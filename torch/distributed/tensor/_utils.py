@@ -157,7 +157,7 @@ def _compute_local_shape_and_global_offset(
 
     for mesh_dim, placement in ordered_placements:
         mesh_dim_size = mesh_shape[mesh_dim]
-        if isinstance(placement, Shard):
+        if isinstance(placement, Shard) or placement.is_hshard():
             shard_dim = placement.dim
             assert shard_dim < len(local_shape), (
                 f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"

@@ -18,7 +18,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 
 
-__all__ = ["Placement", "Shard", "Replicate", "Partial"]
+__all__ = ["Placement", "Shard", "Replicate", "Partial", "HShard"]
 
 
 class Placement:
@@ -41,6 +41,8 @@ class Placement:
     def is_partial(self, reduce_op: Optional[str] = None) -> bool:
         return False
 
+    def is_hshard(self) -> bool:
+        return False
 
 @dataclass(frozen=True)
 class Shard(Placement):

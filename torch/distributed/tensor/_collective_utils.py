@@ -331,6 +331,11 @@ def redistribute_cost(
         # comm cost is 0 if current spec is already full replication
         return 0.0
 
+    if target_spec.is_hsharded():
+        assert len(target_spec.placements) == 1 and len(target_spec.placements[0]) == 1
+        assert current_spec == target_spec.placements[0][0]
+        return 0.0
+
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0
     comm_bytes_gb = (
