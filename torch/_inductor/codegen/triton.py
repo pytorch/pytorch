@@ -5116,7 +5116,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
                 val *= 2
 
-            return 2
+            return val
 
         return val
 
