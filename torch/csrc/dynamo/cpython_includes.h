@@ -28,6 +28,7 @@
 #include <internal/pycore_stackref.h>
 #elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
 #include <internal/pycore_interpframe_structs.h> // _PyInterpreterFrame
+#include "stackref_bridge.h"
 #endif
 
 #endif
@@ -45,7 +46,7 @@ extern "C" {
 
 #elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
 
-#define F_CODE(x) ((PyCodeObject*)((x)->f_executable.bits))
+#define F_CODE(x) ((PyCodeObject*)Torch_PyStackRef_AsPyObjectBorrow(&x->f_executable))
 #define PREV_INSTR(x) (x)->instr_ptr
 
 #else
