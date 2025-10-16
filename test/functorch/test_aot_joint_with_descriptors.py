@@ -57,7 +57,7 @@ def graph_capture(model, inputs, with_export):
         with ExitStack() as stack:
             joint_with_descriptors = aot_export_joint_with_descriptors(
                 stack,
-                model,
+                gm,
                 inputs,
             )
             return joint_with_descriptors.graph_module
