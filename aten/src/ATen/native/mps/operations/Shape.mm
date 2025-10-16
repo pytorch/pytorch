@@ -2,9 +2,13 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Shape.h>
+
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -16,6 +20,13 @@
 #endif
 
 namespace at::native {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Shape_metallib.h>
+#endif
+
 namespace mps {
 
 // Produces a shape with the `dim` dimension set to 0.
@@ -55,6 +66,70 @@ static void check_shape_except_dim(const Tensor& first, const Tensor& second, in
                 " (The offending index is ",
                 index,
                 ")");
+  }
+}
+
+// This implementation of cat is used only if one of the inputs or the output is
+// too large to use MPSGraph.
+// NOTE: `output` is expected to already have the correct size.
+static void cat_out_large_tensor_mps(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
+  CatLargeSharedParams shared_params;
+
+  shared_params.ndim = output.dim();
+  shared_params.cat_dim = dimension;
+
+  for (const auto dim : c10::irange(output.dim())) {
+    shared_params.output_strides[dim] = output.stride(dim);
+    shared_params.output_sizes[dim] = output.size(dim);
+  }
+
+  int64_t cat_dim_offset = 0;
+  size_t input_idx = 0;
+  MPSStream* stream = getCurrentMPSStream();
+
+  // Launch a separate kernels for each input. This will produce some overhead,
+  // but that should be relatively minimal since at least one of the inputs is
+  // very large. In order to launch only one kernel to process all inputs, we
+  // would have to copy all the input tensor data into a packed buffer, which
+  // would not be ideal.
+  for (const Tensor& input : inputs) {
+    if (input.numel() == 0) {
+      continue;
+    }
+
+    // Metal can only launch up to MAX_INT threads at one time. If the input has
+    // more than that number of elements, launch multiple kernels with different
+    // offsets into the data.
+    const int64_t max_num_threads = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
+
+    for (int64_t numel_remaining = input.numel(); numel_remaining > 0; numel_remaining -= max_num_threads) {
+      auto num_threads = std::min(max_num_threads, numel_remaining);
+      CatLargeInputParams input_params;
+
+      input_params.cat_dim_offset = cat_dim_offset;
+      input_params.input_element_offset = input.numel() - numel_remaining;
+
+      for (const auto dim : c10::irange(input.dim())) {
+        input_params.input_strides[dim] = input.stride(dim);
+        input_params.input_sizes[dim] = input.size(dim);
+      }
+
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+          auto pipeline_state = lib.getPipelineStateForFunc(
+              fmt::format("cat_large_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
+          getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input});
+          [computeEncoder setComputePipelineState:pipeline_state];
+          mtl_setArgs(computeEncoder, input, output, shared_params, input_params);
+          mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
+          getMPSProfiler().endProfileKernel(pipeline_state);
+        }
+      });
+    }
+
+    cat_dim_offset += input.size(dimension);
+    input_idx++;
   }
 }
 } // namespace mps
@@ -231,7 +306,11 @@ TORCH_IMPL_FUNC(cat_out_mps)
   // Compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
   idx = 0;
+  bool has_large_tensor = false;
   for (const Tensor& tensor : materialized_inputs) {
+    if (isTooLargeForMPSGraph(tensor)) {
+      has_large_tensor |= true;
+    }
     if (!should_skip(tensor)) {
       // TODO: Factor out `check_shape_except_dim`
       check_shape_except_dim(notSkippedTensor, tensor, dimension, idx);
@@ -247,6 +326,12 @@ TORCH_IMPL_FUNC(cat_out_mps)
   }
   if (out.numel() == 0) {
     return;
+  }
+
+  has_large_tensor |= isTooLargeForMPSGraph(out);
+
+  if (has_large_tensor) {
+    return mps::cat_out_large_tensor_mps(materialized_inputs, dimension, out);
   }
 
   struct CachedGraph : public MPSCachedGraph {
