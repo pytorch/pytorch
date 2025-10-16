@@ -2,7 +2,7 @@ import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Optional, Union
+from typing import Callable, Union
 
 import torch
 import torch.fx as fx
@@ -154,7 +154,7 @@ def device_filter(device: torch.device) -> bool:
 def build_memory_profile(
     graph: fx.Graph,
     is_releasable: Callable[[fx.Node], bool],
-    size_of: Optional[Callable[[Union[int, torch.SymInt]], int]] = None,
+    size_of: Callable[[Union[int, torch.SymInt]], int] | None = None,
 ) -> list[int]:
     """
     Function to estimate the memory profile of an input FX graph.
@@ -216,7 +216,7 @@ def build_memory_profile(
 def get_fwd_bwd_interactions(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
-    size_of: Optional[Callable[[Union[int, torch.SymInt]], int]] = None,
+    size_of: Callable[[Union[int, torch.SymInt]], int] | None = None,
 ) -> tuple[int, OrderedSet[str]]:
     """
     Analyze the interactions between the forward (fwd) and backward (bwd) graphs
@@ -325,8 +325,8 @@ class MemoryTracker:
     def __init__(
         self,
         graph: fx.Graph,
-        is_releasable: Optional[Callable[[fx.Node], bool]] = None,
-        device_filter: Optional[Callable[[torch.device], bool]] = None,
+        is_releasable: Callable[[fx.Node], bool] | None = None,
+        device_filter: Callable[[torch.device], bool] | None = None,
     ):
         """
         Initialize memory tracker for alternative scheduling of the given graph.

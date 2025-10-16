@@ -6,7 +6,7 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.fx as fx
@@ -42,7 +42,7 @@ def get_group_name(n: fx.Node) -> str:
     return kwargs["group_name"]
 
 
-def get_custom_estimation(n: fx.Node) -> Optional[float]:
+def get_custom_estimation(n: fx.Node) -> float | None:
     runtime_estimation = torch._inductor.config.test_configs.estimate_aten_runtime
     if runtime_estimation == "default":
         return None
@@ -51,7 +51,7 @@ def get_custom_estimation(n: fx.Node) -> Optional[float]:
     return runtime_estimation(n)
 
 
-def estimate_collective_time(n: fx.Node, override_size: Optional[int] = None) -> float:
+def estimate_collective_time(n: fx.Node, override_size: int | None = None) -> float:
     """Estimate the runtime of a collective operation, optionally with an overridden size."""
     if (est := get_custom_estimation(n)) is not None:
         return est
@@ -82,7 +82,7 @@ def is_compute_node(n: fx.Node) -> bool:
     )
 
 
-def get_hint(x: Union[int, torch.SymInt]) -> Optional[int]:
+def get_hint(x: Union[int, torch.SymInt]) -> int | None:
     if isinstance(x, int):
         return x
     assert isinstance(x, torch.SymInt)
@@ -100,7 +100,7 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
         )
 
 
-def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
+def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, str | None]:
     assert is_compute_node(n)
 
     from torch._dynamo.testing import rand_strided
@@ -115,7 +115,7 @@ def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
 
     key = f"{str(n.target)}: "
 
-    def to_real(t: torch.Tensor) -> Optional[torch.Tensor]:
+    def to_real(t: torch.Tensor) -> torch.Tensor | None:
         shape = [get_hint(dim) for dim in t.shape]
         stride = [get_hint(s) for s in t.stride()]
 
@@ -177,7 +177,7 @@ class CollectiveInfo:
     size_bytes: int
     estimated_time_ms: float
     exposed_time_ms: float  # How much of this collective is still exposed
-    hiding_node: Optional[fx.Node] = None  # Node that hides this collective
+    hiding_node: fx.Node | None = None  # Node that hides this collective
 
     @property
     def is_exposed(self) -> bool:
@@ -189,8 +189,8 @@ class CollBucket:
     """Track information about a bucket of collectives."""
 
     collectives: list[fx.Node]  # Original collective starts
-    bucketed_start: Optional[fx.Node] = None  # After bucketing
-    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+    bucketed_start: fx.Node | None = None  # After bucketing
+    bucketed_wait: fx.Node | None = None  # After bucketing
     total_bytes: int = 0
 
 
@@ -342,7 +342,7 @@ class OverlapScheduler:
         log.info(
             "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
         )
-        runtime_estimations_keys: list[Optional[str]] = []
+        runtime_estimations_keys: list[str | None] = []
         runtime_estimations: list[float] = []
         for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n)
@@ -670,8 +670,8 @@ class OverlapScheduler:
             available_compute_time -= overlap_amount
 
     def _find_schedulable_path(
-        self, target: fx.Node, curr_compute_node: Optional[fx.Node]
-    ) -> Optional[OrderedSet[fx.Node]]:
+        self, target: fx.Node, curr_compute_node: fx.Node | None
+    ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
 
         # TODO - following path faster than doing set difference here
@@ -725,7 +725,7 @@ class OverlapScheduler:
         return self.collective_info[oldest_start].wait_node
 
     def _wait_is_hidden(
-        self, wait_node: fx.Node, compute_node: Optional[fx.Node] = None
+        self, wait_node: fx.Node, compute_node: fx.Node | None = None
     ) -> bool:
         assert is_wait_tensor(wait_node)
         info = self.collective_info[self.wait_to_start[wait_node]]
@@ -821,7 +821,7 @@ class OverlapScheduler:
 
         used_compute_nodes: OrderedSet[fx.Node] = OrderedSet()
 
-        def could_be_hidden(start: fx.Node) -> Optional[fx.Node]:
+        def could_be_hidden(start: fx.Node) -> fx.Node | None:
             for compute_node in self.compute_nodes:
                 if limit_coll_per_compute and compute_node in used_compute_nodes:
                     continue
