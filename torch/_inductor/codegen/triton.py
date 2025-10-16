@@ -736,7 +736,12 @@ class TritonPrinter(PythonPrinter):
         )
 
     def _print_Float(self, expr: sympy.Expr) -> str:
-        if config.is_fbcode() and torch.version.hip:
+        if expr.is_integer:
+            # sympy considers 0.0 to be integer, but triton doesn't.
+            # this workaround prints the float as an integer
+            # xref: https://github.com/sympy/sympy/issues/26620
+            ret = str(int(expr))
+        elif config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
             ret = f"tl.full([], {expr}, tl.float64)"
@@ -1145,13 +1150,20 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and not config.is_fbcode()
+            and config.emulate_divison_rounding
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
             out = f"triton.language.div_rn({x}, {y})"
         else:
             out = f"({x} / {y})"
+
+        # Workaround here since the functionality of div_rn has not ready on XPU.
+        # TODO: remove this workaround after https://github.com/intel/intel-xpu-backend-for-triton/issues/5306
+        # resolved.
+        if torch.xpu.is_available():
+            out = f"({x} / {y})"
+
         if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().truediv(x, y)
             if out_dtype in (torch.float16, torch.float32):
@@ -2858,6 +2870,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indexing: Union[BlockPtrOptions, TensorDescriptorOptions],
         other="",
     ) -> tuple[str, str]:
+        """Generate a block pointer or tensor descriptor for Triton kernel operations.
+
+        This method creates either a block pointer (for regular Triton operations) or
+        a tensor descriptor (for TMA operations) based on the indexing type. It handles
+        caching and reuse of descriptors for performance optimization.
+
+        Args:
+            name: The name of the buffer/tensor being accessed
+            var: The variable name for the pointer
+            indexing: Block pointer options or tensor descriptor options containing
+                     indexing information and boundary check settings
+            other: Additional parameters string (e.g., padding options)
+
+        Returns:
+            A tuple containing:
+            - block_descriptor: The generated block pointer or tensor descriptor variable name
+            - other: Modified additional parameters string with boundary check options
+        """
         check = indexing.boundary_check()
         if isinstance(indexing, TensorDescriptorOptions):
             if check and other:
@@ -2885,14 +2915,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # tensor descriptor.
                 block_descriptor = self.prologue_cache[var]
             else:
+                block_ptr_line = indexing.format(var, roffset=False)
+                block_var = self.cse.try_get(block_ptr_line)
+
+                # Early return if block descriptor already exists
+                if block_var:
+                    return str(block_var), other
+
                 block_descriptor_id = next(self.block_ptr_id)
                 if isinstance(indexing, BlockPtrOptions):
                     block_descriptor = f"block_ptr{block_descriptor_id}"
                 else:
                     block_descriptor = f"tma_descriptor{block_descriptor_id}"
-                line_body = DeferredLine(
-                    name, f"{block_descriptor} = {indexing.format(var, roffset=False)}"
+                named_var = self.cse.namedvar(
+                    block_descriptor, dtype=torch.uint64, shape=[]
                 )
+                self.cse.put(block_ptr_line, named_var)
+
+                line_body = DeferredLine(name, f"{block_descriptor} = {block_ptr_line}")
                 if indexing.can_lift:
                     self.prologue.writeline(line_body)
                     # Cache the descriptor for epilogue subtiling
@@ -4682,7 +4722,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), device={V.graph.get_current_device_or_throw().type}, rep=40)"  # noqa: B950 line too long
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -5624,21 +5664,18 @@ class TritonScheduling(SIMDScheduling):
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:
-                device = V.graph.get_current_device_or_throw()
                 # We have to clone the inplace updated arguments to avoid earlier calls
                 # generating out of range indices for later calls.
-                ms = benchmarker.benchmark(
-                    lambda: call(wrapped_jit_function.clone_args(*args)[0]),
-                    device=device,
+                ms = benchmarker.benchmark_gpu(
+                    lambda: call(wrapped_jit_function.clone_args(*args)[0])
                 )
                 # overhead of cloning args gives bias for fusing the kernel
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
                 # the input values between benchmarking
                 if len(wrapped_jit_function.mutated_arg_names) > 0:
-                    ms = ms - benchmarker.benchmark(
-                        lambda: wrapped_jit_function.clone_args(*args),
-                        device=str(device),
+                    ms = ms - benchmarker.benchmark_gpu(
+                        lambda: wrapped_jit_function.clone_args(*args)
                     )
 
             log.debug(
@@ -5807,16 +5844,13 @@ class TritonScheduling(SIMDScheduling):
                 # skip benchmarking the kernel if there are register spills
                 ms = ms_clone = float("inf")
             else:
-                device = V.graph.get_current_device_or_throw()
                 # We have to clone the inplace updated arguments to avoid earlier calls
                 # generating out of range indices for later calls.
-                ms = benchmarker.benchmark(
-                    lambda: call(wrapped_jit_function.clone_args(*args)[0]),
-                    device=device,
+                ms = benchmarker.benchmark_gpu(
+                    lambda: call(wrapped_jit_function.clone_args(*args)[0])
                 )
-                ms_clone = benchmarker.benchmark(
-                    lambda: wrapped_jit_function.clone_args(*args)[0],
-                    device=device,
+                ms_clone = benchmarker.benchmark_gpu(
+                    lambda: wrapped_jit_function.clone_args(*args)[0]
                 )
 
             log.debug(
