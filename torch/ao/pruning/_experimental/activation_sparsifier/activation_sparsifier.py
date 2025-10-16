@@ -136,7 +136,7 @@ class ActivationSparsifier:
         for key in fn_keys:
             fn = args[key]
             if not callable(fn):
-                raise AssertionError(f"{key} must be callable")
+                raise AssertionError(f"{fn} must be callable")
 
     def _aggregate_hook(self, name):
         """Returns hook that computes aggregate of activations passing through."""
