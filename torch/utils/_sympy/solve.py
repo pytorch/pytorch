@@ -77,7 +77,8 @@ def try_solve(
         if e is None:
             continue
 
-        assert isinstance(e, sympy.Rel)
+        if not isinstance(e, sympy.Rel):
+            raise AssertionError("expected sympy.Rel")
 
         for _ in range(trials):
             trial = _try_isolate_lhs(e, thing, floordiv_inequality=floordiv_inequality)
@@ -128,7 +129,8 @@ def _try_isolate_lhs(
             if isinstance(e, INEQUALITY_TYPES) and other.is_negative:
                 op = mirror_rel_op(op)  # type: ignore[assignment]
 
-            assert op is not None
+            if op is None:
+                raise AssertionError("expected op to be not None")
             e = op(lhs, rhs)
 
     ################################################################################

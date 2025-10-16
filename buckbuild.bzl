@@ -1729,8 +1729,10 @@ def define_buck_targets(
             "torch/csrc/jit/backends/backend_debug_info.cpp",
             "torch/csrc/jit/backends/backend_interface.cpp",
         ],
-        compiler_flags = get_pt_compiler_flags(),
-        fbandroid_compiler_flags = c2_fbandroid_xplat_compiler_flags,
+        compiler_flags = get_pt_compiler_flags() + select({
+            "DEFAULT": [],
+            "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags
+        }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),
@@ -2023,6 +2025,9 @@ def define_buck_targets(
                 "ovr_config//os:android-x86_64": [
                     "-mssse3",
                 ],
+            }) + select({
+                "DEFAULT": [],
+                "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags,
             }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
