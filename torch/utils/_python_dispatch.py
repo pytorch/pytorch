@@ -218,7 +218,9 @@ def _detect_infra_mode(key):
         torch._C._TorchDispatchModeKey.PROXY,
     ):
         raise AssertionError(
-            "key must be either FUNCTIONAL or PROXY _TorchDispatchModeKey"
+            f"key must be either FUNCTIONAL ({torch._C._TorchDispatchModeKey.FUNCTIONAL}) \
+                or PROXY ({torch._C._TorchDispatchModeKey.PROXY}) _TorchDispatchModeKey, \
+                    got {key}"
         )
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
@@ -549,11 +551,11 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     to be the same storage as the input.
     """
     if not isinstance(func, torch._ops.OpOverload):
-        raise AssertionError("func must be an OpOverload")
+        raise AssertionError(f"func must be an OpOverload, got {type(args)}")
     if not isinstance(args, tuple):
-        raise AssertionError("args must be a tuple")
+        raise AssertionError(f"args must be a tuple, got {type(args)}")
     if not isinstance(outs, (list, tuple)):
-        raise AssertionError("outs must be a list or tuple")
+        raise AssertionError(f"outs must be a list or tuple, got {type(args)}")
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:

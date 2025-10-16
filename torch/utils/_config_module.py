@@ -92,7 +92,8 @@ class _Config(Generic[T]):
                 or self.env_name_force is not None
             ):
                 raise AssertionError(
-                    "if alias is set, none of {default, justknob and env var} can be set"
+                    "if alias is set, none of {default, justknob, \
+                        env_name_default and env_name_force} can be set"
                 )
 
     @staticmethod
@@ -104,7 +105,7 @@ class _Config(Generic[T]):
         if isinstance(val, str):
             return [val]
         if not isinstance(val, list):
-            raise TypeError("val is not a list")
+            raise AssertionError(f"val is not a list, got {type(val)}")
         return val
 
 

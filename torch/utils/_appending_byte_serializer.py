@@ -125,7 +125,8 @@ class AppendingByteSerializer(Generic[T]):
         reader = BytesReader(data)
         if reader.read_uint64() != _ENCODING_VERSION:
             raise AssertionError(
-                "Encoding version mismatch in AppendingByteSerializer.to_list"
+                f"Encoding version mismatch in AppendingByteSerializer.to_list, \
+                    got {reader.read_uint64()}"
             )
 
         result: list[T] = []
