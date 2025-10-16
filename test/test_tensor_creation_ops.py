@@ -689,6 +689,21 @@ class TestTensorCreation(TestCase):
         self.assertTrue(res1.is_contiguous(memory_format=torch.channels_last))
 
     @onlyCUDA
+    def test_cat_channels_last_large_inputs(self, device):
+        num_tensors = 130
+        inputs_cuda = [
+            torch.randn((2, 3, 4, 4), device=device).contiguous(memory_format=torch.channels_last)
+            for _ in range(num_tensors)
+        ]
+        inputs_cpu = [t.cpu() for t in inputs_cuda]
+
+        result = torch.cat(inputs_cuda, dim=1)
+        expected = torch.cat(inputs_cpu, dim=1)
+
+        self.assertEqual(result.cpu(), expected)
+        self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+    @onlyCUDA
     def test_cat_out_memory_format(self, device):
         inp_size = (4, 4, 4, 4)
         expected_size = (8, 4, 4, 4)

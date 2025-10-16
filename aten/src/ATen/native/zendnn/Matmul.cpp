@@ -17,7 +17,9 @@ void zendnn_baddbmm(
     const Tensor& batch2,
     float beta,
     float alpha) {
-  RECORD_FUNCTION("zendnn::zendnn_baddbmm", c10::ArrayRef<c10::IValue>({}));
+  RECORD_FUNCTION(
+      "zendnn::zendnn_baddbmm",
+      std::vector<c10::IValue>({batch1, batch2, self}));
 
   // Infer matrix dimensions from 3D inputs:
   // [B, M, K] x [B, K, N] -> [B, M, N]
@@ -37,7 +39,6 @@ void zendnn_baddbmm(
   data_type_t out_type = get_zendnn_dtype(self);
   data_type_t inp_dtype = get_zendnn_dtype(batch1);
   data_type_t wgt_dtype = get_zendnn_dtype(batch2);
-  lowoha_post_op postop;
 
   TORCH_CHECK(
       (batch1.scalar_type() == batch2.scalar_type()),
@@ -50,27 +51,29 @@ void zendnn_baddbmm(
   matmul_dtype.bias = data_type_t::none;
   matmul_dtype.compute = data_type_t::none;
 
+  lowoha_params params;
+  params.dtypes = matmul_dtype;
+
   // Execute batched matmul directly for LoA path
   matmul_direct(
-      batch1.data_ptr(),
-      batch2.data_ptr(),
-      self.data_ptr(),
-      /*bias_ptr=*/nullptr,
-      alpha,
-      beta,
+      'r',
+      transa,
+      transb,
       M,
       N,
       K,
-      transa,
-      transb,
+      alpha,
+      batch1.data_ptr(),
       lda,
+      batch2.data_ptr(),
       ldb,
+      nullptr,
+      beta,
+      self.data_ptr(),
       ldc,
-      matmul_dtype,
-      postop,
-      lowoha_quantization_params_t(),
-      /*batch_a=*/batch1.size(0),
-      /*batch_b=*/batch2.size(0));
+      params,
+      batch1.size(0),
+      batch2.size(0));
   return;
 }
 } // namespace at::native

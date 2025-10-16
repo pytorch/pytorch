@@ -5,7 +5,7 @@ import collections
 import functools
 import typing
 from enum import auto, Enum
-from typing import Optional, Union
+from typing import Union
 
 from torch.utils._triton import has_triton_package
 
@@ -130,10 +130,10 @@ class DeviceProperties(typing.NamedTuple):
     index: int  # type: ignore[assignment]
     multi_processor_count: int
     cc: int
-    major: Optional[int] = None
-    regs_per_multiprocessor: Optional[int] = None
-    max_threads_per_multi_processor: Optional[int] = None
-    warp_size: Optional[int] = None
+    major: int | None = None
+    regs_per_multiprocessor: int | None = None
+    max_threads_per_multi_processor: int | None = None
+    warp_size: int | None = None
 
     @classmethod
     @functools.cache
@@ -174,10 +174,10 @@ class DeviceProperties(typing.NamedTuple):
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
-    shape: Optional[list[str]] = None
-    stride: Optional[list[str]] = None
-    offset: Optional[str] = None
-    alias_of: Optional[str] = None
+    shape: list[str] | None = None
+    stride: list[str] | None = None
+    offset: str | None = None
+    alias_of: str | None = None
 
     def bindings_type(self) -> str:
         if self.ctype in ("at::Half*", "at::BFloat16*"):
@@ -201,9 +201,9 @@ class HalideInputSpec(typing.NamedTuple):
 class HalideMeta(typing.NamedTuple):
     argtypes: list[HalideInputSpec]
     target: str
-    scheduler: Optional[str] = None
-    scheduler_flags: Optional[dict[str, Union[int, str]]] = None
-    cuda_device: Optional[int] = None
+    scheduler: str | None = None
+    scheduler_flags: dict[str, Union[int, str]] | None = None
+    cuda_device: int | None = None
 
     def args(self) -> list[str]:
         """Command line args to pass to halide generator"""

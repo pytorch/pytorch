@@ -280,7 +280,7 @@ def _kl_exponential_exponential(p, q):
 
 @register_kl(ExponentialFamily, ExponentialFamily)
 def _kl_expfamily_expfamily(p, q):
-    if not type(p) == type(q):
+    if type(p) is not type(q):
         raise NotImplementedError(
             "The cross KL-divergence between different exponential families cannot \
                             be computed using Bregman divergences"
