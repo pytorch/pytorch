@@ -1296,6 +1296,19 @@ def load(
 
     Loads an object saved with :func:`torch.save` from a file.
 
+    .. warning::
+        :func:`torch.load()` unless ``weights_only`` parameter is set to ``True``,
+        uses ``pickle`` module implicitly, which is known to be insecure.
+        It is possible to construct malicious pickle data which will execute arbitrary code
+        during unpickling. Never load data that could have come from an untrusted
+        source in an unsafe mode, or that could have been tampered with. **Only load data you trust**.
+
+        ``weights_only=True`` narrows the surface of remote code execution attacks via a more
+        restricted unpickler but has the following limitations:
+
+        1. ``weights_only=True`` does not guard against denial of service attacks.
+        2. ``weights_only=True`` safeguards against memory corruption are best effort.
+
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the
     CPU and are then moved to the device they were saved from. If this fails
@@ -1347,13 +1360,6 @@ def load(
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
-
-    .. warning::
-        :func:`torch.load()` unless `weights_only` parameter is set to `True`,
-        uses ``pickle`` module implicitly, which is known to be insecure.
-        It is possible to construct malicious pickle data which will execute arbitrary code
-        during unpickling. Never load data that could have come from an untrusted
-        source in an unsafe mode, or that could have been tampered with. **Only load data you trust**.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
