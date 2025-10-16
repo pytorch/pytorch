@@ -2921,6 +2921,7 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
+        torch._dynamo.config.nested_graph_breaks = True
         mode = "train" if self.args.training else "eval"
         msg = f"{current_device:4} {mode:5} {current_name:34} "
         if tag:
