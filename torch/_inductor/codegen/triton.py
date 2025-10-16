@@ -3786,6 +3786,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def scan(
         self,
         dtypes: tuple[torch.dtype, ...],
+        reverse: bool,
         combine_fn: Callable[
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
@@ -3807,6 +3808,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         cse_compute = functools.partial(self.cse.generate, self.compute)
         combine_helper_fn = self._lift_helper(combine_fn, values, dtypes)
+        
+        if reverse and len(masks) == 2:
+            wrapper_fn_base_name = f'{combine_helper_fn}_mask'
+            name = '{name}'
+            wrapper_fn = f"""@triton.jit\ndef {name}(arg0_0, mask_arg0_0, arg1_0, mask_arg1_0):\n    new_val = {combine_helper_fn}(arg0_0, arg1_0)\n    return tl.where(~mask_arg0_0, arg1_0, tl.where(~mask_arg1_0, arg0_0, new_val)), mask_arg1_0\n"""
+            combine_helper_fn = self.helper_functions.add(wrapper_fn, base_name=wrapper_fn_base_name)
+        
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
         for value, dtype in zip(values, dtypes):
@@ -3823,6 +3831,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 shape=tuple(self.dense_size_list()),
             )
             broadcasted_values.append(value)
+            
+            if reverse and len(masks) == 2:
+                value_mask = self.cse.generate(
+                    self.compute,
+                    f"tl.broadcast_to({masks[0]} & {masks[1]}, {self.dense_size_str()})",
+                    dtype=torch.bool,
+                    shape=tuple(self.dense_size_list()),
+                )
+                broadcasted_values.append(value_mask)
 
             acc_type = triton_acc_type(dtype)
 
@@ -3860,11 +3877,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
+        # if reverse:
+        #     for csevar in broadcasted_values:
+        #         self.compute.writeline(
+        #             f"{csevar.name}_mask = tl.arange(0, {self.numels['x']})[:, None] + tl.arange(0, {self.numels['r0_']})[None, :]",
+        #         )
+
         partial_scan_vars = cse_multiple(
-            f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
+            f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn}, {reverse})",
+            # f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
+            # f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
             broadcasted_values,
             masks,
-            dtypes,
+            dtypes + dtypes,
         )
 
         if not self.persistent_reduction:

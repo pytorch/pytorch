@@ -1048,6 +1048,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def scan(
         self,
         dtypes: tuple[torch.dtype, ...],
+        reverse: tuple[torch.dtype, ...],
         combine_fn: Callable[
             [tuple[OpVarT, ...], tuple[OpVarT, ...]],
             tuple[OpVarT, ...],
@@ -2148,6 +2149,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def scan(
         self,
         dtypes: tuple[torch.dtype, ...],
+        reverse: bool,
         combine_fn: Callable[
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
@@ -2752,13 +2754,14 @@ class CSEProxy(DefaultHandler):
     def scan(
         self,
         dtypes: tuple[torch.dtype, ...],
+        reverse: bool,
         combine_fn: Callable[
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
             tuple[CSEVariable, ...],
         ],
         values: tuple[CSEVariable, ...],
     ) -> tuple[CSEVariable, ...]:
-        return self.kernel.scan(dtypes, combine_fn, values)
+        return self.kernel.scan(dtypes, reverse, combine_fn, values)
 
     def sort(
         self,

@@ -80,7 +80,7 @@ class AssociativeScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("associative_scan")
 
-    def __call__(self, combine_fn, xs, additional_inputs):
+    def __call__(self, combine_fn, xs, reverse, additional_inputs):
         # There is currently an issue that the ScanOp is sometimes called with
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
@@ -94,9 +94,9 @@ class AssociativeScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
-        return super().__call__(combine_fn, xs, additional_inputs)
+        return super().__call__(combine_fn, xs, reverse, additional_inputs)
 
-    def gen_schema(self, combine_fn, xs, additional_inputs):
+    def gen_schema(self, combine_fn, xs, reverse, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
@@ -135,7 +135,7 @@ class AssociativeScanOp(HigherOrderOperator):
         for out in outputs:
             schema_gen.add_output(out)
 
-        schema_gen.add_schema_tree_spec(combine_fn, xs, additional_inputs)
+        schema_gen.add_schema_tree_spec(combine_fn, xs, reverse, additional_inputs)
         return schema_gen.gen_schema()
 
 
@@ -237,9 +237,7 @@ def associative_scan(
     # Move scan dim to 0 and always perform scan on dim 0
     leaves_xs = [torch.movedim(elem, dim, 0) for elem in leaves_xs_orig]
 
-    if reverse:
-        leaves_xs = [torch.flip(elem, [0]) for elem in leaves_xs]
-
+    # breakpoint()
     if combine_mode == "generic":
         # The generic_associative_scan implementation calls the combine_fn with a `batch` along the scan dimension
         # For example, consider:
@@ -255,6 +253,12 @@ def associative_scan(
         #            [torch.tensor([[1.0, 3.0],
         #                           [1.0, 3.0]])])
         # The arguments are of shape 2 x 2, but can be evaluated in parallel along the scan dimension.
+        
+        # In case of combine_mode='generic', the handling of reverse=True is handled
+        # on the PyTorch level, inside the generic_associative_scan
+        # if reverse:
+        #     leaves_xs = [torch.flip(elem, [dim]) for elem in leaves_xs]
+        
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
             combine_fn=torch.vmap(
@@ -268,9 +272,15 @@ def associative_scan(
             spec=spec_xs,
             num_leaves=len(leaves_xs),
         )
-        out = generic_associative_scan(combine_fn, leaves_xs, additional_inputs=())
+        # breakpoint()
+        out = generic_associative_scan(combine_fn, leaves_xs, reverse=reverse, additional_inputs=())
         out = pytree.tree_unflatten(out, spec_xs)
+        
+        # if reverse:
+        #     out = pytree.tree_map(lambda elem: elem.flip([0]), out)
     else:
+        # In case of combine_mode='pointwise', the handling of reverse=True is handled
+        # on Triton level, e.g., tl.associative_scan(..., reverse=True)
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
             combine_fn=combine_fn,
@@ -279,7 +289,7 @@ def associative_scan(
         )
 
         def run_flattened_associative_scan(combine_fn, leaves_xs):
-            return associative_scan_op(combine_fn, leaves_xs, additional_inputs=())
+            return associative_scan_op(combine_fn, leaves_xs, reverse, additional_inputs=())
 
         out = _maybe_compile_and_run_fn(
             run_flattened_associative_scan,
@@ -287,15 +297,12 @@ def associative_scan(
             leaves_xs,
         )
 
-    if reverse:
-        out = pytree.tree_map(lambda elem: elem.flip([0]), out)
-
     out = pytree.tree_map(lambda elem: torch.movedim(elem, 0, dim), out)
 
     return out
 
 
-def generic_associative_scan(operator, leaves, dim=0, additional_inputs=()):
+def generic_associative_scan(operator, leaves, dim=0, reverse=False, additional_inputs=()):
     r"""
     This function performs the associative_scan operation.
     The algorithm works by recursively collecting neighbours of ``leaves`` and subsequently
@@ -310,6 +317,7 @@ def generic_associative_scan(operator, leaves, dim=0, additional_inputs=()):
             ``xs`` provided to ``associative_scan``.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
+        reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
         additional_inputs (Tuple of tensors): A tuple of lifted parameters from the global scope.
             This parameter will be populated internally.
 
@@ -393,7 +401,14 @@ def generic_associative_scan(operator, leaves, dim=0, additional_inputs=()):
             safe_map(functools.partial(_interleave, dim=dim), even_elems, odd_elems)
         )
 
+    if reverse:
+        leaves = [torch.flip(elem, [dim]) for elem in leaves]
+
+    # print(reverse)
     scans = _scan(leaves)
+    
+    if reverse:
+        scans = [torch.flip(elem, [dim]) for elem in scans]
 
     return scans
 
@@ -403,6 +418,7 @@ def trace_associative_scan(
     func_overload,
     combine_fn: Callable,
     xs: list[torch.Tensor],
+    reverse: bool,
     additional_inputs: tuple[torch.Tensor],
 ):
     from torch._dynamo.utils import clone_input
@@ -446,7 +462,7 @@ def trace_associative_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, xs, additional_inputs)
+    args = (combine_graph, xs, reverse, additional_inputs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="associative_scan"
@@ -459,8 +475,8 @@ def trace_associative_scan(
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, xs, additional_inputs):
-    return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
+def associative_scan_op_dense(combine_fn, xs, reverse, additional_inputs):
+    return generic_associative_scan(combine_fn, xs, reverse=reverse, additional_inputs=additional_inputs)
 
 
 class AssociativeScanAutogradOp(torch.autograd.Function):
@@ -651,6 +667,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
     def forward(
         ctx,
         combine_fn,
+        reverse,
         num_xs,
         num_additional_inputs,
         *operands,
@@ -672,9 +689,10 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         with torch._C._AutoDispatchBelowAutograd():
             # 1.) Compute the forward output of the associative_scan
-            ys = associative_scan_op(combine_fn, xs, additional_inputs)
-            save_tensors_and_symints_for_backward(ctx, list(operands) + list(ys))
+            ys = associative_scan_op(combine_fn, xs, reverse, additional_inputs)
+            save_tensors_and_symints_for_backward(ctx, [reverse] + list(operands) + list(ys))
 
+        breakpoint()
         return (*ys,)
 
     @staticmethod
@@ -696,10 +714,19 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         # Extract the inputs to the forward path and outputs from the forward path
         flat_args = saved_tensors_and_symints(ctx)
+        reverse = flat_args[0]
         xs, additional_inputs, outs = split_into_chunks(
-            flat_args, [num_xs, num_additional_inputs, num_xs]
+            flat_args[1:], [num_xs, num_additional_inputs, num_xs]
         )
         ndim = outs[0].ndim
+        
+        if reverse:
+            with torch.no_grad():
+                pass
+                xs = [torch.flip(elem, [0]).requires_grad_(elem.requires_grad) for elem in xs]
+                outs = [torch.flip(elem, [0]).requires_grad_(elem.requires_grad) for elem in outs]
+                gl_ys = [torch.flip(elem, [0]).requires_grad_(elem.requires_grad) for elem in gl_ys]
+        # breakpoint()
 
         # First_slice_copy does not keep the original requires_grad flag,
         # but we need it here in order to compute the correcte gradients
@@ -813,13 +840,17 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         g_xs = compute_grad_mapped(
             bwxs_stacked_leaves, bwys_stacked_leaves, gl_ys_stacked_leaves
         )
+        
+        # breakpoint()
+        if reverse:
+            g_xs = [torch.flip(elem, [0]) for elem in g_xs]
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
-        return *[None] * 3, *g_xs, *[None] * num_additional_inputs
+        return *[None] * 4, *g_xs, *[None] * num_additional_inputs
 
 
 @associative_scan_op.py_autograd_impl
-def associative_scan_autograd(combine_fn, xs, additional_inputs):
+def associative_scan_autograd(combine_fn, xs, reverse, additional_inputs):
     num_xs = len(xs)
     num_additional_inputs = len(additional_inputs)
 
@@ -830,6 +861,7 @@ def associative_scan_autograd(combine_fn, xs, additional_inputs):
 
     flat_out = AssociativeScanAutogradOp.apply(
         combine_fn,
+        reverse,
         num_xs,
         num_additional_inputs,
         *(tuple(xs) + tuple(additional_inputs)),
@@ -838,20 +870,20 @@ def associative_scan_autograd(combine_fn, xs, additional_inputs):
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
+def associative_scan_proxy_mode(mode, combine_fn, xs, reverse, additional_inputs):
     return trace_associative_scan(
-        mode, associative_scan_op, combine_fn, xs, additional_inputs
+        mode, associative_scan_op, combine_fn, xs, reverse, additional_inputs
     )
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, reverse, additional_inputs):
     with mode:
         return tuple(x.clone() for x in xs)
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
+def associative_scan_functionalize(ctx, combine_fn, xs, reverse, additional_inputs):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
@@ -876,6 +908,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
         ret = associative_scan_op(
             functional_combine_fn,
             unwrapped_xs,
+            reverse,
             unwrapped_additional_inputs,
         )
     return ctx.wrap_tensors(ret)

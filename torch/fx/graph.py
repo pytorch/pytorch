@@ -1756,7 +1756,7 @@ class Graph:
         return s
 
     @compatibility(is_backward_compatible=True)
-    def print_tabular(self):
+    def print_tabular(self, file=None):
         """
         Prints the intermediate representation of the graph in tabular
         format. Note that this API requires the ``tabulate`` module to be
@@ -1774,7 +1774,8 @@ class Graph:
 
         node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in self.nodes]
         print(
-            tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+            tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"]),
+            file = file
         )
 
     @compatibility(is_backward_compatible=True)

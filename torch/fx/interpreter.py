@@ -161,7 +161,14 @@ class Interpreter:
             delay=0,
         )
 
-        for node in self.graph.nodes:
+        for ind, node in enumerate(self.graph.nodes):
+            # if any([n.name == 'associative_scan' for n in self.graph.nodes]) and ind == 1:
+            # if ind == 1:
+            #     with open('/data_malta3_ssd/pytorch_pt25/graph.txt', 'w') as f:
+            #         print((self.env, node, type(self.graph)))
+            #         # f.write(self.graph.__str__())
+            #         self.graph.print_tabular(f)
+            #     print('Break')
             pbar.update(1)
             if node in self.env:
                 # Short circuit if we have this value. This could
@@ -205,6 +212,8 @@ class Interpreter:
                 for to_delete in self.user_to_last_uses.get(node, []):
                     del self.env[to_delete]
 
+            # print('End')
+
             if node.op == "output":
                 output_val = self.env[node]
                 return (
@@ -212,7 +221,7 @@ class Interpreter:
                     if enable_io_processing
                     else output_val
                 )
-
+                
     @compatibility(is_backward_compatible=True)
     def boxed_run(self, args_list):
         """

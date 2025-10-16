@@ -7257,7 +7257,7 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(
-    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
+    combine_fn: ir.Subgraph, xs, reverse, additional_inputs: tuple[torch.Tensor]
 ):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
@@ -7281,6 +7281,9 @@ def associative_scan(
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
+    kwargs["reverse"] = reverse
+    print(reverse)
+    
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,

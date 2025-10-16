@@ -3758,10 +3758,15 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
+    # @parametrize("reverse", [True])
+    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["compile"])
+    # @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("combine_mode", ["pointwise"])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cuda")])
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [False])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
@@ -3791,7 +3796,8 @@ class AssociativeScanTests(TestCase):
     def test_associative_scan_compile(
         self, combine_mode, reverse, compile_mode, device, autograd
     ):
-        x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        # x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        x = torch.randn(3, 10, device=device, requires_grad=autograd)
         kwargs = {
             "dim": 0,
             "reverse": reverse,

@@ -2303,6 +2303,7 @@ class Scan(Loops):
     # output_index indexes the following tuples
     dtypes: tuple[torch.dtype, ...]
     inner_fns: tuple[Callable[..., Any], ...]
+    reverse: bool = False
 
     # HACK we mimic reduction
 
@@ -2333,7 +2334,8 @@ class Scan(Loops):
     ) -> Any:
         idx = self.reindex(vars, scan_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        result = ops.scan(self.dtypes, self.combine_fn, values)
+        # result = ops.scan(self.dtypes, self.combine_fn, values)
+        result = ops.scan(self.dtypes, self.reverse, self.combine_fn, values)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
         )
