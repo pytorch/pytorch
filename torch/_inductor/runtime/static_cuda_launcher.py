@@ -37,9 +37,17 @@ class StaticallyLaunchedCudaKernel:
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
-        # pyrefly: ignore [missing-attribute]
-        self.cubin_raw = kernel.asm.get("cubin", None)
-        # pyrefly: ignore [missing-attribute]
+        if "hsaco" in kernel.asm:
+            self.cubin_raw = kernel.asm["hsaco"]
+            self.is_rocm = True
+        elif "cubin" in kernel.asm:
+            self.cubin_raw = kernel.asm["cubin"]
+            self.is_rocm = False
+        else:
+            raise RuntimeError(
+                "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
+            )
+
         self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
@@ -245,13 +253,42 @@ class StaticallyLaunchedCudaKernel:
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
 
-        # Add a None if triton wants extra parameters for scratch spaces
         arg_tys = self.arg_tys
-        for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
-            if has_scratch:
-                arg_tys = arg_tys + "O"
-                args = (*args, None)
-        # pyrefly: ignore [bad-argument-type]
+
+        if self.is_rocm:
+            # ROCm/HIP kernel ABI: The Triton HIP backend ALWAYS includes both
+            # global_scratch and profile_scratch parameters in the kernel signature,
+            # even when the kernel doesn't use them (i.e., when has_*_scratch is False).
+            #
+            # This differs fundamentally from CUDA, where these parameters are only
+            # present in the signature if the corresponding has_*_scratch flag is True.
+            #
+            # The flags indicate whether memory will be allocated/used:
+            # - has_global_scratch: Whether global scratch workspace is needed
+            # - has_profile_scratch: Whether profiling instrumentation is enabled
+            #
+            # However, regardless of flag values, we MUST always pass both parameters
+            # to match the HIP kernel ABI. Passing None is safe:
+            #
+            # - If scratch is not needed (has_*_scratch=False or scratch_size=0):
+            #   The None becomes nullptr, which the kernel never dereferences
+            #
+            # - If scratch is needed (has_*_scratch=True and scratch_size>0):
+            #   The None becomes nullptr initially, but the HIP runtime intercepts
+            #   the kernel launch, allocates the required scratch memory based on
+            #   kernel metadata, and replaces the nullptr with a valid pointer before
+            #   the kernel actually executes
+            #
+            # Not passing both parameters causes segmentation faults because the kernel
+            # expects them at specific positions in the argument array.
+            arg_tys = arg_tys + "OO"
+            args = (*args, None, None)
+
+        else:
+            for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
+                if has_scratch:
+                    arg_tys = arg_tys + "O"
+                    args = (*args, None)
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
