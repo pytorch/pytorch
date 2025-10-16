@@ -5186,10 +5186,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 if self.p:
                     return x + 1
                 else:
-                    assert False
+                    raise RuntimeError("whoops")
 
         mod = Mod()
-        mod.__class__ = type(mod.__class__.__name__, (mod.__class__,), {'p': p})
+        mod.__class__ = type(mod.__class__.__name__, (mod.__class__,), {"p": p})
 
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.randn(1)
