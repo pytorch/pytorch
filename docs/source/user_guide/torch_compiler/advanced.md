@@ -1,5 +1,7 @@
 # Advanced
 
+Deep dive into compiler internals, custom backends, transformations, and advanced features.
+
 ```{toctree}
 :maxdepth: 1
 

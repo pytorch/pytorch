@@ -1,5 +1,7 @@
 # Getting Started
 
+Learn the basics of `torch.compile` and how to integrate it into your PyTorch workflows.
+
 ```{toctree}
 :maxdepth: 1
 

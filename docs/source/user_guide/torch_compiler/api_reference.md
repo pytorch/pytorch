@@ -1,5 +1,7 @@
 # Reference/API
 
+Complete API documentation, configuration options, and fine-grained compiler controls.
+
 ```{toctree}
 :maxdepth: 1
 

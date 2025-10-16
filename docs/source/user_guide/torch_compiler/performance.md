@@ -1,5 +1,7 @@
 # Performance
 
+Learn how to profile, benchmark, and optimize your models with `torch.compile`.
+
 ```{toctree}
 :maxdepth: 1
 
