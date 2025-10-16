@@ -701,6 +701,7 @@ def _restore_state_dict(
     for name, _ in list(
         chain(
             original_module.named_parameters(remove_duplicate=False),
+            # pyrefly: ignore  # bad-argument-type
             original_module.named_buffers(remove_duplicate=False),
         )
     ):
