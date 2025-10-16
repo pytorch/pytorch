@@ -631,7 +631,7 @@ class _FileSystemWriter(StorageWriter):
     def set_up_storage_writer(
         self, is_coordinator: bool, *args: Any, **kwargs: Any
     ) -> None:
-        self.rank = kwargs.get("rank", None)
+        self.rank = kwargs.get("rank")
         self.use_collectives = kwargs.get("use_collectives", True)
 
     def _metadata_exists(self) -> bool:
@@ -919,7 +919,7 @@ class FileSystemReader(StorageReader):
 
     # Implementing the abstract function in StorageReader
     def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
-        rank = kwargs.get("rank", None)
+        rank = kwargs.get("rank")
         path = self._get_metadata_path(rank)
         with self.fs.create_stream(path, "rb") as metadata_file:
             metadata = pickle.load(metadata_file)
@@ -934,7 +934,7 @@ class FileSystemReader(StorageReader):
         self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
     ) -> None:
         self.storage_data = metadata.storage_data
-        self.rank = kwargs.get("rank", None)
+        self.rank = kwargs.get("rank")
         self.use_collectives = kwargs.get("use_collectives", True)
         assert self.storage_data is not None
 
