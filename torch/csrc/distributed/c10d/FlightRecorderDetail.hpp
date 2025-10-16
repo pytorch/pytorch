@@ -39,7 +39,7 @@ std::string FlightRecorder<EventType>::Entry::getTraceback() {
 }
 
 template <typename EventType>
-std::optional<size_t> FlightRecorder<EventType>::record(
+typename FlightRecorder<EventType>::TraceIdentifier FlightRecorder<EventType>::record(
     size_t pg_id,
     const std::tuple<std::string, std::string>& pg_name,
     size_t collective_seq_id,
@@ -54,7 +54,7 @@ std::optional<size_t> FlightRecorder<EventType>::record(
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
   if (!enabled_) {
-    return std::nullopt;
+    return TraceIdentifier{std::nullopt, std::nullopt};
   }
   if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
     // Current pg_status is not in FR.
@@ -64,8 +64,11 @@ std::optional<size_t> FlightRecorder<EventType>::record(
       torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
   std::lock_guard<std::mutex> guard(mutex_);
 
+  TORCH_CHECK(reset_epoch_start_idx_.find(reset_epoch_) != reset_epoch_start_idx_.end());
+
   auto te = Entry{
       id_,
+      reset_epoch_,
       pg_id,
       pg_name,
       collective_seq_id,
@@ -112,7 +115,8 @@ std::optional<size_t> FlightRecorder<EventType>::record(
       next_ = 0;
     }
   }
-  return id_++;
+  const auto id = id_++;
+  return TraceIdentifier{id, reset_epoch_};
 }
 
 template <typename EventType>
@@ -161,8 +165,10 @@ template <typename EventType>
 std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
     EventType>::dump_entries() {
   std::vector<Entry> result;
+  size_t current_epoch;
   {
     std::lock_guard<std::mutex> guard(mutex_);
+    current_epoch = reset_epoch_;
     result.reserve(entries_.size());
     result.insert(
         result.end(),
@@ -178,32 +184,57 @@ std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
     update_state(r);
     r.start_ = r.end_ = nullptr;
   }
+
+  // Filter out entries from previous epochs
+  // Only keep entries where reset_epoch_ == current_epoch
+  result.erase(
+      std::remove_if(
+          result.begin(),
+          result.end(),
+          [current_epoch](const Entry& e) {
+            return e.reset_epoch_ < current_epoch;
+          }),
+      result.end());
+
   return result;
 }
 
 template <typename EventType>
-// Returns the entry with the given id, if it exists. Otherwise, returns
+// Returns the index in entries_ for the given id and reset_epoch.
+// Caller must hold mutex_lock before calling this method.
+size_t FlightRecorder<EventType>::getIdxFromId(size_t id, size_t reset_epoch) const {
+  // Look up the starting idx for the given reset epoch
+  auto it = reset_epoch_start_idx_.find(reset_epoch);
+  TORCH_CHECK(it != reset_epoch_start_idx_.end());
+  // Calculate idx based on where the epoch started
+  return (it->second + id) % max_entries_;
+}
+
+template <typename EventType>
+// Returns the entry with the given id and reset_epoch, if it exists. Otherwise, returns
 // std::nullopt.
 std::optional<typename FlightRecorder<EventType>::Entry> FlightRecorder<
-    EventType>::getEntry(std::optional<size_t> id) {
-  if (!enabled_ || !id) {
+    EventType>::getEntry(
+        std::optional<size_t> id,
+        std::optional<size_t> reset_epoch) {
+  if (!enabled_ || !id || !reset_epoch) {
     return std::nullopt;
   }
 
   std::unique_lock<std::mutex> guard(mutex_);
-  Entry entry = entries_.at(*id % max_entries_);
-  if (entry.id_ == *id) {
+  Entry entry = entries_.at(getIdxFromId(*id, *reset_epoch));
+  if (entry.id_ == *id && entry.reset_epoch_ == *reset_epoch) {
     return entry;
-  } else {
-    return std::nullopt;
   }
+  return std::nullopt;
 }
 
 template <typename EventType>
 void FlightRecorder<EventType>::retire_id(
     std::optional<size_t> id,
+    std::optional<size_t> reset_epoch,
     bool compute_duration) {
-  if (!enabled_ || !id) {
+  if (!enabled_ || !id || !reset_epoch) {
     return;
   }
 
@@ -214,8 +245,8 @@ void FlightRecorder<EventType>::retire_id(
 
   std::unique_lock<std::mutex> guard(mutex_);
 
-  Entry* entry = &entries_.at(*id % max_entries_);
-  if (entry->id_ == *id) {
+  Entry* entry = &entries_.at(getIdxFromId(*id, *reset_epoch));
+  if (entry->id_ == *id && entry->reset_epoch_ == *reset_epoch) {
     update_state(*entry);
 
     if (compute_duration) {
@@ -237,8 +268,8 @@ void FlightRecorder<EventType>::retire_id(
     guard.lock();
 
     // Refresh the entry pointer, see if the entry has been overwritten
-    entry = &entries_.at(*id % max_entries_);
-    if (entry->id_ != *id) {
+    entry = &entries_.at(getIdxFromId(*id, *reset_epoch));
+    if (!(entry->id_ == *id && entry->reset_epoch_ == *reset_epoch)) {
       LOG(INFO) << "retire_id abandoned for id " << *id
                 << ", event was overwritten while waiting to compute duration.";
       return;
@@ -252,9 +283,13 @@ void FlightRecorder<EventType>::retire_id(
 template <typename EventType>
 void FlightRecorder<EventType>::reset_all() {
   std::lock_guard<std::mutex> guard(mutex_);
-  next_ = 0;
-  id_ = 0;
-  entries_.clear();
+  if (!entries_.empty()) {
+    // Soft delete: increment epoch to mark all existing entries as old
+    // Store where the new epoch starts in the circular buffer
+    reset_epoch_++;
+    reset_epoch_start_idx_[reset_epoch_] = next_;
+    id_ = 0;
+  }
 }
 
 template <typename EventType>
