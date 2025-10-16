@@ -73,8 +73,6 @@ IGNORE_PATTERNS: list[re.Pattern] = [
         r"dimensionality of sizes \(0\) must match dimensionality of strides \(1\)"
     ),  # https://github.com/pytorch/pytorch/issues/164814
     # Add more patterns here as needed, e.g.:
-
-
     # re.compile(r"Some other error message"),
 ]
 
