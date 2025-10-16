@@ -1,3 +1,4 @@
+#include <pybind11/pybind11.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
@@ -574,3 +575,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
 }
 #endif // LAE_USE_CUDA
+
+PYBIND11_MODULE(_C, m) {
+  m.doc() = "libtorch_agnostic._C - PyTorch stable API extension";
+}

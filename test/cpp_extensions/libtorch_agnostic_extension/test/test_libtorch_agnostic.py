@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
-    IS_WINDOWS,
     run_tests,
     TestCase,
     xfailIfTorchDynamo,
@@ -240,13 +239,11 @@ class TestLibtorchAgnostic(TestCase):
     def test_default_constructor(self):
         import libtorch_agnostic
 
-        defined_tensor_is_defined = libtorch_agnostic.ops.test_default_constructor(
-            True
-        )
+        defined_tensor_is_defined = libtorch_agnostic.ops.test_default_constructor(True)
         self.assertTrue(defined_tensor_is_defined)
 
-        undefined_tensor_is_defined = (
-            libtorch_agnostic.ops.test_default_constructor(False)
+        undefined_tensor_is_defined = libtorch_agnostic.ops.test_default_constructor(
+            False
         )
         self.assertFalse(undefined_tensor_is_defined)
 
@@ -362,6 +359,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result, expected)
         self.assertNotEqual(result.data_ptr(), expected.data_ptr())
         self.assertEqual(result.stride(), expected.stride())
+
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
