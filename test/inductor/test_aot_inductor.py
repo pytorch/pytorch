@@ -5338,7 +5338,7 @@ class AOTInductorTestsTemplate:
                 record_shapes=True,
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
+                    getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
                 ],
             ) as prof,
         ):
