@@ -1269,20 +1269,6 @@ class BuiltinVariable(VariableTracker):
                 tensor_proxy = args[0].as_proxy()
                 datetime_tensor_proxy = args[1].as_proxy()
 
-                # cast datetime_proxy to match datetime_tensor_proxy's dtype and device
-                datetime_tensor_proxy = tx.output.create_proxy(
-                    "call_function",
-                    torch.ops.aten.to.other,
-                    (
-                        datetime_tensor_proxy,
-                        tensor_proxy,
-                        False,
-                        False,
-                        None,
-                    ),
-                    {},
-                )
-
                 proxy = tx.output.create_proxy(
                     "call_function",
                     torch.ops.aten.add.Tensor,  # TODO: add-only for now
