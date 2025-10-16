@@ -301,7 +301,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         ).apply_graph_pass(post_grad_mutable_custom_post_pass)
 
         remove_implict_edges(gm.graph)
-        gm.graph.eliminate_dead_code()
 
     else:
         GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
