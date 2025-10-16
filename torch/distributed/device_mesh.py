@@ -294,19 +294,19 @@ else:
 
         # This is the actual constructor entry-point which dispatches to the overloads.
         def __init__(self, *args, **kwargs) -> None:
-            mismatches: list[tuple[str, str]] = []
+            mismatches: list[tuple[inspect.Signature, TypeError]] = []
             for func in get_overloads(DeviceMesh.__init__):
                 sig = inspect.signature(func)
                 try:
                     sig.bind(self, *args, **kwargs)
                 except TypeError as e:
-                    mismatches.append((f"{sig!s}", f"{e!s}"))
+                    mismatches.append((sig, e))
                     continue
                 func(self, *args, **kwargs)
                 return
             raise TypeError(
                 f"{args=} and {kwargs=} didn't match any overload:\n"
-                + "\n".join(f"- overload {s}: {e}" for s, e in mismatches)
+                + "\n".join(f"- overload {s!s}: {e!s}" for s, e in mismatches)
             )
 
         @property
