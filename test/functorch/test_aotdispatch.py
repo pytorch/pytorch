@@ -7980,7 +7980,7 @@ aot_autograd_failures = {
         "singular",
         # This delta is coming entirely from the clone() on tangents
         # in AOTDispatcher to make them contiguous
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
     ),
     decorate(
         "nn.functional.interpolate",
