@@ -84,7 +84,8 @@ across models. Example usage::
 """
 
 import collections
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.ao.quantization.quantize_fx as quantize_fx

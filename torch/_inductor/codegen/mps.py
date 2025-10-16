@@ -143,7 +143,7 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_Float(self, expr: sympy.Expr) -> str:
         if expr.is_integer:
-            # sympy considers 0.0 to be integer, but triton doesn't.
+            # sympy considers 0.0 to be integer, but mps doesn't.
             # this workaround prints the float as an integer
             # xref: https://github.com/sympy/sympy/issues/26620
             return str(int(expr))
@@ -1067,10 +1067,8 @@ class MetalScheduling(SIMDScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
 
             if V.graph.cpp_wrapper:
-                src_code = (
-                    f"at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}"
-                    + src_code
-                )
+                # For shimified version, generate source constant instead of direct instantiation
+                src_code = f"const char* {mps_lib_name}_source = " + src_code
 
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"

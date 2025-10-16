@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import product
 
+import torch
 from torch.distributed._pycute import (
     coalesce,
     complement,
@@ -16,6 +17,7 @@ from torch.distributed._pycute import (
     is_int,
     is_tuple,
     Layout,
+    suffix_product,
 )
 
 
@@ -36,7 +38,9 @@ class _MeshLayout(Layout):
     different from that of PyCute's.
     """
 
+    # pyrefly: ignore  # bad-override
     shape: IntTuple
+    # pyrefly: ignore  # bad-override
     stride: IntTuple
 
     def __post_init__(self) -> None:
@@ -66,6 +70,10 @@ class _MeshLayout(Layout):
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
         return zip(flatten(self.shape), flatten(self.stride))
 
+    @property
+    def top_level_sizes(self) -> tuple[int, ...]:
+        return tuple(self[i].numel() for i in range(len(self)))
+
     def numel(self) -> int:
         return math.prod(flatten(self.shape))
 
@@ -73,6 +81,9 @@ class _MeshLayout(Layout):
     def __getitem__(self, i: int) -> "_MeshLayout":
         layout = super().__getitem__(i)
         return _MeshLayout(layout.shape, layout.stride)
+
+    def nest(self) -> "_MeshLayout":
+        return _MeshLayout((self.shape,), (self.stride,))
 
     def coalesce(self) -> "_MeshLayout":
         """
@@ -144,6 +155,52 @@ class _MeshLayout(Layout):
         """
         layout = complement(self, world_size)
         return _MeshLayout(layout.shape, layout.stride)
+
+    def unflatten(self, dim: int, unflatten_sizes: tuple[int, ...]) -> "_MeshLayout":
+        """
+        Unflatten a single dimension in the layout by splitting it into multiple dimensions.
+        It takes a dimension at position `dim` and splits it into multiple new dimensions
+        with the specified sizes.
+
+        Args:
+            dim (int): The index of the dimension to unflatten. Must be a valid dimension index.
+            unflatten_sizes (tuple[int, ...]): The new sizes for the dimensions that will replace
+                the original dimension at `dim`. The product of these sizes must equal the size
+                of the original dimension at `dim`.
+
+        Returns:
+            _MeshLayout: A new layout with the specified dimension unflattened.
+
+        Example:
+            Original: sizes=(8,), strides=(1,)  # 8 ranks in 1D
+            Call: unflatten(0, (2, 2, 2))  # Create 3D topology
+            Result: sizes=(2, 2, 2), strides=(4, 2, 1)  # 2*2*2 unflattened topology
+        """
+        # Check that dim is within valid range
+        if dim < 0 or dim >= len(self):
+            raise ValueError(
+                f"dim {dim} is out of range for layout with {len(self)} dimensions. "
+                f"Expected dim to be in range [0, {len(self) - 1}]."
+            )
+
+        # Check that the product of unflatten_sizes equals the original dimension size
+        original_size = self[dim].numel()
+        unflatten_product = math.prod(unflatten_sizes)
+        if unflatten_product != original_size:
+            raise ValueError(
+                f"The product of unflatten_sizes {unflatten_sizes} is {unflatten_product}, "
+                f"but the original dimension at dim={dim} has size {original_size}. "
+                f"These must be equal for unflatten to work correctly."
+            )
+
+        sizes = list(self.sizes)  # type: ignore[arg-type]
+        strides = list(self.strides)  # type: ignore[arg-type]
+        unflatten_layout = self[dim].composition(
+            _MeshLayout(tuple(unflatten_sizes), suffix_product(unflatten_sizes))
+        )
+        sizes[dim : dim + 1] = list(unflatten_layout.sizes)  # type: ignore[arg-type]
+        strides[dim : dim + 1] = list(unflatten_layout.strides)  # type: ignore[arg-type]
+        return _MeshLayout(tuple(sizes), tuple(strides))
 
     def all_ranks_from_zero(self) -> list[int]:
         """
@@ -243,3 +300,54 @@ class _MeshLayout(Layout):
         """
         ranks = self.all_ranks_from_zero()
         return len(ranks) == len(set(ranks))
+
+    def remap_to_tensor(
+        self,
+        mesh_tensor: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Leverage layout as an index for mesh tensor that re-maps the indexes after layout
+        transformation to actual device ranks.
+
+        With this method, the cute layout serves as the backend of indices bookkeeping for the
+        mesh tensor when it comes to flatten, unflatten and slicing operations. The actual mesh
+        tensor still represents the actual device assignment and ranks. We need this function
+        to specify device allocation and create backend for a mesh. Although any transform of mesh tensors
+        can be treated as a view or subset of mesh tensor, we do need to use the actual view or
+        sub-tensor for DeviceMesh and its backend creation.
+
+        The shape of the `mesh_tensor` can be any size because users can define a device mesh with any
+        shapes. But we can further refactor the code so that internally we can only support 1D mesh tensor
+        and reconstruct the mesh tensor with the shape of the layout when accessed by users.
+        #TODO: Only support 1D mesh tensor stored internally and reconstruct the mesh tensor via layout.
+
+        Examples:
+
+        Case 1 - Consecutive ranks, full world:
+            original_mesh_tensor = [[0,1],[2,3]]  # 2x2 mesh, ranks 0-3
+            world_size = 4
+            layout = Layout(2:2)
+            Return: [[0,2],[1,3]]
+
+        Case 2 - Non-consecutive ranks:
+            original_mesh_tensor = [[10,20],[30,40]]  # custom rank assignment
+            world_size = 4
+            layout = Layout(2:2)
+            Return: [[[10,30],[20,40]]]
+
+        Args:
+            mesh_tensor: The concrete mesh tensor with actual device ranks
+
+        Returns:
+            torch.Tensor: A tensor representing the actual device allocation from mesh_tensor
+        """
+        complement_layout = self.complement(mesh_tensor.numel())
+
+        return (
+            mesh_tensor.flatten()
+            .as_strided(
+                flatten(complement_layout.sizes) + flatten(self.sizes),
+                flatten(complement_layout.strides) + flatten(self.strides),
+            )
+            .reshape(-1, *(self[i].numel() for i in range(len(self))))
+        )
