@@ -1664,14 +1664,14 @@ class CuTeLayoutTest(TestCase):
     def test_remap_to_tensor(self):
         """Test the remap_to_tensor method for various scenarios."""
         # Test 1: Consecutive ranks, full world - should return logical groups directly
-        original_mesh = torch.tensor([[0, 1], [2, 3]], dtype=torch.int)
+        original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
         layout1 = _Layout((2, 2), (2, 1))  # row-major 2x2
         result1 = layout1.remap_to_tensor(original_mesh)
         expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result1, expected1)
 
         # Test 2: Non-consecutive ranks - should map to actual ranks
-        original_mesh = torch.tensor([[10, 20], [30, 40]], dtype=torch.int)
+        original_mesh = torch.tensor([10, 20, 30, 40], dtype=torch.int)
         layout2 = _Layout((2, 2), (2, 1))
         result2 = layout2.remap_to_tensor(original_mesh)
         expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
@@ -1692,7 +1692,7 @@ class CuTeLayoutTest(TestCase):
         self.assertEqual(result5, expected5)
 
         # Test 6: Tensor Cute representation of a 2D mesh
-        original_mesh = torch.tensor([[0, 2], [1, 3]], dtype=torch.int)
+        original_mesh = torch.tensor([0, 2, 1, 3], dtype=torch.int)
         layout6 = _Layout((2, 2), (1, 2))  # column-major style
         result6 = layout6.remap_to_tensor(original_mesh)
         expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)

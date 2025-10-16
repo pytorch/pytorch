@@ -301,10 +301,7 @@ class _MeshLayout(Layout):
         ranks = self.all_ranks_from_zero()
         return len(ranks) == len(set(ranks))
 
-    def remap_to_tensor(
-        self,
-        mesh_tensor: torch.Tensor,
-    ) -> torch.Tensor:
+    def remap_to_tensor(self, rank_map: torch.Tensor) -> torch.Tensor:
         """
         Leverage layout as an index for mesh tensor that re-maps the indexes after layout
         transformation to actual device ranks.
@@ -316,10 +313,7 @@ class _MeshLayout(Layout):
         can be treated as a view or subset of mesh tensor, we do need to use the actual view or
         sub-tensor for DeviceMesh and its backend creation.
 
-        The shape of the `mesh_tensor` can be any size because users can define a device mesh with any
-        shapes. But we can further refactor the code so that internally we can only support 1D mesh tensor
-        and reconstruct the mesh tensor with the shape of the layout when accessed by users.
-        #TODO: Only support 1D mesh tensor stored internally and reconstruct the mesh tensor via layout.
+        The shape of the `rank_map` must be 1D and contiguous.
 
         Examples:
 
@@ -336,18 +330,18 @@ class _MeshLayout(Layout):
             Return: [[[10,30],[20,40]]]
 
         Args:
-            mesh_tensor: The concrete mesh tensor with actual device ranks
+            rank_map: The concrete mesh tensor with actual device ranks
 
         Returns:
-            torch.Tensor: A tensor representing the actual device allocation from mesh_tensor
+            torch.Tensor: A tensor representing the actual device allocation from rank_map
         """
-        complement_layout = self.complement(mesh_tensor.numel())
+        assert rank_map.ndim == 1
+        assert rank_map.is_contiguous()
+        assert rank_map.numel() >= self.cosize()
 
-        return (
-            mesh_tensor.flatten()
-            .as_strided(
-                flatten(complement_layout.sizes) + flatten(self.sizes),
-                flatten(complement_layout.strides) + flatten(self.strides),
-            )
-            .reshape(-1, *(self[i].numel() for i in range(len(self))))
-        )
+        complement_layout = self.complement(rank_map.numel())
+
+        return rank_map.as_strided(
+            flatten(complement_layout.sizes) + flatten(self.sizes),
+            flatten(complement_layout.strides) + flatten(self.strides),
+        ).reshape(-1, *self.top_level_sizes)
