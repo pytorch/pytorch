@@ -31,23 +31,24 @@ import sys
 import threading
 import traceback
 from collections import Counter, defaultdict
-from collections.abc import Generator, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import (
     Any,
-    Callable,
     cast,
     Generic,
     NamedTuple,
     NoReturn,
     Optional,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, ParamSpec, TypeAlias, TypeGuard
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch.fx
@@ -4414,7 +4415,7 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
-                val if i not in hint_overrides else hint_overrides[i],
+                hint_overrides.get(i, val),
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
@@ -4615,7 +4616,7 @@ class ShapeEnv:
         sym_sizes = [
             self.create_symintnode(
                 sym,
-                hint=hint if i not in hint_overrides else hint_overrides[i],
+                hint=hint_overrides.get(i, hint),
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
@@ -7870,13 +7871,13 @@ class ShapeEnv:
             # sympy.Eq may update both lower and upper bounds.
             # sympy.G{t,e} may update the lower bound, only.
             # sympy.L{t,e} may update the upper bound, only.
-            if lower < rhs_vr.lower and isinstance(
+            if lower <= rhs_vr.lower and isinstance(
                 r_expr, (sympy.Eq, sympy.Ge, sympy.Gt)
             ):
                 # Strictly greater relations allow us to refine a bit more, since
                 # x < y implies that the lower bound for x is: y + 1.
                 lower = rhs_vr.lower + int(isinstance(r_expr, sympy.Gt))
-            if upper > rhs_vr.upper and isinstance(
+            if upper >= rhs_vr.upper and isinstance(
                 r_expr, (sympy.Eq, sympy.Le, sympy.Lt)
             ):
                 upper = rhs_vr.upper - int(isinstance(r_expr, sympy.Lt))

@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple, Optional, Protocol, Union
 
 import torch
 import torch.distributed as dist
@@ -246,6 +246,7 @@ def _format_pipeline_order(
         pipeline_order.get(key, [""] * num_steps) for key in sorted(pipeline_order)
     ]
     # Transpose the list of lists (rows to columns)
+    # pyrefly: ignore  # no-matching-overload
     transposed_actions = list(itertools.zip_longest(*rank_actions, fillvalue=""))
     # Generate column labels for ranks
     num_ranks = len(pipeline_order)
@@ -624,6 +625,10 @@ or equal to the number of stages ({self._num_stages})."
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
+        # Stage post processing
+        grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+        self._stage._post_backward(grad_scale_factor)
+
         # Return merged results per original format
         if self._stage.is_last:
             return self._merge_outputs(self._stage.output_chunks)
@@ -771,10 +776,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 bwd_sends_to_wait.extend(works.values())
 
             logger.debug("[%s] Backwarded microbatch %s", self._stage.stage_index, i)
-
-        self._stage.scale_grads(
-            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
-        )
 
         # Wait for all backward sends to finish
         for work in bwd_sends_to_wait:
@@ -950,10 +951,6 @@ class Schedule1F1B(PipelineScheduleSingle):
             send_work = _batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
 
-        self._stage.scale_grads(
-            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
-        )
-
         # Wait for the last backward send to finish
         _wait_batch_p2p(send_work)
 
@@ -1060,9 +1057,7 @@ def _add_unshard_reshard(
                         if sub_action.stage_index not in seen:
                             seen.add(sub_action.stage_index)
                             ret.append(sub_action.stage_index)
-                            if len(ret) == count:
-                                break
-                    if len(ret) == count:
+                    if len(ret) >= count:
                         break
                 else:
                     # Regular action
@@ -1108,6 +1103,10 @@ def _add_unshard_reshard(
         for stage in fetch:
             _unshard(stage)
         fsdp_aware_actions.append(action)
+
+    # Reshard all remaining active stages after processing all operations
+    for stage in list(active_stages):
+        _reshard(stage)
 
     return fsdp_aware_actions
 
@@ -1554,6 +1553,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
+        # Stage post processing
+        # TODO: remove this section and include as part of the schedule IR?
+        for stage in self._stages:
+            grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+            stage._post_backward(grad_scale_factor)
+
         # Return merged results per original format
         for stage in self._stages:
             if stage.is_last:
@@ -1749,6 +1754,26 @@ at time_step %s when running action %s",
         self._update_losses(self._stages, losses)
 
 
+class _PipelineContext:
+    def __init__(
+        self,
+        schedule_ref: _PipelineSchedule,
+        arg_mbs: Optional[list[tuple]] = None,
+        kwarg_mbs: Optional[list[dict]] = None,
+        target_mbs: Optional[list] = None,
+        losses: Optional[list] = None,
+    ):
+        self.schedule_ref = schedule_ref
+        self.arg_mbs = arg_mbs
+        self.kwarg_mbs = kwarg_mbs
+        self.target_mbs = target_mbs
+        self.losses = losses
+
+
+class _CustomFunctionProtocol(Protocol):
+    def __call__(self, action: _Action, ctx: _PipelineContext) -> None: ...
+
+
 class _PipelineScheduleRuntime(PipelineScheduleMulti):
     """
     Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
@@ -1756,6 +1781,57 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
     subclassed and the subclass can be responsible for creating a schedule IR.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Action to custom function mapping
+        self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        self.backward_counter: Counter[int] = Counter()
+
+        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
+        self.bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+        self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
+
+        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
+        self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
+        self.unsharded_stages = set()
+
+    def register_custom_function(
+        self,
+        computation_type: _ComputationType,
+        custom_function: _CustomFunctionProtocol,
+    ) -> None:
+        """
+        Register a custom function to be executed for a specific computation type.
+
+        Args:
+            computation_type: The computation type for which to register the custom function
+            custom_function: The function to execute when this computation type is encountered.
+                Must have signature: (stage: _PipelineStageBase, mb_index: int, *args, **kwargs) -> None
+        """
+        # Ensure that the computation type is valid
+        if computation_type not in (
+            FORWARD,
+            FULL_BACKWARD,
+            BACKWARD_INPUT,
+            BACKWARD_WEIGHT,
+            OVERLAP_F_B,
+        ):
+            raise ValueError(
+                f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
+BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
+            )
+
+        # Check if computation_type is already registered
+        if computation_type in self._comp_type_to_function_map:
+            logger.warning(
+                "Computation type %s is already registered. "
+                "Overwriting the existing custom function.",
+                computation_type,
+            )
+
+        self._comp_type_to_function_map[computation_type] = custom_function
 
     def _prepare_schedule_with_comms(
         self,
@@ -1850,6 +1926,20 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             self._num_stages,
         )
 
+    def _assert_unsharded(self, stage: _PipelineStageBase):
+        """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
+        stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+        if stage_uses_fsdp:
+            stage_idx = stage.stage_index
+            if stage_idx in self.unshard_ops:
+                for op in self.unshard_ops[stage_idx]:
+                    op.wait()
+                del self.unshard_ops[stage_idx]
+                self.unsharded_stages.add(stage_idx)
+            assert stage_idx in self.unsharded_stages, (
+                f"Attempted to compute on sharded {stage_idx=}"
+            )
+
     def _step_microbatches(
         self,
         arg_mbs: Optional[list] = None,
@@ -1876,27 +1966,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
         )
 
-        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
-        bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
-        fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
-
         # send ops should be waited on before step() exists, mainly for hygiene
         send_ops: list[list[dist.Work]] = []
-
-        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
-        unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
-        unsharded_stages = set()
-
-        def _assert_unsharded(stage_idx: int):
-            """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
-            if stage_idx in unshard_ops:
-                for op in unshard_ops[stage_idx]:
-                    op.wait()
-                del unshard_ops[stage_idx]
-                unsharded_stages.add(stage_idx)
-            assert stage_idx in unsharded_stages, (
-                f"Attempted to compute on sharded {stage_idx=}"
-            )
 
         def _perform_action(action: _Action) -> None:
             comp_type = action.computation_type
@@ -1920,175 +1991,176 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 action,
             )
 
-            with record_function(_get_profiler_function_name(action)):
-                # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
-                # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
-                # safe to use instead.
-                # However, I was wondering if I should avoid calling batched operators at all in the case that there is
-                # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
-                if comp_type == SEND_F:
-                    send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
-                elif comp_type == SEND_B:
-                    send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
-                elif comp_type == RECV_F:
+            # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
+            # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
+            # safe to use instead.
+            # However, I was wondering if I should avoid calling batched operators at all in the case that there is
+            # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
+            if comp_type == SEND_F:
+                send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+            elif comp_type == SEND_B:
+                send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+            elif comp_type == RECV_F:
+                assert (
+                    stage_idx,
+                    mb_index,
+                ) not in self.fwd_recv_ops, (
+                    f"Recv twice for {stage_idx=} {mb_index=} without executing forward"
+                )
+                self.fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                    stage.get_fwd_recv_ops(mb_index)
+                )
+            elif comp_type == RECV_B:
+                assert (
+                    stage_idx,
+                    mb_index,
+                ) not in self.bwd_recv_ops, (
+                    f"Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                )
+                self.bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                    stage.get_bwd_recv_ops(mb_index)
+                )
+            elif comp_type == UNSHARD:
+                if stage_uses_fsdp:
+                    assert (
+                        stage_idx not in self.unsharded_stages
+                        and stage_idx not in self.unshard_ops
+                    ), f"Unsharding the same {stage_idx=} twice"
+                    for submodule in stage.submod.modules():
+                        if not isinstance(submodule, FSDPModule):
+                            continue
+                        handle = cast(UnshardHandle, submodule.unshard(async_op=True))
+                        self.unshard_ops[stage_idx].append(handle)
+            elif comp_type == RESHARD:
+                if stage_uses_fsdp:
+                    assert stage_idx in self.unsharded_stages, (
+                        f"Resharding {stage_idx=} without unsharding"
+                    )
+                    assert stage_idx not in self.unshard_ops, (
+                        f"Resharding {stage_idx=} before finishing unshard"
+                    )
+                    for submodule in stage.submod.modules():
+                        if not isinstance(submodule, FSDPModule):
+                            continue
+                        submodule.reshard()
+                    self.unsharded_stages.remove(stage_idx)
+            elif comp_type == FORWARD:
+                self._assert_unsharded(stage)
+
+                if (
+                    not stage.is_first
+                    # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                    and not is_prev_stage_on_this_rank
+                ):
                     assert (
                         stage_idx,
                         mb_index,
-                    ) not in fwd_recv_ops, (
-                        f"Recv twice for {stage_idx=} {mb_index=} without executing forward"
+                    ) in self.fwd_recv_ops, (
+                        f"Computing {action=} before receiving input"
                     )
-                    fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
-                        stage.get_fwd_recv_ops(mb_index)
+                    _wait_batch_p2p(self.fwd_recv_ops.pop((stage_idx, mb_index)))
+
+                output = stage.forward_one_chunk(
+                    mb_index,
+                    arg_mbs[mb_index],  # type: ignore[index]
+                    kwarg_mbs[mb_index],  # type: ignore[index]
+                )
+                self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+
+                # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                # see [Note: V-schedule special case]
+                if is_next_stage_on_this_rank:
+                    stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
+                        output, mb_index
                     )
-                elif comp_type == RECV_B:
+
+            elif comp_type == FULL_BACKWARD:
+                self._assert_unsharded(stage)
+
+                if (
+                    not stage.is_last
+                    # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                    and not is_next_stage_on_this_rank
+                ):
                     assert (
                         stage_idx,
                         mb_index,
-                    ) not in bwd_recv_ops, (
-                        f"Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                    ) in self.bwd_recv_ops, (
+                        f"Attempted to run compute {action=} before receiving input"
                     )
-                    bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
-                        stage.get_bwd_recv_ops(mb_index)
+                    _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
+                loss = self._maybe_get_loss(stage, mb_index)
+                self.backward_counter[stage_idx] += 1
+                last_backward = self.backward_counter[stage_idx] == self._n_microbatches
+                stage.backward_one_chunk(
+                    mb_index,
+                    loss=loss,
+                    full_backward=True,
+                    last_backward=last_backward,
+                )
+                # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                # see [Note: V-schedule special case]
+                if is_prev_stage_on_this_rank:
+                    stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                        stage.get_local_bwd_output(mb_index), mb_index
                     )
-                elif comp_type == UNSHARD:
-                    if stage_uses_fsdp:
-                        assert (
-                            stage_idx not in unsharded_stages
-                            and stage_idx not in unshard_ops
-                        ), f"Unsharding the same {stage_idx=} twice"
-                        for submodule in stage.submod.modules():
-                            if not isinstance(submodule, FSDPModule):
-                                continue
-                            handle = cast(
-                                UnshardHandle, submodule.unshard(async_op=True)
-                            )
-                            unshard_ops[stage_idx].append(handle)
-                elif comp_type == RESHARD:
-                    if stage_uses_fsdp:
-                        assert stage_idx in unsharded_stages, (
-                            f"Resharding {stage_idx=} without unsharding"
-                        )
-                        assert stage_idx not in unshard_ops, (
-                            f"Resharding {stage_idx=} before finishing unshard"
-                        )
-                        for submodule in stage.submod.modules():
-                            if not isinstance(submodule, FSDPModule):
-                                continue
-                            submodule.reshard()
-                elif comp_type == FORWARD:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
+            elif comp_type == BACKWARD_INPUT:
+                self._assert_unsharded(stage)
 
-                    if (
-                        not stage.is_first
-                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and not is_prev_stage_on_this_rank
-                    ):
-                        assert (
-                            stage_idx,
-                            mb_index,
-                        ) in fwd_recv_ops, f"Computing {action=} before receiving input"
-                        _wait_batch_p2p(fwd_recv_ops.pop((stage_idx, mb_index)))
-
-                    output = stage.forward_one_chunk(
+                if not stage.is_last and not is_next_stage_on_this_rank:
+                    assert (
+                        stage_idx,
                         mb_index,
-                        arg_mbs[mb_index],  # type: ignore[index]
-                        kwarg_mbs[mb_index],  # type: ignore[index]
+                    ) in self.bwd_recv_ops, (
+                        f"Attempted to run compute {action=} before receiving input"
                     )
-                    self._maybe_compute_loss(stage, output, target_mbs, mb_index)
-
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_next_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
-                            output, mb_index
-                        )
-
-                elif comp_type == FULL_BACKWARD:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
-
-                    if (
-                        not stage.is_last
-                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and not is_next_stage_on_this_rank
-                    ):
-                        assert (
-                            stage_idx,
-                            mb_index,
-                        ) in bwd_recv_ops, (
-                            f"Attempted to run compute {action=} before receiving input"
-                        )
-                        _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    backward_counter[stage_idx] += 1
-                    last_backward = backward_counter[stage_idx] == self._n_microbatches
-                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
-                    stage.backward_one_chunk(
-                        mb_index,
-                        loss=loss,
-                        full_backward=True,
-                        last_backward=last_backward,
+                    _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
+                loss = self._maybe_get_loss(stage, mb_index)
+                stage.backward_one_chunk(
+                    mb_index,
+                    loss=loss,
+                    full_backward=False,
+                    last_backward=False,
+                )
+                # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                # see [Note: V-schedule special case]
+                if is_prev_stage_on_this_rank:
+                    stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                        stage.get_local_bwd_output(mb_index), mb_index
                     )
-                    if last_backward:
-                        stage.scale_grads(grad_scale_factor)
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_prev_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
-                            stage.get_local_bwd_output(mb_index), mb_index
-                        )
-                elif comp_type == BACKWARD_INPUT:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
-
-                    if not stage.is_last and not is_next_stage_on_this_rank:
-                        assert (
-                            stage_idx,
-                            mb_index,
-                        ) in bwd_recv_ops, (
-                            f"Attempted to run compute {action=} before receiving input"
-                        )
-                        _wait_batch_p2p(bwd_recv_ops.pop((stage_idx, mb_index)))
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    stage.backward_one_chunk(
-                        mb_index,
-                        loss=loss,
-                        full_backward=False,
-                        last_backward=False,
-                    )
-                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
-                    # see [Note: V-schedule special case]
-                    if is_prev_stage_on_this_rank:
-                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
-                            stage.get_local_bwd_output(mb_index), mb_index
-                        )
-                elif comp_type == BACKWARD_WEIGHT:
-                    if stage_uses_fsdp:
-                        _assert_unsharded(stage_idx)
-                    backward_counter[stage_idx] += 1
-                    last_backward = backward_counter[stage_idx] == self._n_microbatches
-                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
-                    stage.backward_weight_one_chunk(
-                        mb_index,
-                        last_backward=last_backward,
-                    )
-                    if last_backward:
-                        stage.scale_grads(grad_scale_factor)
-                else:
-                    raise ValueError(f"{action=} is unknown or unsupported")
+            elif comp_type == BACKWARD_WEIGHT:
+                self._assert_unsharded(stage)
+                self.backward_counter[stage_idx] += 1
+                last_backward = self.backward_counter[stage_idx] == self._n_microbatches
+                stage.backward_weight_one_chunk(
+                    mb_index,
+                    last_backward=last_backward,
+                )
+            else:
+                raise ValueError(f"{action=} is unknown or unsupported")
 
         # count either full_backward or backward_weight together, to determine when to sync DP grads
-        backward_counter: Counter[int] = Counter()
+        self.backward_counter.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
             try:
-                if action.computation_type == OVERLAP_F_B:
-                    assert action.sub_actions is not None, "sub_actions must be set"
-                    with record_function("PP::OverlapFwdBwd"):
+                with record_function(_get_profiler_function_name(action)):
+                    if action.computation_type in self._comp_type_to_function_map:
+                        ctx = _PipelineContext(
+                            self,
+                            arg_mbs,
+                            kwarg_mbs,
+                            target_mbs,
+                            losses,
+                        )
+                        self._comp_type_to_function_map[action.computation_type](
+                            action, ctx
+                        )
+                    elif action.computation_type == OVERLAP_F_B:
+                        assert action.sub_actions is not None, "sub_actions must be set"
                         for sub_a in action.sub_actions:
                             _perform_action(sub_a)
-                else:
-                    _perform_action(action)
+                    else:
+                        _perform_action(action)
             except Exception as e:
                 logger.error(
                     "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
@@ -2109,7 +2181,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         while len(send_ops):
             _wait_batch_p2p(send_ops.pop())
 
-        assert len(unshard_ops) == 0, "Unused unshard operations"
+        assert len(self.unshard_ops) == 0, "Unused unshard operations"
 
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
@@ -2459,15 +2531,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
-        # TODO: we don't support Zero Bubble with torch.compile so we
-        # should disable it for now
-        for stage in stages:
-            if isinstance(stage.submod, OptimizedModule):
-                raise RuntimeError(
-                    "The Zero Bubble schedule is not supported with \
-stage modules that have used torch.compile"
-                )
-
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2663,6 +2728,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -2837,6 +2904,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
     ):
+        # TODO: we dont support input/weight backward split with torch.compile
+        _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
@@ -3234,3 +3303,29 @@ def _dump_chrometrace(schedule, filename):
 
     with open(filename, "w") as f:
         json.dump({"traceEvents": events}, f)
+
+
+def _check_torch_compile_compatibility(
+    stages: list[_PipelineStageBase], schedule_name: str
+):
+    """
+    Check if the schedule is compatible with torch.compile.
+
+    Args:
+        stages: List of pipeline stages to check
+        schedule_name: Name of the schedule for error message
+
+    Raises:
+        RuntimeError: If any stage uses torch.compile
+    """
+    for stage in stages:
+        if not isinstance(stage.submod, torch.nn.Module):
+            continue
+
+        for module in stage.submod.modules():
+            if isinstance(module, OptimizedModule):
+                raise RuntimeError(
+                    f"The {schedule_name} schedule is not supported with "
+                    "stage modules that have used torch.compile. "
+                    f"Found OptimizedModule in {type(module).__name__}"
+                )

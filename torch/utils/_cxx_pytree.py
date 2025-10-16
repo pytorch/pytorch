@@ -41,10 +41,7 @@ if not python_pytree._cxx_pytree_dynamo_traceable:
     )
 
 
-# pyrefly: ignore  # import-error
 import optree
-
-# pyrefly: ignore  # import-error
 from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
 
 

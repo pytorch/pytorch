@@ -198,7 +198,7 @@ def generate_yaml_from_profiles(op_profiles: dict[str, set[OpProfile]]) -> str:
     to a file. The yaml string can be loaded back into an operator profile
     structure using `read_profiles_from_yaml`.
     """
-    # pyrefly: ignore  # import-error
+
     import yaml
 
     from torch._export.serde.serialize import (
@@ -263,7 +263,7 @@ def read_profiles_from_yaml(yaml_str: str) -> dict[str, set[OpProfile]]:
     """
     Reads the yaml saved by `save_op_profiles` and returns the operator profiles.
     """
-    # pyrefly: ignore  # import-error
+
     import yaml
 
     from torch._export.serde.serialize import (

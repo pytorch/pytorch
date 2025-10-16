@@ -1,6 +1,6 @@
 import functools
 import os
-from typing import Any, Optional
+from typing import Any
 from typing_extensions import Unpack
 
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
@@ -92,9 +92,7 @@ class StaticallyLaunchedCudaKernel:
         self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
 
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
-        self.function: Optional[int] = (
-            None  # Loaded by load_kernel(on the parent process)
-        )
+        self.function: int | None = None  # Loaded by load_kernel(on the parent process)
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas

@@ -5,6 +5,7 @@ import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch.testing._internal.common_utils import TestCase
+from torch.utils._ordered_set import OrderedSet
 
 
 class TestAugmentedGraphHelper(TestCase):
@@ -61,9 +62,29 @@ class TestAugmentedGraphHelper(TestCase):
             ]:
                 self.nodes[node.name] = node
 
-        # Get all nodes and create tracker
+        # Get all nodes and compute ancestors
         self.all_nodes = list(self.graph.nodes)
-        self.tracker = AugmentedGraphHelper(self.graph)
+        self.node_ancestors = self._collect_node_ancestors(self.graph)
+
+        # Create tracker with ancestors
+        self.tracker = AugmentedGraphHelper(
+            self.graph, node_ancestors=self.node_ancestors
+        )
+
+    def _collect_node_ancestors(
+        self, graph: fx.Graph
+    ) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """Collect all ancestors for each node."""
+        from collections import defaultdict
+
+        from torch.utils._ordered_set import OrderedSet
+
+        ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node in graph.nodes:
+            for input_node in node.all_input_nodes:
+                ancestors[node].add(input_node)
+                ancestors[node] |= ancestors[input_node]
+        return ancestors
 
     def get_deps(self, node):
         """Helper to get dependencies for a node."""
@@ -338,35 +359,6 @@ class TestAugmentedGraphHelper(TestCase):
         self.tracker.unmerge_node(nodes[0])
         self.assertEqual(self.tracker.merge_sets[nodes[0]], {nodes[0]})
         self.assertEqual(len(self.tracker.merge_sets[nodes[1]]), 1)
-
-    def test_has_path_with_bounded_search(self):
-        """Test that bounded search correctly respects search range bounds."""
-        # Create a simple linear chain: x -> A -> B -> C -> D
-        graph = fx.Graph()
-        x = graph.placeholder("x")
-        a = graph.call_function(torch.neg, args=(x,), name="A")
-        b = graph.call_function(torch.abs, args=(a,), name="B")
-        c = graph.call_function(torch.relu, args=(b,), name="C")
-        d = graph.call_function(torch.sigmoid, args=(c,), name="D")
-        graph.output(d)
-
-        node_to_idx = {node: idx for idx, node in enumerate(graph.nodes)}
-        tracker = AugmentedGraphHelper(graph, node_to_idx=node_to_idx)
-
-        # Path exists from A to D: A -> B -> C -> D
-        self.assertTrue(tracker.has_path(a, d))
-
-        # Test with correct bounds: include all nodes in the path
-        a_idx = node_to_idx[a]
-        d_idx = node_to_idx[d]
-        # Bounds that include the full path should find it
-        self.assertTrue(tracker.has_path(a, d, bounded_search_range=(a_idx, d_idx)))
-
-        # Test with incorrect bounds: exclude critical intermediate nodes
-        c_idx = node_to_idx[c]
-        # Bounds that exclude A and B (only allowing C and D) should NOT find the path
-        # because the search can't reach back to A
-        self.assertFalse(tracker.has_path(a, d, bounded_search_range=(c_idx, d_idx)))
 
 
 if __name__ == "__main__":
