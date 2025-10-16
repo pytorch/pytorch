@@ -1653,20 +1653,6 @@ PyObject* THCPModule_cuda_record_untuned_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_tunableop_write_file_on_exit(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkBool(arg),
-      "cuda_tunableop_write_file_on_exit expects a bool, but got ",
-      THPUtils_typename(arg));
-  at::cuda::tunable::getTuningContext()->WriteFileOnExit(
-      THPUtils_unpackBool(arg));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_cuda_tunableop_set_max_tuning_duration(
     PyObject* _unused,
     PyObject* arg) {
@@ -1745,32 +1731,6 @@ PyObject* THCPModule_cuda_tunableop_get_filename(
   HANDLE_TH_ERRORS
   return THPUtils_packString(
       at::cuda::tunable::getTuningContext()->GetFilename());
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_write_file(
-    PyObject* _unused,
-    PyObject* args) {
-  HANDLE_TH_ERRORS
-  PyObject* str = nullptr;
-  bool success = false;
-  if (!PyArg_ParseTuple(args, "|O", &str)) {
-  }
-  if (str) {
-    TORCH_CHECK(
-        THPUtils_checkString(str),
-        "cuda_tunableop_write_file expects a string, but got ",
-        THPUtils_typename(str));
-    auto filename = THPUtils_unpackString(str);
-    success = at::cuda::tunable::getTuningContext()->WriteFile(filename);
-  } else {
-    success = at::cuda::tunable::getTuningContext()->WriteFile();
-  }
-  if (success) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -1894,6 +1854,64 @@ PyObject* THCPModule_cuda_tunableop_get_rotating_buffer_size(
   HANDLE_TH_ERRORS
   return THPUtils_packInt32(
       at::cuda::tunable::getTuningContext()->GetRotatingBufferSize());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
+    PyObject* unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+
+  PyObject* enabled_obj;
+  PyObject* atol_obj = NULL;
+  PyObject* rtol_obj = NULL;
+
+  // Parse: required bool, optional float, optional float
+  if (!PyArg_ParseTuple(args, "O|OO", &enabled_obj, &atol_obj, &rtol_obj)) {
+    TORCH_CHECK(
+        false,
+        "cuda_tunableop_set_numerical_check_tolerances expects (bool[, float[, float]])");
+  }
+
+  TORCH_CHECK(
+      PyBool_Check(enabled_obj),
+      "First argument must be a boolean, got ",
+      THPUtils_typename(enabled_obj));
+
+  bool enabled = THPUtils_unpackBool(enabled_obj);
+
+  double atol = 1e-5;
+  double rtol = 1e-5;
+
+  if (atol_obj != NULL) {
+    TORCH_CHECK(
+        PyFloat_Check(atol_obj),
+        "Second argument (atol) must be a float, got ",
+        THPUtils_typename(atol_obj));
+
+    atol = PyFloat_AsDouble(atol_obj);
+  }
+
+  if (rtol_obj != NULL) {
+    TORCH_CHECK(
+        PyFloat_Check(rtol_obj),
+        "Third argument (rtol) must be a float, got ",
+        THPUtils_typename(rtol_obj));
+
+    rtol = PyFloat_AsDouble(rtol_obj);
+  }
+
+  TORCH_CHECK(
+      atol > 0.0 && rtol > 0.0,
+      "Numerical check tolerances must be positive. Got atol=",
+      atol,
+      ", rtol=",
+      rtol);
+
+  at::cuda::tunable::getTuningContext()->SetNumericalCheckConfig(
+      enabled, atol, rtol);
+
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -2127,10 +2145,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_record_untuned_is_enabled,
      METH_NOARGS,
      nullptr},
-    {"_cuda_tunableop_write_file_on_exit",
-     THCPModule_cuda_tunableop_write_file_on_exit,
-     METH_O,
-     nullptr},
     {"_cuda_tunableop_set_max_tuning_duration",
      THCPModule_cuda_tunableop_set_max_tuning_duration,
      METH_O,
@@ -2155,10 +2169,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_tunableop_get_filename,
      METH_NOARGS,
      nullptr},
-    {"_cuda_tunableop_write_file",
-     THCPModule_cuda_tunableop_write_file,
-     METH_VARARGS,
-     nullptr},
     {"_cuda_tunableop_read_file",
      THCPModule_cuda_tunableop_read_file,
      METH_VARARGS,
@@ -2178,6 +2188,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_tunableop_get_rotating_buffer_size",
      THCPModule_cuda_tunableop_get_rotating_buffer_size,
      METH_NOARGS,
+     nullptr},
+    {"_cuda_tunableop_set_numerical_check_tolerances",
+     THCPModule_cuda_tunableop_set_numerical_check_tolerances,
+     METH_VARARGS,
      nullptr},
     {nullptr}};
 
