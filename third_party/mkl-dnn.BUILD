@@ -70,7 +70,7 @@ template_rule(
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
         "@DNNL_VERSION_MINOR@": "9",
-        "@DNNL_VERSION_PATCH@": "1",
+        "@DNNL_VERSION_PATCH@": "2",
     },
 )
 
@@ -85,7 +85,7 @@ template_rule(
     name = "include_dnnl_version_hash",
     src = "include/oneapi/dnnl/dnnl_version_hash.h.in",
     out = "include/oneapi/dnnl/dnnl_version_hash.h",
-    substitutions = {"@DNNL_VERSION_HASH@": "74f23b48e0779e5e39ea14ebdb80eca9afdb92aa",}
+    substitutions = {"@DNNL_VERSION_HASH@": "fef486592e40c9e907e615e747118620b4611e04",}
 )
 
 cc_library(
