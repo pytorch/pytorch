@@ -18,16 +18,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    Literal,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -119,7 +110,7 @@ def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str)
     return fn_hash
 
 
-def lookup_autotune_config(size_hints, fn) -> Optional[Config]:
+def lookup_autotune_config(size_hints, fn) -> Config | None:
     lookup_table = torch._inductor.config.autotune_lookup_table
     cached_config = None
     if len(lookup_table) > 0 and "_fused_" in fn.src:
@@ -157,7 +148,7 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: tuple[tuple[int, Optional[int], Optional[int]], ...]
+    xyz_options: tuple[tuple[int, int | None, int | None], ...]
     configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
@@ -183,14 +174,6 @@ def autotune_hints_to_configs(
             )
 
     return configs
-
-
-def disable_pointwise_autotuning(inductor_meta):
-    # Autotuning can give different benchmarking results from run to run, and
-    # therefore we disable autotuning when use_deterministic flag is on.
-    if inductor_meta.get("are_deterministic_algorithms_enabled"):
-        return True
-    return not inductor_meta.get("autotune_pointwise", True)
 
 
 def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
@@ -225,8 +208,8 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
 
 
 def check_autotune_cache(
-    configs: list[Config], filename: Optional[str], inductor_meta: dict[str, Any]
-) -> tuple[list[Config], Optional[AutotuneCache], dict[str, Any]]:
+    configs: list[Config], filename: str | None, inductor_meta: dict[str, Any]
+) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
     """
@@ -293,9 +276,9 @@ class CachingAutotuner(KernelInterface):
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
-        filename: Optional[str] = None,
-        reset_to_zero_arg_names: Optional[list[str]] = None,
-        autotune_cache_info: Optional[dict[str, Any]] = None,
+        filename: str | None = None,
+        reset_to_zero_arg_names: list[str] | None = None,
+        autotune_cache_info: dict[str, Any] | None = None,
     ):
         super().__init__()
 
@@ -348,6 +331,7 @@ class CachingAutotuner(KernelInterface):
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
             is_mm=False,
+            is_native_matmul=triton_meta.get("native_matmul", False),
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
@@ -374,7 +358,7 @@ class CachingAutotuner(KernelInterface):
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
         # Compile-time info included in runtime logginging
-        self.compile_id: Optional[CompileId] = None
+        self.compile_id: CompileId | None = None
         self.is_backward = False
 
         # Mode for launch grid calculation
@@ -426,17 +410,15 @@ class CachingAutotuner(KernelInterface):
                         self.fn = reload_kernel_from_src().fn
                     self.compile_results = [self._precompile_config(best_config)]
 
-    def set_compile_info(
-        self, compile_id: Optional[CompileId], is_backward: bool
-    ) -> None:
+    def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
         self.compile_id = compile_id
         self.is_backward = is_backward
 
     def precompile(
         self,
         warm_cache_only=False,
-        reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
-        static_triton_bundle_key: Optional[str] = None,
+        reload_kernel: Callable[[], CachingAutotuner] | None = None,
+        static_triton_bundle_key: str | None = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
@@ -499,7 +481,7 @@ class CachingAutotuner(KernelInterface):
             assert device_prop.regs_per_multiprocessor
             assert device_prop.max_threads_per_multi_processor
             assert device_prop.multi_processor_count
-            seen_config_hashes: Optional[OrderedSet[Hashable]] = None
+            seen_config_hashes: OrderedSet[Hashable] | None = None
             warp_size = device_prop.warp_size or 32
             for result in self.compile_results:
                 triton_config = result.config
@@ -645,7 +627,7 @@ class CachingAutotuner(KernelInterface):
         return old_values
 
     def restore_after_unpickle(
-        self, old_values: Optional[tuple[Any, Any, Any, Any, Any, Any]]
+        self, old_values: tuple[Any, Any, Any, Any, Any, Any] | None
     ) -> None:
         if old_values:
             (
@@ -1329,7 +1311,7 @@ class CachingAutotuner(KernelInterface):
     ):  # type:ignore[override]
         if hasattr(triton, "set_allocator"):
 
-            def alloc_fn(size: int, align: int, stream: Optional[int]):
+            def alloc_fn(size: int, align: int, stream: int | None):
                 return torch.empty(
                     size, dtype=torch.int8, device=self.device_props.type
                 )
@@ -1578,7 +1560,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
-    ) -> Optional[StaticallyLaunchedCudaKernel]:
+    ) -> StaticallyLaunchedCudaKernel | None:
         if not torch._inductor.config.use_static_cuda_launcher:
             return None
 
@@ -1939,12 +1921,12 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
             # in AMD's Triton backend, the global scratch size is never provided
             # (but for AMD it's safe to pass an extra null arg, so always include it)
-            global_scratch: Optional[int] = getattr(
+            global_scratch: int | None = getattr(
                 kernel_metadata,
                 "global_scratch_size",
                 (0 if torch.version.hip else None),
             )
-            profile_scratch: Optional[int] = getattr(
+            profile_scratch: int | None = getattr(
                 kernel_metadata, "profile_scratch_size", None
             )
             launcher.global_scratch = global_scratch
@@ -2098,7 +2080,7 @@ def hash_configs(configs: list[Config]):
 
 
 def cached_autotune(
-    size_hints: Optional[list[int]],
+    size_hints: list[int] | None,
     configs: list[Config],
     triton_meta,
     heuristic_type,
@@ -2583,7 +2565,7 @@ def pointwise(
 
     configs = None
     if len(size_hints) == 1:
-        if disable_pointwise_autotuning(inductor_meta) and not (
+        if not inductor_meta.get("autotune_pointwise", True) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
@@ -2598,7 +2580,8 @@ def pointwise(
             ]
     if len(size_hints) == 2:
         if (
-            disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
+            not inductor_meta.get("autotune_pointwise", True)
+            or tile_hint == TileHint.SQUARE
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2615,7 +2598,7 @@ def pointwise(
                 *hinted_configs,
             ]
     if len(size_hints) == 3:
-        if disable_pointwise_autotuning(inductor_meta):
+        if not inductor_meta.get("autotune_pointwise", True):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -2644,8 +2627,68 @@ def pointwise(
     )
 
 
+def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages: int):
+    config = {
+        "XBLOCK": sizes.get("x"),
+        "YBLOCK": sizes.get("y"),
+        "ZBLOCK": sizes.get("z"),
+        "R0_BLOCK": sizes.get("r"),
+    }
+    # Remove keys with None values (i.e., missing in sizes)
+    config = {k: v for k, v in config.items() if v is not None}
+    return Config(config, num_warps=num_warps, num_stages=num_stages)
+
+
+def _config_helper(bmm=False, persistent=False):
+    # Each entry is: (sizes_dict, num_warps, num_stages)
+    _base_mm_configs = [
+        ({"x": 32, "y": 32, "r": 16}, 2, 1),
+        ({"x": 32, "y": 32, "r": 128}, 4, 2),
+        ({"x": 32, "y": 64, "r": 32}, 8, 5),
+        ({"x": 64, "y": 32, "r": 32}, 8, 5),
+        ({"x": 64, "y": 32, "r": 128}, 4, 5),
+        ({"x": 64, "y": 64, "r": 16}, 4, 2),
+        ({"x": 64, "y": 64, "r": 32}, 4, 2),
+        ({"x": 64, "y": 64, "r": 64}, 8, 3),
+        ({"x": 64, "y": 64, "r": 128}, 4, 5),
+        ({"x": 64, "y": 128, "r": 32}, 4, 3),
+        ({"x": 64, "y": 128, "r": 32}, 8, 4),
+        ({"x": 64, "y": 128, "r": 64}, 4, 3),
+        ({"x": 64, "y": 128, "r": 128}, 4, 4),
+        ({"x": 128, "y": 64, "r": 32}, 4, 3),
+        ({"x": 128, "y": 64, "r": 32}, 8, 4),
+        ({"x": 128, "y": 128, "r": 32}, 8, 2),
+        ({"x": 128, "y": 128, "r": 32}, 4, 3),
+        ({"x": 128, "y": 128, "r": 64}, 4, 3),
+        ({"x": 128, "y": 128, "r": 64}, 8, 5),
+    ]
+    out = []
+    for sizes, w, s in _base_mm_configs:
+        d = dict(sizes)
+        if persistent:
+            d.pop("r", None)
+        if bmm:
+            d["z"] = 1
+        out.append((d, w, s))
+
+    # Deduplicate by converting dicts to immutable frozensets
+    deduped = {(frozenset(d.items()), w, s): (d, w, s) for d, w, s in out}
+
+    return list(deduped.values())
+
+
+triton_native_mm_configs = _config_helper(bmm=False, persistent=False)
+triton_native_persistent_mm_configs = _config_helper(bmm=False, persistent=True)
+triton_native_bmm_configs = _config_helper(bmm=True, persistent=False)
+triton_native_persistent_bmm_configs = _config_helper(bmm=True, persistent=True)
+
+
 def _reduction_configs(
-    *, size_hints: dict[str, int], inductor_meta: dict[str, Any], num_dynamic=0
+    *,
+    size_hints: dict[str, int],
+    inductor_meta: dict[str, Any],
+    triton_meta: dict[str, Any],
+    num_dynamic=0,
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint")
 
@@ -2672,6 +2715,20 @@ def _reduction_configs(
         # hopefully it can be a good enough indicator.
         MAX_R0_BLOCK = 1024
         register_intensive = True
+
+    if triton_meta.get("native_matmul"):
+        if len(size_hints) == 3:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_mm_configs
+            ]
+        elif len(size_hints) == 4:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_bmm_configs
+            ]
+        else:
+            raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
     def make_config(
         x,
@@ -2796,8 +2853,6 @@ def _reduction_configs(
         return configs + [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
-    if disable_pointwise_autotuning(inductor_meta):
-        return configs + [make_config(32, 128)]
 
     return configs + [
         contiguous_config,
@@ -2908,7 +2963,7 @@ def filter_reduction_configs_for_determinism(
         return (
             inductor_meta.get("deterministic", False)
             or torch._inductor.config.test_configs.force_filter_reduction_configs
-        )
+        ) or inductor_meta.get("are_deterministic_algorithms_enabled")
 
     if not _do_filter_due_to_inductor_config() or len(configs) == 1:
         # no filtering happening if NOT in deterministic mode
@@ -3015,11 +3070,15 @@ def reduction(
             num_dynamic += 1
 
     configs = _reduction_configs(
-        size_hints=size_hints, inductor_meta=inductor_meta, num_dynamic=num_dynamic
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        num_dynamic=num_dynamic,
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -3055,12 +3114,16 @@ def cooperative_reduction(
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reduction_configs(
-            {"x": xnumel, "r0_": rnumel // split}, reduction_hint, inductor_meta
+            {"x": xnumel, "r0_": rnumel // split},
+            reduction_hint,
+            inductor_meta,
+            triton_meta,
         )
     else:
         configs = _reduction_configs(
             size_hints={"x": xnumel, "r0_": rnumel // split},
             inductor_meta=inductor_meta,
+            triton_meta=triton_meta,
         )
     for config in configs:
         config.kwargs["RSPLIT"] = split
@@ -3082,6 +3145,7 @@ def _persistent_reduction_configs(
     size_hints,
     reduction_hint=False,
     inductor_meta=None,
+    triton_meta=None,
 ):
     xnumel = size_hints["x"]
     rnumel = get_total_reduction_numel(size_hints)
@@ -3090,6 +3154,20 @@ def _persistent_reduction_configs(
     )
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
+
+    if triton_meta.get("native_matmul"):
+        if len(size_hints) == 3:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
+            ]
+        elif len(size_hints) == 4:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
+            ]
+        else:
+            raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
     if "y" not in size_hints:
         configs = [
@@ -3160,9 +3238,6 @@ def _persistent_reduction_configs(
             if prefix_is_reduction(prefix):
                 c.kwargs.pop(f"{prefix.upper()}BLOCK")
 
-    if disable_pointwise_autotuning(inductor_meta):
-        configs = configs[:1]
-
     return configs
 
 
@@ -3178,7 +3253,9 @@ def persistent_reduction(
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
 
-    configs = _persistent_reduction_configs(size_hints, reduction_hint, inductor_meta)
+    configs = _persistent_reduction_configs(
+        size_hints, reduction_hint, inductor_meta, triton_meta
+    )
 
     # This key is not added to the inductor meta as its clear from the heuristic
     # choice that it is persistent. Add it and remove it below so that persistent
@@ -3216,7 +3293,9 @@ def split_scan(
     if len(size_hints) != 2:
         raise NotImplementedError(f"size_hints: {size_hints}")
 
-    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    configs = _reduction_configs(
+        size_hints=size_hints, inductor_meta=inductor_meta, triton_meta=triton_meta
+    )
 
     # Fixup configs to enforce the minimum Rn_BLOCK size
     min_rblock = inductor_meta.get("min_split_scan_rblock", 256)
