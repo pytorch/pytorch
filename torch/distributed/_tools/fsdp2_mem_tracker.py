@@ -9,13 +9,13 @@ import torch
 import torch.distributed._tools.fake_collectives
 from torch import nn, optim
 from torch._guards import active_fake_mode
+from torch.autograd.graph import _MultiHandle
 from torch.distributed._tools.mem_tracker import _RefType, _State, MemTracker
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
-from torch.autograd.graph import _MultiHandle
 
 
 _TOTAL_KEY = "Total"
@@ -373,7 +373,10 @@ class FSDPMemTracker(MemTracker):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
-                    if isinstance(fsdp_state._pre_forward_hook_handle, _MultiHandle) and do_remove:
+                    if (
+                        isinstance(fsdp_state._pre_forward_hook_handle, _MultiHandle)
+                        and do_remove
+                    ):
                         # If _pre_forward_hook_handle is _MultiHandle, only need to call remove once.
                         # This is because the hooks are grouped and the state for multiple layers are references to one another.
                         fsdp_state._pre_forward_hook_handle.remove()
