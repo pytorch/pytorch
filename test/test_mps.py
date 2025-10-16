@@ -80,6 +80,9 @@ if not torch.backends.mps.is_available():
 
 total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
 
+MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
+MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
+
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
 
@@ -3637,6 +3640,70 @@ class TestMPS(TestCaseMPS):
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
+    # Skip if a test needs more memory than the system has.
+    def _skip_if_exceeds_total_memory(self, required_memory):
+        if total_memory < required_memory:
+            self.skipTest(
+                f"Needs {required_memory / (1024**3):0.01f} GiB RAM, "
+                f"but only {total_memory / (1024**3):0.01f} GiB is available.")
+
+    @parametrize("dtype", MPS_DTYPES)
+    def test_cat_large_tensor(self, dtype):
+        a_shape = (1, 11 + (1 << 31), 1)
+        b_shape = (1, 100, 1)
+
+        # Assume up to 1% extra overhead memory might be required.
+        required_memory = 1.01 * (math.prod(a_shape) + math.prod(a_shape)) * dtype.itemsize
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        a_cpu = make_tensor((1,), dtype=dtype, device='cpu').expand(a_shape)
+        b_cpu = make_tensor(b_shape, dtype=dtype, device='cpu')
+        r_cpu = torch.cat([a_cpu, b_cpu], dim=1)
+
+        # Pick a subset of output elements to compare, because comparing all of
+        # them takes too long.
+        rand_indices = torch.randint(0, a_cpu.shape[1] + b_cpu.shape[1], (10_000,))
+        r_cpu_part0 = r_cpu[:, rand_indices, :].clone()
+        r_cpu_part1 = r_cpu[:, -200:, :].clone()
+        r_cpu_part2 = r_cpu[:, :200, :].clone()
+
+        # Delete the CPU result to free up memory for the MPS run.
+        del r_cpu
+
+        a_mps = (
+            torch.empty(0, dtype=dtype, device='mps')
+            .set_(a_cpu.untyped_storage().mps())
+            .as_strided(size=a_cpu.size(), stride=a_cpu.stride())
+        )
+        b_mps = b_cpu.to('mps')
+
+        try:
+            r_mps = torch.cat([a_mps, b_mps], dim=1)
+
+        except RuntimeError as e:
+            if "Invalid buffer size" in str(e):
+                self.skipTest(f"Exceeds max buffer size for MPS: {str(e)}.")
+            raise e
+
+        self.assertEqual(r_mps[:, rand_indices, :], r_cpu_part0)
+        self.assertEqual(r_mps[:, -200:, :], r_cpu_part1)
+        self.assertEqual(r_mps[:, :200, :], r_cpu_part2)
+
+    def test_large_tensor_to_string(self):
+        shape = (2, 1 << 31)
+
+        # Assume up to 1% extra overhead memory might be required.
+        required_memory = 1.01 * 2 * math.prod(shape)
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        self.assertEqual(
+            str(torch.ones(shape, dtype=torch.int8, device='mps')),
+            (
+                "tensor([[1, 1, 1,  ..., 1, 1, 1],\n"
+                "        [1, 1, 1,  ..., 1, 1, 1]], device='mps:0', dtype=torch.int8)"
+            ),
+        )
+
     # See https://github.com/pytorch/pytorch/issues/152701
     def test_jacfwd_cat(self):
         def fn(x, y):
@@ -6940,70 +7007,6 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             helper(22, 0, [])
 
-    # TODO: This test can be removed once the backward pass of embedding_bag is
-    # implemented and tested
-    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
-    @parametrize("idx_dtype", [torch.long, torch.int])
-    @parametrize("padding_idx", [-1, 1])
-    @parametrize("include_last_offset", [True, False])
-    @parametrize("mode", ['sum', 'mean', 'max'])
-    def test__embedding_bag(self, dtype, idx_dtype, padding_idx, include_last_offset, mode):
-        import time
-        torch.manual_seed(time.time() * 1000)
-        mode_num = {'sum': 0, 'mean': 1, 'max': 2}[mode]
-        num_words = 10
-        feature_size = 7
-        num_indices = 40
-        num_bags = 5
-
-        weight_cpu = torch.randn(num_words, feature_size, dtype=dtype)
-
-        # Test nan value behavior.
-        # Set second element of each word to nan.
-        weight_cpu[:, 1] = float('nan')
-        # Set third element of a randomized half of the words to nan.
-        weight_cpu[torch.randperm(num_words)[:num_words // 2], 2] = float('nan')
-        # Set fourth element of one randomized word to nan.
-        weight_cpu[torch.randint(0, num_words, ()), 3] = float('nan')
-
-        input_cpu = torch.randint(0, num_words, (num_indices,), dtype=idx_dtype)
-        offsets_cpu = torch.tensor(
-            [0] + (torch.randperm(num_indices - 1)[:num_bags - 1].sort()[0] + 1).tolist(),
-            dtype=idx_dtype)
-
-        if include_last_offset:
-            offsets_cpu[-1] = input_cpu.numel()
-
-        per_sample_weights_cpu = torch.randn(num_indices, dtype=dtype) if mode == 'sum' else None
-
-        r_cpu, offset2bag_cpu, bag_size_cpu, max_indices_cpu = torch._embedding_bag(
-            weight_cpu,
-            input_cpu,
-            offsets_cpu,
-            per_sample_weights=per_sample_weights_cpu,
-            mode=mode_num,
-            padding_idx=padding_idx,
-            include_last_offset=include_last_offset,
-        )
-        r_mps, offset2bag_mps, bag_size_mps, max_indices_mps = torch._embedding_bag(
-            weight_cpu.to('mps'),
-            input_cpu.to('mps'),
-            offsets_cpu.to('mps'),
-            per_sample_weights=per_sample_weights_cpu.to('mps') if per_sample_weights_cpu is not None else None,
-            mode=mode_num,
-            padding_idx=padding_idx,
-            include_last_offset=include_last_offset,
-        )
-
-        self.assertEqual(r_cpu, r_mps)
-
-        if mode != 'sum':
-            self.assertEqual(offset2bag_cpu, offset2bag_mps)
-            self.assertEqual(bag_size_cpu, bag_size_mps)
-
-        if mode == 'max':
-            self.assertEqual(max_indices_cpu, max_indices_mps)
-
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
@@ -8121,6 +8124,12 @@ class TestMPS(TestCaseMPS):
         out_neg = torch.isposinf(input_tensor)
         self.assertEqual(out_pos.numel(), 0)
         self.assertEqual(out_neg.numel(), 0)
+
+    def test_empty_dot(self):
+        # just to check that it doesnt crash
+        a = torch.rand((0), device="mps")
+        b = torch.rand((0), device="mps")
+        self.assertEqual(a.dot(b), a.cpu().dot(b.cpu()))
 
 
 class TestLargeTensors(TestCaseMPS):
@@ -12231,9 +12240,6 @@ class TestNoRegression(TestCase):
             self.assertEqual(x2.device.type, "mps")
 
 
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
-
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 
@@ -12529,6 +12535,8 @@ class TestConsistency(TestCaseMPS):
                 # In a few cases where stride is smaller than kernel size,
                 # several output grad elements of similar magnitudes get summed
                 # together, introducing significant error for float16.
+                atol, rtol = 5e-3, 5e-3
+            if op.name == "nn.functional.embedding_bag" and dtype == torch.float16:
                 atol, rtol = 5e-3, 5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
