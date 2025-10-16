@@ -181,7 +181,7 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
 #define ASSIGN_EXP_CL_ASPECT(member)                                       \
   device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
-      "cl_intel_" #member, &cl_version);
+      "cl_intel_" #member);
 
 #define ASSIGN_EXP_DEVICE_PROP(property) \
   device_prop->property =                \
@@ -196,8 +196,6 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
 
-  // TODO: Remove cl_version since it is unnecessary.
-  sycl::ext::oneapi::experimental::cl_version cl_version;
   AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
 
 #if SYCL_COMPILER_VERSION >= 20250000
