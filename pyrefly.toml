@@ -23,7 +23,7 @@ project-excludes = [
   # ==== below will be enabled directory by directory ====
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
   "torch/_inductor/runtime",
-  "torch/_inductor/codegen",
+  "torch/_inductor/codegen/triton.py",
   # formatting issues, will turn on after adjusting where suppressions can be
   # in import statements
   "torch/linalg/__init__.py",
