@@ -215,16 +215,11 @@ else:
             assert _layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
             )
-            assert _rank_map.ndim == 1, (
-                "The global rank permutation must be 1-dimensional"
-            )
-            assert _rank_map.is_contiguous(), (
-                "The global rank permutation must be contiguous"
-            )
+            assert _rank_map.ndim == 1, "The rank map must be 1-dimensional"
+            assert _rank_map.is_contiguous(), "The rank map must be contiguous"
             assert _rank_map.numel() >= _layout.cosize(), (
-                "The global rank permutation must be large enough for the layout: "
-                f"got {_rank_map.numel()}, "
-                f"expected >= {'*'.join(f'{s}' for s in _layout.top_level_sizes)}"
+                f"The rank map contains {_rank_map.numel()} element, "
+                f"which isn't large enough for layout {_layout}"
             )
 
             self._device_type = device_type
@@ -250,18 +245,12 @@ else:
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
                     self._setup_world_group_and_device()
-<<<<<<< HEAD
-                    self._init_process_groups(backend_override)
-||||||| parent of 21a874edbcc ([DeviceMesh] Simplify unflatten method)
-                    self._init_process_groups(_backend_override)
-=======
                     self._dim_group_names = self._init_process_groups(
                         self._layout,
                         self._rank_map,
                         self._mesh_dim_names,
-                        _backend_override,
+                        backend_override,
                     )
->>>>>>> 21a874edbcc ([DeviceMesh] Simplify unflatten method)
 
                 if is_initialized() and get_backend() == "threaded":
                     # pyrefly: ignore  # bad-assignment
@@ -1309,7 +1298,7 @@ else:
             )
 
         layout = _MeshLayout(tuple(mesh_shape), suffix_product(mesh_shape))
-        # Always initialize the (identity) permutation on CPU, regardless of what the
+        # Always initialize the (identity) rank map on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
             rank_map = torch.arange(layout.numel(), dtype=torch.int)
