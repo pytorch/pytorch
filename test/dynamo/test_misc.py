@@ -242,6 +242,49 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
+    def test_dynamo_inside_custom_op(self):
+        cnt = torch._dynamo.testing.InductorAndRecordGraphs()
+        cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x) -> Tensor")
+
+            def inner(x):
+                return x.sin().cos()
+
+            def foo_impl(x):
+                return torch.compile(inner, fullgraph=True, backend=cnt)(x)
+
+            m.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+            @torch.compile(fullgraph=True, backend=cnt1)
+            def f(x):
+                return torch.ops.mylib.foo.default(x)
+
+            x = torch.randn(3)
+            f(x)
+            f(x)
+            f(x)
+            self.assertTrue(len(cnt.inductor_graphs), 1)
+            self.assertTrue(len(cnt1.inductor_graphs), 1)
+            self.assertExpectedInline(
+                str(cnt.inductor_graphs[0].graph).strip(),
+                """\
+graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg0_1,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%sin,), kwargs = {})
+    return (cos,)""",
+            )
+            self.assertExpectedInline(
+                str(cnt1.inductor_graphs[0].graph).strip(),
+                """\
+graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg0_1,), kwargs = {})
+    return (foo,)""",
+            )
+
     @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
         counters.clear()
