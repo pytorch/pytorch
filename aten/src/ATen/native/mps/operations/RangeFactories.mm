@@ -243,6 +243,9 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+      // Restore exact endpoints to avoid ∞*0 / ∞−∞ artifacts from the graph math
+      r.select(0, 0).fill_(start);
+      r.select(0, steps - 1).fill_(end);
     }
 
     if (!result.is_contiguous()) {

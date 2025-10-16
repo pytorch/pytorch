@@ -66,6 +66,13 @@ void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Sca
             }
           }, {p_begin, p_end});
     });
+
+    // NEW: restore exact endpoints to avoid ∞*0 / ∞−∞ artifacts
+    {
+      TensorIterator it(iter);
+      cpu_serial_kernel(it, [=](){ return start; }, {0, 1});
+      cpu_serial_kernel(it, [=](){ return end;   }, {steps - 1, steps});
+    }
   });
 }
 
