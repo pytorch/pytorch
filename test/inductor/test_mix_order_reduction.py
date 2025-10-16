@@ -28,6 +28,7 @@ class MixOrderReductionTest(TestCase):
             # "min",
             # "amax",
             # "amin",
+            # "mean",
         ],
     )
     @parametrize("swap", (False, True))
