@@ -443,7 +443,9 @@ def all_gather_merge_fn_to_trace_custom_ops(
     rank: int,
 ) -> list[torch.Tensor]:
     ag_ins = [
-        _ag_in.view(out_dtype) if _ag_in.dtype != out_dtype else _ag_in
+        torch._prims.convert_element_type(_ag_in, out_dtype)
+        if _ag_in.dtype != out_dtype
+        else _ag_in
         for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)
     ]
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
