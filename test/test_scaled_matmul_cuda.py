@@ -152,15 +152,34 @@ def infer_scale_swizzle(mat, scale):
     ):
         return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
-    # MX
+    # MXFP4 w/o swizzle
     if (
-        scale.numel()
-        == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
-        or scale.numel()
-        == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4)
+        scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
+        or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0]
+        and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e8m0fnu
     ):
-        return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
+        return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
+
+    if not torch.version.hip:
+        # MXFP8 w/ swizzle
+        if (
+            scale.numel()
+            == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
+            or scale.numel()
+            == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4)
+            and scale.dtype == torch.float8_e8m0fnu
+        ):
+            return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
+
+    else:
+        # MXFP8 w/o swizzle
+        if (
+            scale.numel() == math.ceil(mat.shape[0] // 32) * mat.shape[1]
+            or scale.numel() == math.ceil(mat.shape[1] // 32) * mat.shape[0]
+            and scale.dtype == torch.float8_e8m0fnu
+        ):
+            return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
 
     return None, None
 
@@ -310,18 +329,6 @@ def addmm_float8_unwrapped(
         out_dtype=output_dtype,
     )
     return output
-
-def mm_float8(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    a_scale: torch.Tensor,
-    b_scale: torch.Tensor,
-    output_dtype: torch.dtype,  # output dtype
-    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
-) -> torch.Tensor:
-    return addmm_float8_unwrapped(
-        a, a_scale, b, b_scale, output_dtype, output_scale
-    )
 
 def to_fp8_saturated(
     x: torch.Tensor,
@@ -674,12 +681,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -726,12 +733,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -993,8 +1000,12 @@ class TestFP8Matmul(TestCase):
 
         def test():
             # Calculate actual F8 mm
-            out_scaled_mm = mm_float8(
-                x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+            out_scaled_mm = scaled_mm_wrap(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales.reciprocal(),
+                scale_b=y_scales.reciprocal(),
+                out_dtype=output_dtype
             )
 
             # Calculate emulated F8 mm
@@ -1013,7 +1024,7 @@ class TestFP8Matmul(TestCase):
         # rowwise on SM 9.0
         if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "Only bf16 high precision output types are supported for row-wise scaling."
             ):
                 test()
@@ -1105,16 +1116,25 @@ class TestFP8Matmul(TestCase):
         # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.BlockWise1x128
+        else:
+            lhs_recipe = ScalingType.BlockWise128x128
+
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.BlockWise1x128
+        else:
+            rhs_recipe = ScalingType.BlockWise128x128
 
         # Verify that actual F8 mm doesn't error
-        mm_float8(
+        scaled_mm_wrap(
             x_fp8,
             y_fp8.t(),
-            a_scale=x_scales,
-            b_scale=y_scales.t(),
-            output_dtype=output_dtype,
+            scale_a=x_scales,
+            scale_recipe_a=lhs_recipe,
+            scale_b=y_scales.t(),
+            scale_recipe_b=rhs_recipe,
+            out_dtype=output_dtype,
         )
 
         # Verify that emulated F8 mm doesn't error
@@ -1210,7 +1230,7 @@ class TestFP8Matmul(TestCase):
 
                 self.assertEqual(no_carveout, no_carveout_again)
                 capability = torch.cuda.get_device_capability()
-                if capability == (10, 0):
+                if capability in {(10, 0), (10, 3), (12, 0), (12, 1)}:
                     # expected failure
                     # CUTLASS only supports SM carveout via green contexts on SM100
                     self.assertEqual(no_carveout, carveout_66)
@@ -1488,7 +1508,7 @@ class TestFP8Matmul(TestCase):
             assert sqnr.item() > approx_match_sqnr_target
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
-    @parametrize("recipe", ["mxfp8", "nvfp4"])
+    @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
@@ -1502,7 +1522,7 @@ class TestFP8Matmul(TestCase):
         if recipe == "mxfp8":
             x_lowp = x.to(e4m3_type)
             y_lowp = y.to(e4m3_type).t()
-        else:  # nvfp4
+        else:  # nvfp4 #mxfp4
             x_lowp = _bfloat16_to_float4_e2m1fn_x2(x.bfloat16())
             y_lowp = _bfloat16_to_float4_e2m1fn_x2(y.bfloat16()).t()
 
@@ -1516,7 +1536,10 @@ class TestFP8Matmul(TestCase):
             if recipe == "nvfp4"
             else ScalingType.BlockWise1x32
         )
-        swizzle = SwizzleType.SWIZZLE_32_4_4
+        if torch.version.hip:
+            swizzle = SwizzleType.NO_SWIZZLE
+        else:
+            swizzle = SwizzleType.SWIZZLE_32_4_4
 
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(

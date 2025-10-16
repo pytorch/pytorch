@@ -217,7 +217,7 @@ else:
                 "Please use a non-overlapping layout when creating a DeviceMesh."
             )
             # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
-            assert self._layout.numel() == self.mesh.numel(), (
+            assert self._layout.top_level_sizes == self.mesh.size(), (
                 "Please use a valid layout when creating a DeviceMesh."
                 f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
             )
@@ -674,6 +674,8 @@ else:
                 )
 
             flattened_mesh_layout = self._layout.coalesce()
+            if len(flattened_mesh_layout) > 1:
+                flattened_mesh_layout = flattened_mesh_layout.nest()
             # Quick return if the flatten mesh has been created before.
             if mesh_dim_name in root_mesh._flatten_mapping:
                 if (
@@ -701,7 +703,7 @@ else:
                 cur_rank,
                 (mesh_dim_name,),
                 (backend_override,),
-                _layout=self._layout.coalesce(),
+                _layout=flattened_mesh_layout,
                 _root_mesh=root_mesh,
             )
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh

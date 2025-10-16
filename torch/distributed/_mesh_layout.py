@@ -70,6 +70,10 @@ class _MeshLayout(Layout):
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
         return zip(flatten(self.shape), flatten(self.stride))
 
+    @property
+    def top_level_sizes(self) -> tuple[int, ...]:
+        return tuple(self[i].numel() for i in range(len(self)))
+
     def numel(self) -> int:
         return math.prod(flatten(self.shape))
 
@@ -77,6 +81,9 @@ class _MeshLayout(Layout):
     def __getitem__(self, i: int) -> "_MeshLayout":
         layout = super().__getitem__(i)
         return _MeshLayout(layout.shape, layout.stride)
+
+    def nest(self) -> "_MeshLayout":
+        return _MeshLayout((self.shape,), (self.stride,))
 
     def coalesce(self) -> "_MeshLayout":
         """

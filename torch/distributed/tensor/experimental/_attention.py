@@ -1069,21 +1069,28 @@ def _context_parallel_buffers(
         if isinstance(buffer, torch.Tensor):
             # TODO: the load balance doesn't perform error handling.
             if load_balance_indices is not None:
-                if load_balance_indices.size(0) == 1:  # identical load-balance in batch
-                    buffer = torch.index_select(
-                        buffer, dim=seq_dim, index=load_balance_indices[0]
+                # NOTE: assuming batch dim is 0
+                idx_batch_size = load_balance_indices.size(0)
+                data_batch_size = buffer.size(0)
+                if idx_batch_size != 1 and idx_batch_size != data_batch_size:
+                    raise ValueError(
+                        "Cannot rearrange buffer: "
+                        f"load_balance_indices has shape {load_balance_indices.shape}, "
+                        f"but buffer has shape {buffer.shape}."
                     )
-                else:
-                    # load_balance_indices has shape (batch_size, seq_length)
-                    # TODO: this for-loop can be done in a smarter way
-                    for i in range(load_balance_indices.size(dim=0)):
-                        # NOTE: assuming batch dim is 0
-                        buffer_batch_i = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=load_balance_indices[i]
-                        )
-                        buffer[i] = buffer_batch_i
-            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
 
+                for i in range(data_batch_size):
+                    index = (
+                        load_balance_indices[0]  # identical load-balance in batch
+                        if idx_batch_size == 1
+                        else load_balance_indices[i]
+                    )
+                    buffer_batch_i = torch.index_select(
+                        buffer[i], dim=seq_dim - 1, index=index
+                    )
+                    buffer[i] = buffer_batch_i
+
+            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
             sharded_buffer = distribute_tensor(
                 buffer, mesh, [Shard(seq_dim)], src_data_rank=None
             ).to_local()
@@ -1580,19 +1587,26 @@ def context_parallel_unshard(
         unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
 
         if restore_indices is not None:
-            if restore_indices.size(0) == 1:  # identical load-balance in batch
-                unsharded_b = torch.index_select(
-                    unsharded_b, dim=dim, index=restore_indices[0]
+            # NOTE: assuming batch dim is 0
+            idx_batch_size = restore_indices.size(0)
+            data_batch_size = unsharded_b.size(0)
+            if idx_batch_size != 1 and idx_batch_size != data_batch_size:
+                raise ValueError(
+                    "Cannot restore buffer: "
+                    f"restore_indices has shape {restore_indices.shape}, "
+                    f"but unsharded_b has shape {unsharded_b.shape}."
                 )
-            else:
-                # restore_indices has shape (batch_size, seq_length)
-                # TODO: this for-looop can be done in a smarter way
-                for i in range(restore_indices.size(dim=0)):
-                    # NOTE: assuming batch dim is 0
-                    unsharded_b_batch_i = torch.index_select(
-                        unsharded_b[i], dim=dim - 1, index=restore_indices[i]
-                    )
-                    unsharded_b[i] = unsharded_b_batch_i
+
+            for i in range(data_batch_size):
+                index = (
+                    restore_indices[0]  # identical load-balance in batch
+                    if idx_batch_size == 1
+                    else restore_indices[i]
+                )
+                unsharded_b_batch_i = torch.index_select(
+                    unsharded_b[i], dim=dim - 1, index=index
+                )
+                unsharded_b[i] = unsharded_b_batch_i
 
         unsharded_buffers.append(unsharded_b)
 
