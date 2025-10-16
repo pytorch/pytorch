@@ -1415,41 +1415,6 @@ static inline bool apply_zendnn_matmul_heur(const Tensor& batch1, const Tensor& 
   for (int64_t stride : out_strides) {
     if (stride == 0) return false;
   }
-
-  // Extract dimensions from tensor sizes
-  auto batch1_sizes = batch1.sizes();
-  auto batch2_sizes = batch2.sizes();
-
-  // Get dimensions: BS (batch size), M, K, N
-  int64_t BS = batch1_sizes[0];  // Batch size
-  int64_t M = batch1_sizes[1];   // First matrix rows
-  int64_t K = batch1_sizes[2];   // First matrix cols / Second matrix rows
-  int64_t N = batch2_sizes[2];   // Second matrix cols
-
-  // Heuristic conditions derived from performance experiments
-  // on various AMD CPUs
-  // Native -> return false, ZenDNN_loa -> return true
-  if (BS <= 896) {
-    if (N <= 480) {
-      if (K <= 24) {
-        return false;  // Native
-      } else {
-        return true;   // ZenDNN_loa
-      }
-    } else {
-      if (K <= 40) {
-        return true;   // ZenDNN_loa
-      } else {
-        return false;  // Native
-      }
-    }
-  } else {
-    if (M <= 44) {
-      return true;     // ZenDNN_loa
-    } else {
-      return false;    // Native
-    }
-  }
   return true;
 }
 #endif

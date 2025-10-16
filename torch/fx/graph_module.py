@@ -7,8 +7,9 @@ import os
 import sys
 import traceback
 import warnings
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -18,6 +19,7 @@ from torch.package import Importer, PackageExporter, PackageImporter, sys_import
 
 from ._compatibility import compatibility
 from .graph import (
+    _BoxedCodeGen,
     _custom_builtins,
     _is_from_torch,
     _override_sym_repr,
@@ -192,7 +194,7 @@ def _deserialize_graph_module(
     graph = KeepModules().trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
-    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
     if node_meta_stack_trace is not None:
         del body["_graphmodule_graph_node_meta_stack_trace"]
         for node in graph.nodes:
@@ -533,6 +535,7 @@ class GraphModule(torch.nn.Module):
             self.graph._tracer_cls
             and "<locals>" not in self.graph._tracer_cls.__qualname__
         ):
+            # pyrefly: ignore  # bad-assignment
             self._tracer_cls = self.graph._tracer_cls
 
         self._tracer_extras = {}
@@ -552,7 +555,11 @@ class GraphModule(torch.nn.Module):
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
-    __jit_unused_properties__ = ["graph"]
+    __jit_unused_properties__ = ["graph", "_boxed_call"]
+
+    @property
+    def _boxed_call(self) -> bool:
+        return isinstance(self._graph._codegen, _BoxedCodeGen)
 
     @property
     def graph(self) -> Graph:
