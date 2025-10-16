@@ -265,7 +265,7 @@ def aot_stage2_compile(
     fw_compiler: Callable,
     bw_compiler: Optional[Callable] = None,
     inference_compiler: Optional[Callable] = None,
-) -> DispatchReturn:
+) -> Union[DispatchReturn, tuple[DispatchReturn, GraphModule, GraphModule]]:
     if bw_compiler is None:
         bw_compiler = fw_compiler
     if inference_compiler is None:
@@ -978,9 +978,9 @@ def create_wrap_fn(fn, args):
     from .functional_utils import from_fun, has_data_mutation, to_fun
 
     def assert_no_mutation(t):
-        assert not has_data_mutation(t), (
-            "Saved tensors hooks with inputs mutations are not allowed"
-        )
+        assert not has_data_mutation(
+            t
+        ), "Saved tensors hooks with inputs mutations are not allowed"
 
     @simple_wraps(fn)
     def _wrapper(*args):
@@ -1974,7 +1974,7 @@ def _aot_stage2b_bw_compile(
 def aot_stage2_autograd(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
-) -> DispatchReturn:
+) -> tuple[DispatchReturn, GraphModule, GraphModule]:
     """
     Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
     and returns a wrapped torch.autograd.Function with a forward and backward.
@@ -2149,4 +2149,4 @@ def aot_stage2_autograd(
         aot_config,
         runtime_metadata=fw_metadata,
     )
-    return compiled_fn
+    return compiled_fn, fw_module, bw_module

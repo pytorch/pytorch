@@ -536,9 +536,11 @@ def create_aot_state(
     # won't be affected.
     def _dup_fake_script_obj(fake_flat_args):
         return [
-            maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-            if isinstance(arg, FakeScriptObject)
-            else arg
+            (
+                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                if isinstance(arg, FakeScriptObject)
+                else arg
+            )
             for arg in fake_flat_args
         ]
 
@@ -1294,7 +1296,7 @@ def aot_compile_joint_with_descriptors(
     partition_fn: Callable = default_partition,
     fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
     bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
-) -> callable:
+) -> tuple[callable, torch.fx.GraphModule | None, torch.fx.GraphModule | None]:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
     graph into a callable function that follows a standard calling convention.
@@ -1305,13 +1307,22 @@ def aot_compile_joint_with_descriptors(
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    compiled_fn, _ = aot_stage2_compile(
+    result = aot_stage2_compile(
         jd._aot_state,
         jd._aot_graph_capture,
         partition_fn,
         fw_compiler,
         bw_compiler,
     )
+    if jd._aot_state.needs_autograd:
+        assert len(result) == 3
+        dispatch_return, fw_module, bw_module = result
+        assert len(dispatch_return) == 2
+        compiled_fn, _ = dispatch_return
+    else:
+        assert len(result) == 2
+        compiled_fn, _ = result
+        fw_module = bw_module = None
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)
@@ -1322,7 +1333,7 @@ def aot_compile_joint_with_descriptors(
         flat_outputs = compiled_fn(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, jd.out_spec)
 
-    return unflattened_compiled_fn
+    return unflattened_compiled_fn, fw_module, bw_module
 
 
 def aot_export_module(
@@ -1505,7 +1516,9 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             output_gradients = []
             for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
-                    assert grad is not None, """\
+                    assert (
+                        grad is not None
+                    ), """\
 Found a parameter that did not receive a gradient.
 "This is most likely a bug, but if this needs to be supported please comment on this Github issue:
 https://github.com/pytorch/pytorch/issues/101192
