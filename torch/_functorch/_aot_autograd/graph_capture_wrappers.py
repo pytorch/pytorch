@@ -258,7 +258,7 @@ class JointFnHandle:
 
 
 # Given a fn, computes the joint.
-# NOTE: fn is expects the following behavior:
+# NOTE: fn must conform to the following behavior:
 # (1) fn() needs to return a tuple of (outs, mask),
 #     where `mask` tells us which outputs are meant to have tangents.
 #     we don't know this info automatically, because we don't actually want to blindly
