@@ -2004,12 +2004,6 @@ class TestPatternMatcher(TestCase):
     def test_mutable_custom_op_pattern_matcher_unsafe_clone_removal(self):
         import functools
 
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
-
         @torch.library.custom_op("mylib::add_two_inplace", mutates_args={"x"})
         def add_two_inplace(x: torch.Tensor) -> None:
             x.add_(2)
