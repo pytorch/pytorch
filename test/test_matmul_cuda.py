@@ -1,7 +1,6 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
-import time
 import unittest
 from itertools import product
 from functools import partial
@@ -34,8 +33,13 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_WINDOWS,
+    MI200_ARCH,
+    NAVI_ARCH,
+    getRocmVersion,
+    isRocmArchAnyOf,
     parametrize,
     run_tests,
+    runOnRocmArch,
     skipIfRocm,
     TEST_CUDA,
     TEST_WITH_ROCM,
@@ -153,6 +157,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
+            if (TEST_WITH_ROCM and backend == "cublas" and isRocmArchAnyOf(NAVI_ARCH) and
+                    getRocmVersion() < (6, 4) and dtype == torch.float16 and size >= 10000):
+                self.skipTest(f"failed on Navi for ROCm6.3 due to hipblas backend, dtype={dtype} and size={size}")
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
@@ -250,7 +257,6 @@ class TestMatmulCuda(InductorTestCase):
          (1, 10000, 10000, 10000)],
         name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
-    @skipIfRocm
     def test_cublas_baddbmm_large_input(self, device, batch_size, N, M, P, dtype):
         cpu_dtype = dtype
         if dtype == torch.float16 or dtype == torch.bfloat16:
@@ -272,7 +278,10 @@ class TestMatmulCuda(InductorTestCase):
         if N == M and M == P:
             M2_eye = torch.eye(N, device=device, dtype=dtype)
             out1_eye_gpu = torch.nn.functional.linear(M1, M2_eye.t(), torch.zeros_like(A))
-            self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu())
+            if runOnRocmArch(MI200_ARCH) and dtype == torch.float16:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu(), atol=1e-4, rtol=0.001)
+            else:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu())
 
         # baddbmm
         def _expand_to_batch(t: torch.Tensor):
@@ -287,7 +296,10 @@ class TestMatmulCuda(InductorTestCase):
         if N == M and M == P:
             M2_eye = torch.eye(N, device=device, dtype=dtype).expand(batch_size, N, N)
             out2_eye_gpu = torch.baddbmm(torch.zeros_like(A), M1, M2_eye, beta=beta, alpha=alpha)
-            self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu())
+            if runOnRocmArch(MI200_ARCH) and dtype == torch.float16:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu(), atol=1e-4, rtol=0.001)
+            else:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu())
 
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
@@ -840,28 +852,6 @@ class TestMatmulCuda(InductorTestCase):
                     op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
                 else:
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
-
-
-    @unittest.skipIf(not _get_torch_cuda_version() >= (12, 8), "Green Context only tested on 12.8+")
-    def test_greencontext_carveout(self):
-        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
-        ctx.make_current()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        partial_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        ctx.pop_current()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        full_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t3 = time.perf_counter()
-        self.assertEqual(partial_res, full_res)
-        self.assertGreater(t1 - t0, t3 - t2)
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
