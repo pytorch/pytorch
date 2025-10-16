@@ -51,9 +51,11 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Any, Callable, Generator, Optional, Union
 
+import numpy as np
+
 import torch
 from torch import Size, SymBool, SymInt, Tensor
-from torch._C import DispatchKey, DispatchKeySet
+from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed import DeviceMesh
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -70,11 +72,13 @@ not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemente
 from . import _c10d
 
 
-def _int_on_rank(i: "LocalIntNode | ConstantIntNode", r: int) -> int:
+def _int_on_rank(i: "int | LocalIntNode | ConstantIntNode", r: int) -> int:
     if isinstance(i, LocalIntNode):
         return i._local_ints[r]
     elif isinstance(i, ConstantIntNode):
         return i.val
+    elif isinstance(i, int):
+        return i
     else:
         raise AssertionError(type(i))
 
@@ -216,7 +220,7 @@ class LocalIntNode:
         return False
 
     def sym_max(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {
@@ -226,36 +230,50 @@ class LocalIntNode:
         )
 
     def add(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {r: self._local_ints[r] + _int_on_rank(other, r) for r in self._local_ints}
         )
 
     def sub(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {r: self._local_ints[r] - _int_on_rank(other, r) for r in self._local_ints}
         )
 
     def mul(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {r: self._local_ints[r] * _int_on_rank(other, r) for r in self._local_ints}
         )
 
-    def eq(self, other: "LocalIntNode | ConstantIntNode") -> bool | SymBool:
+    def mod(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {r: self._local_ints[r] % _int_on_rank(other, r) for r in self._local_ints}
+        )
+
+    def int_floordiv(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {r: self._local_ints[r] // _int_on_rank(other, r) for r in self._local_ints}
+        )
+
+    def eq(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] == _int_on_rank(other, r) for r in self._local_ints}
         return torch._C._get_constant_bool_symnode(len(r) == 1 and next(iter(r)))
 
-    def gt(self, other: "LocalIntNode | ConstantIntNode") -> bool | SymBool:
+    def gt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] > _int_on_rank(other, r) for r in self._local_ints}
         assert len(r) == 1, (self, other)
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
-    def lt(self, other: "LocalIntNode | ConstantIntNode") -> bool | SymBool:
+    def lt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] < _int_on_rank(other, r) for r in self._local_ints}
         assert len(r) == 1, (self, other)
         return torch._C._get_constant_bool_symnode(next(iter(r)))
@@ -375,6 +393,7 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
+            # pyrefly: ignore  # bad-argument-type
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -436,6 +455,27 @@ class LocalTensor(torch.Tensor):
 
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
+
+    def numpy(self, *, force: bool = False) -> np.ndarray:
+        return self.reconcile().numpy(force=force)
+
+    def __lt__(
+        self, other: torch.Tensor | bool | complex | float | int
+    ) -> torch.Tensor:
+        self_rec = self.reconcile()
+        other_rec = other
+        if isinstance(other, LocalTensor):
+            other_rec = other.reconcile()
+        return self_rec < other_rec
+
+    def __gt__(
+        self, other: torch.Tensor | bool | complex | float | int
+    ) -> torch.Tensor:
+        self_rec = self.reconcile()
+        other_rec = other
+        if isinstance(other, LocalTensor):
+            other_rec = other.reconcile()
+        return self_rec > other_rec
 
     def tolist(self) -> list[Any]:
         """
@@ -598,6 +638,9 @@ class LocalTensorMode(TorchDispatchMode):
                     DispatchKey.CompositeExplicitAutograd, *args, **kwargs
                 )
 
+        if func.namespace == "profiler":
+            return func(*args, **kwargs)
+
         if func.namespace == "_c10d_functional_autograd":
             raise NotImplementedError(f"{func} not implemented")
 
@@ -638,6 +681,7 @@ class LocalTensorMode(TorchDispatchMode):
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
+        # pyrefly: ignore  # bad-assignment
         self._old_get_coordinate = None
 
 
