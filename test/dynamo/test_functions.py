@@ -5173,10 +5173,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure
     def test_property_class_transmute(self):
         class PropertyGetter:
-            def __call__(self):
+            def __call__(self, obj):
                 return True
 
         p = property(PropertyGetter())
