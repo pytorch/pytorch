@@ -7369,6 +7369,41 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         )
         self.assertEqual(explain_output.break_reasons[0].reason, expected_msg)
 
+    # https://github.com/pytorch/pytorch/issues/164990
+    def test_guard_same_frame_fail_message(self):
+        import torch._dynamo.guards as g
+
+        # deterministically fail check on the same frame to verify error message correctness
+        # the other example of fail might be datetime.now() until patched - see issue #164990
+        compile_check_fn = g.CheckFunctionManager.compile_check_fn
+
+        def wrapper(self, builder, sorted_guards, guard_fail_fn):
+            compile_check_fn(self, builder, sorted_guards, guard_fail_fn)
+
+            def check(x):
+                return False
+
+            self.guard_manager.check = check
+
+        with mock.patch.object(g.CheckFunctionManager, "compile_check_fn", new=wrapper):
+
+            class Model(nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = Model()
+            x = torch.randn(5)
+
+            with self.assertRaises(AssertionError) as e:
+                torch.compile(model)(x)
+
+        msg = str(e.exception)
+        self.assertIn(
+            "Guard failed on the same frame it was created. This is a bug - please create an issue."
+            "Guard fail reason: ",
+            msg,
+        )
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):

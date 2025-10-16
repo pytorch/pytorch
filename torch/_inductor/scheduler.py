@@ -3269,8 +3269,8 @@ class Scheduler:
         device = node_list_1[0].get_device()
         assert device
 
-        # don't support benchmark fusion for CPU C++ backend right now.
-        if device.type == "cpu" and config.cpu_backend != "triton":
+        # don't support benchmark fusion for CPU right now.
+        if device.type == "cpu":
             return True
 
         node_list_2 = node2.get_nodes()
@@ -3992,6 +3992,12 @@ class Scheduler:
         if not config.loop_ordering_after_fusion or any(
             n.is_cpu() for n in [node1, node2]
         ):
+            return -1
+
+        # in some rare case, a template can be passed in.
+        # Check test_interaction_with_multi_template in test_loop_ordering.py
+        # and https://github.com/pytorch/pytorch/issues/165579
+        if node1.is_template() or node2.is_template():
             return -1
 
         node1_buffer_names = node1.read_writes.buffer_names()
@@ -5569,8 +5575,8 @@ class Scheduler:
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
-        # don't support benchmark fusion for CPU C++ backend right now.
-        if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
+        # don't support benchmark fusion for CPU right now.
+        if device is None or device.type == "cpu":
             return True
 
         from triton.compiler.errors import CompilationError
