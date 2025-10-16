@@ -127,7 +127,7 @@ To raw_bitcast(const From& src) {
   TORCH_CHECK(sizeof(To) == sizeof(From), "Invalid bitcast invocation");
   To storage;
   std::memcpy(&storage, &src, sizeof(To));
-  return reinterpret_cast<To&>(storage);
+  return storage;
 }
 
 class SimpleIREvaluatorImpl;

@@ -11,8 +11,9 @@ import os
 import os.path
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -198,14 +199,15 @@ def _extract_graph_with_inputs_outputs(
         new_node = new_graph.placeholder(node.name)
         # Can't use node_copy here as we may be turning previous call_function into placeholders
         new_node.meta = node.meta
+        # pyrefly: ignore  # unsupported-operation
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if _must_be_in_backward(node) and subgraph != "backward":
+        if _must_be_in_backward(node) and subgraph != "backward" and node not in inputs:
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
-        if _must_be_in_forward(node) and subgraph != "forward":
+        if _must_be_in_forward(node) and subgraph != "forward" and node not in inputs:
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
@@ -226,8 +228,10 @@ def _extract_graph_with_inputs_outputs(
             if any(all_args):
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
+            # pyrefly: ignore  # unsupported-operation, bad-argument-type
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
+            # pyrefly: ignore  # unsupported-operation, bad-argument-type
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "output":
             pass
@@ -292,13 +296,27 @@ def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
 
 
 def _must_be_in_forward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_forward(node)
+    if _has_tag_must_be_in_forward(node):
+        return True
+    is_mutable = is_with_effects(node) or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target._schema.is_mutable
+    )
+    return (
+        not _has_tag_is_backward(node)
+        and not _has_tag_must_be_in_backward(node)
+        and is_mutable
+    )
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_backward(node) or (
-        _has_tag_is_backward(node) and is_with_effects(node)
+    if _has_tag_must_be_in_backward(node):
+        return True
+    is_mutable = is_with_effects(node) or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target._schema.is_mutable
     )
+    return _has_tag_is_backward(node) and is_mutable
 
 
 def _extract_fwd_bwd_outputs(
@@ -607,10 +625,10 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     # Use position-based lookup for building output
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
-        position_to_quant[i] if i in position_to_quant else node
-        for i, node in enumerate(fwd_outputs)
+        position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
+    # pyrefly: ignore  # bad-argument-type
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:
@@ -1012,17 +1030,60 @@ def default_partition(
     forward_node_names = OrderedSet(
         node.name for node in forward_only_graph.nodes if node.op != "output"
     )
+    order = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = []
     saved_sym_nodes = []
 
+    def is_mutated_later_in_fw(node):
+        if _has_tag_is_backward(node):
+            return False
+        tensor_arg_aliases = [
+            x
+            for x in node.args
+            if isinstance(x, fx.Node)
+            and "val" in x.meta
+            and isinstance(x.meta["val"], torch.Tensor)
+        ]
+        while len(tensor_arg_aliases) > 0:
+            a = tensor_arg_aliases.pop()
+            for u in a.users:
+                if not isinstance(u.target, torch._ops.OpOverload):
+                    continue
+                # If we witness a mutation on our node later, and that mutation is not "must be in backward",
+                # then our node needs to be computed in the forward (otherwise we will compute it on the mutated values)
+                if (
+                    # one of the args was mutated
+                    u.target._schema.is_mutable
+                    # and the mutation happens "later"
+                    and order[u] > order[node]
+                    # and the mutation happened during the forward
+                    and not (_has_tag_is_backward(u) or _has_tag_must_be_in_backward(u))
+                ):
+                    for idx, alias_info in enumerate(u.target._schema.arguments):
+                        if alias_info.is_write and u.args[idx] is a:
+                            return True
+                elif u.target.is_view:
+                    tensor_arg_aliases.append(u)
+        return False
+
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
+            # if a node isn't "required" to be in the forward, but any of its arguments
+            # are later mutated in the forward, then it must have been run in the forward
+            # (if not, and the node's arg was saved for backward, we would have mutated a saved value)
+            # NB: doesn't handle nodes where the input is a list of tensors and one of those tensors is later mutated
+            if is_mutated_later_in_fw(node):
+                saved_values.append(node)
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
-        elif "tensor_meta" not in node.meta and node.op == "call_function":
+        elif (
+            "tensor_meta" not in node.meta
+            and node.op == "call_function"
+            and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
+        ):
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
@@ -1173,6 +1234,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             # critical path first.
             cur_nodes += node.all_input_nodes
 
+        # pyrefly: ignore  # bad-assignment
         insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
         for node in insertable_nodes:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -1401,12 +1463,14 @@ def functionalize_rng_ops(
     devices = OrderedSet(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
+    # pyrefly: ignore  # unbound-name
     devices.discard(torch.device("cpu"))
     # multiple cuda devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 
     # this changes numerics, so if fallback_random is set we will not use it
+    # pyrefly: ignore  # unbound-name
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
@@ -2838,6 +2902,7 @@ def min_cut_rematerialization_partition(
         node_info,
         memory_budget=memory_budget,
     )
+    # pyrefly: ignore  # unbound-name
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
@@ -2848,6 +2913,7 @@ def min_cut_rematerialization_partition(
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
+        # pyrefly: ignore  # bad-argument-type
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
