@@ -5,6 +5,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/math.h>
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,9 @@
 #include <type_traits>
 
 namespace at::native {
+
+using torch::headeronly::divup;
+
 inline namespace CPU_CAPABILITY {
 template <typename scalar_t>
 int64_t vec_log_softmax_lastdim_chunk_size(int64_t grain_size, int64_t outer_size, int64_t dim_size) {
@@ -94,12 +98,6 @@ void serial_vec_log_softmax_lastdim_range(
           dim_size);
     }
   }
-}
-
-// Can't include ATen/Parallel.h.
-// TODO: find a way to have only one copy of divup.
-inline int64_t divup(int64_t x, int64_t y) {
-  return (x + y - 1) / y;
 }
 
 template <typename scalar_t, int64_t BLOCK_SIZE = 128 * 1024>
