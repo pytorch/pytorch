@@ -2,14 +2,10 @@
 
 #include <ATen/core/TensorBase.h>
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace at::cuda::detail {
 
 float *get_cublas_device_one();
 float *get_cublas_device_zero();
 float *get_user_alpha_ptr();
 
-} // namespace detail
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::detail
