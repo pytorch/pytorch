@@ -321,7 +321,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         # kwargs might contain a callable that generates kwargs
         torch._dynamo.reset()
-        kwarg_gen_fn = kwargs.get("_gen_fn", None)
+        kwarg_gen_fn = kwargs.get("_gen_fn")
         if kwarg_gen_fn is not None:
             kwargs = kwarg_gen_fn()
 
@@ -416,14 +416,11 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 self.assertIsNotNone(guards_state)
                 guards_state = torch._dynamo.package.load_guards_state(guards_state)
 
-                check_fn_manager = CheckFunctionManager(
+                loaded_gm = torch._dynamo.package.load_guard_manager(
+                    guards_state,
                     self._frame_state.f_code,
-                    guards_state.output_graph,
-                    shape_code_parts=guards_state.shape_code_parts,
-                    runtime_global_scope=self._frame_state.f_globals,
-                    source_get_cache=guards_state.source_get_cache,
+                    self._frame_state.f_globals,
                 )
-                loaded_gm = check_fn_manager.guard_manager
 
         try:
             transform_code_object(self._frame_state.f_code, transform)
