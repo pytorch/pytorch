@@ -1856,7 +1856,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Perform all-to-all
         fut = pg.alltoall(output_tensors, input_tensors).get_future()
         fut.wait()
-        result = fut.value()
 
         # After alltoall, rank i should have received tensor with value j from rank j
         # in output_tensors[j]
@@ -1891,7 +1890,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         for i, future_handle in enumerate(future_handles):
             future_handle.wait()
-            result = future_handle.value()
 
             # Verify correctness: output_tensors[j] should contain the value
             # that rank j sent to this rank (self.rank) at position self.rank in rank j's input.
