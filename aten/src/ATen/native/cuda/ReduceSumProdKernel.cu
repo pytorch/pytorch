@@ -77,8 +77,8 @@ struct nansum_functor_complex {
 #if AT_USE_JITERATOR()
   void operator()(TensorIterator& iter) {
     std::string func = jiterator_stringify(
-        arg_t combine(arg_t a, scalar_t b) {
-          return a + (std::isnan(b) ? arg_t{0.} : arg_t{b});
+        arg_t combine(arg_t a, arg_t b) {
+          return a + (std::isnan(b) ? arg_t{0.} : b);
         }
     );
     jitted_gpu_reduce_kernel<nansum_name, scalar_t, scalar_t>(

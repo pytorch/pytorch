@@ -3838,17 +3838,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("world_size"),
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
-      .def(
-          "__init__",
-          [](const py::object&,
-             const py::args& args,
-             const py::kwargs& kwargs) {
-            TORCH_CHECK(
-                false,
-                "FakeProcessGroup cannot be constructed directly. "
-                "Use torch.distributed.init_process_group(backend='fake') instead to ensure "
-                "proper dispatch system integration.");
-          })
       .def_property_readonly(
           "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =
@@ -4091,6 +4080,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
+  module.def(
+      "_reset_fr_recording_nccl",
+      []() { ::c10d::reset_nccl_trace(); },
+      "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
 
   module.def(
