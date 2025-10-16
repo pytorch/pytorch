@@ -930,13 +930,12 @@ class DTensor(torch.Tensor):
 
         Example:
             For a tensor of shape [8, 16, 32] on a 3D device mesh with
-            ``placements=[Shard(1), Shard(0), Shard(0)]``::
+            ``placements=[Shard(1), Shard(0), Shard(0)]``, the shard_order would be::
 
-                >>> # Tensor dim 0 is sharded over mesh dims 1 and 2
-                >>> # Tensor dim 1 is sharded over mesh dim 0
-                >>> # Tensor dim 2 is not in the dict, meaning it's replicated over all mesh dims
-                >>> dtensor.shard_order
-                {0: [1, 2], 1: [0]}
+                # Tensor dim 0 is sharded over mesh dims 1 and 2
+                # Tensor dim 1 is sharded over mesh dim 0
+                # Tensor dim 2 is not in the dict, meaning it's replicated over all mesh dims
+                dtensor.shard_order  # Returns: {0: [1, 2], 1: [0]}
 
             A tensor dimension not appearing as a key in the returned dictionary means
             that dimension is replicated (not sharded) across all device mesh dimensions.
