@@ -6077,10 +6077,6 @@ class TestRandomness(TestCase):
             return y
 
         for chunk_size in [1, 2, 4]:
-            # TODO: without reset, we're getting a weird error complaining that arg.graph is not
-            # cur_tracer.graph, which seems to suggest that there are some issues
-            # about re-compilation
-            torch._dynamo.reset()
             output = torch.vmap(
                 f,
                 in_dims=in_dim,
