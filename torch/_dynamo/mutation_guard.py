@@ -107,7 +107,7 @@ class GenerationTracker:
         cls.generation_values = ExactWeakKeyDictionary()
 
 
-def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
+def is_dynamic_nn_module(obj: Any) -> bool:
     """Check for nn.Modules() created dynamically or mutated"""
     if isinstance(obj, torch.nn.Module) and (
         "forward" in obj.__dict__ or isinstance(obj, (dict, MutableMapping))
@@ -117,11 +117,7 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
         return True
     if hasattr(obj, "torchdynamo_force_dynamic"):
         return obj.torchdynamo_force_dynamic
-    if (
-        isinstance(obj, torch.nn.Module)
-        and config.inline_inbuilt_nn_modules
-        and (not is_export or config.install_free_tensors)
-    ):
+    if isinstance(obj, torch.nn.Module) and config.inline_inbuilt_nn_modules:
         return True
 
     if isinstance(obj, torch.nn.Module) and nn_module_has_global_hooks():

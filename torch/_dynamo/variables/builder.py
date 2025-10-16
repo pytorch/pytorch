@@ -1888,7 +1888,7 @@ class VariableBuilder:
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+        elif mutation_guard.is_dynamic_nn_module(value):
             # created dynamically, don't specialize on it
 
             # Note [Tracing a torch.compiled function]
@@ -1936,18 +1936,14 @@ class VariableBuilder:
                 and not value.__module__.startswith("torch.nn.modules.container")
             ) or getattr(value.__class__, "_dynamo_marked_static", False):
                 new_source = self.source
-                if config.inline_inbuilt_nn_modules and (
-                    not self.tx.output.export or config.install_free_tensors
-                ):
+                if config.inline_inbuilt_nn_modules:
                     # Export corner case - look at test_repros.py test_inlining_cornercase
                     new_source = UnspecializedBuiltinNNModuleSource(self.source)
                 result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
                 new_source = self.source
-                if config.inline_inbuilt_nn_modules and (
-                    not self.tx.output.export or config.install_free_tensors
-                ):
+                if config.inline_inbuilt_nn_modules:
                     # Export corner case - look at test_repros.py test_inlining_cornercase
                     new_source = UnspecializedNNModuleSource(self.source)
                 result = UnspecializedNNModuleVariable(value, source=new_source)
