@@ -1808,7 +1808,8 @@ class PythonWrapperCodegen(CodeGen):
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
-        out_names = V.graph.get_output_names()
+        outputs = self.get_graph_outputs()
+        out_names = V.graph._get_output_names(outputs)
 
         while (
             self.lines
