@@ -92,7 +92,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
                is specified in the config dictionary.
         """
         if type(data) not in SUPPORTED_TYPES:
-            raise AssertionError("specified data type not supported at the moment")
+            raise AssertionError(f"specified data type:{type(data)} not  supported at the moment")
         local_args = copy.deepcopy(self.defaults)
         local_args.update(config)
         weight = self._extract_weight(data)
