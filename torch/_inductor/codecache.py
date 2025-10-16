@@ -42,7 +42,12 @@ import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import SkipFrame
-from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    counters,
+    dynamo_timed,
+    get_metrics_context,
+)
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
@@ -1281,6 +1286,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             },
             payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
+        if get_metrics_context().in_progress():
+            get_metrics_context().add_to_set(
+                "inductor_provenance", graph.inductor_provenance_stack_traces_str
+            )
         return graph, cache_info
 
     @staticmethod
