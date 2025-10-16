@@ -47,7 +47,8 @@ jobs:
       - name: Output test-matrix
         id: output-test-matrix
         run: |
-          MATRIX=$(jq -n '[{"changed-files": "${{ steps.get-changed-files.outputs.changed-files }}"}, {"changed-files": "*"}]' | jq 'unique')
+          set -euox pipefail
+          MATRIX=$(jq -n '[{"changed-files": "${{ steps.get-changed-files.outputs.changed-files }}"}, {"changed-files": "*"}]' | jq -c 'unique')
           echo "changed-files-matrix={\"include\":$MATRIX}" >> "$GITHUB_OUTPUT"
 
   lintrunner-clang:
