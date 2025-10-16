@@ -48,5 +48,4 @@ class TORCH_CUDA_CPP_API GreenContext {
   cudaStream_t parent_stream_ = nullptr;
 #endif
 };
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda
