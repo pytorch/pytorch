@@ -1,4 +1,3 @@
-#include <pybind11/pybind11.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
@@ -12,6 +11,15 @@
 #endif
 
 #include <optional>
+
+// Fixes error LNK2001: unresolved external symbol PyInit__C
+#if defined(_WIN32)
+#include <Python.h>
+PyMODINIT_FUNC PyInit__C(void) {
+  // No need to do anything.
+  return NULL;
+}
+#endif // defined(_WIN32)
 
 void inline sgd_math(
   float* param_ptr,
@@ -575,7 +583,3 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
 }
 #endif // LAE_USE_CUDA
-
-PYBIND11_MODULE(_C, m) {
-  m.doc() = "libtorch_agnostic._C - PyTorch stable API extension";
-}
