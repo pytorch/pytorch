@@ -166,20 +166,20 @@ static void pool2d_template(const Tensor& input,
     MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
 
     auto cachedGraph = LookUpOrCreateCachedGraph<PoolingCachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      MPSGraphPooling2DOpDescriptor* desc = [MPSGraphPooling2DOpDescriptor
-          descriptorWithKernelWidth:kW
-                       kernelHeight:kH
-                          strideInX:dW
-                          strideInY:dH
-                    dilationRateInX:dilationW
-                    dilationRateInY:dilationH
-                        paddingLeft:padW
-                       paddingRight:ceil_mode ? padW * dW : padW
-                         paddingTop:padH
-                      paddingBottom:ceil_mode ? padH * dH : padH
-                       paddingStyle:MPSGraphPaddingStyleExplicit
-                         dataLayout:memory_format == MemoryFormat::ChannelsLast ? MPSGraphTensorNamedDataLayoutNHWC
-                                                                                : MPSGraphTensorNamedDataLayoutNCHW];
+      MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor
+      descriptorWithKernelWidth:kW
+                   kernelHeight:kH
+                      strideInX:dW
+                      strideInY:dH
+                dilationRateInX:dilationW
+                dilationRateInY:dilationH
+                    paddingLeft:padW
+                   paddingRight:ceil_mode ? padW * dW : padW
+                     paddingTop:padH
+                  paddingBottom:ceil_mode ? padH * dH : padH
+                   paddingStyle:MPSGraphPaddingStyleExplicit
+                     dataLayout:memory_format == MemoryFormat::ChannelsLast ? MPSGraphTensorNamedDataLayoutNHWC
+                                                                            : MPSGraphTensorNamedDataLayoutNCHW] autorelease];
       desc.ceilMode = (padW == 0 && padH == 0) ? ceil_mode : false;
       if (has_indices) {
         desc.returnIndicesMode = MPSGraphPoolingReturnIndicesGlobalFlatten2D;
