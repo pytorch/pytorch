@@ -7,7 +7,23 @@ namespace c10d {
 void DebugInfoWriter::write(const std::string& trace) {
   std::string filename = filename_;
   if (enable_dynamic_filename_) {
+    LOG(INFO) << "Writing Flight Recorder debug info to a dynamic file name";
     filename = c10::str(getCvarString({"TORCH_FR_DUMP_TEMP_FILE"}, ""), rank_);
+
+    // Check if filename contains a "/" and create directory if needed
+    size_t slashPos = filename.find_last_of('/');
+    if (slashPos != std::string::npos) {
+      // Extract directory path (everything before the last '/')
+      std::string dirPath = filename.substr(0, slashPos);
+      try {
+        c10::filesystem::create_directories(dirPath);
+        LOG(INFO) << "Created directory for Flight Recorder output: " << dirPath;
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Failed to create directory " << dirPath << ": " << e.what();
+      }
+    }
+  } else {
+    LOG(INFO) << "Writing Flight Recorder debug info to a static file name";
   }
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
