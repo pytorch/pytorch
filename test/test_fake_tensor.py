@@ -1000,6 +1000,8 @@ class FakeTensorTest(TestCase):
                 == torch.channels_last
             )
 
+    # This doesn't work with torch.compile also
+    @skipIfCrossRef
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):
