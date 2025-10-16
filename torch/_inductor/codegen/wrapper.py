@@ -26,6 +26,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
@@ -1787,6 +1788,14 @@ class PythonWrapperCodegen(CodeGen):
                 "Auto-tuning code written to %s",
                 file_path,
             )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_autotune_at_compile_time_code",
+                "encoding": "string",
+            },
+            payload_fn=lambda: tuning_code,
+        )
         # Execute the code to autotune kernels
         try:
             exec(tuning_code, scope)
@@ -1799,7 +1808,8 @@ class PythonWrapperCodegen(CodeGen):
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
-        out_names = V.graph.get_output_names()
+        outputs = self.get_graph_outputs()
+        out_names = V.graph._get_output_names(outputs)
 
         while (
             self.lines

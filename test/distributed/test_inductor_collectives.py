@@ -53,11 +53,6 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-def _tolist(tensor):
-    lst = tensor.tolist()
-    return lst
-
-
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
@@ -535,8 +530,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist(input_split_sizes_tensor)
-            output_split_sizes = _tolist(output_split_sizes_tensor)
+            input_split_sizes = input_split_sizes_tensor.tolist()
+            output_split_sizes = output_split_sizes_tensor.tolist()
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes,
@@ -696,8 +691,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist(input_split_sizes_tensor)
-            output_split_sizes = _tolist(output_split_sizes_tensor)
+            input_split_sizes = input_split_sizes_tensor.tolist()
+            output_split_sizes = output_split_sizes_tensor.tolist()
             a2a = torch.ops.custom_ns.alltoall_autograd.default(
                 inp,
                 output_split_sizes,
@@ -1951,36 +1946,37 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-                count=2,
-                exactly=True,
+        if not torch._inductor.config.triton.native_matmul:
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                    count=2,
+                    exactly=True,
+                )
+                .check(
+                    "extern_kernels.mm",
+                )
+                .check(
+                    "extern_kernels.addmm",
+                )
+                .run(code)
             )
-            .check(
-                "extern_kernels.mm",
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                    count=2,
+                    exactly=True,
+                )
+                .check(
+                    "extern_kernels.mm",
+                )
+                .check(
+                    "extern_kernels.addmm",
+                )
+                .run(code)
             )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                count=2,
-                exactly=True,
-            )
-            .check(
-                "extern_kernels.mm",
-            )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"

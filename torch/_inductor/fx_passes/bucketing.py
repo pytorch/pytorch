@@ -1,7 +1,8 @@
 import collections
 import logging
+import operator
 from collections import defaultdict
-from typing import Any, Callable, Literal, Optional, TypeAlias
+from typing import Any, Callable, Literal, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -42,18 +43,18 @@ def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:  # type:
     return (group_name, reduce_op, dtype)
 
 
+def bucket_key(node: torch.fx.Node) -> object | None:
+    if is_all_gather_into_tensor(node):
+        return _ag_group_key(node)
+    elif is_reduce_scatter_tensor(node):
+        return _rs_group_key(node)
+    else:
+        return None
+
+
 def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:  # type: ignore[name-defined]
     assert len(dtypes) > 0
-    lowest_dtype = dtypes[0]
-    lowest_dtype_bytes = _dtype_size_bytes(lowest_dtype)
-    for i in range(1, len(dtypes)):
-        dtype = dtypes[i]
-        dtype_bytes = _dtype_size_bytes(dtype)
-        if dtype_bytes < lowest_dtype_bytes:
-            lowest_dtype = dtype
-            lowest_dtype_bytes = dtype_bytes
-
-    return lowest_dtype
+    return min(dtypes, key=operator.attrgetter("itemsize"))
 
 
 def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
@@ -71,7 +72,7 @@ def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
 
 def bucket_all_gather(
     gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
     mode: BucketMode = "default",
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
@@ -88,7 +89,7 @@ def bucket_all_gather(
 
 def bucket_reduce_scatter(
     gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
     mode: BucketMode = "default",
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
@@ -171,7 +172,7 @@ def greedy_bucket_collective_by_mb(
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_node: Callable[[torch.fx.Node], bool],
     node_group_key: Callable[[torch.fx.Node], Any],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Bucketing adjacent collectives with equal node_group_key.
@@ -249,7 +250,7 @@ def greedy_bucket_collective_by_mb(
 def bucket_all_gather_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
     mode: BucketMode = "default",
 ) -> list[list[torch.fx.Node]]:
     """
@@ -263,7 +264,7 @@ def bucket_all_gather_by_mb(
             to specify different sizes of the buckets at the start,
             as first all_gather is usually exposed.  Interface of bucket_cap_mb_by_bucket_idx
             is `bucket_cap_mb_by_bucket_idx_default` function that is default value for `bucket_cap_mb_by_bucket_idx`.
-        filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
+        filter_wait_node (Callable[[torch.fx.Node], bool] | None): If specified,
             only all_gather nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
 
     Returns:
@@ -286,7 +287,7 @@ def bucket_all_gather_by_mb(
 def bucket_reduce_scatter_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
     mode: BucketMode = "default",
 ) -> list[list[torch.fx.Node]]:
     """
@@ -298,7 +299,7 @@ def bucket_reduce_scatter_by_mb(
         bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
             to specify different sizes of the buckets.
-        filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
+        filter_wait_node (Callable[[torch.fx.Node], bool] | None): If specified,
             only reduce_scatter nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
 
     Returns:
@@ -398,7 +399,7 @@ def _pre_bucket_all_gather(
     rank: int,
 ) -> torch.Tensor:
     ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
-    bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
+    bucket_dtype_size_bytes = dtype.itemsize
     ins_split_sizes = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
     ]
@@ -420,7 +421,7 @@ def _pre_bucket_all_gather_fake(
     rank: int,
 ) -> torch.Tensor:
     ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
-    bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
+    bucket_dtype_size_bytes = dtype.itemsize
     ins_split_sizes = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
     ]
@@ -433,13 +434,6 @@ def _pre_bucket_all_gather_fake(
 _pre_bucket_all_gather.register_fake(_pre_bucket_all_gather_fake)
 
 
-def _dtype_size_bytes(dtype: torch.dtype) -> int:  # type:  ignore[name-defined]
-    if dtype.is_floating_point:
-        return torch.finfo(dtype).bits // 8  # type: ignore[attr-defined]
-
-    return torch.iinfo(dtype).bits // 8  # type: ignore[attr-defined]
-
-
 def all_gather_merge_fn_to_trace_custom_ops(
     _ag_ins: list[torch.Tensor],
     group_size: int,
@@ -449,17 +443,15 @@ def all_gather_merge_fn_to_trace_custom_ops(
     rank: int,
 ) -> list[torch.Tensor]:
     ag_ins = [
-        torch._prims.convert_element_type(_ag_in, out_dtype)
-        if _ag_in.dtype != out_dtype
-        else _ag_in
+        _ag_in.view(out_dtype) if _ag_in.dtype != out_dtype else _ag_in
         for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)
     ]
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
     ins_split_sizes_bytes = [
-        ag_in.numel() * _dtype_size_bytes(out_dtype)
+        ag_in.numel() * out_dtype.itemsize
         for ag_in, out_dtype in zip(ag_ins, out_dtypes)
     ]
-    bucket_dtype_size_bytes = _dtype_size_bytes(dtype)
+    bucket_dtype_size_bytes = dtype.itemsize
     ins_split_sizes = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
     ]
@@ -633,8 +625,8 @@ def process_collective_bucket(
     bucket_nodes: list[torch.fx.Node],
     fn_to_trace: Callable[..., list[torch.Tensor]],
     trace_args_fn: Callable[[list[torch.fx.Node]], tuple[Any, ...]],
-    insert_before: Optional[torch.fx.Node] = None,
-    wait_insertion_point: Optional[torch.fx.Node] = None,
+    insert_before: torch.fx.Node | None = None,
+    wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     """
     Process a single bucket of collective operation nodes with flexible insertion control.
@@ -723,8 +715,8 @@ def merge_reduce_scatter_bucket(
     g: torch.fx.Graph,
     rs_nodes: list[torch.fx.Node],
     mode: BucketMode = "default",
-    insert_before: Optional[torch.fx.Node] = None,
-    wait_insertion_point: Optional[torch.fx.Node] = None,
+    insert_before: torch.fx.Node | None = None,
+    wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     # Validate bucket consistency
     rs0 = rs_nodes[0]
@@ -773,8 +765,8 @@ def merge_all_gather_bucket(
     g: torch.fx.Graph,
     ag_nodes: list[torch.fx.Node],
     mode: BucketMode = "default",
-    insert_before: Optional[torch.fx.Node] = None,
-    wait_insertion_point: Optional[torch.fx.Node] = None,
+    insert_before: torch.fx.Node | None = None,
+    wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     from torch.distributed.distributed_c10d import _resolve_process_group
 

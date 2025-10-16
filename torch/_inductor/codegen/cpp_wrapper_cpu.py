@@ -767,7 +767,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         num_outputs = len(V.graph.graph_outputs)
         num_constants = len(V.graph.constants)
         include_weights = (
-            "true" if config.aot_inductor.package_constants_in_so else "false"
+            "true"
+            if config.aot_inductor.package_constants_in_so
+            and config.aot_inductor.package_constants_on_disk_format != "binary_blob"
+            else "false"
         )
         self.prefix.splice(
             f"""
