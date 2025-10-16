@@ -2362,10 +2362,13 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
 )
 def op_for_dependencies(t: torch.Tensor) -> torch.Tensor:
     """
-    No-op marker inserted by add_implict_edges() to create explicit dependency edges
-    for mutable custom ops. Removed by remove_implict_edges() before codegen (zero overhead).
-    Simpler than control_deps HOP - no subgraphs, transparent to pattern matcher.
-    TODO: Should depend on all aliases of storage, not just primary tensor.
+    A lightweight no-op that creates explicit dependency edges in the FX graph
+    for mutable custom operations.
+
+    This differs from the existing control_deps HOP. The control_deps HOP creates subgraphs
+    and persists through compilation. This op_for_dependencies is a simple custom op that
+    gets inserted by add_implict_edges() and removed by remove_implict_edges() before
+    codegen, resulting in zero runtime overhead.
     """
     return t.clone()
 
