@@ -40,6 +40,12 @@ def _stringify_attributes(tensor, attributes) -> str:
     return f"{{{', '.join([f'{k}={v}' for k, v in pairs.items()])}}}"
 
 
+def _stringify_dtensor_spec(spec) -> str:
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+    return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
+
+
 def _tensor_debug_string(tensor, attributes) -> str:
     """Convert tensor to debug string representation."""
 
@@ -48,7 +54,7 @@ def _tensor_debug_string(tensor, attributes) -> str:
 
         if isinstance(tensor, torch.distributed.tensor.DTensor):
             # omitted device mesh
-            return f"dt: {tensor_debug_str}{_stringify_placement(tensor.placements)}"
+            return f"dt: {tensor_debug_str}| {_stringify_dtensor_spec(tensor._spec)}"
         elif isinstance(tensor, FakeTensor):
             return f"ft: {tensor_debug_str}"
         else:
@@ -64,36 +70,73 @@ def _arg_to_str(arg, attributes) -> str:
         if isinstance(x, torch.Tensor):
             return _tensor_debug_string(x, attributes)
         elif isinstance(x, DTensorSpec):
-            return _stringify_placement(x.placements)
+            return _stringify_dtensor_spec(x)
         return x
 
     arg = tree_map(to_str, arg)
     return str(arg)
 
 
-def _op_to_str(op, attributes, *args, **kwargs) -> str:
-    if op == REDISTRIBUTE_FUNC:
-        assert len(args) == 3
-        _args = [_arg_to_str(arg, attributes) for arg in args]
-        args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
-    else:
-        args_str = ", ".join(_arg_to_str(arg, attributes) for arg in args)
+class _DebugCall:
+    """Base class for tracking operator calls in DebugMode"""
 
-    if kwargs:
-        kwargs_str = ", " + ", ".join(
-            f"{k}={_arg_to_str(v, attributes)}" for k, v in kwargs.items()
-        )
-    else:
-        kwargs_str = ""
+    def __init__(self, call_depth: int):
+        self.call_depth = call_depth
 
-    if isinstance(op, torch._ops.OpOverload):
-        op_name = op.__qualname__
-    elif hasattr(op, "__module__") and hasattr(op, "__name__"):
-        op_name = f"{op.__module__}.{op.__name__}"
-    else:
-        op_name = str(op)
+    def render(self, attributes: list[str]) -> str:
+        raise NotImplementedError("Subclasses must implement string render()")
 
-    return f"{op_name}({args_str}{kwargs_str})"
+
+class _OpCall(_DebugCall):
+    """Normal operator call"""
+
+    def __init__(self, op, args: tuple, kwargs: dict, call_depth: int):
+        super().__init__(call_depth)
+        self.op = op
+        self.args = args
+        self.kwargs = kwargs
+
+    def render(self, attributes: list[str]) -> str:
+        args_str = ", ".join(_arg_to_str(arg, attributes) for arg in self.args)
+
+        if self.kwargs:
+            kwargs_str = ", " + ", ".join(
+                f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
+            )
+        else:
+            kwargs_str = ""
+
+        if isinstance(self.op, torch._ops.OpOverload):
+            op_name = self.op.__qualname__
+        elif hasattr(self.op, "__module__") and hasattr(self.op, "__name__"):
+            op_name = f"{self.op.__module__}.{self.op.__name__}"
+        else:
+            op_name = str(self.op)
+
+        return f"{op_name}({args_str}{kwargs_str})"
+
+
+class _RedistributeCall(_DebugCall):
+    """Redistribute call from DTensor dispatch"""
+
+    def __init__(
+        self, arg, src_placement, dst_placement, transform_info_str, call_depth
+    ):
+        super().__init__(call_depth)
+        self.arg = arg
+        self.src_placement = src_placement
+        self.dst_placement = dst_placement
+        self.transform_info_str = transform_info_str
+
+    def render(self, attributes: list[str]) -> str:
+        arg_str = f"{_arg_to_str(self.arg, attributes)}"
+        if self.transform_info_str is not None:  # prioritize over src/dst placements
+            placement_str = f"trace: {self.transform_info_str}"
+        else:
+            src_placement_str = _arg_to_str(self.src_placement, attributes)
+            dst_placement_str = _arg_to_str(self.dst_placement, attributes)
+            placement_str = f"{src_placement_str} -> {dst_placement_str}"
+        return f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
 
 
 class DebugMode(TorchDispatchMode):
@@ -128,7 +171,7 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        self.operators.append((func, args, kwargs, self.call_depth))
+        self.operators.append(_OpCall(func, args, kwargs, self.call_depth))
 
         try:
             self.call_depth += 1
@@ -142,17 +185,19 @@ class DebugMode(TorchDispatchMode):
 
         # Record the operation with its call depth
         if torch.distributed.tensor.DTensor in types:
-            self.operators.append((func, args, kwargs, self.call_depth))
+            self.operators.append(_OpCall(func, args, kwargs, self.call_depth))
             return NotImplemented
         elif FakeTensor in types or isinstance(
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self.operators.append((func, args, kwargs, self.call_depth + 1))
+                    self.operators.append(
+                        _OpCall(func, args, kwargs, self.call_depth + 1)
+                    )
         elif len(types) == 0:
             if self.record_realtensor:
-                self.operators.append((func, args, kwargs, self.call_depth + 1))
+                self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
 
         result = func(*args, **kwargs)
 
@@ -175,14 +220,21 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
 
     @contextlib.contextmanager
-    def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
+    def record_redistribute_calls(
+        self,
+        arg,
+        src_placement,
+        dst_placement,
+        transform_info_str: Optional[str] = None,
+    ):
         try:
             self.operators.append(
-                (
-                    REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
-                    {},
-                    self.call_depth + 1,
+                _RedistributeCall(
+                    arg,
+                    src_placement=src_placement,
+                    dst_placement=dst_placement,
+                    transform_info_str=transform_info_str,
+                    call_depth=self.call_depth + 1,
                 )
             )
             self.call_depth += 1
@@ -194,10 +246,8 @@ class DebugMode(TorchDispatchMode):
         with torch._C.DisableTorchFunction():
             result = ""
             result += "\n".join(
-                "  "
-                + "  " * depth
-                + _op_to_str(op, self.record_tensor_attributes, *args, **kwargs)
-                for op, args, kwargs, depth in self.operators
+                "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
+                for op in self.operators
             )
         return result
 

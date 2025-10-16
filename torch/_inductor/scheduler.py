@@ -595,6 +595,9 @@ class BaseSchedulerNode:
     def is_reduction(self) -> bool:
         return False
 
+    def is_native_matmul(self) -> bool:
+        return False
+
     def is_split_scan(self) -> bool:
         return False
 
@@ -1472,6 +1475,10 @@ class SchedulerNode(BaseSchedulerNode):
         )
         return bool(self.node.get_reduction_type())
 
+    def is_native_matmul(self) -> bool:
+        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
+        return self.node.get_reduction_type() == "dot"
+
     def is_split_scan(self) -> bool:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
             f"{type(self.node)=}"
@@ -1816,6 +1823,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self) -> bool:
         return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_native_matmul(self) -> bool:
+        return any(x.is_native_matmul() for x in self.snodes)
 
     @cache_on_self
     def is_split_scan(self) -> bool:
@@ -2418,7 +2429,6 @@ class Scheduler:
                 *V.graph.torchbind_constants.keys(),
             ]
         )
-
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
@@ -4129,6 +4139,12 @@ class Scheduler:
         if not config.loop_ordering_after_fusion or any(
             n.is_cpu() for n in [node1, node2]
         ):
+            return -1
+
+        # in some rare case, a template can be passed in.
+        # Check test_interaction_with_multi_template in test_loop_ordering.py
+        # and https://github.com/pytorch/pytorch/issues/165579
+        if node1.is_template() or node2.is_template():
             return -1
 
         node1_buffer_names = node1.read_writes.buffer_names()
