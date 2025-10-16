@@ -233,7 +233,7 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
-    DatetimeVariable,
+    DatetimeClassVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
@@ -1311,9 +1311,8 @@ class VariableBuilder:
             self.tx.output.side_effects.track_mutable(value, result)
             return result
         elif value is datetime.datetime:
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = DatetimeVariable(value, source=self.source)
-            self.tx.output.side_effects.track_mutable(value, result)
+            self.install_guards(GuardBuilder.ID_MATCH)
+            result = DatetimeClassVariable(source=self.source)
             return result
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,

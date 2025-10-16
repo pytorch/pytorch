@@ -1961,77 +1961,46 @@ class WeakRefVariable(VariableTracker):
         codegen.extend_output(create_call_function(2, False))
 
 
-class DatetimeVariable(VariableTracker):
-    """datetime.datetime
-
-    Implemented by wrapping a VariableTracker around a datetime.datetime object.
-    The supported methods for the datetime.datetime object cannot be overridden.
-    Based on RandomVariable implementation.
-    """
-
-    _supported_fn_names = {
-        "now",  # also utcnow and potentially more
-        # datetime inherits from date, so maybe also today(), fromtimestamp() and fromordinal()
-    }
-
-    def __init__(
-        self,
-        dt: Optional[datetime.datetime] = None,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        # maybe don't instantiate and do it only when now() is called? not sure
-        self.now = datetime.datetime.now()
-
+class DatetimeClassVariable(VariableTracker):
     def python_type(self):
-        return datetime.datetime
+        return type(datetime.datetime)
 
-    def as_python_constant(self):
-        return self.now
-
-    @staticmethod
-    def is_supported_datetime_obj(val):
-        if type(val) is not datetime.datetime:
-            return False
-        return True
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "now":
-            return variables.UserDefinedObjectVariable(
-                self.now, mutation_type=variables.base.ValueMutationNew()
-            )
-        elif name in self._supported_fn_names:
-            tx.output.side_effects.mutation(self)
-
-            def call_random_meth(*args, **kwargs):
-                return getattr(self.now, name)(*args, **kwargs)
-
-            getattr(self.now, name)(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-
+    def call_method(self, tx, name, args, kwargs):
+        if name == "now" and not args and not kwargs:
+            return DatetimeNowVariable()
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen"):
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(datetime),
-                    codegen.create_load_attr("datetime"),
-                ]
+
+def _datetime_attr_tensor(attr: str, dtype: torch.dtype):
+    val = getattr(datetime.datetime.now(), attr)
+    t = torch.tensor(val, dtype=dtype)
+    return t
+
+
+_supported_datetime_attrs = {
+    "year",
+    "month",
+    "day",
+    "hour",
+    "minute",
+    "second",
+    "microsecond",
+}
+
+
+class DatetimeNowVariable(VariableTracker):
+    def reconstruct(self, cg):
+        cg.create_load_python_module(datetime)
+        cg.create_load_attr("datetime")
+        cg.create_load_attr("now")
+        cg.call_function(0, False)
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        # TODO: for now supporting only attributes; operations on now() won't work yet
+        if name in _supported_datetime_attrs:
+            vt = tx.output.synthetic_graph_input(
+                _datetime_attr_tensor, (name, torch.get_default_dtype())
             )
-        )
-        codegen.call_function(0, False)
-        # NOTE using add_push_null may result in NULL being duplicated
-        # so defer the push_null to call_function
-        codegen.dup_top()
-        codegen(variables.VariableTracker(self.now))
-        codegen.call_function(1, True)
-        codegen.pop_top()
+            vt.is_datetime_scalar = True
+            return vt
+        return super().var_getattr(tx, name)
