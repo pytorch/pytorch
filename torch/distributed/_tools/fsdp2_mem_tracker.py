@@ -15,6 +15,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
+from torch.autograd.graph import _MultiHandle
 
 
 _TOTAL_KEY = "Total"
@@ -366,13 +367,21 @@ class FSDPMemTracker(MemTracker):
         # TODO(@sanketpurandare): This will need to be modified after this PR (https://github.com/pytorch/pytorch/pull/127786)
         # lands. For backward we monkey-patch the `FSDPParamGroup.pre_backward` and `FSDPParamGroup.post_backward`.
         # pyrefly: ignore  # missing-attribute
+        do_remove = True
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
-                    fsdp_state._pre_forward_hook_handle.remove()
-                    fsdp_state._post_forward_hook_handle.remove()
+                    if isinstance(fsdp_state._pre_forward_hook_handle, _MultiHandle) and do_remove:
+                        # If _pre_forward_hook_handle is _MultiHandle, only need to call remove once.
+                        # This is because the hooks are grouped and the state for multiple layers are references to one another.
+                        fsdp_state._pre_forward_hook_handle.remove()
+                        fsdp_state._post_forward_hook_handle.remove()
+                        do_remove = False
+                    if do_remove:
+                        fsdp_state._pre_forward_hook_handle.remove()
+                        fsdp_state._post_forward_hook_handle.remove()
                     fsdp_state._pre_forward_hook_handle = (
                         # pyrefly: ignore  # missing-attribute
                         module.register_forward_pre_hook(
