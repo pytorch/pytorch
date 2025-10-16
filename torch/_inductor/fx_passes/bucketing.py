@@ -1,7 +1,7 @@
 import collections
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import torch
 import torch.distributed as dist
@@ -42,6 +42,17 @@ def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     return (group_name, reduce_op, dtype)
 
 
+def bucket_key(node: torch.fx.Node) -> object | None:
+    if is_all_gather_into_tensor(node):
+        return _ag_group_key(node)
+    elif is_reduce_scatter_tensor(node):
+        return _rs_group_key(node)
+    elif is_all_reduce_tensor(node):
+        return _ar_group_key(node)
+    else:
+        return None
+
+
 def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
     """
     Determine the size of a bucket based on its ID.
@@ -57,8 +68,8 @@ def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
 
 def bucket_all_gather(
     gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
-    mode: Optional[str] = None,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
+    mode: str | None = None,
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
         from torch._inductor.fx_passes.bucketing import (
@@ -74,8 +85,8 @@ def bucket_all_gather(
 
 def bucket_reduce_scatter(
     gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
-    mode: Optional[str] = None,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
+    mode: str | None = None,
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
         from torch._inductor.fx_passes.bucketing import (
@@ -162,7 +173,7 @@ def greedy_bucket_collective_by_mb(
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_node: Callable[[torch.fx.Node], bool],
     node_group_key: Callable[[torch.fx.Node], Any],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Bucketing adjacent collectives with equal node_group_key.
@@ -240,7 +251,7 @@ def greedy_bucket_collective_by_mb(
 def bucket_all_gather_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all all_gather nodes and groups them into buckets,
@@ -253,7 +264,7 @@ def bucket_all_gather_by_mb(
             to specify different sizes of the buckets at the start,
             as first all_gather is usually exposed.  Interface of bucket_cap_mb_by_bucket_idx
             is `bucket_cap_mb_by_bucket_idx_default` function that is default value for `bucket_cap_mb_by_bucket_idx`.
-        filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
+        filter_wait_node (Callable[[torch.fx.Node], bool] | None): If specified,
             only all_gather nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
 
     Returns:
@@ -272,7 +283,7 @@ def bucket_all_gather_by_mb(
 def bucket_reduce_scatter_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all reduce_scatter nodes and groups them into buckets,
@@ -283,7 +294,7 @@ def bucket_reduce_scatter_by_mb(
         bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
             to specify different sizes of the buckets.
-        filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
+        filter_wait_node (Callable[[torch.fx.Node], bool] | None): If specified,
             only reduce_scatter nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
 
     Returns:
@@ -302,7 +313,7 @@ def bucket_reduce_scatter_by_mb(
 def bucket_all_reduce_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
-    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+    filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
 ) -> list[list[torch.fx.Node]]:
     return greedy_bucket_collective_by_mb(
         gm,
@@ -315,8 +326,8 @@ def bucket_all_reduce_by_mb(
 
 def bucket_all_reduce(
     gm: torch.fx.GraphModule,
-    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
-    mode: Optional[str] = None,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
+    mode: str | None = None,
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
         from torch._inductor.fx_passes.bucketing import (
@@ -633,8 +644,8 @@ def process_collective_bucket(
     bucket_nodes: list[torch.fx.Node],
     fn_to_trace: Callable[..., list[torch.Tensor]],
     trace_args_fn: Callable[[list[torch.fx.Node]], tuple[Any, ...]],
-    insert_before: Optional[torch.fx.Node] = None,
-    wait_insertion_point: Optional[torch.fx.Node] = None,
+    insert_before: torch.fx.Node | None = None,
+    wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     """
     Process a single bucket of collective operation nodes with flexible insertion control.
@@ -722,9 +733,9 @@ def process_collective_bucket(
 def merge_reduce_scatter_bucket(
     g: torch.fx.Graph,
     rs_nodes: list[torch.fx.Node],
-    mode: Optional[str] = None,
-    insert_before: Optional[torch.fx.Node] = None,
-    wait_insertion_point: Optional[torch.fx.Node] = None,
+    mode: str | None = None,
+    insert_before: torch.fx.Node | None = None,
+    wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     # Validate bucket consistency
     rs0 = rs_nodes[0]
@@ -772,9 +783,9 @@ def merge_reduce_scatter_bucket(
 def merge_all_reduce_bucket(
     g: torch.fx.Graph,
     ar_nodes: list[torch.fx.Node],
-    mode: Optional[str] = None,
-    insert_before: Optional[torch.fx.Node] = None,
-    wait_insertion_point: Optional[torch.fx.Node] = None,
+    mode: str | None = None,
+    insert_before: torch.fx.Node | None = None,
+    wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     ar0 = ar_nodes[0]
     ar0_val = ar0.meta["val"]
@@ -815,9 +826,9 @@ def merge_all_reduce_bucket(
 def merge_all_gather_bucket(
     g: torch.fx.Graph,
     ag_nodes: list[torch.fx.Node],
-    mode: Optional[str] = None,
-    insert_before: Optional[torch.fx.Node] = None,
-    wait_insertion_point: Optional[torch.fx.Node] = None,
+    mode: str | None = None,
+    insert_before: torch.fx.Node | None = None,
+    wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     from torch.distributed.distributed_c10d import _resolve_process_group
 
@@ -863,7 +874,7 @@ def merge_all_gather_bucket(
 def merge_reduce_scatter(
     gm: torch.fx.GraphModule,
     rs_buckets: list[list[torch.fx.Node]],
-    mode: Optional[str] = None,
+    mode: str | None = None,
 ) -> None:
     """
     Merges specified buckets of reduce_scatter to joint reduce_scatter.
@@ -887,7 +898,7 @@ def merge_reduce_scatter(
 def merge_all_gather(
     gm: torch.fx.GraphModule,
     ag_buckets: list[list[torch.fx.Node]],
-    mode: Optional[str] = None,
+    mode: str | None = None,
 ) -> None:
     """
     Merges specified buckets of all_gather to joint all_gather.
