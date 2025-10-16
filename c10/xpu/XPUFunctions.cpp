@@ -120,6 +120,20 @@ inline void initGlobalDevicePoolState() {
   TORCH_CHECK(
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed!");
+  // Check each device's architecture and issue a warning if it is older
+  // than the officially supported range (Intel GPUs starting from Arc
+  // (Alchemist) series).
+  namespace syclex = sycl::ext::oneapi::experimental;
+  for (const auto& device : gDevicePool.devices) {
+    auto architecture = device->get_info<syclex::info::device::architecture>();
+    if (architecture < syclex::architecture::intel_gpu_acm_g10) {
+      TORCH_WARN(
+          "The current GPU (",
+          device->get_info<sycl::info::device::name>(),
+          ") is not officially supported. Please refer to the hardware prerequisites: ",
+          "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite");
+    }
+  }
 
 #if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
   // The default context feature is disabled by default on Windows for SYCL
