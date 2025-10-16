@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from torch.ao.quantization.fx.custom_config import FLOAT_TO_OBSERVED_DICT_KEY
 import logging
 import math
 from dataclasses import dataclass
@@ -330,6 +331,21 @@ def redistribute_cost(
         # short-cut:
         # comm cost is 0 if current spec is already full replication
         return 0.0
+
+    if target_spec.is_hsharded():
+        assert len(target_spec.placements) == 1 and len(target_spec.placements[0]) == 1
+        # split
+        if current_spec == target_spec:
+            return 0.0
+        # flatten
+        assert current_spec == target_spec.placements[0][0]
+        return 0.0
+    
+    if current_spec.is_hsharded():
+        if target_spec.is_sharded() and len(target_spec.placements) == 1 and target_spec.placements[0].is_shard() and target_spec.placements[0].dim == current_spec.placements[0].dim:
+            return 0.0
+        else:
+            return float('inf')
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0

@@ -719,7 +719,7 @@ def redistribute_local_tensor(
             current_spec, target_spec, use_graph_based_transform
         )
     else:
-        transform_infos = _gen_transform_infos(
+        transform_infos = _gen_transform_infos_non_cached(
             current_spec, target_spec, use_graph_based_transform
         )
 

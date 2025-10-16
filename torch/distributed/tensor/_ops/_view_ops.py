@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from torch.ao.quantization.fx.custom_config import FLOAT_TO_OBSERVED_DICT_KEY
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import cast, Optional, Union
@@ -7,7 +8,7 @@ from typing import cast, Optional, Union
 import torch
 from torch import Tensor
 from torch._prims_common import DimsType
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta, ShardOrder, ShardOrderEntry
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -33,6 +34,53 @@ from torch.distributed.tensor.placement_types import (
 aten = torch.ops.aten
 
 Shape = tuple[int, ...]
+class HShard(tuple[tuple[DTensorSpec, ...] | DTensorSpec]):
+    dim: int
+    def __new__(cls, dim, iterable):
+        obj = super().__new__(cls, iterable)
+        obj.dim = dim
+        return obj
+
+    def __repr__(self):
+        return f"HShard(dim={self.dim}, {super().__repr__()})"
+    
+    def __eq__(self, other):
+        # flatten
+        if len(self) == 1 and len(self[0].placements) == 1 and self[0].placements[0] == other:
+            return True
+        # mm
+        # elif len(self) == 1 and other.is_shard() and other.dim == self.dim:
+        #     import fbvscode
+        #     fbvscode.set_trace()
+        #     return True
+        return super().__eq__(other)
+    
+    def is_shard(self, dim: Optional[int] = None) -> bool:
+        return False
+
+    def is_replicate(self) -> bool:
+        return False
+
+    def is_partial(self, reduce_op: Optional[str] = None) -> bool:
+        return False
+
+    def is_hshard(self) -> bool:
+        return True
+
+    def _local_shard_size_and_offset(
+        self,
+        curr_local_size: int,
+        num_chunks: int,
+        rank: int,
+    ) -> tuple[int, Optional[int]]:
+        return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
+
+
+# HShard = tuple[tuple[DTensorSpec] | DTensorSpec, ...]
+# HShard.is_shard = lambda self, dim: False
+# HShard.is_replicate = lambda self: False
+# HShard.is_partial = lambda self, reduce_op: False
+# HShard.is_hshard = lambda self: True
 
 
 @dataclass
@@ -502,7 +550,7 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 
 
 def propagate_shape_and_sharding(
-    input_src_placements: Sequence[Placement],
+    input_src_spec: DTensorSpec,
     global_input_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
@@ -519,8 +567,11 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
-    if not len(input_src_placements) == len(mesh_sizes):
-        raise AssertionError(f"{input_src_placements} != {mesh_sizes}")
+    input_src_placements = input_src_spec.placements
+
+    assert len(input_src_placements) == len(mesh_sizes), (
+        f"{input_src_placements} != {mesh_sizes}"
+    )
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
     shardable_dims: dict[int, list[bool]] = {}
@@ -572,10 +623,9 @@ def propagate_shape_and_sharding(
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
-                        raise RuntimeError(
-                            f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
-                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
-                        )
+                        for x in range(0, dim.input_dim + 1):
+                            shardable_dims[x] = [can_shard_dim] * mesh_ndim
+                        return dim
                 elif input_sharded:
                     if not (shard_placement is not None and shard_mesh_dim is not None):
                         raise AssertionError(
@@ -599,6 +649,8 @@ def propagate_shape_and_sharding(
                 )
             return cmd.input_dims[0]
         elif isinstance(cmd, Split):
+            import fbvscode
+            fbvscode.set_trace()
             in_dim = get_in_dim_to_shard(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
             if cmd.split_id == 0 and in_dim is not None:
@@ -627,7 +679,7 @@ def propagate_shape_and_sharding(
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
                 for size, shard in zip(mesh_sizes, input_src_placements):
-                    if isinstance(shard, Shard) and shard.dim == in_dim:
+                    if isinstance(shard, (Shard, HShard)) and shard.dim == in_dim.input_dim:
                         submesh_size *= size
                 if not out_size % submesh_size == 0:
                     raise AssertionError(
@@ -645,20 +697,23 @@ def propagate_shape_and_sharding(
             return None
 
     # for each output dim, find the corresponding input dim in terms of sharding prop
+    # key: input dim, value: output dim
     shard_dim_map = {}
+    # non_viewable_dims = set()
     for dim, cmd in enumerate(rule):
         in_dim = get_in_dim_to_shard(cmd)
         if in_dim is not None:
             shard_dim_map[in_dim.input_dim] = dim
 
-    input_tgt_placements = [
-        (
-            Replicate()
-            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
-            else p
-        )
-        for mesh_dim, p in enumerate(input_src_placements)
-    ]
+    input_tgt_placements = []
+    for mesh_dim, p in enumerate(input_src_placements):
+        if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]:
+            hshard = HShard(shard_dim_map[p.dim], (input_src_spec, ))
+            input_tgt_placements.append(hshard)
+        else:
+            import fbvscode
+            fbvscode.set_trace()
+            input_tgt_placements.append(p)
 
     def _rewrite_shard_dim(p: Shard):
         """
@@ -681,10 +736,12 @@ def propagate_shape_and_sharding(
         else:
             return Shard(shard_dim_map[p.dim])
 
-    output_placements = [
-        _rewrite_shard_dim(p) if isinstance(p, Shard) else p
-        for p in input_tgt_placements
-    ]
+    output_placements = []
+    for p in input_tgt_placements:
+        if isinstance(p, Shard):
+            output_placements.append(_rewrite_shard_dim(p))
+        else:
+            output_placements.append(p)
 
     return input_tgt_placements, output_placements
 
@@ -719,9 +776,8 @@ def register_op_strategy_map(
         output_strategy = OpStrategy([])
         for input_placement_strategy in input_strategy.strategies:
             input_src_spec = input_placement_strategy.output_spec
-
             input_tgt_placements, output_placements = propagate_shape_and_sharding(
-                input_src_spec.placements,
+                input_src_spec,
                 tuple(global_in_shape),
                 rules,
                 mesh.shape,

@@ -14,6 +14,7 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
 )
+import itertools
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
@@ -77,6 +78,8 @@ def _mm_like_strategy(
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
     strategies = mm_strategy.strategies
+    import fbvscode
+    fbvscode.set_trace()
     filtered_strategies = []
     for strtg in strategies:
         if strtg.input_specs is None:
@@ -85,16 +88,22 @@ def _mm_like_strategy(
             )
         self_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
-        if is_tensor_shardable(self_strategy.shape, self_spec) and is_tensor_shardable(
-            mat2_strategy.shape, mat2_spec
-        ):
+        self_shardable = is_tensor_shardable(self_strategy.shape, self_spec)
+        mat2_shardable = is_tensor_shardable(mat2_strategy.shape, mat2_spec)
+        if self_shardable and mat2_shardable:
             redistribute_cost = [
                 generate_redistribute_costs(self_strategy, self_spec),
                 generate_redistribute_costs(mat2_strategy, mat2_spec),
             ]
-            strtg.redistribute_cost = redistribute_cost
-            filtered_strategies.append(strtg)
-
+            if all(x != float('inf') for x in itertools.chain.from_iterable(redistribute_cost)):
+                strtg.redistribute_cost = redistribute_cost
+                if any(x.output_spec.is_hsharded() for x in self_strategy.strategies):
+                    assert len(redistribute_cost[0]) == 1 and redistribute_cost[0][0] == 0.0
+                    # TODO: relax the assert to handle shapes beyond [dim, dim]
+                    assert len(mat2_strategy.shape) == 2 and mat2_strategy.shape[0] == mat2_strategy.shape[1] 
+                    strtg.input_specs[0] = self_strategy.strategies[0].output_specs
+                    strtg.output_specs = self_strategy.strategies[0].output_specs
+                    filtered_strategies.append(strtg)
     mm_strategy.strategies = filtered_strategies
 
     return mm_strategy

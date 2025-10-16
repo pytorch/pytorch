@@ -486,6 +486,12 @@ class DTensorSpec:
         return True if the current DTensorSpec is sharded on any mesh dims (devices)
         """
         return any(placement.is_shard() for placement in self.placements)
+    
+    def is_hsharded(self) -> bool:
+        """
+        return True if the current DTensorSpec replicates on all mesh dims (devices)
+        """
+        return any(placement.is_hshard() for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: Optional[TensorMeta]

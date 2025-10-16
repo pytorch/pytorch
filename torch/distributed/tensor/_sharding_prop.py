@@ -9,7 +9,7 @@ import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta, ShardOrder, ShardOrderEntry
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -336,9 +336,10 @@ class ShardingPropagator:
         if _are_we_tracing():
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
-            output_sharding = cast(
-                OutputSharding, self.propagate_op_sharding(op_info.schema)
-            )
+            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
+            # output_sharding = cast(
+            #     OutputSharding, self.propagate_op_sharding(op_info.schema)
+            # )
         op_info.output_sharding = output_sharding
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
@@ -359,6 +360,8 @@ class ShardingPropagator:
             op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
 
             if isinstance(op_strategy, OpStrategy):
+                # import fbvscode
+                # fbvscode.set_trace()
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy, op_schema)
 
@@ -385,7 +388,7 @@ class ShardingPropagator:
                             input_spec.tensor_meta
                         )
                     )
-                    if input_spec.placements != desired_spec.placements:
+                    if desired_spec.placements != input_spec.placements and input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
 
                 suggestion_schema = None
@@ -401,9 +404,11 @@ class ShardingPropagator:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
-                    if output_strategy.output_spec.is_sharded():
+                    if output_strategy.output_spec.is_sharded() or output_strategy.output_spec.is_hsharded():
                         schema = suggestion_schema or op_schema
                         assert isinstance(out_tensor_meta, TensorMeta)
+                        # import fbvscode
+                        # fbvscode.set_trace()
                         suggestion_schema = self._adjust_shape_and_stride_args(
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
