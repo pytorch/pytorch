@@ -298,6 +298,7 @@ def create_hop_fw_bw(
             *[example_grads[i] for i in filtered_grads_idx],
         ]
         if fake_mode and fake_mode.shape_env:
+            # TODO: we need a better way to handle unbacked symbols that are contained within the HOP subgraphs
             fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
         from torch._functorch._aot_autograd.graph_capture import (
@@ -537,7 +538,8 @@ def proxy_mode_key_common(
     from torch._guards import detect_fake_mode
 
     fake_mode = detect_fake_mode(args)
-    if fake_mode and fake_mode.shape_env is not None:
+    if fake_mode and fake_mode.shape_env:
+        # TODO: we need a better way to handle unbacked symbols that are contained within the HOP subgraphs
         fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
 
     return track_tensor_tree(
