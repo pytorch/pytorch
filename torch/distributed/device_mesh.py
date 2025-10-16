@@ -272,7 +272,10 @@ else:
             # TODO: think about how to allow pg options to be passed to world group
             # or mesh dimension groups
             if not default_initialized:
-                init_process_group()
+                init_pg_kwargs: dict[str, object] = {}
+                if self._device_type == "cpu" and not torch.cuda.is_available():
+                    init_pg_kwargs["backend"] = "gloo"
+                init_process_group(**init_pg_kwargs)
 
             world_size = get_world_size()
             if self.mesh.numel() > world_size:
@@ -326,6 +329,7 @@ else:
             #
             dim_group_names: list[str] = []
             default_group = _get_default_group()
+            mesh_device_type = self._device_type
 
             if (
                 self.mesh.ndim == 1
@@ -335,16 +339,36 @@ else:
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
                 # Otherwise, create new pg.
                 ranks = list(range(get_world_size()))
-                dim_group = (
-                    new_group(
+                default_supports_mesh = any(
+                    device.type == mesh_device_type
+                    for device in getattr(default_group, "_device_types", ())
+                )
+                if mesh_device_type == "cpu":
+                    if not default_supports_mesh:
+                        dim_group = new_group(
+                            backend="gloo",
+                            ranks=ranks,
+                            group_desc="mesh_default",
+                        )
+                    elif torch.cuda.is_available() and get_backend(default_group) == "gloo":
+                        dim_group = new_group(
+                            backend="cpu:gloo,cuda:nccl",
+                            ranks=ranks,
+                            group_desc="mesh_default",
+                        )
+                    else:
+                        dim_group = default_group
+                elif (
+                    torch.cuda.is_available()
+                    and get_backend(default_group) == "gloo"
+                ):
+                    dim_group = new_group(
                         backend="cpu:gloo,cuda:nccl",
                         ranks=ranks,
                         group_desc="mesh_default",
                     )
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
-                )
+                else:
+                    dim_group = default_group
                 dim_group_names.append(dim_group.group_name)
             else:
                 # create sub pgs base on the mesh argument specified
@@ -359,6 +383,8 @@ else:
                     # the default timeout will be used to override the timeout set in option.
                     # TODO: remove this once we have fixed inside c10d level.
                     timeout = pg_options._timeout if pg_options else None
+                    if backend is None and mesh_device_type == "cpu":
+                        backend = "gloo"
 
                     # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
                     # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.

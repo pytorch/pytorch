@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 import os
 import unittest
+from unittest import mock
 from datetime import timedelta
 
 import torch
@@ -74,6 +75,72 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
             self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
             self.assertEqual(mesh_group, default_group)
+
+
+class _DummyProcessGroup:
+    def __init__(self, device_types: tuple[str, ...], world_size: int = 1):
+        self._device_types = [torch.device(dtype) for dtype in device_types]
+        self.group_name = "dummy"
+        self.bound_device_id = None
+        self._world_size = world_size
+
+    def size(self) -> int:
+        return self._world_size
+
+    def rank(self) -> int:
+        return 0
+
+
+class DeviceMeshCPUFallbackTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.mesh_tensor = torch.arange(1, dtype=torch.int)
+
+    def test_cpu_mesh_bootstrap_without_cuda_uses_gloo(self):
+        # These tests patch the distributed helpers instead of standing up real
+        # default process groups. The failure scenario requires a CUDA build
+        # running without GPUs, which is hard to reproduce deterministically in
+        # the shared test harness, so we simulate the relevant state here.
+        dummy_pg = _DummyProcessGroup(("cpu",))
+        with mock.patch("torch.distributed.device_mesh.is_initialized", return_value=False), mock.patch(
+            "torch.distributed.device_mesh.get_world_size", return_value=1
+        ), mock.patch(
+            "torch.distributed.device_mesh.get_rank", return_value=0
+        ), mock.patch(
+            "torch.distributed.device_mesh._get_default_group", return_value=dummy_pg
+        ), mock.patch(
+            "torch.distributed.device_mesh.get_backend", return_value="gloo"
+        ), mock.patch(
+            "torch.distributed.device_mesh.init_process_group"
+        ) as mock_init_pg, mock.patch(
+            "torch.distributed.device_mesh.torch.cuda.is_available", return_value=False
+        ):
+            DeviceMesh("cpu", self.mesh_tensor)
+            mock_init_pg.assert_called_once_with(backend="gloo")
+
+    def test_cpu_mesh_creates_gloo_group_when_default_lacks_cpu(self):
+        world_size = 2
+        mesh = torch.arange(world_size, dtype=torch.int)
+        dummy_pg = _DummyProcessGroup(("cuda",), world_size=world_size)
+        with mock.patch("torch.distributed.device_mesh.is_initialized", return_value=True), mock.patch(
+            "torch.distributed.device_mesh.get_world_size", return_value=world_size
+        ), mock.patch(
+            "torch.distributed.device_mesh.get_rank", return_value=0
+        ), mock.patch(
+            "torch.distributed.device_mesh._get_default_group", return_value=dummy_pg
+        ), mock.patch(
+            "torch.distributed.device_mesh.get_backend", return_value="nccl"
+        ), mock.patch(
+            "torch.distributed.device_mesh.split_group", return_value=None
+        ), mock.patch(
+            "torch.distributed.device_mesh.new_group"
+        ) as mock_new_group, mock.patch(
+            "torch.distributed.device_mesh.torch.cuda.is_available", return_value=False
+        ):
+            DeviceMesh("cpu", mesh)
+            mock_new_group.assert_called_once()
+            kwargs = mock_new_group.call_args.kwargs
+            self.assertEqual(kwargs.get("backend"), "gloo")
 
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
