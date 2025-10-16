@@ -1,14 +1,13 @@
 #pragma once
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
+#include <torch/headeronly/util/math.h>
 #include <functional>
 #include <string>
 
 namespace at {
 
-inline int64_t divup(int64_t x, int64_t y) {
-  return (x + y - 1) / y;
-}
+using torch::headeronly::divup;
 
 // Called during new thread initialization
 TORCH_API void init_num_threads();

@@ -19,6 +19,7 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/parallel_utils.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/util/math.h>
 
 namespace torch::stable {
 
@@ -246,11 +247,6 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
 }
 
 namespace internal {
-
-// Copied from aten/src/ATen/Parallel.h
-inline int64_t divup(int64_t x, int64_t y) {
-  return (x + y - 1) / y;
-}
 
 // We expect this to be the stable version of the OpenMP variant of the
 // invoke_parallel op with identical semantics to the existing invoke_parallel.
