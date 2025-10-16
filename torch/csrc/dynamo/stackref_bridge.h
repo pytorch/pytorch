@@ -1,10 +1,10 @@
 #pragma once
 
-#ifdef _WIN32
+#if defined(_WIN32)
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
+#endif
 
 // Use a void* to avoid exposing the internal _PyStackRef union on this
 // translation unit
@@ -12,6 +12,6 @@ PyObject* Torch_PyStackRef_AsPyObjectBorrow(void* stackref);
 
 #ifdef __cplusplus
 }
-#endif  // #ifdef __cplusplus
+#endif
 
-#endif  // #ifdef _WIN32
+#endif

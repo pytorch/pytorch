@@ -46,7 +46,8 @@ extern "C" {
 
 #elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
 
-#define F_CODE(x) ((PyCodeObject*)Torch_PyStackRef_AsPyObjectBorrow(&x->f_executable))
+#define F_CODE(x) \
+  ((PyCodeObject*)Torch_PyStackRef_AsPyObjectBorrow(&x->f_executable))
 #define PREV_INSTR(x) (x)->instr_ptr
 
 #else
