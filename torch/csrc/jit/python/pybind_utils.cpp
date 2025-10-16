@@ -880,9 +880,13 @@ std::optional<py::object> _maybe_handle_torch_function(
     // all objects, operator[] returns py::object instead of
     // py::handle, so args[i].ptr() would cause a reference count
     // round trip. This has enough overhead that I noticed it while
-    // profiling and came here to fix it. For tuples in particular,
+    // profiling and came here to fix it. In contrast,
     // PyTuple_GET_ITEM returns a borrowed reference, so no counting
     // overhead.
+    static_assert(
+        std::is_base_of_v<py::tuple, std::decay_t<decltype(args)>>,
+        "Use of PyTuple_GET_ITEM below requires that args is a tuple!");
+
     auto* const args_i_ptr = PyTuple_GET_ITEM(args_ptr, i);
     is_tensor_and_append_overloaded(args_i_ptr, &overloaded_args);
     is_tensor_list_and_append_overloaded(
