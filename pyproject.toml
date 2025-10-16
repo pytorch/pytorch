@@ -341,3 +341,11 @@ keep-runtime-typing = true
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
+
+[tool.spin]
+package = 'torch'
+
+[tool.spin.commands]
+"Build" = [
+  "spin.cmds.pip.install",
+]
