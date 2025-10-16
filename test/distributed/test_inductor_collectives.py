@@ -1745,6 +1745,67 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @parametrize("bucket_mode", ["all"])
+    def test_all_reduce_bucket(self, bucket_mode):
+        def func(x, w, ar_0, ar_1, tag, ranks, group_size):
+            y = torch.mm(x, w)
+
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ar_0_out = torch.ops._c10d_functional.all_reduce.default(
+                ar_0, "sum", group_name
+            )
+            ar_1_out = torch.ops._c10d_functional.all_reduce.default(
+                ar_1, "sum", group_name
+            )
+
+            ar_0_w = torch.ops.c10d_functional.wait_tensor(ar_0_out)
+            ar_1_w = torch.ops.c10d_functional.wait_tensor(ar_1_out)
+
+            return y, ar_0_w, ar_1_w
+
+        f = func
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ar_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ar_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ar_0, ar_1]
+        f(*inputs, **self.get_world_trs())
+
+        def _pass(g):
+            from torch._inductor.fx_passes.bucketing import bucket_all_reduce
+
+            bucket_all_reduce(g.owning_module, lambda _: 2000)
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+
+        with torch._inductor.config.patch(
+            {
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(f)
+            compiled(*inputs, **self.get_world_trs())
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unnecessary copy is made.
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.all_reduce_.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = f(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
     @parametrize("bucket_mode", ["all", "all_custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
