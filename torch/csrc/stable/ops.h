@@ -248,6 +248,8 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
 
 namespace internal {
 
+using torch::headeronly::divup;
+
 // We expect this to be the stable version of the OpenMP variant of the
 // invoke_parallel op with identical semantics to the existing invoke_parallel.
 // This is copy pasted from aten/src/ATen/ParallelOpenMP.h except that we
