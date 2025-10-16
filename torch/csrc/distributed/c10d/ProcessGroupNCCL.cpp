@@ -14,6 +14,7 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Backtrace.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/WaitCounter.h>
@@ -31,6 +32,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/profiler/combined_traceback.h>
 #include <torch/torch.h>
 #include <optional>
 
@@ -66,6 +68,16 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
       || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
 #endif
   );
+}
+
+void print_traceback(const torch::SymbolizedTracebacks& st,
+                     size_t traceback_index) {
+  const std::vector<uint64_t>& traceback = st.tracebacks[traceback_index];
+  for (uint64_t idx : traceback) {
+    const torch::unwind::Frame& frame = st.all_frames[idx];
+    LOG(ERROR) << "  File \"" << frame.filename << "\", line "
+       << frame.lineno << ", in " << frame.funcname << "\n";
+  }
 }
 
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
@@ -2090,6 +2102,19 @@ void ProcessGroupNCCL::Watchdog::run() {
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
+      LOG(ERROR) << "Backtrace:";
+      LOG(ERROR) << c10::get_lazy_backtrace();
+      std::shared_ptr<torch::CapturedTraceback> tb0 =
+        torch::CapturedTraceback::gather(/*python=*/true, /*script=*/true, /*cpp=*/true);
+
+      std::shared_ptr<torch::CapturedTraceback> tb1 =
+        torch::CapturedTraceback::gather(/*python=*/true, /*script=*/true, /*cpp=*/true);
+
+      torch::SymbolizedTracebacks r = torch::symbolize({tb0.get(), tb1.get()});
+      print_traceback(r, 0);
+      print_traceback(r, 1);
+      std::abort();
+
       if (C10_LIKELY(rethrowCUDAErrors_) ||
           !(std::string(e.what()).find("CUDA Error"))) {
         // TODO(whc) clean up the rethrow - why is it stored in a class var and
