@@ -1442,6 +1442,7 @@ _has_cuda: _bool
 _has_magma: _bool
 _has_xpu: _bool
 _has_mkldnn: _bool
+_has_mkldnn_acl: _bool
 _has_cudnn: _bool
 _has_cusparselt: _bool
 has_spectral: _bool
