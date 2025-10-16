@@ -6087,6 +6087,42 @@ class TestRandomness(TestCase):
             )(x)
             self._assert_all_slices_unique(output)
 
+    @parametrize("in_dim1", [0, 1])
+    @parametrize("out_dim1", [0, 1])
+    @parametrize("in_dim2", [0, 1])
+    @parametrize("out_dim2", [0, 1])
+    def test_vmap_chunk_with_scan_nested(self, in_dim1, out_dim1, in_dim2, out_dim2):
+        randomness = "different"
+
+        x = torch.randn(4, 8, 16)
+
+        def f(x):
+            y = x.sin() + torch.rand_like(x)
+            return y
+
+        # Test nested vmaps with different chunk_sizes
+        # chunk_size1 must divide x.shape[in_dim1]
+        # chunk_size2 must divide x.shape[in_dim2] or the size after first vmap
+        for chunk_size1 in [1, 2, 4]:
+            for chunk_size2 in [1, 2, 4]:
+                output = torch.vmap(
+                    lambda x: torch.vmap(
+                        f,
+                        in_dims=in_dim2,
+                        out_dims=out_dim2,
+                        randomness=randomness,
+                        chunk_size=chunk_size2,
+                        chunk_with_scan=True,
+                    )(x),
+                    in_dims=in_dim1,
+                    out_dims=out_dim1,
+                    randomness=randomness,
+                    chunk_size=chunk_size1,
+                    chunk_with_scan=True,
+                )(x)
+                # Verify that all slices are unique (randomness="different")
+                self._assert_all_slices_unique(output)
+
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects
         # the randomness param

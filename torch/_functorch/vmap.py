@@ -290,9 +290,8 @@ def vmap_impl(
                 lambda t, in_dim: t.unsqueeze(0).expand(num_chunks, *t.shape)
                 if in_dim is None
                 else t.view(
-                    num_chunks,
-                    *[s if i != in_dim else -1 for i, s in enumerate(t.shape)],
-                ),
+                    *t.shape[:in_dim], num_chunks, chunk_size, *t.shape[in_dim + 1 :]
+                ).movedim(in_dim, 0),
                 args,
                 in_dims,
             )
@@ -315,7 +314,7 @@ def vmap_impl(
 
             from torch._higher_order_ops import scan
 
-            _, chunked_outs = scan(_scan_fn, torch.zeros(0), chunked_args)
+            _, chunked_outs = scan(_scan_fn, torch.zeros([]), chunked_args)
             outs = tree_map(
                 lambda t, chunk_dim: t.view(
                     [
