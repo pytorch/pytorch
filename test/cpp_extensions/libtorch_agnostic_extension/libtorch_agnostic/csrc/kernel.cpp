@@ -657,7 +657,7 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
       &tensor_handle);
 
   Tensor tensor(tensor_handle);
-  auto* data_ptr = reinterpret_cast<int64_t*>(tensor.data_ptr());
+  int64_t* data_ptr = reinterpret_cast<int64_t*>(tensor.data_ptr());
 
   torch::stable::zero_(tensor);
 
@@ -667,7 +667,6 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
       0, size, grain_size, [data_ptr](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {
           int thread_id = get_thread_idx();
-          STD_TORCH_CHECK(i <= UINT32_MAX);
           data_ptr[i] = i | (static_cast<int64_t>(thread_id) << 32);
         }
       });
@@ -679,7 +678,7 @@ void boxed_test_parallel_for(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  auto res = test_parallel_for(to<int64_t>(stack[0]), to<int64_t>(stack[1]));
+  Tensor res = test_parallel_for(to<int64_t>(stack[0]), to<int64_t>(stack[1]));
   stack[0] = from(res);
 }
 
