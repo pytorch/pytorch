@@ -769,7 +769,7 @@ class FxConverter:
                 args=(generate_item(input_fx_node), keypath[0].divisor),
             )
         else:
-            raise AssertionError(f"unrecognized keypath {keypath}")
+            raise NotImplementedError(f"Unsupported keypath {keypath}")
 
         result_symbol = ir_node.sym
         result_buffer = SymbolBuffer(result_symbol)
