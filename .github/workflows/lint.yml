@@ -102,7 +102,7 @@ jobs:
         echo "Running mypy"
 
         CHANGED_FILES="${{ matrix.changed-files }}"
-        if [ "$CHANGED_FILES" = "*" || "$CHANGED_FILES" = *".py"* ]; then
+        if [[ "$CHANGED_FILES" == *".py"* || "$CHANGED_FILES" == "*" ]]; then
           ADDITIONAL_LINTRUNNER_ARGS="--take MYPY,MYPYSTRICT --all-files" .github/scripts/lintrunner.sh
         else
           echo "No .py files changed, skipping mypy"
