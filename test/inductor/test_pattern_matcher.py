@@ -1799,7 +1799,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
-    def test_mutable_op_nonview_inputs_register_replacement(self):
+    def test_mutable_custom_op_pattern_matcher(self):
         import functools
 
         @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x"})
@@ -2000,6 +2000,91 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f5_inp, f5_replaced_inp)
         self.assertEqual(f5_inp1, f5_replaced_inp1)
         self.assertEqual(f5_out, f5_replaced_out)
+
+    def test_mutable_custom_op_pattern_matcher_unsafe_clone_removal(self):
+        import functools
+
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        @torch.library.custom_op("mylib::add_two_inplace", mutates_args={"x"})
+        def add_two_inplace(x: torch.Tensor) -> None:
+            x.add_(2)
+
+        # Pattern: clone + mutation
+        def pattern(x):
+            y = x.clone()
+            add_two_inplace(y)
+            return y
+
+        # Replacement: mutation without clone
+        def replacement(x):
+            add_two_inplace(x)
+            return x
+
+        my_patterns = PatternMatcherPass()
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[torch.ones(3, device=GPU_TYPE)],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=my_patterns,
+        )
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_mutable_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        # Case 1: graph input - must not match
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def unsafe_case1(x):
+            y = x.clone()
+            add_two_inplace(y)
+            return y
+
+        input_tensor = torch.ones(3, device=GPU_TYPE)
+        original_input = input_tensor.clone()
+        result = unsafe_case1(input_tensor)
+
+        self.assertEqual(
+            input_tensor,
+            original_input,
+            "Pattern matcher incorrectly removed clone, mutating graph input!",
+        )
+        self.assertEqual(result, original_input + 2)
+        self.assertEqual(count, 0, "Pattern should NOT match when x is a graph input!")
+
+        # Case 2: later use in graph - must not match
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def unsafe_case2():
+            x = torch.ones(3, device=GPU_TYPE)
+            y = x.clone()
+            add_two_inplace(y)
+            return x + y
+
+        result = unsafe_case2()
+        expected = torch.ones(3, device=GPU_TYPE) + (torch.ones(3, device=GPU_TYPE) + 2)
+
+        self.assertEqual(
+            result,
+            expected,
+            "Pattern matcher incorrectly removed clone, affecting later use!",
+        )
+        self.assertEqual(count, 0, "Pattern should NOT match when x has later use!")
 
 
 if __name__ == "__main__":
