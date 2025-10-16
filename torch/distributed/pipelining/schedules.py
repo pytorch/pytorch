@@ -1265,6 +1265,83 @@ def _add_send_recv(
     return comm_actions
 
 
+def _add_send_recv_simple(
+    compute_actions: dict[int, list[_Action]],
+    stage_to_rank: Callable[[int], int],
+    num_stages: int,
+) -> dict[int, list[_Action]]:
+    """
+    Simple version: For each forward/backward action, add recv before and send after if necessary.
+    """
+    comm_actions: dict[int, list[_Action]] = {}
+
+    for rank, actions in compute_actions.items():
+        comm_actions[rank] = []
+
+        for action in actions:
+            if action is None:
+                comm_actions[rank].append(action)
+                continue
+
+            # Handle FORWARD: recv before, compute, send after
+            if action.computation_type == F:
+                stage_idx = action.stage_index
+                mb_idx = action.microbatch_index
+
+                # Add RECV_F before if:
+                # - Not first stage (stage 0 has no input)
+                # - Previous stage is on a different rank
+                if stage_idx > 0:
+                    prev_rank = stage_to_rank(stage_idx - 1)
+                    if prev_rank != rank:
+                        recv = _Action(stage_idx, RECV_F, mb_idx)
+                        comm_actions[rank].append(recv)
+
+                # Add the forward computation
+                comm_actions[rank].append(action)
+
+                # Add SEND_F after if:
+                # - Not last stage
+                # - Next stage is on a different rank
+                if stage_idx < num_stages - 1:
+                    next_rank = stage_to_rank(stage_idx + 1)
+                    if next_rank != rank:
+                        send = _Action(stage_idx, SEND_F, mb_idx)
+                        comm_actions[rank].append(send)
+
+            # Handle BACKWARD: recv before, compute, send after
+            elif action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD):
+                stage_idx = action.stage_index
+                mb_idx = action.microbatch_index
+
+                # Add RECV_B before if:
+                # - Not last stage (last stage has no gradient input)
+                # - Next stage is on a different rank
+                if stage_idx < num_stages - 1:
+                    next_rank = stage_to_rank(stage_idx + 1)
+                    if next_rank != rank:
+                        recv = _Action(stage_idx, RECV_B, mb_idx)
+                        comm_actions[rank].append(recv)
+
+                # Add the backward computation
+                comm_actions[rank].append(action)
+
+                # Add SEND_B after if:
+                # - Not first stage
+                # - Previous stage is on a different rank
+                if stage_idx > 0:
+                    prev_rank = stage_to_rank(stage_idx - 1)
+                    if prev_rank != rank:
+                        send = _Action(stage_idx, SEND_B, mb_idx)
+                        comm_actions[rank].append(send)
+
+            else:
+                # For other actions (UNSHARD, RESHARD, W, etc.), just add as-is
+                comm_actions[rank].append(action)
+
+    return comm_actions
+
+
 def _validate_schedule(
     actions: dict[int, list[Optional[_Action]]],
     pp_group_size: int,
@@ -1865,7 +1942,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     actions[rank]
                 )
 
-            self.pipeline_order_with_comms = _add_send_recv(
+            self.pipeline_order_with_comms = _add_send_recv_simple(
                 self.pipeline_order_with_comms,
                 stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
                 num_stages=self._num_stages,
