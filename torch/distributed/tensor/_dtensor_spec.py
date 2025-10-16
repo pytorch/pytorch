@@ -90,6 +90,7 @@ class DTensorSpec:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
         if self.shard_order is None:
+            # pyrefly: ignore  # bad-assignment
             self.shard_order = DTensorSpec.compute_default_shard_order(self.placements)
         self._hash: int | None = None
 
