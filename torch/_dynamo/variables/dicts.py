@@ -44,7 +44,7 @@ from ..utils import (
     raise_args_mismatch,
     specialize_symnode,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -509,10 +509,10 @@ class ConstDictVariable(VariableTracker):
 
             self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
-                msg = ConstantVariable.create(
-                    f"dict.__setitem__ takes exactly two arguments ({len(args)} given)"
+                raise_type_error_exc(
+                    tx,
+                    f"dict.__setitem__ takes exactly two arguments ({len(args)} given)",
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)

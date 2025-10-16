@@ -81,7 +81,12 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    raise_type_error_exc,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .dicts import (
     ConstDictVariable,
@@ -1948,23 +1953,18 @@ class BuiltinVariable(VariableTracker):
                 or len(kwargs) != 1
                 or "value" not in kwargs
             ):
-                msg = ConstantVariable.create(
-                    f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
+                raise_type_error_exc(
+                    tx, f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
-            msg = ConstantVariable.create(
-                "fromkeys expected at least 1 arguments, got 0"
-            )
-            raise_observed_exception(TypeError, tx, args=[msg])
+            raise_type_error_exc(tx, "fromkeys expected at least 1 arguments, got 0")
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
         if len(args) != 2:
-            msg = ConstantVariable.create(
-                f"fromkeys expected at most 2 arguments, got {len(args)}"
+            raise_type_error_exc(
+                tx, f"fromkeys expected at most 2 arguments, got {len(args)}"
             )
-            raise_observed_exception(TypeError, tx, args=[msg])
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2061,10 +2061,10 @@ class BuiltinVariable(VariableTracker):
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
             if not (len(kwargs) == 1 and "strict" in kwargs):
-                msg = ConstantVariable.create(
-                    f"zip() should only have 'strict' keyword argument, but ({len(kwargs)} given)"
+                raise_type_error_exc(
+                    tx,
+                    f"zip() should only have 'strict' keyword argument, but ({len(kwargs)} given)",
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
         strict = kwargs.pop("strict", False)
         args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
