@@ -8,6 +8,7 @@ from typing import Any, Callable
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.config import use_experimental_benchmarker
 
@@ -146,14 +147,17 @@ class Benchmarker:
             fn_kwargs = fn_kwargs or {}
             # pyrefly: ignore  # bad-assignment
             for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-                if not isinstance(arg_or_kwarg, torch.Tensor):
-                    continue
-                if inferred_device is None:
-                    inferred_device = arg_or_kwarg.device
-                elif arg_or_kwarg.device != inferred_device:
-                    raise ValueError(
-                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
-                    )
+                # Some callables take nested structures as arguments so use the
+                # flattened form to find any tensors
+                for arg_or_kwarg_leaf in pytree.tree_leaves(arg_or_kwarg):
+                    if not isinstance(arg_or_kwarg_leaf, torch.Tensor):
+                        continue
+                    if inferred_device is None:
+                        inferred_device = arg_or_kwarg_leaf.device
+                    elif arg_or_kwarg_leaf.device != inferred_device:
+                        raise ValueError(
+                            "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                        )
 
         if inferred_device is None:
             raise ValueError(
