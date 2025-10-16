@@ -334,6 +334,10 @@ def redistribute_cost(
 
     if target_spec.is_hsharded():
         assert len(target_spec.placements) == 1 and len(target_spec.placements[0]) == 1
+        # split
+        if current_spec == target_spec:
+            return 0.0
+        # flatten
         assert current_spec == target_spec.placements[0][0]
         return 0.0
     

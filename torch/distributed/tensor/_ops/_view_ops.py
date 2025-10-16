@@ -613,6 +613,8 @@ def propagate_shape_and_sharding(
             assert isinstance(cmd.input_dims[0], InputDim)
             return cmd.input_dims[0]
         elif isinstance(cmd, Split):
+            import fbvscode
+            fbvscode.set_trace()
             in_dim = get_in_dim_to_shard(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
             if cmd.split_id == 0 and in_dim is not None:
@@ -641,7 +643,7 @@ def propagate_shape_and_sharding(
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
                 for size, shard in zip(mesh_sizes, input_src_placements):
-                    if isinstance(shard, Shard) and shard.dim == in_dim:
+                    if isinstance(shard, (Shard, HShard)) and shard.dim == in_dim.input_dim:
                         submesh_size *= size
                 assert out_size % submesh_size == 0, (
                     f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
@@ -660,7 +662,7 @@ def propagate_shape_and_sharding(
     # for each output dim, find the corresponding input dim in terms of sharding prop
     # key: input dim, value: output dim
     shard_dim_map = {}
-    non_viewable_dims = set()
+    # non_viewable_dims = set()
     for dim, cmd in enumerate(rule):
         in_dim = get_in_dim_to_shard(cmd)
         if in_dim is not None:
@@ -672,6 +674,8 @@ def propagate_shape_and_sharding(
             hshard = HShard(shard_dim_map[p.dim], (input_src_spec, ))
             input_tgt_placements.append(hshard)
         else:
+            import fbvscode
+            fbvscode.set_trace()
             input_tgt_placements.append(p)
 
     def _rewrite_shard_dim(p: Shard):

@@ -75,6 +75,8 @@ def _mm_like_strategy(
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
     strategies = mm_strategy.strategies
+    import fbvscode
+    fbvscode.set_trace()
     filtered_strategies = []
     for strtg in strategies:
         assert strtg.input_specs is not None
@@ -91,8 +93,10 @@ def _mm_like_strategy(
                 strtg.redistribute_cost = redistribute_cost
                 if any(x.output_spec.is_hsharded() for x in self_strategy.strategies):
                     assert len(redistribute_cost[0]) == 1 and redistribute_cost[0][0] == 0.0
+                    # TODO: relax the assert to handle shapes beyond [dim, dim]
+                    assert len(mat2_strategy.shape) == 2 and mat2_strategy.shape[0] == mat2_strategy.shape[1] 
+                    strtg.input_specs[0] = self_strategy.strategies[0].output_specs
                     strtg.output_specs = self_strategy.strategies[0].output_specs
-                    assert False, "need to handle new strtg"
                     filtered_strategies.append(strtg)
     mm_strategy.strategies = filtered_strategies
 
