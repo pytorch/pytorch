@@ -25,7 +25,7 @@ from .ir import (
 )
 from .kernel_inputs import KernelInputs, MMKernelInputs
 from .scheduler import SchedulerNode
-from .virtualized import V, NullHandler
+from .virtualized import NullHandler, V
 
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ def schedule(scheduler: torch._inductor.scheduler.Scheduler) -> None:
     Finish the distributed autotuning by propagating the autotuning results
     between the ranks and then replacing the placeholder with the real Buffer.
     """
-    assert config.distributed_autotune
+    assert config.distributed_max_autotune_gemm
     autotune_results = _autotune_local_nodes(scheduler)
     choices_by_index = _sync(autotune_results)
     _autotune_remote_nodes(scheduler, choices_by_index)
@@ -87,7 +87,7 @@ def graph_context() -> Generator[None, None, None]:
     Wrapped around processing a graph, sets up figuring out which ranks tune
     which shapes.
     """
-    assert isinstance(V.get_distributed_autotune_state(), NullHandler)
+    assert not isinstance(V.get_distributed_autotune_state(check_poisoned=False), _DistributedAutotuneState)
     V.set_distributed_autotune_state(_DistributedAutotuneState())
     try:
         yield
@@ -102,7 +102,7 @@ def maybe_autotune_remote(
     Used by an op (like `mm`) to determine if the op should be autotuned
     locally (returns None) or remotely (returns a placeholder Buffer).
     """
-    if not config.distributed_autotune:
+    if not config.distributed_max_autotune_gemm:
         return None
 
     if not (autotune_pg := get_autotune_pg()):

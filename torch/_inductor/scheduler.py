@@ -2380,7 +2380,7 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
-        if config.distributed_autotune:
+        if config.distributed_max_autotune_gemm:
             from . import distributed_autotune
 
             distributed_autotune.schedule(self)

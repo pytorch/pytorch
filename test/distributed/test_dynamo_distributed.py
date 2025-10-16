@@ -1212,7 +1212,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)
     @patch.object(torch._inductor.config, "max_autotune_gemm", True)
-    @patch.object(torch._inductor.config, "distributed_autotune", True)
+    @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
     @parametrize("backend", ("TRITON", "ATEN"))
     def test_multiproc_autotune(self, backend):
         with patch.object(

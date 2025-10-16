@@ -160,6 +160,7 @@ def varlen_attn(
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> batch_size, max_seq_len, embed_dim, num_heads = 2, 512, 1024, 16
         >>> head_dim = embed_dim // num_heads
         >>> seq_lengths = []

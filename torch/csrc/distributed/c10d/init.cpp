@@ -3838,15 +3838,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("world_size"),
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
-      .def(py::init([](const py::args& args, const py::kwargs& kwargs) {
-        TORCH_CHECK(
-            false,
-            "FakeProcessGroup cannot be constructed directly. "
-            "Use torch.distributed.init_process_group(backend='fake') instead to ensure "
-            "proper dispatch system integration.");
-        // Even though this is effectively noreturn pybind wants a return.
-        return nullptr;
-      }))
       .def_property_readonly(
           "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =

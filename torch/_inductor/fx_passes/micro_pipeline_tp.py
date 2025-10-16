@@ -4,7 +4,7 @@ import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
 from math import prod
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -374,8 +374,8 @@ class _Matmul:
     arg_ancestor_nodes: OrderedSet[torch.fx.Node] = field(init=False)
     A_node: torch.fx.Node
     B_node: torch.fx.Node
-    pre_mm_reshape: Optional[torch.fx.Node]
-    post_mm_reshape: Optional[torch.fx.Node]
+    pre_mm_reshape: torch.fx.Node | None
+    post_mm_reshape: torch.fx.Node | None
 
     def __post_init__(self):
         assert len(self.nodes) in (1, 3)
@@ -450,12 +450,12 @@ class _Matmul:
 class _ScaledMatmul(_Matmul):
     A_scale_node: torch.fx.Node
     B_scale_node: torch.fx.Node
-    bias_node: Optional[torch.fx.Node]
-    result_scale_node: Optional[torch.fx.Node]
-    out_dtype: Optional[torch.dtype]
+    bias_node: torch.fx.Node | None
+    result_scale_node: torch.fx.Node | None
+    out_dtype: torch.dtype | None
     use_fast_accum: bool
-    pre_mm_reshape: Optional[torch.fx.Node]
-    post_mm_reshape: Optional[torch.fx.Node]
+    pre_mm_reshape: torch.fx.Node | None
+    post_mm_reshape: torch.fx.Node | None
 
     def __post_init__(self):
         super().__post_init__()
@@ -763,7 +763,7 @@ def _scatter_dim_after_reshape(
     return 0 if leading_dims_collapsed else 1
 
 
-def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
+def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
     """
     Returns producer matmul node if found, otherwise returns None.
     """

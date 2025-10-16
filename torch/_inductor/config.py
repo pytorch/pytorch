@@ -449,7 +449,9 @@ use_experimental_benchmarker: bool = Config(
 # autotuning across distributed ranks in the same program group - so instead of
 # each rank autotuning every kernel they only autotune 1/world size kernels and
 # then share the results.
-distributed_autotune = os.environ.get("TORCHINDUCTOR_DISTRIBUTED_AUTOTUNE") == "1"
+distributed_max_autotune_gemm = (
+    os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
+)
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -768,6 +770,13 @@ debug_index_asserts = False
 # emulate the eager numerics.
 emulate_precision_casts = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
+
+# x / y in Triton is lowered to div.full which is approx
+# PyTorch eager uses the equivalent of Triton's div_rn, which can
+# come at a performance penalty
+emulate_divison_rounding = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
 )
 
 # warnings intended for PyTorch developers, disable for point releases
@@ -2077,6 +2086,9 @@ class test_configs:
 
     # to be migrated when ready for use
     aten_fx_overlap_preserving_bucketing = False
+
+    # mostly disabled testing
+    assume_bucketing_reduces_latency = True
 
     # to be migrated when ready for use
     # runtime estimation function for ops
