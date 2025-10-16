@@ -330,7 +330,7 @@ def out_wrapper(
                 # Naively you might expect this assert to be true, but
                 # it's not:
                 #
-                #   assert type(out) == type(result)
+                #   assert type(out) is type(result)
                 #
                 # The reason is that functions under this wrapper can
                 # get registered to the Meta dispatch key, and that
