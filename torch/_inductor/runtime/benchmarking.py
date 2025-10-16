@@ -4,7 +4,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -273,7 +273,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
         return_mode: str = "min",
-        grad_to_none: Optional[list[torch.Tensor]] = None,
+        grad_to_none: list[torch.Tensor] | None = None,
         is_vetted_benchmarking: bool = False,
         **kwargs: Any,
     ) -> Union[float, list[float]]:

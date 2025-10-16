@@ -1615,6 +1615,7 @@ test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
+  ARCH=$(uname -m)
 
   test_inductor_set_cpu_affinity
 
@@ -1629,7 +1630,7 @@ test_operator_benchmark() {
   pip_install pandas
   python check_perf_csv.py \
       --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
+      --expected "${ARCH}_expected_ci_operator_benchmark_eager_float32_cpu.csv"
 }
 
 test_operator_microbenchmark() {

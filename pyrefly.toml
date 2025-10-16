@@ -1,5 +1,7 @@
 # A Pyrefly configuration for PyTorch
 # Based on https://github.com/pytorch/pytorch/blob/main/mypy.ini
+python-version = "3.12"
+
 project-includes = [
     "torch",
     "caffe2",
@@ -36,6 +38,7 @@ project-excludes = [
   "torch/nn/modules/rnn.py", # only remove when parsing errors are fixed
   "torch/_inductor/codecache.py",
   "torch/distributed/elastic/metrics/__init__.py",
+  "torch/_inductor/fx_passes/bucketing.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",
