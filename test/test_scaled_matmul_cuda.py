@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 
 
-from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
+from torch.nn.functional import scaled_mm, scaled_grouped_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
@@ -215,6 +215,49 @@ def scaled_mm_wrap(
         )
         return out
 
+def scaled_grouped_mm_wrap(
+    a,
+    b,
+    scale_a,
+    scale_b,
+    scale_recipe_a,
+    scale_recipe_b,
+    swizzle_a=SwizzleType.NO_SWIZZLE,
+    swizzle_b=SwizzleType.NO_SWIZZLE,
+    scale_result=None,
+    out_dtype=torch.bfloat16,
+    use_fast_accum=False,
+    offs=None,
+    bias=None,
+    wrap_v2=True,
+):
+    if not wrap_v2:
+        return torch._scaled_grouped_mm(
+            a,
+            b,
+            scale_a,
+            scale_b,
+            out_dtype=out_dtype,
+            bias=bias,
+            offs=offs,
+            use_fast_accum=use_fast_accum)
+    else:
+        return scaled_grouped_mm(
+            a,
+            b,
+            scale_a,
+            scale_recipe_a,
+            scale_b,
+            scale_recipe_b,
+            swizzle_a=swizzle_a,
+            swizzle_b=swizzle_b,
+            offs=offs,
+            bias=bias,
+            output_dtype=out_dtype,
+            use_fast_accum=use_fast_accum)
+
+
+
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
@@ -267,18 +310,6 @@ def addmm_float8_unwrapped(
         out_dtype=output_dtype,
     )
     return output
-
-def mm_float8(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    a_scale: torch.Tensor,
-    b_scale: torch.Tensor,
-    output_dtype: torch.dtype,  # output dtype
-    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
-) -> torch.Tensor:
-    return addmm_float8_unwrapped(
-        a, a_scale, b, b_scale, output_dtype, output_scale
-    )
 
 def to_fp8_saturated(
     x: torch.Tensor,
@@ -444,7 +475,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
-    def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K):
+    @parametrize("wrap_v2", [True, False])
+    def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K, wrap_v2):
         torch.manual_seed(42)
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
@@ -510,13 +542,18 @@ class TestFP8Matmul(TestCase):
         w_blocked_scales = w_blocked_scales.reshape(N_rounded, -1)
 
         # Compute mxfp8 grouped mm output
-        y_mxfp8 = torch._scaled_grouped_mm(
+        y_mxfp8 = scaled_grouped_mm_wrap(
             xq,  # (M, total_K)
             wq.transpose(-2, -1),  # (total_K, N)
             x_blocked_scales,  # to_blocked_per_group(M, total_K//32)
             w_blocked_scales,  # to_blocked_per_group(N, total_K//32)
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
             offs=input_group_end_offsets,  # (G,)
             out_dtype=torch.bfloat16,
+            wrap_v2=wrap_v2
         )
 
         # bf16 reference output
@@ -535,7 +572,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K):
+    @parametrize("wrap_v2", [True, False])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, wrap_v2):
         torch.manual_seed(42)
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
@@ -579,14 +617,19 @@ class TestFP8Matmul(TestCase):
         xq = xq.view(-1, xq.shape[-1])
 
         # Compute mxfp8 grouped gemm.
-        y_mxfp8 = torch._scaled_grouped_mm(
+        y_mxfp8 = scaled_grouped_mm_wrap(
             xq,
             wq.transpose(-2, -1),
             x_scale,
             w_scale,
             offs=input_group_end_offsets,
             out_dtype=torch.bfloat16,
-        )
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            wrap_v2=wrap_v2)
+
 
         # Compute reference bf16 grouped gemm.
         y_bf16 = torch._grouped_mm(
@@ -619,12 +662,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -671,12 +714,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -938,8 +981,12 @@ class TestFP8Matmul(TestCase):
 
         def test():
             # Calculate actual F8 mm
-            out_scaled_mm = mm_float8(
-                x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+            out_scaled_mm = scaled_mm_wrap(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales.reciprocal(),
+                scale_b=y_scales.reciprocal(),
+                out_dtype=output_dtype
             )
 
             # Calculate emulated F8 mm
@@ -958,7 +1005,7 @@ class TestFP8Matmul(TestCase):
         # rowwise on SM 9.0
         if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "Only bf16 high precision output types are supported for row-wise scaling."
             ):
                 test()
@@ -1050,16 +1097,25 @@ class TestFP8Matmul(TestCase):
         # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.BlockWise1x128
+        else:
+            lhs_recipe = ScalingType.BlockWise128x128
+
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.BlockWise1x128
+        else:
+            rhs_recipe = ScalingType.BlockWise128x128
 
         # Verify that actual F8 mm doesn't error
-        mm_float8(
+        scaled_mm_wrap(
             x_fp8,
             y_fp8.t(),
-            a_scale=x_scales,
-            b_scale=y_scales.t(),
-            output_dtype=output_dtype,
+            scale_a=x_scales,
+            scale_recipe_a=lhs_recipe,
+            scale_b=y_scales.t(),
+            scale_recipe_b=rhs_recipe,
+            out_dtype=output_dtype,
         )
 
         # Verify that emulated F8 mm doesn't error
@@ -1536,7 +1592,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2):
         device = "cuda"
         fp8_dtype = e4m3_type
         m, n, k, n_groups = 16, 32, 64, 4
@@ -1545,9 +1602,16 @@ class TestFP8Matmul(TestCase):
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-        f = torch._scaled_grouped_mm
-        out = f(a, b.t(), scale_a, scale_b, offs=offs,
-                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+        f = scaled_grouped_mm_wrap
+        out = f(a, b.t(),
+                scale_a,
+                scale_b,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
+                offs=offs,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=fast_accum,
+                wrap_v2=wrap_v2)
         offs_cpu = offs.cpu()
         alist, blist, ascalelist, bscalelist = [], [], [], []
         start = 0
@@ -1564,7 +1628,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2):
         device = "cuda"
         fp8_dtype = e4m3_type
         m, n, k, n_groups = 16, 32, 64, 4
@@ -1582,9 +1647,16 @@ class TestFP8Matmul(TestCase):
                 offs[0] = offs[1]
             scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32)
             scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
-            f = torch._scaled_grouped_mm
-            out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
-                    out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+            f = scaled_grouped_mm_wrap
+            out = f(a, b.transpose(-2, -1),
+                    scale_a,
+                    scale_b,
+                    scale_recipe_a=ScalingType.RowWise,
+                    scale_recipe_b=ScalingType.RowWise,
+                    offs=offs,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=fast_accum,
+                    wrap_v2=wrap_v2)
 
             offs_cpu = offs.cpu()
             alist, ascalelist, outlist = [], [], []
