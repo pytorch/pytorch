@@ -13,9 +13,7 @@ namespace torch::headeronly {
  * @param y divisor
  * @return ceiling of x/y
  */
-template <typename T>
-inline constexpr T divup(T x, T y) {
-  static_assert(std::is_integral_v<T>, "divup requires integral types");
+inline constexpr int64_t divup(int64_t x, int64_t y) {
   return (x + y - 1) / y;
 }
 
