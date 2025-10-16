@@ -6065,6 +6065,32 @@ class TestRandomness(TestCase):
             )(x)
             self._assert_all_slices_unique(output)
 
+    @parametrize("in_dim", [0, 1, 2])
+    @parametrize("out_dim", [0, 1, 2])
+    def test_vmap_chunk_with_scan(self, in_dim, out_dim):
+        randomness = "different"
+
+        x = torch.randn(4, 8, 16)
+
+        def f(x):
+            y = x.sin() + torch.rand_like(x)
+            return y
+
+        for chunk_size in [1, 2, 4]:
+            # TODO: without reset, we're getting a weird error complaining that arg.graph is not
+            # cur_tracer.graph, which seems to suggest that there are some issues
+            # about re-compilation
+            torch._dynamo.reset()
+            output = torch.vmap(
+                f,
+                in_dims=in_dim,
+                out_dims=out_dim,
+                randomness=randomness,
+                chunk_size=chunk_size,
+                chunk_with_scan=True,
+            )(x)
+            self._assert_all_slices_unique(output)
+
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects
         # the randomness param
