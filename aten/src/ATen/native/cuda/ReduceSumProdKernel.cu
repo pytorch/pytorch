@@ -28,7 +28,7 @@ struct sum_functor {
     }
 #endif
     if constexpr (is_16_bits) {
-      gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/4, /*input_vec_size=*/4>(
+      gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/4, /*input_vec_size=*/8>(
         iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a + b;
         }));
