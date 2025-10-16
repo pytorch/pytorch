@@ -267,10 +267,7 @@ class _MeshLayout(Layout):
         ranks = self.all_ranks_from_zero()
         return len(ranks) == len(set(ranks))
 
-    def remap_to_tensor(
-        self,
-        global_rank_permutation: torch.Tensor,
-    ) -> torch.Tensor:
+    def remap_to_tensor(self, rank_map: torch.Tensor) -> torch.Tensor:
         """
         Leverage layout as an index for mesh tensor that re-maps the indexes after layout
         transformation to actual device ranks.
@@ -282,7 +279,7 @@ class _MeshLayout(Layout):
         can be treated as a view or subset of mesh tensor, we do need to use the actual view or
         sub-tensor for DeviceMesh and its backend creation.
 
-        The shape of the `global_rank_permutation` must be 1D and contiguous.
+        The shape of the `rank_map` must be 1D and contiguous.
 
         Examples:
 
@@ -299,18 +296,18 @@ class _MeshLayout(Layout):
             Return: [[[10,30],[20,40]]]
 
         Args:
-            global_rank_permutation: The concrete mesh tensor with actual device ranks
+            rank_map: The concrete mesh tensor with actual device ranks
 
         Returns:
-            torch.Tensor: A tensor representing the actual device allocation from global_rank_permutation
+            torch.Tensor: A tensor representing the actual device allocation from rank_map
         """
-        assert global_rank_permutation.ndim == 1
-        assert global_rank_permutation.is_contiguous()
-        assert global_rank_permutation.numel() >= self.cosize()
+        assert rank_map.ndim == 1
+        assert rank_map.is_contiguous()
+        assert rank_map.numel() % self.cosize() == 0
 
-        complement_layout = self.complement(global_rank_permutation.numel())
+        complement_layout = self.complement(rank_map.numel())
 
-        return global_rank_permutation.as_strided(
+        return rank_map.as_strided(
             flatten(complement_layout.sizes) + flatten(self.sizes),
             flatten(complement_layout.strides) + flatten(self.strides),
-        ).reshape(-1, *(self[i].numel() for i in range(len(self))))
+        ).reshape(-1, *self.top_level_sizes)

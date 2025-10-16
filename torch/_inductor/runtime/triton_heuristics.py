@@ -18,16 +18,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    Literal,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -119,7 +110,7 @@ def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str)
     return fn_hash
 
 
-def lookup_autotune_config(size_hints, fn) -> Optional[Config]:
+def lookup_autotune_config(size_hints, fn) -> Config | None:
     lookup_table = torch._inductor.config.autotune_lookup_table
     cached_config = None
     if len(lookup_table) > 0 and "_fused_" in fn.src:
@@ -157,7 +148,7 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: tuple[tuple[int, Optional[int], Optional[int]], ...]
+    xyz_options: tuple[tuple[int, int | None, int | None], ...]
     configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
@@ -217,8 +208,8 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
 
 
 def check_autotune_cache(
-    configs: list[Config], filename: Optional[str], inductor_meta: dict[str, Any]
-) -> tuple[list[Config], Optional[AutotuneCache], dict[str, Any]]:
+    configs: list[Config], filename: str | None, inductor_meta: dict[str, Any]
+) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
     """
@@ -285,9 +276,9 @@ class CachingAutotuner(KernelInterface):
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
-        filename: Optional[str] = None,
-        reset_to_zero_arg_names: Optional[list[str]] = None,
-        autotune_cache_info: Optional[dict[str, Any]] = None,
+        filename: str | None = None,
+        reset_to_zero_arg_names: list[str] | None = None,
+        autotune_cache_info: dict[str, Any] | None = None,
     ):
         super().__init__()
 
@@ -367,7 +358,7 @@ class CachingAutotuner(KernelInterface):
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
         # Compile-time info included in runtime logginging
-        self.compile_id: Optional[CompileId] = None
+        self.compile_id: CompileId | None = None
         self.is_backward = False
 
         # Mode for launch grid calculation
@@ -419,17 +410,15 @@ class CachingAutotuner(KernelInterface):
                         self.fn = reload_kernel_from_src().fn
                     self.compile_results = [self._precompile_config(best_config)]
 
-    def set_compile_info(
-        self, compile_id: Optional[CompileId], is_backward: bool
-    ) -> None:
+    def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
         self.compile_id = compile_id
         self.is_backward = is_backward
 
     def precompile(
         self,
         warm_cache_only=False,
-        reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
-        static_triton_bundle_key: Optional[str] = None,
+        reload_kernel: Callable[[], CachingAutotuner] | None = None,
+        static_triton_bundle_key: str | None = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
@@ -492,7 +481,7 @@ class CachingAutotuner(KernelInterface):
             assert device_prop.regs_per_multiprocessor
             assert device_prop.max_threads_per_multi_processor
             assert device_prop.multi_processor_count
-            seen_config_hashes: Optional[OrderedSet[Hashable]] = None
+            seen_config_hashes: OrderedSet[Hashable] | None = None
             warp_size = device_prop.warp_size or 32
             for result in self.compile_results:
                 triton_config = result.config
@@ -638,7 +627,7 @@ class CachingAutotuner(KernelInterface):
         return old_values
 
     def restore_after_unpickle(
-        self, old_values: Optional[tuple[Any, Any, Any, Any, Any, Any]]
+        self, old_values: tuple[Any, Any, Any, Any, Any, Any] | None
     ) -> None:
         if old_values:
             (
@@ -1322,7 +1311,7 @@ class CachingAutotuner(KernelInterface):
     ):  # type:ignore[override]
         if hasattr(triton, "set_allocator"):
 
-            def alloc_fn(size: int, align: int, stream: Optional[int]):
+            def alloc_fn(size: int, align: int, stream: int | None):
                 return torch.empty(
                     size, dtype=torch.int8, device=self.device_props.type
                 )
@@ -1571,7 +1560,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
-    ) -> Optional[StaticallyLaunchedCudaKernel]:
+    ) -> StaticallyLaunchedCudaKernel | None:
         if not torch._inductor.config.use_static_cuda_launcher:
             return None
 
@@ -1932,12 +1921,12 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
             # in AMD's Triton backend, the global scratch size is never provided
             # (but for AMD it's safe to pass an extra null arg, so always include it)
-            global_scratch: Optional[int] = getattr(
+            global_scratch: int | None = getattr(
                 kernel_metadata,
                 "global_scratch_size",
                 (0 if torch.version.hip else None),
             )
-            profile_scratch: Optional[int] = getattr(
+            profile_scratch: int | None = getattr(
                 kernel_metadata, "profile_scratch_size", None
             )
             launcher.global_scratch = global_scratch
@@ -2091,7 +2080,7 @@ def hash_configs(configs: list[Config]):
 
 
 def cached_autotune(
-    size_hints: Optional[list[int]],
+    size_hints: list[int] | None,
     configs: list[Config],
     triton_meta,
     heuristic_type,
