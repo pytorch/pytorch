@@ -89,6 +89,7 @@ def compile_time_strobelight_meta(
                 skip := kwargs["skip"],
                 int,
             ):
+                # pyrefly: ignore  # unbound-name
                 kwargs["skip"] = skip + 1
 
             # This is not needed but we have it here to avoid having profile_compile_time
