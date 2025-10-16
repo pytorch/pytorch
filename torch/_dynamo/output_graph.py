@@ -605,8 +605,6 @@ class OutputGraph(OutputGraphCommon):
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=shape_env,
-                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-                allow_non_fake_inputs=bool(self.export),
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)

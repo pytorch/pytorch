@@ -98,9 +98,9 @@ class TestSourceMatcher(JitTestCase):
                 return self.maxpool(self.relu(z))
 
         inputs = (torch.randn(1, 3, 256, 256),)
-        gm, _ = torch._dynamo.export(M(torch.ones(1, 16, 256, 256)), aten_graph=True)(
-            *inputs
-        )
+        gm = torch.export.export(
+            M(torch.ones(1, 16, 256, 256)), inputs, strict=True
+        ).module()
         gm.graph.eliminate_dead_code()
 
         module_partitions = get_source_partitions(
