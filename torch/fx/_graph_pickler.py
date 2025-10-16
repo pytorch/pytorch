@@ -3,7 +3,8 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from typing import Any, Callable, NewType, Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
@@ -426,12 +427,9 @@ class _OpPickleData:
             return cls._pickle_op(name, _OpOverloadPickleData, options)
         elif isinstance(op, torch._ops.OpOverloadPacket):
             return cls._pickle_op(name, _OpOverloadPacketPickleData, options)
-        elif name.startswith(("builtins.", "math.", "torch.")):
+        elif name.startswith(_OpFunctionPickleData.SUPPORTED_ROOTS):
             root, detail = name.split(".", 1)
-            return _OpBuiltinPickleData(root, detail)
-        elif name.startswith("operator."):
-            _, detail = name.split(".", 1)
-            return _OpOperatorPickleData(detail)
+            return _OpFunctionPickleData(root, detail)
         else:
             # TODO: raise a BypassFxGraphCache so we will just bypass this one...
             raise NotImplementedError(f"TARGET: {type(op)} {op} {name}")
@@ -505,7 +503,16 @@ class _OpOverloadPacketPickleData(_OpPickleData):
         return obj
 
 
-class _OpBuiltinPickleData(_OpPickleData):
+class _OpFunctionPickleData(_OpPickleData):
+    """
+    Supports pickling a set of standard/common functions
+    These must be prefixed with the full namespace in order to properly
+    be pickled (i.e `einops.rearrange` and not `from einops import rearrange`)
+    """
+
+    # Static variable listing supported root names
+    SUPPORTED_ROOTS = ("builtins.", "math.", "torch.", "operator.", "einops.")
+
     def __init__(self, root: str, name: str) -> None:
         self.root = root
         self.name = name
@@ -519,18 +526,16 @@ class _OpBuiltinPickleData(_OpPickleData):
             return self._getattr_by_name(math, self.name)
         elif self.root == "torch":
             return self._getattr_by_name(torch, self.name)
+        elif self.root == "operator":
+            import operator
+
+            return self._getattr_by_name(operator, self.name)
+        elif self.root == "einops":
+            import einops
+
+            return self._getattr_by_name(einops, self.name)
         else:
             raise NotImplementedError
-
-
-class _OpOperatorPickleData(_OpPickleData):
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def unpickle(self, unpickle_state: _UnpickleState) -> object:
-        import operator
-
-        return self._getattr_by_name(operator, self.name)
 
 
 class _GraphPickleData:
