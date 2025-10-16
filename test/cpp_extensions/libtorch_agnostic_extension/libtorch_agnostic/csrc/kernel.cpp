@@ -599,7 +599,8 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
   // If using a parallel path, the thread id is encoded in the upper 32 bits
   torch::stable::parallel_for(
       0, size, grain_size, [data_ptr](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
+        for (auto i = begin; i < end; i++) {
+          STD_TORCH_CHECK(i <= UINT32_MAX);
           int thread_id = get_thread_idx();
           data_ptr[i] = i | (static_cast<int64_t>(thread_id) << 32);
         }
