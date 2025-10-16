@@ -8204,6 +8204,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         ):
             vmap_fn(x, init)
 
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
     def test_vmap_closure_weight_error(self):
         init_batched = torch.randn(7, 2, 3)
         xs_batched = torch.randn(7, 5, 4)
