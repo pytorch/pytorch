@@ -388,7 +388,7 @@ class ShardingPropagator:
                             input_spec.tensor_meta
                         )
                     )
-                    if desired_spec.placements != input_spec.placements:
+                    if desired_spec.placements != input_spec.placements and input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
 
                 suggestion_schema = None

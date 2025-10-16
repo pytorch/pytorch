@@ -36,6 +36,12 @@ def main():
     inps = distribute_tensor(global_inps, mesh, (Shard(1), ))
     inps_viewed = inps.view(batch_size * seq_len, dim)
 
+    # mm
+    global_weight = torch.eye(dim, device="cuda")
+    weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
+    out = torch.mm(inps_viewed, weight)
+    print(f"rank: {torch.distributed.get_rank()} out: {out}")
+
     # transpose
     # global_weight = torch.eye(dim, device="cuda")
     # weight = distribute_tensor(global_weight, mesh, (Shard(0), ))
@@ -46,14 +52,6 @@ def main():
     # global_inps = torch.arange(batch_size * seq_len * dim, device="cuda").float().view(batch_size * seq_len, dim)
     # inps = distribute_tensor(global_inps, mesh, (Shard(0), ))
     # inps_viewed = inps.view(batch_size, seq_len, dim)
-
-    
-
-    # # mm
-    # global_weight = torch.eye(dim, device="cuda")
-    # weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
-    # out = torch.mm(inps_viewed, weight)
-    # print(f"rank: {torch.distributed.get_rank()} out: {out}")
 
     # F.linear
     # global_inps = torch.arange(batch_size * seq_len * dim, device="cuda").float().view(batch_size, seq_len, dim)

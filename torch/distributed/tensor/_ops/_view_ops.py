@@ -45,10 +45,15 @@ class HShard(tuple[tuple[DTensorSpec, ...] | DTensorSpec]):
         return f"HShard(dim={self.dim}, {super().__repr__()})"
     
     def __eq__(self, other):
+        # flatten
         if len(self) == 1 and len(self[0].placements) == 1 and self[0].placements[0] == other:
             return True
-        else:
-            return False
+        # mm
+        # elif len(self) == 1 and other.is_shard() and other.dim == self.dim:
+        #     import fbvscode
+        #     fbvscode.set_trace()
+        #     return True
+        return super().__eq__(other)
     
     def is_shard(self, dim: Optional[int] = None) -> bool:
         return False
