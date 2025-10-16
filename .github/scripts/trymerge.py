@@ -2042,10 +2042,6 @@ def validate_revert(
             f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
 
-    # Raises exception if matching rule is not found, but ignores all status checks
-    find_matching_merge_rule(
-        pr, repo, skip_mandatory_checks=True, skip_internal_checks=True
-    )
     commit_sha = get_pr_commit_sha(repo, pr)
     return (author_login, commit_sha)
 
