@@ -267,6 +267,7 @@ class ParallelForkServerPerfTest(TestCase):
 
     def test_forkserver_perf(self):
 
+
         start_method = 'forkserver'
         expensive = Expensive()
         nprocs = 4
