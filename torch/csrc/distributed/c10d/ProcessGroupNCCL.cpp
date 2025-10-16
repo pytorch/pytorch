@@ -33,6 +33,10 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/torch.h>
 #include <optional>
+#include <exception>
+#include <cxxabi.h>
+#include <execinfo.h>
+#include <dlfcn.h>
 
 namespace c10d {
 
@@ -40,6 +44,23 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 using FlightRecorderCUDA = FlightRecorder<at::cuda::CUDAEvent>;
 
 namespace {
+
+// Captures stack trace
+extern "C" void __cxa_throw(void* thrown_exception,
+                            std::type_info* tinfo,
+                            void (*dest)(void*)) {
+    // Capture stack trace here
+    void* buffer[100];
+    int size = backtrace(buffer, 100);
+
+    LOG(ERROR) << "Exception thrown! Stack trace:\n";
+    backtrace_symbols_fd(buffer, size, 2);
+
+    // Call original throw
+    typedef void (*orig_cxa_throw_type)(void*, std::type_info*, void (*)(void*));
+    static orig_cxa_throw_type orig_cxa_throw = (orig_cxa_throw_type)dlsym(RTLD_NEXT, "__cxa_throw");
+    orig_cxa_throw(thrown_exception, tinfo, dest);
+}
 
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
