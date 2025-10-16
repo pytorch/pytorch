@@ -57,8 +57,9 @@ import torch
 from torch import Size, SymBool, SymInt, Tensor
 from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed import DeviceMesh
+from torch.distributed import DeviceMesh, ProcessGroup
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed.distributed_c10d import _get_default_group
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils import _pytree as pytree
@@ -112,6 +113,9 @@ def _for_each_rank_run_func(
     alias: bool = True,
 ) -> Any:
     flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+    flat_args = [
+        a.wait() if isinstance(a, AsyncCollectiveTensor) else a for a in flat_args
+    ]
 
     cpu_state = torch.get_rng_state()
     devices, states = get_device_states((args, kwargs))
@@ -248,6 +252,13 @@ class LocalIntNode:
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {r: self._local_ints[r] * _int_on_rank(other, r) for r in self._local_ints}
+        )
+
+    def floordiv(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {r: self._local_ints[r] // _int_on_rank(other, r) for r in self._local_ints}
         )
 
     def mod(
@@ -595,7 +606,7 @@ class LocalTensorMode(TorchDispatchMode):
         # For LocalTensors, verify they have compatible ranks
         for a in flat_args:
             if isinstance(a, LocalTensor):
-                assert a._ranks == self.ranks, (
+                assert a._ranks <= self.ranks, (
                     f"Input LocalTensor {a} and LocalTensorMode must be configured for the same ranks"
                 )
 
@@ -696,15 +707,28 @@ class _LocalDeviceMesh:
         lm = local_tensor_mode()
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
-        rank_coords = (self.mesh == lm.rank_map(lambda r: torch.tensor(r))).nonzero()
-        # NB: unlike the regular mechanism, we don't allow for MPMD
-        assert rank_coords.size(0) == 1
-        assert isinstance(rank_coords[0], LocalTensor)
+        root_mesh = self._get_root_mesh()
+        submesh_dims = self.mesh_dim_names
 
-        coords: list[dict[int, int]] = [{} for _ in range(rank_coords.size(1))]
-        for r, v in rank_coords[0]._local_tensors.items():
-            for i, x in enumerate(v.tolist()):
-                coords[i][r] = x
+        coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
+        old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
+        try:
+            for r in lm.ranks:
+                DeviceMesh.get_rank = lambda self: r  # type: ignore[method-assign]
+                submesh = (
+                    root_mesh
+                    if submesh_dims is None
+                    else root_mesh.__getitem__(submesh_dims)
+                )
+                rank_coords = (submesh.mesh == r).nonzero().tolist()
+                assert len(rank_coords) in (0, 1)
+                if len(rank_coords) == 0:
+                    continue
+                for d, c in enumerate(rank_coords[0]):
+                    coords[d][r] = c
+        finally:
+            DeviceMesh.get_rank = old_get_rank  # type: ignore[method-assign]
+
         out = [torch.SymInt(LocalIntNode(c)) for c in coords]
 
         return out  # type: ignore[return-value]
