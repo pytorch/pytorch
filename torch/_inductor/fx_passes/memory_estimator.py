@@ -54,6 +54,11 @@ class GraphAliasTracker:
             OrderedSet
         )
 
+        # Map from storage to all nodes that produce it as output (including views/aliases)
+        self.storage_to_producers: dict[StorageKey, OrderedSet[fx.Node]] = defaultdict(
+            OrderedSet
+        )
+
         # Map from storage to the last node that uses it
         self.storage_to_last_user: dict[StorageKey, fx.Node] = {}
 
@@ -70,6 +75,10 @@ class GraphAliasTracker:
             # Get output storages
             output_storages = self._get_output_storages(node)
             self.node_to_output_storages[node] = output_storages
+
+            # Track fresh allocations
+            for storage_key in output_storages:
+                self.storage_to_producers[storage_key].add(node)
 
             # Track fresh allocations
             fresh_allocations: OrderedSet[StorageKey] = OrderedSet()

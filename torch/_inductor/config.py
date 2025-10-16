@@ -265,6 +265,7 @@ b2b_gemm_pass = False
 # to which your custom passes have been applied:
 post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
+post_grad_mutable_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Allow users to pass in custom partition function
 custom_partitioner_fn: torch._inductor.custom_graph_pass.CustomPartitionerFnType = None

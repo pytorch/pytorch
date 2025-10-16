@@ -481,6 +481,29 @@ def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
     return get_mutable_args_from_schema(op._schema)
 
 
+def normalize_args_kwargs_by_schema(
+    schema: torch._C.FunctionSchema,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Normalize args and kwargs into a dict by arg names from the schema.
+    """
+    normalized_kwargs = {}
+    for idx, arg in enumerate(schema.arguments):
+        # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
+        if arg.name in kwargs:
+            normalized_kwargs[arg.name] = kwargs[arg.name]
+        elif idx < len(args):
+            # if its out of bounds we don't need to do anything
+            # as it means the optional arg was passed with its default
+            # value
+            normalized_kwargs[arg.name] = args[idx]
+        else:
+            normalized_kwargs[arg.name] = arg.default_value
+    return normalized_kwargs
+
+
 def do_auto_functionalize(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
@@ -500,19 +523,7 @@ def do_auto_functionalize(
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
-    normalized_kwargs = {}
-    schema = op._schema
-    for idx, arg in enumerate(schema.arguments):
-        # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
-        if arg.name in kwargs:
-            normalized_kwargs[arg.name] = kwargs[arg.name]
-        elif idx < len(args):
-            # if its out of bounds we don't need to do anything
-            # as it means the optional arg was passed with its default
-            # value
-            normalized_kwargs[arg.name] = args[idx]
-        else:
-            normalized_kwargs[arg.name] = arg.default_value
+    normalized_kwargs = normalize_args_kwargs_by_schema(op._schema, args, kwargs)
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
@@ -606,8 +617,6 @@ def do_auto_functionalize_v2(
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
-    normalized_kwargs = {}
-
     schema = op._schema
     # pyrefly: ignore  # bad-assignment
     op = op._op if isinstance(op, HopInstance) else op
@@ -620,17 +629,7 @@ def do_auto_functionalize_v2(
 
     args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
 
-    for idx, arg in enumerate(schema.arguments):
-        # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
-        if arg.name in kwargs:
-            normalized_kwargs[arg.name] = kwargs[arg.name]
-        elif idx < len(args):
-            # if its out of bounds we don't need to do anything
-            # as it means the optional arg was passed with its default
-            # value
-            normalized_kwargs[arg.name] = args[idx]
-        else:
-            normalized_kwargs[arg.name] = arg.default_value
+    normalized_kwargs = normalize_args_kwargs_by_schema(schema, args, kwargs)
 
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)

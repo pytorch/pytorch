@@ -1216,14 +1216,28 @@ class ReplacementPatternEntry(PatternEntry):
         if len(output_nodes) == 1:
             last_node = output_nodes[0]
         else:
+            # When there are multiple output nodes, we need to insert the replacement
+            # After the last output node to ensure all outputs are ready.
+            #
+            # Example: If output_nodes = [node_a, node_b] at indices [5, 10],
+            # we must insert after index 10 (the last output) to ensure both
+            # node_a and node_b are available to the replacement. Using the
+            # first output (min) would cause "use before def" errors.
+            #
+            # This applies whether outputs are DEP_OP nodes (inserted by
+            # add_implict_edges after mutations) or regular operation results.
+            #
+            # We first perform a stable topological sort to guarantee the graph
+            # is in valid dependency order before computing indices.
             assert output_nodes[0]
+            stable_topological_sort(output_nodes[0].graph)
             nodes = list(output_nodes[0].graph.nodes)
             indices = [
                 (nodes.index(n), n)
                 for n in output_nodes
                 if isinstance(n, torch.fx.Node)
             ]
-            last_node = min(indices, key=operator.itemgetter(0))[1]
+            last_node = max(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(
             node: torch.fx.Node,
@@ -1272,6 +1286,14 @@ class ReplacementPatternEntry(PatternEntry):
                     assert new is None
                     return
                 assert isinstance(old, torch.fx.Node)
+                # Check if this is an op_for_dependencies node and if its mutated_of was part of the match
+                # Only erase the corresponding mutated op if the original mutated op was matched
+
+                if old.op == "call_function" and old.target == DEP_OP:
+                    mutated_of = old.meta.get("mutated_of")
+                    if mutated_of and not mutated_of._erased and not mutated_of.users:
+                        graph.erase_node(mutated_of)
+
                 if new is None:
                     old.replace_all_uses_with(
                         None,  # type: ignore[arg-type]
@@ -1535,6 +1557,7 @@ def register_replacement(
                         log_trace_failure(search_fn, e)
                         return False
 
+                add_implict_edges(specific_graph)
                 specific_pattern = fx_to_pattern(
                     specific_graph,
                     argnames=argnames,
@@ -1790,6 +1813,7 @@ def gen_pattern_and_search_gm(
             input_idx += 1
 
     search_gm = trace_fn(search_fn, flat_inputs)
+    add_implict_edges(search_gm)
     return (
         fx_to_pattern(
             search_gm,
@@ -2331,3 +2355,155 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
         assert isinstance(node.target, str)
         return _get_attr(node.graph.owning_module, node.target).__class__
     return node.target
+
+
+@torch.library.custom_op(
+    "pattern_matcher::op_for_dependencies", mutates_args=OrderedSet(["t"])
+)
+def op_for_dependencies(t: torch.Tensor) -> torch.Tensor:
+    """
+    A lightweight no-op that creates explicit dependency edges in the FX graph
+    for mutable custom operations.
+
+    This differs from the existing control_deps HOP. The control_deps HOP creates subgraphs
+    and persists through compilation. This op_for_dependencies is a simple custom op that
+    gets inserted by add_implict_edges() and removed by remove_implict_edges() before
+    codegen, resulting in zero runtime overhead.
+    """
+    return t.clone()
+
+
+DEP_OP = torch.ops.pattern_matcher.op_for_dependencies
+
+
+def add_implict_edges(gm: torch.fx.GraphModule) -> None:
+    """
+    Add implicit edges to preserve ordering of mutations.
+    """
+    from torch._higher_order_ops.auto_functionalize import (
+        get_mutable_args_from_schema,
+        normalize_args_kwargs_by_schema,
+    )
+
+    from .fx_passes.memory_estimator import GraphAliasTracker, StorageKey
+    from .fx_utils import FakeTensorUpdater
+
+    # Ensure FakeTensor metadata exists for all nodes so alias tracking works.
+    # Use FakeTensorUpdater for efficiency
+    FakeTensorUpdater(gm.graph).incremental_update()
+
+    nodes = list(gm.graph.nodes)
+    alias_info = GraphAliasTracker(nodes)
+    stable_topological_sort(gm.graph)
+    storage_to_nodes = alias_info.storage_to_producers
+
+    def mutated_arg_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
+        if not is_mutation_op(node) or not hasattr(node.target, "_schema"):
+            return []
+
+        mutable_names, _ = get_mutable_args_from_schema(node.target._schema)
+        if not mutable_names:
+            return []
+
+        normalized_kwargs = normalize_args_kwargs_by_schema(
+            node.target._schema, node.args, node.kwargs
+        )
+
+        # Extract only the mutated args that are Nodes
+        return [
+            normalized_kwargs[name]
+            for name in mutable_names
+            if name in normalized_kwargs
+            and isinstance(normalized_kwargs[name], torch.fx.Node)
+        ]
+
+    # We'll incrementally update this as we insert DEP_OP nodes.
+    order: dict[torch.fx.Node, float] = {n: i for i, n in enumerate(gm.graph.nodes)}
+
+    # Counter for assigning indices to newly inserted DEP_OP nodes.
+    next_fractional_index = 0.1
+
+    # Use list() to create a snapshot since we'll be mutating the graph by inserting
+    # DEP_OP nodes during iteration
+    for node in list(gm.graph.nodes):
+        if node.op == "call_function" and node.target == DEP_OP:
+            continue
+        mutated_nodes = mutated_arg_nodes(node)
+        if not mutated_nodes:
+            continue
+
+        # For each mutated arg node, collect all storages it outputs.
+        storage_to_mutated: dict[StorageKey, torch.fx.Node] = {}
+        for mutated in mutated_nodes:
+            # Skip DEP_OP nodes - they're just dependency markers, not actual tensors
+            if mutated.op == "call_function" and mutated.target == DEP_OP:
+                continue
+
+            output_storages = alias_info.node_to_output_storages.get(mutated)
+            assert output_storages, (
+                f"Mutated argument node {mutated.name} of operation {node.name} has no output storages."
+            )
+            for sk in output_storages:
+                storage_to_mutated.setdefault(sk, mutated)
+
+        # It's valid to have no storages if all mutated args were DEP_OP nodes
+        if not storage_to_mutated:
+            continue
+
+        insert_after: torch.fx.Node = node
+
+        # Insert all DEP_OP nodes for this mutation and assign them incremental indices
+        for storage_key, mutated_tensor in storage_to_mutated.items():
+            # TODO: Should pass ALL aliases of this storage as inputs to DEP_OP
+            dep_kwargs = {"writer_token": node}
+            with gm.graph.inserting_after(insert_after):
+                dep_node = gm.graph.call_function(
+                    DEP_OP, args=(mutated_tensor,), kwargs=dep_kwargs
+                )
+            insert_after = dep_node
+            if "val" in mutated_tensor.meta:
+                dep_node.meta["val"] = mutated_tensor.meta["val"]
+            dep_node.meta["mutated_of"] = node
+            node.meta["mutation_region_id"] = 0
+
+            # Since we insert it after node, its index should be slightly higher than node's.
+            order[dep_node] = order[node] + next_fractional_index
+            next_fractional_index += 0.1
+
+            storage_to_nodes.setdefault(storage_key, OrderedSet()).add(dep_node)
+
+            # Redirect later users of any alias of this storage to depend on dep_node.
+            # We use the precomputed order (with incremental updates) to check if a user
+            # comes after the dep_node in topological order.
+            for alias in list(storage_to_nodes[storage_key]):
+                if alias is dep_node:
+                    continue
+                for user in list(alias.users):
+                    if user in (node, dep_node):
+                        continue
+                    if order.get(user, -1) <= order[dep_node]:
+                        continue
+                    user.replace_input_with(alias, dep_node)
+
+
+def remove_implict_edges(graph: torch.fx.Graph) -> None:
+    """Remove implicit edges added by add_implict_edges"""
+    nodes_to_remove = []
+
+    for node in graph.nodes:
+        if node.op == "call_function" and node.target == DEP_OP:
+            nodes_to_remove.append(node)
+
+    for dep_node in nodes_to_remove:
+        input_tensor = dep_node.kwargs.get("t")
+        if input_tensor is None and dep_node.args:
+            input_tensor = dep_node.args[0]
+
+        if input_tensor is not None:
+            dep_node.replace_all_uses_with(input_tensor)
+
+    for dep_node in nodes_to_remove:
+        if not dep_node._erased:
+            graph.erase_node(dep_node)
+
+    graph.eliminate_dead_code()
