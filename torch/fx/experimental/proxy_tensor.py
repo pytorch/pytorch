@@ -16,12 +16,12 @@ import typing
 import typing_extensions
 import weakref
 from collections import defaultdict, OrderedDict
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
-    Callable,
+    Concatenate,
     Optional,
     overload,
     Protocol,
@@ -29,7 +29,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, Self, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
@@ -63,6 +63,7 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -908,11 +909,16 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
-        torch.ops.aten.size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.storage_offset.default,
-    ]:
+    if (
+        not pre_dispatch
+        and func
+        not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        ]
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -2229,9 +2235,9 @@ class _MakefxTracer:
             self.fake_tensor_mode = parent_tracer.fake_tensor_mode
 
             def _create_sub_fx_tracer(parent_tracer: _ProxyTracer) -> PythonKeyTracer:
-                if type(parent_tracer) == PythonKeyTracer:
+                if type(parent_tracer) is PythonKeyTracer:
                     return PythonKeyTracer()
-                elif type(parent_tracer) == _ModuleStackTracer:
+                elif type(parent_tracer) is _ModuleStackTracer:
                     return _ModuleStackTracer(parent_tracer.scope_root)
                 else:
                     raise RuntimeError(

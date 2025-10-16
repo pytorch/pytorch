@@ -12,10 +12,10 @@ import re
 import typing
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -951,10 +951,10 @@ class _PyTreeCodeGen(CodeGen):
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = (
-                self.pytree_info.in_spec.type == tuple
+                self.pytree_info.in_spec.type is tuple
                 and self.pytree_info.in_spec.num_children == 2
-                and self.pytree_info.in_spec.children_specs[0].type == tuple
-                and self.pytree_info.in_spec.children_specs[1].type == dict
+                and self.pytree_info.in_spec.children_specs[0].type is tuple
+                and self.pytree_info.in_spec.children_specs[1].type is dict
             )
             fn_kwargs = "{}"
             fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
