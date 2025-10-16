@@ -87,3 +87,7 @@
 ```{eval-rst}
 .. autofunction:: get_rotating_buffer_size
 ```
+
+```{eval-rst}
+.. autofunction:: set_numerical_check_tolerances
+```
