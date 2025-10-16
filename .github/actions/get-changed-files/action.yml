@@ -19,6 +19,8 @@ runs:
     - id: get-files
       name: Get changed files (bash)
       shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         # Call the bundled entrypoint script. Running via bash avoids needing execute bit set.
         # Check if we're in a pull request context
