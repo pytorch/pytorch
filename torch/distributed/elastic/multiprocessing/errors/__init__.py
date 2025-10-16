@@ -60,9 +60,9 @@ from datetime import datetime
 from functools import wraps
 from string import Template
 from typing import Any, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
+from typing_extensions import ParamSpec
 
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
@@ -79,9 +79,9 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-JSON = dict
+JSON = dict[str, Any]
 
-_EMPTY_ERROR_DATA = {"message": "<NONE>"}
+_EMPTY_ERROR_DATA: dict[str, Any] = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
 _R = TypeVar("_R")
@@ -142,6 +142,10 @@ class ProcessFailure:
                     f"Signal {-self.exitcode} ({self.signal_name()})"
                     f" received by PID {self.pid}"
                 )
+                self.error_file_data["errorTraits"] = {
+                    "category": "system_terminated_error",
+                    "retryability": "False",
+                }
             else:
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
