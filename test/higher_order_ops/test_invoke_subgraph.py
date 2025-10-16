@@ -805,6 +805,7 @@ class GraphModule(torch.nn.Module):
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
             return (mul, primals_0, primals_1)
 """,
+            ignore_empty_lines=True,
         )
 
     def test_dce(self):
