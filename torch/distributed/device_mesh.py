@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import inspect
 import logging
 import os
 import threading
@@ -8,7 +7,6 @@ import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
-from typing_extensions import get_overloads, overload
 
 import torch
 from torch.distributed import is_available
@@ -181,53 +179,39 @@ else:
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
 
-        # This is the only public (legacy) constructor. It forwards to the private one.
-        @overload
         def __init__(
             self,
             device_type: str,
-            mesh: Union[torch.Tensor, "ArrayLike"],
+            mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
             *,
             mesh_dim_names: Optional[tuple[str, ...]] = None,
             backend_override: Optional[tuple[BackendConfig, ...]] = None,
             _init_backend: bool = True,
             _rank: Optional[int] = None,
-        ) -> None:
-            if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
-                raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
-            mesh_tensor = (
-                mesh.detach().to(dtype=torch.int).contiguous()
-                if isinstance(mesh, torch.Tensor)
-                else torch.tensor(mesh, device="cpu", dtype=torch.int)
-            )
-            layout = _MeshLayout(mesh_tensor.size(), mesh_tensor.stride())
-            rank_map = mesh_tensor.flatten()
-            DeviceMesh.__init__(
-                self,
-                _device_type=device_type,
-                _layout=layout,
-                _rank_map=rank_map,
-                _mesh_dim_names=mesh_dim_names,
-                _backend_override=backend_override,
-                _init_backend=_init_backend,
-                _rank=_rank,
-            )
-
-        # This is the core private constructor. All args are thus underscore-prefixed,
-        # and also keyword-only to avoid this overload triggering by mistake.
-        @overload
-        def __init__(
-            self,
-            *,
-            _device_type: str,
-            _layout: _MeshLayout,
-            _rank_map: torch.Tensor,
-            _mesh_dim_names: Optional[tuple[str, ...]] = None,
+            _layout: Optional[_MeshLayout] = None,
+            _rank_map: Optional[torch.Tensor] = None,
             _root_mesh: Optional["DeviceMesh"] = None,
-            _backend_override: Optional[tuple[BackendConfig, ...]] = None,
-            _init_backend: bool = True,
-            _rank: Optional[int] = None,
         ) -> None:
+            if mesh is not None:
+                if _layout is not None or _rank_map is not None:
+                    raise TypeError(
+                        "Cannot provide _layout and/or _rank_map if passing explicit mesh"
+                    )
+                if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
+                    raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
+                mesh_tensor = (
+                    mesh.detach().to(dtype=torch.int).contiguous()
+                    if isinstance(mesh, torch.Tensor)
+                    else torch.tensor(mesh, device="cpu", dtype=torch.int)
+                )
+                _layout = _MeshLayout(mesh_tensor.size(), mesh_tensor.stride())
+                _rank_map = mesh_tensor.flatten()
+            else:
+                if _layout is None or _rank_map is None:
+                    raise TypeError(
+                        "The mesh argument is required except for PRIVATE USAGE ONLY!"
+                    )
+
             assert _layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
             )
@@ -243,30 +227,30 @@ else:
                 f"expected >= {'*'.join(f'{s}' for s in _layout.top_level_sizes)}"
             )
 
-            self._device_type = _device_type
+            self._device_type = device_type
             self._layout = _layout
             self._rank_map = _rank_map
-            self._mesh_dim_names = tuple(_mesh_dim_names) if _mesh_dim_names else None
+            self._mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             self._root_mesh = _root_mesh
 
-            if _backend_override is None:
-                _backend_override = ((None, None),) * len(self._layout)
-            elif len(_backend_override) != len(self._layout):
+            if backend_override is None:
+                backend_override = ((None, None),) * len(self._layout)
+            elif len(backend_override) != len(self._layout):
                 raise ValueError(
                     f"backend_override should have the same length as the number of mesh dimensions, "
-                    f"but got {len(_backend_override)} and {len(self._layout)}."
+                    f"but got {len(backend_override)} and {len(self._layout)}."
                 )
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
             self._thread_id = None
-            if _device_type != "xla":
+            if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
                     self._setup_world_group_and_device()
-                    self._init_process_groups(_backend_override)
+                    self._init_process_groups(backend_override)
 
                 if is_initialized() and get_backend() == "threaded":
                     # pyrefly: ignore  # bad-assignment
@@ -286,23 +270,6 @@ else:
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
-
-        # This is the actual constructor entry-point which dispatches to the overloads.
-        def __init__(self, *args, **kwargs) -> None:
-            mismatches: list[tuple[inspect.Signature, TypeError]] = []
-            for func in get_overloads(DeviceMesh.__init__):
-                sig = inspect.signature(func)
-                try:
-                    sig.bind(self, *args, **kwargs)
-                except TypeError as e:
-                    mismatches.append((sig, e))
-                    continue
-                func(self, *args, **kwargs)
-                return
-            raise TypeError(
-                f"{args=} and {kwargs=} didn't match any overload:\n"
-                + "\n".join(f"- overload {s!s}: {e!s}" for s, e in mismatches)
-            )
 
         @property
         def device_type(self) -> str:
@@ -697,10 +664,10 @@ else:
                         ]
                     )
             res_submesh = DeviceMesh(
-                _device_type=self._device_type,
+                self._device_type,
                 _layout=layout,
                 _rank_map=root_mesh._rank_map,
-                _mesh_dim_names=submesh_dim_names,
+                mesh_dim_names=submesh_dim_names,
                 _root_mesh=root_mesh,
                 _init_backend=False,
             )
@@ -747,12 +714,12 @@ else:
                     )
 
             res_flattened_mesh = DeviceMesh(
-                _device_type=root_mesh._device_type,
+                root_mesh._device_type,
                 _layout=flattened_mesh_layout,
                 _rank_map=root_mesh._rank_map,
-                _mesh_dim_names=(mesh_dim_name,),
+                mesh_dim_names=(mesh_dim_name,),
                 _root_mesh=root_mesh,
-                _backend_override=(backend_override,),
+                backend_override=(backend_override,),
             )
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh
 
@@ -1111,10 +1078,10 @@ else:
             unflattened_mesh_dim_names = list(not_none(self.mesh_dim_names))
             unflattened_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
             res_mesh = DeviceMesh(
-                _device_type=self.device_type,
+                self.device_type,
                 _layout=unflattened_layout,
                 _rank_map=root_mesh._rank_map,
-                _mesh_dim_names=tuple(unflattened_mesh_dim_names),
+                mesh_dim_names=tuple(unflattened_mesh_dim_names),
                 _root_mesh=root_mesh,
                 _init_backend=False,
             )
@@ -1130,11 +1097,11 @@ else:
                     tuple(unflattened_layout.strides[dim : dim + unflatten_length]),  # type: ignore[index]
                 )
                 unflatten_submesh = DeviceMesh(
-                    _device_type=self.device_type,
+                    self.device_type,
                     _layout=unflatten_layout,
                     _rank_map=root_mesh._rank_map,
-                    _mesh_dim_names=mesh_dim_names,
-                    _backend_override=backend_override,
+                    mesh_dim_names=mesh_dim_names,
+                    backend_override=backend_override,
                 )
                 dim_group_names = []
                 for idx in range(0, res_mesh.ndim):
@@ -1341,11 +1308,11 @@ else:
         with torch.device("cpu"):
             rank_map = torch.arange(layout.numel(), dtype=torch.int)
         device_mesh = DeviceMesh(
-            _device_type=device_type,
+            device_type=device_type,
             _layout=layout,
             _rank_map=rank_map,
-            _mesh_dim_names=mesh_dim_names,
-            _backend_override=backend_override_tuple,
+            mesh_dim_names=mesh_dim_names,
+            backend_override=backend_override_tuple,
         )
 
         return device_mesh
