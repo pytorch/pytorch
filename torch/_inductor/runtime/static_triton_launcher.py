@@ -245,13 +245,43 @@ class StaticallyLaunchedTritonKernel:
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
 
-        # Add a None if triton wants extra parameters for scratch spaces
         arg_tys = self.arg_tys
-        for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
-            if has_scratch:
-                arg_tys = arg_tys + "O"
-                args = (*args, None)
 
+        if self.is_rocm:
+            # ROCm/HIP kernel ABI: The Triton HIP backend ALWAYS includes both
+            # global_scratch and profile_scratch parameters in the kernel signature,
+            # even when the kernel doesn't use them (i.e., when has_*_scratch is False).
+            #
+            # This differs fundamentally from CUDA, where these parameters are only
+            # present in the signature if the corresponding has_*_scratch flag is True.
+            #
+            # The flags indicate whether memory will be allocated/used:
+            # - has_global_scratch: Whether global scratch workspace is needed
+            # - has_profile_scratch: Whether profiling instrumentation is enabled
+            #
+            # However, regardless of flag values, we MUST always pass both parameters
+            # to match the HIP kernel ABI. Passing None is safe:
+            #
+            # - If scratch is not needed (has_*_scratch=False or scratch_size=0):
+            #   The None becomes nullptr, which the kernel never dereferences
+            #
+            # - If scratch is needed (has_*_scratch=True and scratch_size>0):
+            #   The None becomes nullptr initially, but the HIP runtime intercepts
+            #   the kernel launch, allocates the required scratch memory based on
+            #   kernel metadata, and replaces the nullptr with a valid pointer before
+            #   the kernel actually executes
+            #
+            # Not passing both parameters causes segmentation faults because the kernel
+            # expects them at specific positions in the argument array.
+            arg_tys = arg_tys + "OO"
+            args = (*args, None, None)
+
+        else:
+            for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
+                if has_scratch:
+                    arg_tys = arg_tys + "O"
+                    args = (*args, None)
+        
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
@@ -267,7 +297,6 @@ class StaticallyLaunchedTritonKernel:
             args,
             stream,
         )
-
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
     @cached_property
@@ -309,7 +338,7 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
-    if device_type == "cuda":
+    if device_type in ("cuda", "hip"):
         return StaticallyLaunchedCudaKernel(kernel)
     elif device_type == "xpu":
         return StaticallyLaunchedXpuKernel(kernel)
