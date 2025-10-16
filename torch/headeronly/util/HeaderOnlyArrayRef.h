@@ -22,8 +22,9 @@ namespace c10 {
 /// functionality than ArrayRef. We document the minor differences below:
 /// 1. ArrayRef has an extra convenience constructor for SmallVector.
 /// 2. ArrayRef uses TORCH_CHECK. HeaderOnlyArrayRef uses header-only
-/// STD_TORCH_CHECK,
-///    which will output a std::runtime_error vs a c10::Error.
+///    STD_TORCH_CHECK, which will output a std::runtime_error vs a
+///    c10::Error. Consequently, you should use ArrayRef when possible
+///    and HeaderOnlyArrayRef only when necessary to support headeronly code.
 /// In all other aspects, HeaderOnlyArrayRef is identical to ArrayRef, with the
 /// positive benefit of being header-only and thus independent of libtorch.so.
 template <typename T>
