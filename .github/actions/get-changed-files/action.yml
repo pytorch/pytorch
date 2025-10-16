@@ -12,6 +12,7 @@ inputs:
 outputs:
   changed-files:
     description: "List of changed files (space-separated) or '*' if not in a PR"
+    value: ${{ steps.get-files.outputs.changed-files }}
 
 runs:
   using: composite
