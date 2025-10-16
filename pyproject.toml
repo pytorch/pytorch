@@ -347,5 +347,10 @@ package = 'torch'
 
 [tool.spin.commands]
 "Build" = [
+  ".spin/cmds.py:setup_lint",
+  ".spin/cmds.py:lazy_setup_lint",
+  ".spin/cmds.py:lint",
+  ".spin/cmds.py:quicklint",
+  ".spin/cmds.py:quickfix",
   "spin.cmds.pip.install",
 ]
