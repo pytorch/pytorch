@@ -174,12 +174,12 @@ else:
         """
 
         _device_type: str
-        _global_rank_permutation: torch.Tensor
+        _rank_map: torch.Tensor
         _mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
-        _flatten_mapping: dict[str, "DeviceMesh"] = {}
+        _flatten_mapping: dict[str, "DeviceMesh"]
 
         # This is the only public (legacy) constructor. It forwards to the private one.
         @overload
@@ -201,12 +201,12 @@ else:
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
             layout = _MeshLayout(mesh_tensor.size(), mesh_tensor.stride())
-            global_rank_permutation = mesh_tensor.flatten()
+            rank_map = mesh_tensor.flatten()
             DeviceMesh.__init__(
                 self,
                 _device_type=device_type,
                 _layout=layout,
-                _global_rank_permutation=global_rank_permutation,
+                _rank_map=rank_map,
                 _mesh_dim_names=mesh_dim_names,
                 _backend_override=backend_override,
                 _init_backend=_init_backend,
@@ -221,7 +221,7 @@ else:
             *,
             _device_type: str,
             _layout: _MeshLayout,
-            _global_rank_permutation: torch.Tensor,
+            _rank_map: torch.Tensor,
             _mesh_dim_names: Optional[tuple[str, ...]] = None,
             _root_mesh: Optional["DeviceMesh"] = None,
             _backend_override: Optional[tuple[BackendConfig, ...]] = None,
@@ -231,21 +231,21 @@ else:
             assert _layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
             )
-            assert _global_rank_permutation.ndim == 1, (
+            assert _rank_map.ndim == 1, (
                 "The global rank permutation must be 1-dimensional"
             )
-            assert _global_rank_permutation.is_contiguous(), (
+            assert _rank_map.is_contiguous(), (
                 "The global rank permutation must be contiguous"
             )
-            assert _global_rank_permutation.numel() >= _layout.cosize(), (
+            assert _rank_map.numel() >= _layout.cosize(), (
                 "The global rank permutation must be large enough for the layout: "
-                f"got {_global_rank_permutation.numel()}, "
+                f"got {_rank_map.numel()}, "
                 f"expected >= {'*'.join(f'{s}' for s in _layout.top_level_sizes)}"
             )
 
             self._device_type = _device_type
             self._layout = _layout
-            self._global_rank_permutation = _global_rank_permutation
+            self._rank_map = _rank_map
             self._mesh_dim_names = tuple(_mesh_dim_names) if _mesh_dim_names else None
             self._root_mesh = _root_mesh
 
@@ -284,6 +284,8 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            # Initialize instance-specific flatten mapping
+            self._flatten_mapping = {}
 
         # This is the actual constructor entry-point which dispatches to the overloads.
         def __init__(self, *args, **kwargs) -> None:
@@ -310,13 +312,17 @@ else:
         @property
         def mesh(self) -> torch.Tensor:
             """Returns the tensor representing the layout of devices."""
-            full_mesh = self._layout.remap_to_tensor(self._global_rank_permutation)
+            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+            if full_mesh.size(0) == 1:
+                return full_mesh[0]
             my_coords = (full_mesh == get_rank()).nonzero()
             if my_coords.size(0) > 0:
                 return full_mesh[my_coords[0, 0]]
-            if full_mesh.size(0) == 1:
-                return full_mesh[0]
-            return full_mesh.new_empty((0,) * full_mesh.ndim)
+            raise RuntimeError(
+                "In order to get the mesh Tensor of a DeviceMesh it needs to "
+                "either have all its original dimensions (e.g., no slicing) "
+                "or it needs to contain the local rank"
+            )
 
         @property
         def mesh_dim_names(self) -> Optional[tuple[str, ...]]:
@@ -408,9 +414,7 @@ else:
                     # swap the current dim to the last dim
                     # then reshape to flatten out other dims
                     pg_ranks_by_dim = (
-                        self._layout[dim]
-                        .nest()
-                        .remap_to_tensor(self._global_rank_permutation)
+                        self._layout[dim].nest().remap_to_tensor(self._rank_map)
                     )
                     backend, pg_options = backend_override[dim]
                     # We need to explicitly pass in timeout when specified in option, otherwise
@@ -523,8 +527,7 @@ else:
                 self._hash = hash(
                     (
                         self._flatten_mesh_list,
-                        self._layout.sizes,
-                        self._layout.strides,
+                        self._layout,
                         self._device_type,
                         self._mesh_dim_names,
                         self._thread_id,
@@ -540,8 +543,7 @@ else:
                 return False
             return (
                 self._flatten_mesh_list == other._flatten_mesh_list
-                and self._layout.sizes == other._layout.sizes
-                and self._layout.strides == other._layout.strides
+                and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
@@ -697,7 +699,7 @@ else:
             res_submesh = DeviceMesh(
                 _device_type=self._device_type,
                 _layout=layout,
-                _global_rank_permutation=root_mesh._global_rank_permutation,
+                _rank_map=root_mesh._rank_map,
                 _mesh_dim_names=submesh_dim_names,
                 _root_mesh=root_mesh,
                 _init_backend=False,
@@ -747,7 +749,7 @@ else:
             res_flattened_mesh = DeviceMesh(
                 _device_type=root_mesh._device_type,
                 _layout=flattened_mesh_layout,
-                _global_rank_permutation=root_mesh._global_rank_permutation,
+                _rank_map=root_mesh._rank_map,
                 _mesh_dim_names=(mesh_dim_name,),
                 _root_mesh=root_mesh,
                 _backend_override=(backend_override,),
@@ -879,9 +881,7 @@ else:
             """
             mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
             layout = self._layout[mesh_dim]
-            pg_ranks_by_dim = layout.remap_to_tensor(
-                self._global_rank_permutation,
-            )
+            pg_ranks_by_dim = layout.remap_to_tensor(self._rank_map)
             cur_rank = self.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -1113,7 +1113,7 @@ else:
             res_mesh = DeviceMesh(
                 _device_type=self.device_type,
                 _layout=unflattened_layout,
-                _global_rank_permutation=root_mesh._global_rank_permutation,
+                _rank_map=root_mesh._rank_map,
                 _mesh_dim_names=tuple(unflattened_mesh_dim_names),
                 _root_mesh=root_mesh,
                 _init_backend=False,
@@ -1132,7 +1132,7 @@ else:
                 unflatten_submesh = DeviceMesh(
                     _device_type=self.device_type,
                     _layout=unflatten_layout,
-                    _global_rank_permutation=root_mesh._global_rank_permutation,
+                    _rank_map=root_mesh._rank_map,
                     _mesh_dim_names=mesh_dim_names,
                     _backend_override=backend_override,
                 )
@@ -1339,11 +1339,11 @@ else:
         # Always initialize the (identity) permutation on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
-            global_rank_permutation = torch.arange(layout.numel(), dtype=torch.int)
+            rank_map = torch.arange(layout.numel(), dtype=torch.int)
         device_mesh = DeviceMesh(
             _device_type=device_type,
             _layout=layout,
-            _global_rank_permutation=global_rank_permutation,
+            _rank_map=rank_map,
             _mesh_dim_names=mesh_dim_names,
             _backend_override=backend_override_tuple,
         )
