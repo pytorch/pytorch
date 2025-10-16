@@ -160,35 +160,34 @@ def varlen_attn(
 
     Example::
 
-        >>> batch_size, max_seq_len, embed_dim, num_heads = 2, 512, 1024, 16
-        >>> head_dim = embed_dim // num_heads
-        >>> seq_lengths = []
-        >>> for _ in range(batch_size):
-        ...     length = torch.randint(1, max_seq_len // 64 + 1, (1,)).item() * 64
-        ...     seq_lengths.append(min(length, max_seq_len))
-        >>> seq_lengths = torch.tensor(seq_lengths, device="cuda")
-        >>> total_tokens = seq_lengths.sum().item()
-        >>>
-        >>> # Create packed query, key, value tensors
-        >>> query = torch.randn(
-        ...     total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
-        ... )
-        >>> key = torch.randn(
-        ...     total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
-        ... )
-        >>> value = torch.randn(
-        ...     total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
-        ... )
-        >>>
-        >>> # Build cumulative sequence tensor
-        >>> cu_seq = torch.zeros(batch_size + 1, device="cuda", dtype=torch.int32)
-        >>> cu_seq[1:] = seq_lengths.cumsum(0)
-        >>> max_len = seq_lengths.max().item()
-        >>>
-        >>> # Call varlen_attn
-        >>> output = varlen_attn(
-        ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
-        ... )
+        >>> import torch
+        >>> if torch.cuda.is_available():
+        ...     batch_size, max_seq_len, embed_dim, num_heads = 2, 512, 1024, 16
+        ...     head_dim = embed_dim // num_heads
+        ...     seq_lengths = []
+        ...     for _ in range(batch_size):
+        ...         length = torch.randint(1, max_seq_len // 64 + 1, (1,)).item() * 64
+        ...         seq_lengths.append(min(length, max_seq_len))
+        ...     seq_lengths = torch.tensor(seq_lengths, device="cuda")
+        ...     total_tokens = seq_lengths.sum().item()
+        ...     # Create packed query, key, value tensors
+        ...     query = torch.randn(
+        ...         total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
+        ...     )
+        ...     key = torch.randn(
+        ...         total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
+        ...     )
+        ...     value = torch.randn(
+        ...         total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
+        ...     )
+        ...     # Build cumulative sequence tensor
+        ...     cu_seq = torch.zeros(batch_size + 1, device="cuda", dtype=torch.int32)
+        ...     cu_seq[1:] = seq_lengths.cumsum(0)
+        ...     max_len = seq_lengths.max().item()
+        ...     # Call varlen_attn
+        ...     output = varlen_attn(
+        ...         query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
+        ...     )
     """
     out, lse = _varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
