@@ -900,7 +900,7 @@ test_inductor_set_cpu_affinity(){
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
 
-  if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
+  if [[ "$(uname -m)" != "aarch64" ]]; then
     # Use Intel OpenMP for x86
     IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
     export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
@@ -914,7 +914,7 @@ test_inductor_set_cpu_affinity(){
   cores=$((cpus / thread_per_core))
 
   # Set number of cores to 16 on aarch64 for performance runs
-  if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
+  if [[ "$(uname -m)" == "aarch64" && $cores -gt 16 ]]; then
     cores=16
   fi
   export OMP_NUM_THREADS=$cores
@@ -1667,7 +1667,7 @@ if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
     python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
   fi
   python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
-elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
