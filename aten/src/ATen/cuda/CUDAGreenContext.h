@@ -10,8 +10,7 @@
 #define CUDA_HAS_GREEN_CONTEXT
 #endif
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 class TORCH_CUDA_CPP_API GreenContext {
  public:
