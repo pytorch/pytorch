@@ -33,12 +33,10 @@ Be careful when running untrusted models. This classification includes models cr
 
 **Be mindful of risky model formats**. Give preference to share and load weights with the appropriate format for your use case. [safetensors](https://huggingface.co/docs/safetensors/en/index) gives the most safety but is the most restricted in what it supports. [`torch.load`](https://pytorch.org/docs/stable/generated/torch.load.html#torch.load) with `weights_only=True` reduces the surface of remote code execution attacks but offers a significantly larger surface of attack than safetensors. In particular:
 
-1. ``weights_only=True`` does not guard against denial of service attacks.
-2. ``weights_only=True`` safeguards against memory corruption are best effort.
+1. `weights_only=True` does not guard against denial of service attacks.
+2. `weights_only=True` safeguards against memory corruption are best effort.
 
 Loading un-trusted checkpoint with `weights_only=False` MUST never be done.
-
-
 
 Important Note: The trustworthiness of a model is not binary. You must always determine the proper level of caution depending on the specific model and how it matches your use case and risk tolerance.
 
