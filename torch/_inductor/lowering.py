@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (
+from torch._prims_common import (  # pyrefly: ignore  # deprecated
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -2139,6 +2139,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if t.is_meta:
+        return True
+
+    if t.is_sparse:
         return True
 
     if t.dtype == torch.float8_e8m0fnu:
