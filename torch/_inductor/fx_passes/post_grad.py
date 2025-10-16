@@ -1405,28 +1405,6 @@ def decompose_auto_functionalized(graph):
         raise AssertionError("auto_functionalized_v2 was not removed")
 
 
-def make_autofunctionalize(gm: torch.fx.GraphModule):
-    from torch._subclasses.functional_tensor import (
-        dispatch_functionalize,
-        FunctionalTensorMode,
-    )
-    from torch.fx.experimental.proxy_tensor import make_fx
-
-    fake_inputs = []
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            fake_val = node.meta.get("val")
-            if fake_val is not None:
-                fake_inputs.append(fake_val)
-
-    def wrapper(*inputs):
-        return gm(*inputs)
-
-    mode = FunctionalTensorMode()
-    functionalized_fn = dispatch_functionalize(wrapper, mode)
-    return make_fx(functionalized_fn, tracing_mode="fake")(*fake_inputs)
-
-
 @register_lowering_pattern(
     CallFunction(
         aten.cat,
