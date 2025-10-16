@@ -88,16 +88,19 @@ TorchShimError invoke_parallel(
     int64_t grain_size,
     ParallelFunc lambda,
     void* ctx) {
-  TORCH_SHIM_CONVERT_EXCEPTION_TO_ERROR_CODE({
 #if !AT_PARALLEL_NATIVE
+  TORCH_SHIM_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(
         false,
         "Only use invoke_parallel if libtorch built with AT_PARALLEL_NATIVE=1");
-#endif
+  });
+#else
+  TORCH_SHIM_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto wrapper = [lambda, ctx](int64_t chunk_begin, int64_t chunk_end) {
       lambda(chunk_begin, chunk_end, ctx);
     };
 
     at::internal::invoke_parallel(begin, end, grain_size, wrapper);
   });
+#endif
 }
