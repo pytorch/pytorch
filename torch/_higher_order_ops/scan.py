@@ -868,21 +868,7 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def scan_batch_rule(interpreter, combine_fn, init, xs, additional_inputs):
-    from torch._functorch.vmap import (
-        is_batchedtensor,
-        restore_vmap,
-        unwrap_batched,
-        wrap_batched,
-    )
-
-    if any(is_batchedtensor(x) for x in [*init, *xs, *additional_inputs]):
-        if any(not is_batchedtensor(x) for x in init):
-            raise NotImplementedError(
-                f"vmapped scan got init inputs that're not vmapped {init}. "
-                f"Hint: consider expand the init then vmap over the expanded dimension."
-                f"Explanation: the combine_fn might return batched tensor carries which we can't "
-                f"pass as input to next iteration since it has an additional batched dimension after first iteration "
-            )
+    from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 
     unbatched_args, in_dims = unwrap_batched(
         (init, xs, additional_inputs), interpreter.level()
@@ -904,27 +890,29 @@ def scan_batch_rule(interpreter, combine_fn, init, xs, additional_inputs):
 
         def wrapper(*args):
             nonlocal out_dims
-            outputs, out_dims = restore_vmap(
+            outputs, per_slice_out_dims = restore_vmap(
                 combine_fn,
                 after_move_dims,
                 interpreter.batch_size(),
                 interpreter.randomness(),
             )(*args)
-            target_out_dims = tuple(
-                pytree.tree_map(
-                    lambda out_bdim: -1 if out_bdim is not None else None, out_dims
-                )
-            )
+            # Note: outputs are not batched, we just move the batch dim to the end
+            # this is to avoid it interfering with scan's batching
             outputs = tuple(
                 pytree.tree_map(
                     lambda out, out_bdim: out.movedim(out_bdim, -1)
                     if out_bdim is not None
                     else out,
                     outputs,
-                    out_dims,
+                    per_slice_out_dims,
                 )
             )
-            out_dims = target_out_dims
+            out_dims = tuple(
+                pytree.tree_map(
+                    lambda out_bdim: -1 if out_bdim is not None else None,
+                    per_slice_out_dims,
+                )
+            )
             return outputs
 
         unwrapped_out = scan_op(
