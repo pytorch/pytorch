@@ -128,9 +128,12 @@ inline void initGlobalDevicePoolState() {
     auto architecture = device->get_info<syclex::info::device::architecture>();
     if (architecture < syclex::architecture::intel_gpu_acm_g10) {
       TORCH_WARN(
-          "The current GPU (",
+          "The detected GPU (",
           device->get_info<sycl::info::device::name>(),
-          ") is not officially supported. Please refer to the hardware prerequisites: ",
+          ") is not officially supported by PyTorch XPU. Running workloads on this device may result in ",
+          "unexpected behavior, reduced performance, or runtime errors.\n",
+          "For stable and fully supported execution, please use GPUs based on Intel Arc Alchemist series or newer.\n",
+          "Refer to the hardware prerequisites for more information: ",
           "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite");
     }
   }
