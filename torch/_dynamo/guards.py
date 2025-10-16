@@ -2166,6 +2166,8 @@ class GuardBuilder(GuardBuilderBase):
                 range,
                 dict_keys,
                 torch.Size,
+                torch.Stream,
+                torch.cuda.streams.Stream,
                 *np_types,
                 *ok_mutable_types,
             }
@@ -3603,7 +3605,10 @@ class CheckFunctionManager:
                     output_graph.local_scope,
                     CompileContext.current_compile_id(),
                 )
-                raise AssertionError(f"Guard check failed: {reasons}")
+                raise AssertionError(
+                    "Guard failed on the same frame it was created. This is a bug - please create an issue."
+                    f"Guard fail reason: {reasons}"
+                )
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
@@ -4182,7 +4187,7 @@ def make_torch_function_mode_stack_guard(
             return False
 
         for ty, mode in zip(types, cur_stack):
-            if ty != type(mode):
+            if ty is not type(mode):
                 return False
 
         return True
