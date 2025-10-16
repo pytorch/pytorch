@@ -31,6 +31,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: Get changed files
     runs-on: ubuntu-latest
+    outputs:
+      changed-files-matrix: ${{ steps.output-test-matrix.outputs.changed-files-matrix }}
     steps:
       - name: Get changed files
         id: get-changed-files
@@ -38,6 +40,7 @@ jobs:
         with:
           all_files: ${{ contains(github.event.pull_request.labels.*.name, 'lint-all-files') || contains(github.event.pull_request.labels.*.name, 'Reverted') || github.event_name == 'push' }}
       - name: Output test-matrix
+        id: output-test-matrix
         run: |
           MATRIX=$(jq -n '[{"changed-files": "${{ steps.get-changed-files.outputs.changed-files }}"}, {"changed-files": "*"}]' | jq 'unique')
           echo "changed-files-matrix={\"include\":$MATRIX}" >> "$GITHUB_OUTPUT"
