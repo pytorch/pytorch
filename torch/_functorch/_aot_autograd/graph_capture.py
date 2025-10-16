@@ -287,6 +287,8 @@ def aot_dispatch_base_graph(
         copy_count2 = assert_functional_graph(fw_module.graph)
         propagate_input_mutation_stacktraces(fw_module.graph)
         assert copy_count == copy_count2
+    else:
+        fw_module.graph.eliminate_dead_code()
 
     # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
@@ -466,8 +468,8 @@ def aot_dispatch_autograd_graph(
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
+    fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
-        fx_g.graph.eliminate_dead_code()
         # There should be *NO* mutating ops in the graph at this point.
         assert_functional_graph(fx_g.graph)
 

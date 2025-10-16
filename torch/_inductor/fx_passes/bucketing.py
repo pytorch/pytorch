@@ -34,6 +34,15 @@ def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     return (group_name, reduce_op, dtype)
 
 
+def bucket_key(node: torch.fx.Node) -> Optional[object]:
+    if is_all_gather_into_tensor(node):
+        return _ag_group_key(node)
+    elif is_reduce_scatter_tensor(node):
+        return _rs_group_key(node)
+    else:
+        return None
+
+
 def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
     """
     Determine the size of a bucket based on its ID.

@@ -252,11 +252,6 @@ class TestMemoryTracker(InductorTestCase):
                 if node.op not in ("placeholder", "get_attr", "output")
             ]
 
-            if len(compute_nodes) < 3:
-                self.skipTest(
-                    f"Need at least 3 compute nodes, got {len(compute_nodes)}"
-                )
-
             # Test original order: zeros_like, add, sum
             # zeros gets freed after sum (last use of zeros)
             memory_tracker1 = MemoryTracker(fx_graph.graph, device_filter=device_filter)
