@@ -98,6 +98,7 @@ class _Orthogonal(Module):
                 )
             # Q is now orthogonal (or unitary) of size (..., n, n)
             if n != k:
+                # pyrefly: ignore  # unbound-name
                 Q = Q[..., :k]
             # Q is now the size of the X (albeit perhaps transposed)
         else:
