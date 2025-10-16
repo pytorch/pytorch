@@ -79,6 +79,35 @@ class SimpleModelAnnotated(torch.nn.Module):
         return self.mlp_1(x)
 
 
+class SimpleMoEModel(torch.nn.Module):
+    def __init__(self, device, num_experts=4, hidden_dim=10):
+        super().__init__()
+        self.num_experts = num_experts
+        self.hidden_dim = hidden_dim
+        self.gate = torch.nn.Linear(hidden_dim, num_experts, device=device)
+        self.experts = torch.nn.ModuleList(
+            [MLPModule(device) for _ in range(num_experts)]
+        )
+
+    def forward(self, input):
+        # Dispatch region: compute gating/routing probabilities
+        with fx_traceback.annotate({"moe_region": "dispatch"}):
+            gate_logits = self.gate(input)
+            gate_probs = torch.nn.functional.softmax(gate_logits, dim=-1)
+
+        # Compute region: run all experts on the input
+        with fx_traceback.annotate({"moe_region": "compute"}):
+            expert_outputs = torch.stack(
+                [expert(input) for expert in self.experts], dim=-1
+            )
+
+        # Combine region: combine expert outputs using gate probabilities
+        with fx_traceback.annotate({"moe_region": "combine"}):
+            output = torch.sum(expert_outputs * gate_probs.unsqueeze(1), dim=-1)
+
+        return output
+
+
 def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # needed for stric export
     torch.utils._pytree.register_constant(DTensorSpec)
@@ -371,6 +400,62 @@ class DTensorExportTest(TestCase):
             )
         output_gm = gm(x_dtensor, y_dtensor, z_dtensor)
         self.assertEqual(output, output_gm)
+
+    def test_moe_export_with_region_annotation(self):
+        """Test exporting a MoE model with DTensor inputs"""
+        dp_degree = 2
+        tp_degree = self.world_size // dp_degree
+
+        # 2-D mesh is [dp, tp]
+        mesh_2d = init_device_mesh(
+            self.device_type,
+            mesh_shape=(dp_degree, tp_degree),
+            mesh_dim_names=["dp", "tp"],
+        )
+
+        model = SimpleMoEModel(self.device_type, num_experts=4, hidden_dim=10)
+
+        # Parallelize the MoE model
+        parallelize_plan = {
+            "gate": ColwiseParallel(),
+        }
+        # Parallelize each expert
+        for i in range(model.num_experts):
+            parallelize_plan[f"experts.{i}.net1"] = ColwiseParallel()
+            parallelize_plan[f"experts.{i}.net2"] = RowwiseParallel()
+
+        tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
+
+        inputs = torch.rand(20, 10, device=self.device_type)
+        inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
+
+        joint_gm = graph_capture_and_aot_export_joint_with_descriptors(tp_model, inputs)
+
+        self.assertIsNotNone(joint_gm)
+
+        # Verify that annotations are present in the exported graph
+        def count_nodes_with_annotation(gm, region_name):
+            count = 0
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and "custom" in node.meta:
+                    if node.meta["custom"].get("moe_region") == region_name:
+                        count += 1
+            return count
+
+        # Check that all three regions have annotated nodes
+        dispatch_nodes = count_nodes_with_annotation(joint_gm, "dispatch")
+        compute_nodes = count_nodes_with_annotation(joint_gm, "compute")
+        combine_nodes = count_nodes_with_annotation(joint_gm, "combine")
+
+        self.assertGreater(
+            dispatch_nodes, 0, "Expected nodes annotated with 'dispatch' region"
+        )
+        self.assertGreater(
+            compute_nodes, 0, "Expected nodes annotated with 'compute' region"
+        )
+        self.assertGreater(
+            combine_nodes, 0, "Expected nodes annotated with 'combine' region"
+        )
 
 
 instantiate_parametrized_tests(DTensorExportTest)
