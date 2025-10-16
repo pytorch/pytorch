@@ -682,9 +682,10 @@ def check_no_missing_dump_files(
     for membership in memberships:
         all_ranks.add(int(membership.global_rank))
     dumps_ranks = {int(key) for key in entries.keys()}
-    assert dumps_ranks == all_ranks, (
-        f"Missing dump files from ranks {all_ranks - dumps_ranks}"
-    )
+    if dumps_ranks != all_ranks:
+        logger.warning(
+            f"Missing dump files from ranks {all_ranks - dumps_ranks}"
+        )
 
 
 def check_version(version_by_ranks: dict[str, str], version: str) -> None:
@@ -752,6 +753,8 @@ def align_trace_from_beginning(
         # Rank 3: [0, 1, 2, 3, 4, 5, None]
         # Then we should start from collective 2 not 0 because any collective before,
         # we don't have complete records from all ranks so we need to ignore them.
+        if len(entries[rank]) == 0:
+            continue
         first_record_id = entries[rank][0]["record_id"]
         maximum_starting_record_id = max(maximum_starting_record_id, first_record_id)
 
