@@ -173,12 +173,12 @@ else:
         """
 
         _device_type: str
-        _global_rank_permutation: torch.Tensor
+        _rank_map: torch.Tensor
         _mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
-        _flatten_mapping: dict[str, "DeviceMesh"] = {}
+        _flatten_mapping: dict[str, "DeviceMesh"]
 
         def __init__(
             self,
@@ -200,8 +200,8 @@ else:
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
-            self._global_rank_permutation = (
-                _root_mesh._global_rank_permutation
+            self._rank_map = (
+                _root_mesh._rank_map
                 if _root_mesh is not None
                 else mesh_tensor.flatten()
             )
@@ -257,6 +257,8 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            # Initialize instance-specific flatten mapping
+            self._flatten_mapping = {}
 
         @property
         def device_type(self) -> str:
@@ -266,13 +268,17 @@ else:
         @property
         def mesh(self) -> torch.Tensor:
             """Returns the tensor representing the layout of devices."""
-            full_mesh = self._layout.remap_to_tensor(self._global_rank_permutation)
+            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+            if full_mesh.size(0) == 1:
+                return full_mesh[0]
             my_coords = (full_mesh == get_rank()).nonzero()
             if my_coords.size(0) > 0:
                 return full_mesh[my_coords[0, 0]]
-            if full_mesh.size(0) == 1:
-                return full_mesh[0]
-            return full_mesh.new_empty((0,) * full_mesh.ndim)
+            raise RuntimeError(
+                "In order to get the mesh Tensor of a DeviceMesh it needs to "
+                "either have all its original dimensions (e.g., no slicing) "
+                "or it needs to contain the local rank"
+            )
 
         @property
         def mesh_dim_names(self) -> Optional[tuple[str, ...]]:
@@ -364,9 +370,7 @@ else:
                     # swap the current dim to the last dim
                     # then reshape to flatten out other dims
                     pg_ranks_by_dim = (
-                        self._layout[dim]
-                        .nest()
-                        .remap_to_tensor(self._global_rank_permutation)
+                        self._layout[dim].nest().remap_to_tensor(self._rank_map)
                     )
                     backend, pg_options = backend_override[dim]
                     # We need to explicitly pass in timeout when specified in option, otherwise
@@ -479,8 +483,7 @@ else:
                 self._hash = hash(
                     (
                         self._flatten_mesh_list,
-                        self._layout.sizes,
-                        self._layout.strides,
+                        self._layout,
                         self._device_type,
                         self._mesh_dim_names,
                         self._thread_id,
@@ -496,8 +499,7 @@ else:
                 return False
             return (
                 self._flatten_mesh_list == other._flatten_mesh_list
-                and self._layout.sizes == other._layout.sizes
-                and self._layout.strides == other._layout.strides
+                and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
@@ -651,9 +653,7 @@ else:
                         ]
                     )
             cur_rank = self.get_rank()
-            pg_ranks_by_dim = layout.remap_to_tensor(
-                root_mesh._global_rank_permutation,
-            )
+            pg_ranks_by_dim = layout.remap_to_tensor(root_mesh._rank_map)
             res_submesh = DeviceMesh._create_mesh_from_ranks(
                 self._device_type,
                 pg_ranks_by_dim,
@@ -708,9 +708,7 @@ else:
             cur_rank = root_mesh.get_rank()
             # Due to the limitation of ProcessGroup api, we need to start from root mesh so that all ranks call the
             # new_group api to avoid potential hang.
-            pg_ranks_by_dim = flattened_mesh_layout.remap_to_tensor(
-                root_mesh._global_rank_permutation,
-            )
+            pg_ranks_by_dim = flattened_mesh_layout.remap_to_tensor(root_mesh._rank_map)
             res_flattened_mesh = DeviceMesh._create_mesh_from_ranks(
                 root_mesh._device_type,
                 pg_ranks_by_dim.flatten(
@@ -849,9 +847,7 @@ else:
             """
             mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
             layout = self._layout[mesh_dim]
-            pg_ranks_by_dim = layout.remap_to_tensor(
-                self._global_rank_permutation,
-            )
+            pg_ranks_by_dim = layout.remap_to_tensor(self._rank_map)
             cur_rank = self.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -1132,9 +1128,7 @@ else:
             root_mesh = self._get_root_mesh()
             cur_rank = self.get_rank()
             unflattened_layout = self._layout.unflatten(dim, mesh_sizes)
-            pg_ranks_by_dim = unflattened_layout.remap_to_tensor(
-                root_mesh._global_rank_permutation,
-            )
+            pg_ranks_by_dim = unflattened_layout.remap_to_tensor(root_mesh._rank_map)
             unflattened_mesh_dim_names = list(not_none(self.mesh_dim_names))
             unflattened_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
             res_mesh = DeviceMesh._create_mesh_from_ranks(
@@ -1158,7 +1152,7 @@ else:
                     tuple(unflattened_layout.strides[dim : dim + unflatten_length]),  # type: ignore[index]
                 )
                 unflatten_pg_ranks_by_dim = unflatten_layout.remap_to_tensor(
-                    root_mesh._global_rank_permutation,
+                    root_mesh._rank_map
                 )
                 unflatten_submesh = DeviceMesh._create_mesh_from_ranks(
                     self.device_type,
