@@ -7384,7 +7384,7 @@
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_mask
+    SparseCPU, SparseCUDA, SparseMPS: sparse_mask
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_mask_sparse_compressed
   autogen: sparse_mask.out
 
