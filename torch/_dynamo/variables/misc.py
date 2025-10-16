@@ -1989,12 +1989,6 @@ _supported_datetime_attrs = {
 
 
 class DatetimeNowVariable(VariableTracker):
-    def reconstruct(self, cg):
-        cg.create_load_python_module(datetime)
-        cg.create_load_attr("datetime")
-        cg.create_load_attr("now")
-        cg.call_function(0, False)
-
     def var_getattr(self, tx, name: str) -> VariableTracker:
         # TODO: for now supporting only attributes; operations on now() won't work yet
         if name in _supported_datetime_attrs:
