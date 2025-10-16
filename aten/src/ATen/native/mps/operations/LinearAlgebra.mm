@@ -197,7 +197,7 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 }
 
 void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
-  Tensor status_flat = status.view(-1);
+  const auto& status_flat = status.view(-1);
 
   for (const auto i : c10::irange(status_flat.size(0))) {
     int code = status_flat[i].item<int>();
