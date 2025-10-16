@@ -3490,7 +3490,7 @@ class Grid2DWithYZOverflow(GridExpr):
 
 class MixOrderReductionGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
-        assert self.inductor_meta.get("RSPLIT_SIZE") % meta.get("XBLOCK") == 0  # TODO will remove
+        assert self.inductor_meta.get("RSPLIT_SIZE") % meta.get("XBLOCK") == 0  # TODO can allow RSPLIT_SIZE to be not a multiple of XBLOCK later
         self.x_grid = self.ceildiv("xnumel", self.inductor_meta.get("RSPLIT_SIZE"))
 
 class CooperativeReductionGrid(GridExpr):

@@ -4392,10 +4392,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
 
         if self.mix_order_reduction:
-            self.args.workspace(self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
-
-            # TODO add multiple workspace only if needed
-            self.args.workspace(self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
+            self.args.workspace(len(self.saved_partial_accumulate) * self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
 
         code = IndentedBuffer()
 

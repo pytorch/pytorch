@@ -1448,7 +1448,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
-        # a extra sum
+        # a extra round of reduction
         assert len(node2.get_buffer_names()) == len(kernel.saved_partial_accumulate)
         for idx, (buffer_name, partial_accum) in enumerate(zip(node2.get_buffer_names(), kernel.saved_partial_accumulate)):
             assert buffer_name == partial_accum.buffer_name

@@ -1379,7 +1379,6 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-    # TODO: do similar things for fused node
     def swap_pw_red_dimension(self):
         assert len(self._body.sizes[0]) == 2
         self.apply_new_loop_order([1, 0])
@@ -1885,9 +1884,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
 class FusedMixOrderReductions(FusedSchedulerNode):
     def __init__(self, node1, node2):
-        # TODO: node1, node2 can themself be FusedSchedulerNode
-        # assert isinstance(node1, SchedulerNode)
-        # assert isinstance(node2, SchedulerNode)
         self.node1 = node1
         self.node2 = node2 
         super().__init__(node1.scheduler, node1.get_nodes() + node2.get_nodes())
@@ -4508,7 +4504,6 @@ class Scheduler:
                 shared_data_score,
             )
 
-        print(f"==> {MixOrderReduction.can_fuse(node1, node2)=}")
         if not V.choices.can_fuse(self, node1, node2, shared_data_score):
             return False
 
@@ -5804,7 +5799,6 @@ class BaseScheduling:  # noqa: docstring_linter
         self.scheduler = scheduler
 
     def free_buffers_in_scheduler(self) -> None:
-        # return # TODO bring this back
         if self.scheduler:
             self.scheduler.free_buffers()
 
