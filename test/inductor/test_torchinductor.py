@@ -8700,6 +8700,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual_out = compiled_fn(view)
         self.assertEqual(reference_out.stride(), actual_out.stride())
 
+    def test_nonzero_static_stride_compile(self):
+        from torch._subclasses import FakeTensorMode
+
+        L = 8
+        x = torch.eye(L, device=self.device)
+
+        def fn(t):
+            return torch.nonzero_static(t, size=L)
+
+        compiled_fn = torch.compile(fn, backend=lambda gm, _: gm)
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            eager_fake = fn(fake_x)
+            compiled_fake = compiled_fn(fake_x)
+
+        self.assertEqual(eager_fake.stride(), compiled_fake.stride())
+
     def test_like_channels_last(self):
         def foo():
             randn = torch.randn((4, 3, 8, 8), device=self.device, dtype=torch.float32)
