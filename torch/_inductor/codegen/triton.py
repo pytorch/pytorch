@@ -120,6 +120,14 @@ schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
+def get_triton_reductoin_function(reduction_type):
+    use_helper = reduction_type in ("any", "max", "min", "prod")
+    module = "triton_helpers" if use_helper else "tl"
+    if reduction_type in ("max", "min"):
+        return f"{module}.{reduction_type}2"
+    else:
+        return f"{module}.{reduction_type}"
+
 
 def is_sympy_integer_like(expr: object):
     """ "
@@ -1945,6 +1953,11 @@ class TMACompatibilityChecker:
         """
         return self.force
 
+@dataclasses.dataclass
+class PartialAccumulate:
+    buffer_name: str
+    reduction_type: str
+    value: Any
 
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     """A class to represent a triton kernel and helpers to generate
@@ -1988,7 +2001,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._load_index = 0
 
-        self.saved_partial_accumulate = {}
+        self.saved_partial_accumulate = []
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -2715,8 +2728,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
 
-    def partial_accumulate(self, name: str, val):
-        self.saved_partial_accumulate[name] = val
+    def partial_accumulate(self, name: str, reduction_type, val):
+        self.saved_partial_accumulate.append(PartialAccumulate(name, reduction_type, val))
 
     def load(self, name: str, index: sympy.Expr):
         """
@@ -3138,18 +3151,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
-            use_helper = reduction_type in ("any", "max", "min", "prod")
-            module = "triton_helpers" if use_helper else "tl"
+            triton_reduction_fn = get_triton_reductoin_function(reduction_type)
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
-            if reduction_type in ("max", "min"):
-                result, shape = self.reduction_resize_and_shape(
-                    f"{module}.{reduction_type}2({value}, {dim})", value.shape
-                )
-            else:
-                result, shape = self.reduction_resize_and_shape(
-                    f"{module}.{reduction_type}({value}, {dim})", value.shape
-                )
+            result, shape = self.reduction_resize_and_shape(
+                f"{triton_reduction_fn}({value}, {dim})", value.shape
+            )
 
             if result_type is not None:
                 result = f"{result}.to({self.dtype_to_str(result_type)})"
@@ -4045,13 +4052,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         loop_trees = [tree for tree in self.range_trees if tree.is_loop]
         if self.mix_order_reduction:
-            # self.body.writeline("if True:")
-            self.body.writeline(
-                f"accum = tl.full([R0_BLOCK], 0.0, tl.float32)[None, :]"
-            )
-            if len(self.saved_partial_accumulate) == 2:
+
+            for idx, partial_accum in enumerate(self.saved_partial_accumulate):
+                reduction_type = partial_accum.reduction_type
+                default = ir.Reduction.default_accumulator(reduction_type, torch.float)
+                name = f"accum{idx}"
                 self.body.writeline(
-                    f"accum2 = tl.full([R0_BLOCK], 0.0, tl.float32)[None, :]"
+                    f"{name} = tl.full([R0_BLOCK], {default}, tl.float32)[None, :]"
                 )
             self.body.writeline(
                 f"for suboff in range(0, RSPLIT_SIZE, XBLOCK):"
@@ -4067,27 +4074,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
 
-                assert len(self.saved_partial_accumulate) in [1, 2]
-                var = list(self.saved_partial_accumulate.values())[0]
-                # TODO: find the tmp0 name from cache
                 # TODO: no need to sum if XBLOCK == 0
-                self.body.writeline(
-                    f"accum += {var}.sum(axis=0)",
-                )
-                if len(self.saved_partial_accumulate) == 2:
-                    var2 = list(self.saved_partial_accumulate.values())[1]
-                    self.body.writeline(
-                        f"accum2 += {var2}.sum(axis=0)",
+                for idx, partial_accum in enumerate(self.saved_partial_accumulate):
+                    var = partial_accum.value
+                    name = f"accum{idx}"
+                    combine_fn = ir.get_reduction_combine_fn(partial_accum.reduction_type, torch.float)
+                    triton_reduction_function = get_triton_reductoin_function(partial_accum.reduction_type)
+                    updated = combine_fn(name, f"{triton_reduction_function}({var}, axis=0)")
+                    self.body.writeline( 
+                        f"{name} = {updated}"
                     )
-            # buf2 is the intermediate buffer
-            # var = self.args.output("buf2")
-            # self.store("buf2", None, "accum")
-            self.body.writeline(
-                "tl.store(ws_ptr + tl.program_id(0) * r0_numel + r0_index, accum, r0_mask)"
-            )
-            if len(self.saved_partial_accumulate) == 2:
+
+            for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                 self.body.writeline(
-                    "tl.store(ws_ptr + (tl.program_id(0) + tl.num_programs(0)) * r0_numel + r0_index, accum2, r0_mask)"
+                    f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )
 
         elif self.inside_reduction and len(loop_trees) > 0:

@@ -19,15 +19,27 @@ class MixOrderReductionTest(TestCase):
         super().setUp()
         metrics.reset()
 
+    @parametrize(
+        "name",
+        [
+            "sum",
+            "prod",
+            # "max",
+            # "min",
+            # "amax",
+            # "amin",
+        ],
+    )
     @parametrize("swap", (False, True))
     @inductor_config.patch(split_reductions=False)
-    def test_mix_order_sum(self, swap):
+    def test_mix_order_reduction(self, name, swap):
         def f(x):
             if swap:
-                return x.sum(dim=0), x.sum(dim=1)
+                return reduction_fn(x, dim=0), reduction_fn(x, dim=1)
             else:
-                return x.sum(dim=1), x.sum(dim=0)
+                return reduction_fn(x, dim=1), reduction_fn(x, dim=0)
 
+        reduction_fn = getattr(torch, name)
         M, N = 32768, 768
         dtype = torch.float
         x = torch.randn(M, N, dtype=dtype, device=GPU_TYPE)

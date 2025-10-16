@@ -545,6 +545,7 @@ class LoopBodyBlock:
             breakpoint() # TODO
         assert red
         assert store
+        reduction_type = red.args[-2]
         red_arg = red.args[-1]
         buf = store.args[1]
         ops = store.args[0]
@@ -552,7 +553,7 @@ class LoopBodyBlock:
         with self.graph.inserting_after(store):
             self.graph.call_method(
                 "partial_accumulate",
-                (ops, buf, red_arg)
+                (ops, buf, reduction_type, red_arg)
             )
         self.graph.erase_node(store)
         self.graph.erase_node(red)
