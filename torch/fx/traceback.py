@@ -10,6 +10,7 @@ from torch._utils_internal import signpost_event
 
 from ._compatibility import compatibility
 from .graph import Graph
+from .graph_module import GraphModule
 from .node import Node
 
 
@@ -273,11 +274,7 @@ def annotate(annotation_dict: dict):
     global current_meta
 
     has_custom = "custom" in current_meta
-    old_custom = {}
-    # cannot use `old_custom = copy.copy(current_meta.get("custom", {}))` here,
-    # as dynamo doesn't support copy.copy()
-    for k, v in current_meta.get("custom", {}).items():
-        old_custom[k] = v  # noqa: PERF403
+    old_custom = copy.copy(current_meta.get("custom", {}))
 
     try:
         if not has_custom:
@@ -392,3 +389,20 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
             },
         )
         return {}
+
+
+def _get_custom_metadata(gm: GraphModule) -> str:
+    assert isinstance(gm, GraphModule)
+
+    def helper(gm: GraphModule):
+        custom_metadata = []
+        for node in gm.graph.nodes:
+            if hasattr(node, "meta") and node.meta.get("custom", None):
+                custom_metadata.append((node.op, node.name, node.meta["custom"]))
+            if node.op == "get_attr" and isinstance(
+                getattr(gm, node.target), GraphModule
+            ):
+                custom_metadata.append(helper(getattr(gm, node.target)))
+        return custom_metadata
+
+    return "\n".join(str(x) for x in helper(gm))
