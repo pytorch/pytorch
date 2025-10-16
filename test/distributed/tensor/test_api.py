@@ -17,7 +17,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import (
@@ -427,13 +426,13 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         self.assertEqual(
             input_tensor_dt.placements, [Replicate() for _ in range(mesh.ndim)]
         )
-        self.assertEqual(input_tensor_dt.shard_order, ())
+        self.assertEqual(input_tensor_dt.shard_order, {})
         input_tensor_dt.redistribute(mesh, (Shard(0), Shard(0)))
         input_tensor_dt.redistribute(mesh)
         self.assertEqual(
             input_tensor_dt.placements, [Replicate() for _ in range(mesh.ndim)]
         )
-        self.assertEqual(input_tensor_dt.shard_order, ())
+        self.assertEqual(input_tensor_dt.shard_order, {})
 
     @parametrize(
         "placements, shard_order_dict, should_pass",
@@ -484,15 +483,15 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         [
             [
                 (Shard(0), Shard(1)),
-                (ShardOrderEntry(0, (0,)), ShardOrderEntry(1, (1,))),
+                {0: [0], 1: [1]},
             ],
-            [(Shard(0), Shard(0)), (ShardOrderEntry(0, (0, 1)),)],
+            [(Shard(0), Shard(0)), {0: [0, 1]}],
             [
                 (Shard(1), Shard(2)),
-                (ShardOrderEntry(1, (0,)), ShardOrderEntry(2, (1,))),
+                {1: [0], 2: [1]},
             ],
-            [(Replicate(), Shard(2)), (ShardOrderEntry(2, (1,)),)],
-            [(Replicate(), Replicate()), ()],
+            [(Replicate(), Shard(2)), {2: [1]}],
+            [(Replicate(), Replicate()), {}],
         ],
     )
     def test_only_placements_provided(self, placements, expected_shard_order_tuple):
@@ -720,15 +719,15 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         [
             [
                 (Shard(0), Shard(1)),
-                (ShardOrderEntry(0, (0,)), ShardOrderEntry(1, (1,))),
+                {0: [0], 1: [1]},
             ],
-            [(Shard(0), Shard(0)), (ShardOrderEntry(0, (0, 1)),)],
+            [(Shard(0), Shard(0)), {0: [0, 1]}],
             [
                 (Shard(1), Shard(2)),
-                (ShardOrderEntry(1, (0,)), ShardOrderEntry(2, (1,))),
+                {1: [0], 2: [1]},
             ],
-            [(Replicate(), Shard(2)), (ShardOrderEntry(2, (1,)),)],
-            [(Replicate(), Replicate()), ()],
+            [(Replicate(), Shard(2)), {2: [1]}],
+            [(Replicate(), Replicate()), {}],
         ],
     )
     def test_redistribute_with_placements_only(
@@ -782,7 +781,7 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             placements=(_StridedShard(0, split_factor=2), Replicate()),
         )
         # _StridedShard doesn't have shard_order
-        self.assertEqual(dt_default.shard_order, ())
+        self.assertEqual(dt_default.shard_order, {})
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -811,7 +810,7 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             input_tensor, mesh, placements=(Partial(), Shard(0))
         )
         self.assertEqual(gathered_tensor.placements, (Partial(), Shard(0)))
-        self.assertEqual(gathered_tensor.shard_order, (ShardOrderEntry(0, (1,)),))
+        self.assertEqual(gathered_tensor.shard_order, {0: [1]})
 
         # can redistribute to Partial from Partial
         dt_redist_shard_order = gathered_tensor.redistribute(
