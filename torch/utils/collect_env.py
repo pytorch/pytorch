@@ -640,9 +640,9 @@ def get_pip_packages(run_lambda, patterns=None):
 
     os.environ["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     # People generally have pip as `pip` or `pip3`
-    # But here it is invoked as `python -mpip`
+    # But here it is invoked as `python -m pip`
     out = run_and_read_all(
-        run_lambda, [sys.executable, "-mpip", "list", "--format=freeze"]
+        run_lambda, [sys.executable, "-m", "pip", "list", "--format=freeze"]
     )
     if out is None:
         return pip_version, out

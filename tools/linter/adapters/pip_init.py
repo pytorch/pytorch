@@ -76,7 +76,7 @@ def main() -> None:
     if uv and (is_uv_managed_python or not need_user_flag):
         pip_args = [uv, "pip", "install"]
     elif sys.executable:
-        pip_args = [sys.executable, "-mpip", "install"]
+        pip_args = [sys.executable, "-m", "pip", "install"]
     else:
         pip_args = ["pip3", "install"]
 
