@@ -4301,6 +4301,34 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             accumulate(X0, torch.tensor([1])), compiled(X0, torch.tensor([1]))
         )
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item_set_item3(self):
+        def func(x, y):
+            u0 = y.item()
+            x[u0] = 0
+            return x
+
+        compiled = torch.compile(func, fullgraph=True, disable=False)
+        b = torch.tensor([0])
+        a = torch.ones(9, dtype=torch.int32)
+
+        compiled(a, b)
+        self.assertEqual(compiled(a, b), func(a, b))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_select_scatter_unbacked_index(self):
+        def func(x, y):
+            u0 = y.item()
+            # Create a scalar tensor to scatter into the selected index
+            scalar_src = torch.tensor(42, dtype=x.dtype)
+            return x.select_scatter(scalar_src, 0, u0)
+
+        compiled = torch.compile(func, fullgraph=True, dynamic=True, backend="inductor")
+        b = torch.tensor([0])
+        a = torch.ones(9, dtype=torch.int32)
+
+        self.assertEqual(compiled(a, b), func(a, b))
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
