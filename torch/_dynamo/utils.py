@@ -1376,6 +1376,7 @@ class CompilationMetrics:
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
     pytorch_version: Optional[str] = None
+    inductor_provenance: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
