@@ -197,9 +197,11 @@ class ConstDictVariable(VariableTracker):
         @staticmethod
         def _eq_impl(a, b):
             # TODO: Put this in utils and share it between variables/builtin.py and here
-            if type(a) is not type(b):
+            type_a, type_b = type(a), type(b)
+            if not (issubclass(type_a, type_b) or issubclass(type_b, type_a)):
                 return False
-            elif isinstance(a, tuple):
+
+            if isinstance(a, tuple):
                 Hashable = ConstDictVariable._HashableTracker
                 return len(a) == len(b) and all(
                     Hashable._eq_impl(u, v) for u, v in zip(a, b)
@@ -1371,3 +1373,13 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self):
         return dict_items
+
+    def call_method(self, tx, name, args, kwargs):
+        # TODO(guilhermeleobas): This should actually check if args[0]
+        # implements the mapping protocol.
+        if name == "__eq__":
+            assert len(args) == 1
+            if isinstance(args[0], DictItemsVariable):
+                return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
+            return ConstantVariable.create(False)
+        return super().call_method(tx, name, args, kwargs)
