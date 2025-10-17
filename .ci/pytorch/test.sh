@@ -1434,7 +1434,7 @@ EOF
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
   python -m build --wheel --no-isolation -C--build-option=--bdist-dir="base_bdist_tmp" --outdir "base_dist"
-  python -mpip install base_dist/*.whl
+  python -m pip install base_dist/*.whl
   echo "::endgroup::"
 
   pushd test/forward_backward_compatibility

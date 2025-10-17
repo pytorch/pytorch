@@ -211,7 +211,7 @@ jobs:
             $tool --version
           done
 
-          python3 -mpip install --no-index --no-deps dist/*.whl
+          python3 -m pip install --no-index --no-deps dist/*.whl
 
           set +e
           pushd "${RUNNER_TEMP}"
@@ -222,7 +222,7 @@ jobs:
           popd
 
           if [ "${RC}" -ne 0 ]; then
-            python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+            python3 -m pip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
           fi
           set -e
 

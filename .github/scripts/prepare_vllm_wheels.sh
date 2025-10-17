@@ -85,7 +85,7 @@ repackage_wheel() {
 }
 
 # Require to re-package the wheel
-${PYTHON_EXECUTABLE} -mpip install wheel==0.45.1
+${PYTHON_EXECUTABLE} -m pip install wheel==0.45.1
 
 pushd externals/vllm/wheels
 for package in xformers flashinfer-python vllm; do

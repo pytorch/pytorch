@@ -8,8 +8,8 @@ MKLROOT=/opt/intel
 mkdir -p ${MKLROOT}
 pushd /tmp
 
-python3 -mpip install wheel
-python3 -mpip download -d . mkl-static==${MKL_VERSION}
+python3 -m pip install wheel
+python3 -m pip download -d . mkl-static==${MKL_VERSION}
 python3 -m wheel unpack mkl_static-${MKL_VERSION}-py2.py3-none-manylinux1_x86_64.whl
 python3 -m wheel unpack mkl_include-${MKL_VERSION}-py2.py3-none-manylinux1_x86_64.whl
 mv mkl_static-${MKL_VERSION}/mkl_static-${MKL_VERSION}.data/data/lib ${MKLROOT}

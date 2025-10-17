@@ -288,7 +288,7 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-      python -mpip install numpy==2.0.2
+      python -m pip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
 
