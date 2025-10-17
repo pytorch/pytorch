@@ -113,7 +113,6 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
         return False
 
-    # pyrefly: ignore  # bad-assignment
     for x, y in zip(a, b):
         if allow_rhs_unbacked:
             if isinstance(y, torch.SymInt):

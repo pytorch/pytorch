@@ -52,7 +52,7 @@ class C10_API SymInt {
   // One appropriate use for this is when you are constructing a symint
   // in a situation where you know it is non-negative (or, if it is negative,
   // the negative value is -1; i.e., not user controlled)
-  SymInt(Unchecked, int64_t d) : data_(d) {}
+  SymInt(Unchecked /*unused*/, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
   // temporary and then use the move constructor/assignment

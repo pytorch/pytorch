@@ -49,6 +49,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
       }
       if (step == 0) {
         PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
+        throw python_error();
       }
 
       step = clip_val(step);
