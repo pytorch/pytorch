@@ -16,8 +16,7 @@ from torch.testing._internal.common_utils import \
      skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
-     largeTensorTest)
+     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -1492,8 +1491,6 @@ class TestSparseCSR(TestCase):
                 csr.matmul(bad_vec)
 
     @onlyCUDA
-    # hmm, the test passes ok on CUDA when Rocm is not available:
-    @skipCUDAIfRocmVersionLessThan((5, 2))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_baddbmm(self, device, dtype):
 
@@ -2702,7 +2699,7 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                raise ValueError(f"Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             sample.input = sample.input.to_sparse_csr()
             expect = op(sample.input, *sample.args, **sample.kwargs)
@@ -2726,7 +2723,7 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                raise ValueError(f"Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             sample.input = sample.input.to_sparse_csr()
             expect = op(sample.input, *sample.args, **sample.kwargs)
@@ -4102,7 +4099,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             left_alpha = make_tensor(M, dtype=dtype, device=device, low=0.5, high=high) if has_left_alpha else None
             right_alpha = make_tensor(N, dtype=dtype, device=device, low=0.5, high=high) if has_right_alpha else None
 
-            if 0 and op == "bsr_dense_addmm":
+            if 0 and op == "bsr_dense_addmm":  # noqa: SIM223
                 # Find optimal kernel parameters, the speed-up is
                 # about 10x for running this test.
                 #

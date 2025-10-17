@@ -12,6 +12,7 @@ import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._nvshmem_triton import requires_nvshmem
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -61,8 +62,13 @@ def my_get_kernel(
     src,
     nelems,
     pe,
+    nbi: tl.constexpr,  # use nonblocking interface if True
 ):
-    nvshmem.get(dest, src, nelems, pe)
+    if nbi:
+        nvshmem.get_nbi(dest, src, nelems, pe)
+        nvshmem.quiet()
+    else:
+        nvshmem.get(dest, src, nelems, pe)
 
 
 @requires_nvshmem
@@ -259,6 +265,10 @@ def my_reduce_kernel(
     nvshmem.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
+@skip_but_pass_in_sandcastle_if(
+    SM100OrLater,
+    "Skipping all NVSHMEM Triton tests due to https://github.com/pytorch/pytorch/issues/162897",
+)
 @instantiate_parametrized_tests
 class NVSHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
@@ -327,7 +337,8 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     @skipIfRocm
     @requires_triton()
     @requires_h100()
-    def test_triton_get(self) -> None:
+    @parametrize("nbi", [False, True])  # Test both blocking and nonblocking interfaces
+    def test_triton_get(self, nbi: bool) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
@@ -357,6 +368,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
                 inp,
                 numel,
                 peer,
+                nbi=nbi,
             )
         if rank == 1:
             torch.testing.assert_close(
@@ -397,6 +409,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
             inp,
             numel,
             peer,
+            nbi=False,
         )
 
         expected_value = peer
@@ -1128,9 +1141,8 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         vals[0, ::2] = 1
         vals[0, 1::2] = 2
         vals[1] = 1
-        vals2 = vals[2].view(-1, 2, 2)
-        vals2[:, 0] = 1
-        vals2[:, 1] = 2
+        for rank in range(world_size):
+            vals[2, rank] = 1 if (rank // 2) % 2 == 0 else 2
         expected = vals.prod(-1).tolist()
 
         # Synchronize before reduction

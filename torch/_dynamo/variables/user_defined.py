@@ -293,9 +293,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
             if isinstance(obj.__func__, property):
-                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
-                    tx, [self], {}
-                )
+                fget_vt = VariableTracker.build(tx, obj.__func__.fget)
+                return fget_vt.call_function(tx, [self], {})
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -1458,12 +1457,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Get the getter function
                 source = AttrSource(source, "fget")
 
-            # Avoid using UserMethodVariable here because there is no way to
-            # access the method object here. Direct inline by creating the
-            # UserFunctionVariable.
-            return variables.UserFunctionVariable(
-                subobj.fget, source=source
-            ).call_function(tx, [self], {})
+            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
             # emulate its `__get__`, which is implemented in C.
@@ -1672,7 +1667,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         def __eq__(self, other):
             return (
-                type(self) == type(other)
+                type(self) is type(other)
                 and self.cls == other.cls
                 and self.fields == other.fields
             )
@@ -1793,7 +1788,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        fn_variable = VariableTracker.build(tx, self.value.forward.__func__)
         args = [self] + args
         return tx.inline_user_function_return(
             fn_variable,

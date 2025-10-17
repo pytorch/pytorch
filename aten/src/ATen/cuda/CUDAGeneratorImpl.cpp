@@ -15,19 +15,19 @@ namespace cuda::detail {
 namespace {
 
 // Total number of gpus in the system.
-static int64_t num_gpus;
+int64_t num_gpus;
 
 // Ensures default_gens_cuda is initialized once.
-static std::deque<c10::once_flag> cuda_gens_init_flag;
+std::deque<c10::once_flag> cuda_gens_init_flag;
 
 // Default, global CUDA generators, one per GPU.
-static std::vector<Generator> default_gens_cuda;
+std::vector<Generator> default_gens_cuda;
 
 /*
  * Populates the global variables related to CUDA generators
  * Warning: this function must only be called once!
  */
-static void initCUDAGenVector() {
+void initCUDAGenVector() {
   // Ensures we only call cudaGetDeviceCount only once.
   static bool num_gpu_init_flag [[maybe_unused]] = []() {
     num_gpus = static_cast<int32_t>(c10::cuda::device_count());
@@ -109,7 +109,7 @@ void CUDAGeneratorState::increase(uint64_t increment) {
         offset_intragraph_ % 4 == 0, "RNG offset must be a multiple of 4.");
     // Ensures the increment does not cause overflow.
     TORCH_INTERNAL_ASSERT(
-        offset_intragraph_ <= std::numeric_limits<uint32_t>::max() - increment,
+        offset_intragraph_ <= std::numeric_limits<uint64_t>::max() - increment,
         "Increment causes overflow in the offset value.");
     offset_intragraph_ += increment;
   } else {
@@ -325,9 +325,9 @@ uint64_t CUDAGeneratorImpl::seed() {
  */
 c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   // The RNG state comprises the seed, and an offset used for Philox.
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(int64_t);
+  constexpr size_t total_size = seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
@@ -346,9 +346,9 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
  * and size of the internal state.
  */
 void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(int64_t);
+  constexpr size_t total_size = seed_size + offset_size;
 
   detail::check_rng_state(new_state);
 
@@ -461,7 +461,7 @@ void CUDAGeneratorImpl::unregister_graph(cuda::CUDAGraph* graph) {
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
   if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-    uint32_t offset = state_->offset_intragraph_;
+    uint64_t offset = state_->offset_intragraph_;
     state_->increase(increment);
     return PhiloxCudaState(
         state_->seed_extragraph_.data_ptr<int64_t>(),

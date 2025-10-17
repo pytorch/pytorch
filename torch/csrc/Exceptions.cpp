@@ -252,10 +252,10 @@ PyWarningHandler::PyWarningHandler() noexcept(true)
 // Get the Python warning type for a warning
 static PyObject* map_warning_to_python_type(const c10::Warning& warning) {
   struct Visitor {
-    PyObject* operator()(const c10::UserWarning&) const {
+    PyObject* operator()(const c10::UserWarning& /*unused*/) const {
       return PyExc_UserWarning;
     }
-    PyObject* operator()(const c10::DeprecationWarning&) const {
+    PyObject* operator()(const c10::DeprecationWarning& /*unused*/) const {
       return PyExc_DeprecationWarning;
     }
   };
@@ -336,7 +336,7 @@ PyObject* _new_accelerator_error_object(const c10::AcceleratorError& e) {
 
   auto py_msg = PyUnicode_FromString(msg);
   auto rc = PyObject_CallOneArg(THPException_AcceleratorError, py_msg);
-  auto error_code = PyInt_FromLong(e.get_error_code());
+  auto error_code = THPUtils_packUInt32(e.get_error_code());
   PyObject_SetAttrString(rc, "error_code", error_code);
   Py_XDECREF(py_msg);
   Py_XDECREF(error_code);
