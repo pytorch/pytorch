@@ -1063,36 +1063,6 @@ def _dump_snapshot(filename="dump_snapshot.pickle"):
         pickle.dump(s, f)
 
 
-def _set_memory_metadata(metadata: str):
-    """
-    Set custom metadata that will be attached to all subsequent CUDA memory allocations.
-
-    This metadata will be recorded in the memory snapshot for all allocations made
-    after this call until the metadata is cleared or changed.
-
-    Args:
-        metadata (str): Custom metadata string to attach to allocations.
-                       Pass an empty string to clear the metadata.
-
-    Example:
-        >>> torch.cuda.memory._set_memory_metadata("training_phase")
-        >>> # All allocations here will have "training_phase" metadata
-        >>> x = torch.randn(100, 100, device="cuda")
-        >>> torch.cuda.memory._set_memory_metadata("")  # Clear metadata
-    """
-    torch._C._cuda_setMemoryMetadata(metadata)
-
-
-def _get_memory_metadata() -> str:
-    """
-    Get the current custom metadata that is being attached to CUDA memory allocations.
-
-    Returns:
-        str: The current metadata string, or empty string if no metadata is set.
-    """
-    return torch._C._cuda_getMemoryMetadata()
-
-
 def _save_segment_usage(filename="output.svg", snapshot=None):
     if snapshot is None:
         snapshot = _snapshot()

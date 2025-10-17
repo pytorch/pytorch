@@ -765,7 +765,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str frames_s = "frames";
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
-  py::str user_metadata_s = "user_metadata";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -883,7 +882,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       trace_entry[stream_s] = int64_t(te.stream_);
       trace_entry[time_us_s] = te.time_.t_;
       trace_entry[compile_context_s] = te.compile_context_;
-      trace_entry[user_metadata_s] = te.user_metadata_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -1137,14 +1135,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
-  });
-
-  m.def("_cuda_setMemoryMetadata", [](const std::string& metadata) {
-    c10::cuda::CUDACachingAllocator::setUserMetadata(metadata);
-  });
-
-  m.def("_cuda_getMemoryMetadata", []() {
-    return c10::cuda::CUDACachingAllocator::getUserMetadata();
   });
 
   m.def("_cuda_get_conv_benchmark_empty_cache", []() {
