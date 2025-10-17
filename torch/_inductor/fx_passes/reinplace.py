@@ -5,7 +5,7 @@ import operator
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Union
+from typing import Any, Callable, cast
 
 import torch
 import torch.fx.node
@@ -578,7 +578,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         old_tensors_to_clone, kwargs, node_name, trigger
     ):
         tensors_to_clone: list[str] = []
-        storage_of_reinplaced_args = OrderedSet[Union[int, None]]()
+        storage_of_reinplaced_args = OrderedSet[int | None]()
 
         # Those used to count possibly_missed_reinplacing_opportunities
         missed_nodes = []
@@ -679,7 +679,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
 
             tensors_to_clone, _ = get_mutable_args(_mutable_op)
-            # Don't try to reinplace Optional[Tensor] args that are None.
+            # Don't try to reinplace Tensor | None args that are None.
             tensors_to_clone = [
                 t for t in tensors_to_clone if node.kwargs[t] is not None
             ]

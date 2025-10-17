@@ -2932,9 +2932,7 @@ class GraphModule(torch.nn.Module):
             if autograd:
                 result_flat = pytree.tree_leaves(result)
                 result_exp_flat = pytree.tree_leaves(result_exp)
-                exp_grad_mask = [
-                    True if r.requires_grad else False for r in result_exp_flat
-                ]
+                exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
                 self.check_autograd(
                     [r for r, m in zip(result_flat, exp_grad_mask) if m],
                     [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
@@ -3741,9 +3739,7 @@ class AssociativeScanTests(TestCase):
         ):
             result_flat = pytree.tree_leaves(result)
             result_exp_flat = pytree.tree_leaves(result_exp)
-            exp_grad_mask = [
-                True if r.requires_grad else False for r in result_exp_flat
-            ]
+            exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
 
             self._check_autograd(
                 [r for r, m in zip(result_flat, exp_grad_mask) if m],
@@ -5710,10 +5706,9 @@ def forward(self, arg0_1):
     )
     def test_while_loop_tracing(self, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
-        allow_non_fake_inputs = (
-            False
-            if while_loop_test not in ("simple_with_linear", "nested_with_linear")
-            else True
+        allow_non_fake_inputs = while_loop_test in (
+            "simple_with_linear",
+            "nested_with_linear",
         )
         self._check_tracing(fn, inp, allow_non_fake_inputs)
 
