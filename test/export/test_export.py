@@ -16061,6 +16061,7 @@ class GraphModule(torch.nn.Module):
                 add: "f32[2, 4]" = torch.ops.aten.add.Tensor(relu, arg1_1);  relu = arg1_1 = None
                 return (add,)
 """,
+            ignore_empty_lines=True,
         )
 
         ep = export(M(), (x, y), strict=strict).run_decompositions({})
@@ -16093,6 +16094,7 @@ class GraphModule(torch.nn.Module):
                 add: "f32[2, 4]" = torch.ops.aten.add.Tensor(relu, arg1_1);  relu = arg1_1 = None
                 return (add,)
 """,
+            ignore_empty_lines=True,
         )
 
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
