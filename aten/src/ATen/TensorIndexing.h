@@ -432,7 +432,7 @@ inline void copy_to(const Tensor& dst, const Tensor& src) {
     }
   }
 
-   (src.dim() == 0 && src.device().type() == at::kCPU) {
+  if (src.dim() == 0 && src.device().type() == at::kCPU) {
     dst.fill_(src);
     return;
   }

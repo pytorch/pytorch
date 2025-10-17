@@ -119,7 +119,7 @@ inline c10::MaybeOwned<Tensor> expand_inplace(
     }
   }
 
-   Can't prove they match - expand to be safe
+  // Can't prove they match - expand to be safe
   return c10::MaybeOwned<Tensor>::owned(
       to_expand.expand_symint(tensor.sym_sizes()));
 }
