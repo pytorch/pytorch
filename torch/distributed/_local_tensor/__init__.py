@@ -51,12 +51,15 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Any, Callable, Generator, Optional, Union
 
+import numpy as np
+
 import torch
 from torch import Size, SymBool, SymInt, Tensor
-from torch._C import DispatchKey, DispatchKeySet
+from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed import DeviceMesh
+from torch.distributed import DeviceMesh, ProcessGroup
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed.distributed_c10d import _get_default_group
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils import _pytree as pytree
@@ -70,11 +73,13 @@ not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemente
 from . import _c10d
 
 
-def _int_on_rank(i: "LocalIntNode | ConstantIntNode", r: int) -> int:
+def _int_on_rank(i: "int | LocalIntNode | ConstantIntNode", r: int) -> int:
     if isinstance(i, LocalIntNode):
         return i._local_ints[r]
     elif isinstance(i, ConstantIntNode):
         return i.val
+    elif isinstance(i, int):
+        return i
     else:
         raise AssertionError(type(i))
 
@@ -108,6 +113,9 @@ def _for_each_rank_run_func(
     alias: bool = True,
 ) -> Any:
     flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+    flat_args = [
+        a.wait() if isinstance(a, AsyncCollectiveTensor) else a for a in flat_args
+    ]
 
     cpu_state = torch.get_rng_state()
     devices, states = get_device_states((args, kwargs))
@@ -216,7 +224,7 @@ class LocalIntNode:
         return False
 
     def sym_max(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {
@@ -226,36 +234,57 @@ class LocalIntNode:
         )
 
     def add(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {r: self._local_ints[r] + _int_on_rank(other, r) for r in self._local_ints}
         )
 
     def sub(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {r: self._local_ints[r] - _int_on_rank(other, r) for r in self._local_ints}
         )
 
     def mul(
-        self, other: "LocalIntNode | ConstantIntNode"
+        self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode(
             {r: self._local_ints[r] * _int_on_rank(other, r) for r in self._local_ints}
         )
 
-    def eq(self, other: "LocalIntNode | ConstantIntNode") -> bool | SymBool:
+    def floordiv(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {r: self._local_ints[r] // _int_on_rank(other, r) for r in self._local_ints}
+        )
+
+    def mod(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {r: self._local_ints[r] % _int_on_rank(other, r) for r in self._local_ints}
+        )
+
+    def int_floordiv(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {r: self._local_ints[r] // _int_on_rank(other, r) for r in self._local_ints}
+        )
+
+    def eq(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] == _int_on_rank(other, r) for r in self._local_ints}
         return torch._C._get_constant_bool_symnode(len(r) == 1 and next(iter(r)))
 
-    def gt(self, other: "LocalIntNode | ConstantIntNode") -> bool | SymBool:
+    def gt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] > _int_on_rank(other, r) for r in self._local_ints}
         assert len(r) == 1, (self, other)
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
-    def lt(self, other: "LocalIntNode | ConstantIntNode") -> bool | SymBool:
+    def lt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] < _int_on_rank(other, r) for r in self._local_ints}
         assert len(r) == 1, (self, other)
         return torch._C._get_constant_bool_symnode(next(iter(r)))
@@ -375,6 +404,7 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
+            # pyrefly: ignore  # bad-argument-type
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -436,6 +466,27 @@ class LocalTensor(torch.Tensor):
 
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
+
+    def numpy(self, *, force: bool = False) -> np.ndarray:
+        return self.reconcile().numpy(force=force)
+
+    def __lt__(
+        self, other: torch.Tensor | bool | complex | float | int
+    ) -> torch.Tensor:
+        self_rec = self.reconcile()
+        other_rec = other
+        if isinstance(other, LocalTensor):
+            other_rec = other.reconcile()
+        return self_rec < other_rec
+
+    def __gt__(
+        self, other: torch.Tensor | bool | complex | float | int
+    ) -> torch.Tensor:
+        self_rec = self.reconcile()
+        other_rec = other
+        if isinstance(other, LocalTensor):
+            other_rec = other.reconcile()
+        return self_rec > other_rec
 
     def tolist(self) -> list[Any]:
         """
@@ -555,7 +606,7 @@ class LocalTensorMode(TorchDispatchMode):
         # For LocalTensors, verify they have compatible ranks
         for a in flat_args:
             if isinstance(a, LocalTensor):
-                assert a._ranks == self.ranks, (
+                assert a._ranks <= self.ranks, (
                     f"Input LocalTensor {a} and LocalTensorMode must be configured for the same ranks"
                 )
 
@@ -598,6 +649,9 @@ class LocalTensorMode(TorchDispatchMode):
                     DispatchKey.CompositeExplicitAutograd, *args, **kwargs
                 )
 
+        if func.namespace == "profiler":
+            return func(*args, **kwargs)
+
         if func.namespace == "_c10d_functional_autograd":
             raise NotImplementedError(f"{func} not implemented")
 
@@ -638,6 +692,7 @@ class LocalTensorMode(TorchDispatchMode):
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
+        # pyrefly: ignore  # bad-assignment
         self._old_get_coordinate = None
 
 
@@ -652,15 +707,28 @@ class _LocalDeviceMesh:
         lm = local_tensor_mode()
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
-        rank_coords = (self.mesh == lm.rank_map(lambda r: torch.tensor(r))).nonzero()
-        # NB: unlike the regular mechanism, we don't allow for MPMD
-        assert rank_coords.size(0) == 1
-        assert isinstance(rank_coords[0], LocalTensor)
+        root_mesh = self._get_root_mesh()
+        submesh_dims = self.mesh_dim_names
 
-        coords: list[dict[int, int]] = [{} for _ in range(rank_coords.size(1))]
-        for r, v in rank_coords[0]._local_tensors.items():
-            for i, x in enumerate(v.tolist()):
-                coords[i][r] = x
+        coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
+        old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
+        try:
+            for r in lm.ranks:
+                DeviceMesh.get_rank = lambda self: r  # type: ignore[method-assign]
+                submesh = (
+                    root_mesh
+                    if submesh_dims is None
+                    else root_mesh.__getitem__(submesh_dims)
+                )
+                rank_coords = (submesh.mesh == r).nonzero().tolist()
+                assert len(rank_coords) in (0, 1)
+                if len(rank_coords) == 0:
+                    continue
+                for d, c in enumerate(rank_coords[0]):
+                    coords[d][r] = c
+        finally:
+            DeviceMesh.get_rank = old_get_rank  # type: ignore[method-assign]
+
         out = [torch.SymInt(LocalIntNode(c)) for c in coords]
 
         return out  # type: ignore[return-value]

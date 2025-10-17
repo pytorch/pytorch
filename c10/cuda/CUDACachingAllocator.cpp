@@ -1076,19 +1076,12 @@ class RingBuffer {
 
   void getEntries(std::vector<T>& result) const {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    result.reserve(alloc_trace->size());
-    result.insert(
-        result.end(),
-        alloc_trace->begin() +
-            static_cast<typename std::vector<T>::difference_type>(
-                alloc_trace_next),
-        alloc_trace->end());
-    result.insert(
-        result.end(),
+    result.reserve(result.size() + alloc_trace->size());
+    std::rotate_copy(
         alloc_trace->begin(),
-        alloc_trace->begin() +
-            static_cast<typename std::vector<T>::difference_type>(
-                alloc_trace_next));
+        std::next(alloc_trace->begin(), alloc_trace_next),
+        alloc_trace->end(),
+        std::back_inserter(result));
   }
 
   void clear() {
@@ -4459,9 +4452,7 @@ struct BackendStaticInitializer {
         if (key == "backend") {
           tokenizer.checkToken(++i, ":");
           i++; // Move to the value after the colon
-          if (tokenizer[i] ==
-                  "cud"
-                  "aMallocAsync"
+          if (tokenizer[i] == "cudaMallocAsync"
 #ifdef USE_ROCM
               // convenience for ROCm users to allow either CUDA or HIP env var
               || tokenizer[i] == "hipMallocAsync"
@@ -4491,9 +4482,7 @@ struct BackendStaticInitializer {
 // HIPAllocatorMasqueradingAsCUDA because it needs to happen during static
 // initialization, and doing so there may introduce static initialization
 // order (SIOF) issues.
-#define HIP_MASQUERADING_AS_CUDA \
-  "cud"                          \
-  "a"
+#define HIP_MASQUERADING_AS_CUDA "cuda"
     at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
     allocator.store(r);
 #undef HIP_MASQUERADING_AS_CUDA
