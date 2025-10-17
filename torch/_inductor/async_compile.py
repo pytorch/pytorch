@@ -423,9 +423,7 @@ class AsyncCompile:
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             extra_config = {
-                "use_static_cuda_launcher": torch._inductor.config.use_static_cuda_launcher,
-                "deterministic": torch._inductor.config.deterministic,
-                "test_configs.force_filter_reduction_configs": torch._inductor.config.test_configs.force_filter_reduction_configs,
+                "use_static_cuda_launcher": torch._inductor.config.use_static_cuda_launcher
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
