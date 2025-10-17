@@ -143,7 +143,7 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_Float(self, expr: sympy.Expr) -> str:
         if expr.is_integer:
-            # sympy considers 0.0 to be integer, but mps doesn't.
+            # sympy considers 0.0 to be integer, but Metal doesn't.
             # this workaround prints the float as an integer
             # xref: https://github.com/sympy/sympy/issues/26620
             return str(int(expr))

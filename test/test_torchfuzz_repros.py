@@ -13,6 +13,7 @@ import pytest
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 class TestFuzzerCompileIssues(TestCase):
@@ -220,6 +221,7 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
+    @pytest.mark.skipUnless(HAS_CUDA_AND_TRITON, "Needs CUDA")
     def test_fuzzer_issue_164086(self):
         torch.manual_seed(0)
 
