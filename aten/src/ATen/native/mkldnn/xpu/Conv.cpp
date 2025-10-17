@@ -515,17 +515,10 @@ Tensor convolution_overrideable(
   const Tensor& bias_r = *bias_r_maybe_owned;
 
   auto k = weight_r.ndimension();
-  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-  if (xpu_conv_use_channels_last(input_r, weight_r)) {
-    backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d
-                                     : at::MemoryFormat::ChannelsLast;
-  }
-  Tensor input_c = input_r.contiguous(backend_memory_format);
-  Tensor weight_c = weight_r.contiguous(backend_memory_format);
 
   return _convolution(
-      input_c,
-      weight_c,
+      input_r,
+      weight_r,
       bias_r,
       stride_,
       padding_,
