@@ -7867,7 +7867,7 @@ class TestMPS(TestCaseMPS):
                 # Create non-contiguous tensor via transpose
                 t_mps = torch.zeros(50, 50, device='mps').T.clone()
                 self.assertFalse(t_mps.is_contiguous(),
-                                f"{name}: tensor should be non-contiguous")
+                                 f"{name}: tensor should be non-contiguous")
 
                 # Apply operation
                 op_func(t_mps)
@@ -7875,7 +7875,7 @@ class TestMPS(TestCaseMPS):
                 # Verify tensor was modified (not all zeros)
                 max_val = t_mps.max().item()
                 self.assertNotEqual(max_val, 0.0,
-                                   f"{name}: operation failed to modify non-contiguous tensor")
+                                    f"{name}: operation failed to modify non-contiguous tensor")
 
         # Test rand_like specifically (issue #124029)
         t = torch.ones((3, 2, 2), device='mps').permute(2, 0, 1)
