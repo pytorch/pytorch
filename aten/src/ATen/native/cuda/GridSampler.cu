@@ -408,6 +408,9 @@ namespace {
           // Atomics on shared memory
           index_t s_ix_nw = ix_nw - w_base;
           index_t s_iy_nw = iy_nw - h_base;
+          // While inner shared memory bounds check (`s_ix_nw >= 0 && ...`) might implicitly discard many out-of-bounds global coordinates,
+          // it's not a guaranteed or explicit safeguard.
+          // Call `within_bounds_2d` (as in `safe_add_2d`) to ensure that no attempt is made to write to an out-of-bounds memory location in `grad_input`.
           if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
             if (s_iy_nw >= 0 && s_iy_nw < SMEM_H) {
               if (s_ix_nw >= 0 && s_ix_nw < SMEM_W) {
