@@ -110,10 +110,11 @@ def _enter_unshard_params_ctx(
     requires to enter the context in the pre-hook but leave the context in the
     post-hook. This API enters the context of ``_unshard_fsdp_state_params``.
     """
-    assert module not in fsdp_state._unshard_params_ctx, (
-        "Entering the ``_unshard_fsdp_state_params`` context but _unshard_params_ctx[module] "
-        "is not None."
-    )
+    if module in fsdp_state._unshard_params_ctx:
+        raise AssertionError(
+            "Entering the ``_unshard_fsdp_state_params`` context but _unshard_params_ctx[module] "
+            "is not None."
+        )
     fsdp_state._unshard_params_ctx[module] = _unshard_fsdp_state_params(
         module,
         fsdp_state,
@@ -219,12 +220,13 @@ def _common_unshard_post_state_dict_hook(
         if no_fsdp_return:
             state_dict.pop(fqn)
             continue
-        assert fqn in state_dict, (
-            f"FSDP assumes {fqn} is in the state_dict but the state_dict only "
-            f"has {state_dict.keys()}. "
-            f"prefix={prefix}, module_name={module_name}, "
-            f"param_name={param_name} rank={fsdp_state.rank}."
-        )
+        if fqn not in state_dict:
+            raise AssertionError(
+                f"FSDP assumes {fqn} is in the state_dict but the state_dict only "
+                f"has {state_dict.keys()}. "
+                f"prefix={prefix}, module_name={module_name}, "
+                f"param_name={param_name} rank={fsdp_state.rank}."
+            )
 
         param_hook(state_dict, prefix, fqn)
 
@@ -410,7 +412,8 @@ def _local_post_state_dict_hook(
     # value as the flat_param but it is a pure Tensor because
     # nn.Module.state_dict() will detach the parameter. Therefore, we need
     # to get flat_param to get the metadata.
-    assert _module_handle(fsdp_state, module), "Should have returned early"
+    if not _module_handle(fsdp_state, module):
+        raise AssertionError("Should have returned early")
     flat_param = _module_handle(fsdp_state, module).flat_param
     # Constructs a ShardedTensor from the flat_param "without" padding.
     # Removing the padding allows users to change the number of ranks
@@ -460,32 +463,37 @@ def _local_pre_load_state_dict_hook(
     _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_PREFIX}")
     fqn = f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"
     if fqn not in state_dict:
-        assert not _has_fsdp_params(fsdp_state, module), (
-            "No `FlatParameter` in `state_dict` for this FSDP instance "
-            "but it has parameters"
-        )
+        if _has_fsdp_params(fsdp_state, module):
+            raise AssertionError(
+                "No `FlatParameter` in `state_dict` for this FSDP instance "
+                "but it has parameters"
+            )
         return
     load_tensor = state_dict[fqn]
-    assert isinstance(load_tensor, ShardedTensor), (
-        "Tensors in local_state_dict should be ShardedTensor."
-    )
+    if not isinstance(load_tensor, ShardedTensor):
+        raise AssertionError("Tensors in local_state_dict should be ShardedTensor.")
 
     # Convert the ShardedTensor to a Tensor.
     flat_param = _module_handle(fsdp_state, module).flat_param
-    assert flat_param is not None
+    if flat_param is None:
+        raise AssertionError("Expected flat_param to be set")
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     shards = load_tensor.local_shards()
     if valid_data_size > 0:
-        assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
+        if not len(shards):
+            raise AssertionError(
+                "load_local_state_dict assume one shard per ShardedTensor."
+            )
         load_tensor = shards[0].tensor
 
         # Get the metadata of the flat_param to decide whether to pad the loaded
         # tensor.
         if flat_param._shard_numel_padded > 0:
-            assert load_tensor.numel() < flat_param.numel(), (
-                f"Local shard size = {flat_param.numel()} and the tensor in "
-                f"the state_dict is {load_tensor.numel()}."
-            )
+            if load_tensor.numel() >= flat_param.numel():
+                raise AssertionError(
+                    f"Local shard size = {flat_param.numel()} and the tensor in "
+                    f"the state_dict is {load_tensor.numel()}."
+                )
             load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
     else:
         load_tensor = flat_param
@@ -618,10 +626,11 @@ def _sharded_pre_load_state_dict_hook(
                 param, fsdp_state._fsdp_extension
             )
 
-            assert len(shards) < 2, (
-                "Expects 0 or 1 shard per rank "
-                f"but got {len(shards)} shards on rank {fsdp_state.rank}."
-            )
+            if len(shards) >= 2:
+                raise AssertionError(
+                    "Expects 0 or 1 shard per rank "
+                    f"but got {len(shards)} shards on rank {fsdp_state.rank}."
+                )
             param_numel = param.size().numel()
             dim_0_size = param.size()[0]
             chunk_size = (
