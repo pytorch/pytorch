@@ -175,7 +175,7 @@ def _for_each_rank_run_func(
 
     # NB: Before invoking an op we are collecting rng states from CPU and
     # CUDA devices such that we can reset to the same before invoking op
-    # for each rank. This is not very efficient and will likely be revisted
+    # for each rank. This is not very efficient and will likely be revisited
     # to support per rank rng state.
     rng_state = _get_rng_state()
     flat_rank_rets = {}
