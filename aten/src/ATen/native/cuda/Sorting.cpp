@@ -163,10 +163,6 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     bool keepdim,
     Tensor& values,
     Tensor& indices) {
-  // See note [Writing Nondeterministic Operations]
-  // If there are duplicate elements of the kth value, the procedure for choosing which
-  // of the duplicates to use for the indices output is nondeterministic.
-  at::globalContext().alertNotDeterministic("kthvalue CUDA");
   auto result = [&]() {
     NoNamesGuard guard;
     // `kthvalue_out_impl_cuda` expects contiguous in input `self`.
