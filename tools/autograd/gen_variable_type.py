@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -106,7 +106,7 @@ from .gen_trace_type import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 # We don't set or modify grad_fn on these methods. Generally, they return

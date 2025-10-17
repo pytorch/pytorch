@@ -316,6 +316,7 @@ def _local_all_gather_(
     assert len(input_tensors) == 1
 
     input_tensor = input_tensors[0]
+    # pyrefly: ignore  # bad-assignment
     output_tensors = output_tensors[0]
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
@@ -336,10 +337,12 @@ def _local_all_gather_(
             source_tensor = input_tensor
             if isinstance(input_tensor, LocalTensor):
                 source_tensor = input_tensor._local_tensors[rank_i]
+            # pyrefly: ignore  # missing-attribute
             output_tensors[i].copy_(source_tensor)
 
     work = FakeWork()
     work_so = Work.boxed(work)
+    # pyrefly: ignore  # bad-return
     return ([output_tensors], work_so)
 
 
@@ -426,6 +429,7 @@ def _local_scatter_(
     assert len(output_tensors) == 1
     assert len(input_tensors) == 1
     output_tensor = output_tensors[0]
+    # pyrefly: ignore  # bad-assignment
     input_tensors = input_tensors[0]
 
     ranks, group_offsets, offset = _prepare_collective_groups(process_group_so)
