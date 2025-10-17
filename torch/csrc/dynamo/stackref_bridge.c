@@ -8,14 +8,6 @@
 
 #include <torch/csrc/utils/python_compat.h>
 
-#if IS_PYTHON_3_14_PLUS
-#pragma message("is Python 3.14+")
-#endif
-
-#if defined(_WIN32)
-#pragma message("WIN32 defined")
-#endif
-
 #if IS_PYTHON_3_14_PLUS && defined(_WIN32)
 
 #define Py_BUILD_CORE
