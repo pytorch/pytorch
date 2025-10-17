@@ -8,6 +8,7 @@ from unittest import mock
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
+import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
 
@@ -497,6 +498,7 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
+            e.compiler_config = None
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
@@ -530,6 +532,7 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
+ 'compiler_config': None,
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -616,6 +619,7 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
+ 'compiler_config': None,
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -714,6 +718,7 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
+ 'compiler_config': None,
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -800,6 +805,7 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
+ 'compiler_config': None,
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -873,6 +879,25 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
+        )
+
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+        }
+    )
+    @compiler_config.patch({"job_id": "test_job_id"})
+    def test_compiler_config(self):
+        def test1(x):
+            return x * x
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(test1)(torch.randn(1))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertIn(
+            '"job_id": "test_job_id"',
+            compilation_events[0].compiler_config,
         )
 
     @dynamo_config.patch(
