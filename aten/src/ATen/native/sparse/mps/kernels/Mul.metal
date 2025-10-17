@@ -101,9 +101,6 @@ kernel void spmm_bmm_coo_rows_grouped(
   }
 }
 
-template <typename T> struct MulAccum { using type = float; };
-template <> struct MulAccum<float2> { using type = float2; };
-
 template <typename T>
 kernel void dense_sparse_mul_kernel(
     device const T* dense         [[buffer(0)]],
@@ -130,10 +127,9 @@ kernel void dense_sparse_mul_kernel(
   ulong dense_idx = (ulong)key * (ulong)view_cols + (ulong)col;
   ulong val_idx = (ulong)i * (ulong)view_cols + (ulong)col;
 
-  using accum_t = typename MulAccum<T>::type;
-  const accum_t a = static_cast<accum_t>(values[val_idx]);
-  const accum_t b = static_cast<accum_t>(dense[dense_idx]);
-  out_values[val_idx] = static_cast<T>(a * b);
+  const auto a = static_cast<accum_t<T>>(values[val_idx]);
+  const auto b = static_cast<accum_t<T>>(dense[dense_idx]);
+  out_values[val_idx] = static_cast<T>(mul(a, b));
 }
 
 kernel void intersect_binary_search(
