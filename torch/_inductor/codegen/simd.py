@@ -968,7 +968,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             # pyrefly: ignore  # missing-argument
             t
             for t in self.range_trees
-            # pyrefly: ignore  # missing-argument
             if not t.is_reduction or self.inside_reduction
         ]
 
