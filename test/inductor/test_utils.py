@@ -1,11 +1,14 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
+from copy import deepcopy
+from typing import Callable
 
 from sympy import Symbol, sympify
 
 import torch
-from torch._inductor.fx_utils import count_flops_fx, countable_fx
+from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._inductor.fx_utils import count_flops_fx, countable_fx, FakeTensorUpdater
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
@@ -202,6 +205,81 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals())
+
+
+class TestFakeTensorUpdater(TestCase):
+    def _modify_node(self, main_graph: torch.fx.GraphModule) -> None:
+        updater = FakeTensorUpdater(main_graph)
+
+        def recursively_test_graph_mod(gm: torch.fx.GraphModule) -> None:
+            for node in gm.graph.nodes:
+                # If "val" isn't in the meta dict initially, an update will
+                # likely skip the node anyway, so the logic of this test doesn't
+                # work.
+                if "val" not in node.meta:
+                    continue
+
+                val: torch.Tensor = node.meta["val"]
+                dtype = val.dtype
+                shape = val.size()
+                strides = val.stride()
+                del node.meta["val"], val
+
+                self.assertEqual(updater.incremental_update(), 1)
+                self.assertIn("val", node.meta)
+
+                val: torch.Tensor = node.meta["val"]
+                self.assertEqual(val.dtype, dtype)
+                self.assertEqual(val.size(), shape)
+                self.assertEqual(val.stride(), strides)
+
+            # iterate over subgraphs, updating *main_graph*
+            for subgraph_name in (s for s in dir(gm) if s.startswith("subgraph_")):
+                subgraph = getattr(gm, subgraph_name)
+                self.assertIsInstance(subgraph, torch.fx.GraphModule)
+                recursively_test_graph_mod(subgraph)
+
+        recursively_test_graph_mod(main_graph)
+
+    def _common_test(
+        self, fn: Callable[..., torch.Tensor], *args: torch.Tensor
+    ) -> None:
+        backend = AotEagerAndRecordGraphs()
+        # populate the backend with a captured graph
+        torch.compile(backend=backend, fullgraph=True)(fn)(*args)
+
+        self._modify_node(deepcopy(backend.graphs[0]))
+
+    def test_hop_no_subgraph_inputs(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))
+
+        a = torch.randn((32, 32, 32))
+        self._common_test(fn, a)
+
+    def test_hop_subgraph_inputs(self):
+        @torch.compiler.nested_compile_region
+        def nested_section_inner(a: torch.Tensor) -> torch.Tensor:
+            return torch.sin(a)
+
+        @torch.compiler.nested_compile_region
+        def nested_section_outer(a: torch.Tensor) -> torch.Tensor:
+            return nested_section_inner(nested_section_inner(a))
+
+        @torch.compiler.nested_compile_region
+        def nested_section_mega_outer(a: torch.Tensor) -> torch.Tensor:
+            return nested_section_outer(nested_section_outer(a))
+
+        def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            x = nested_section_inner(a)
+            y = nested_section_outer(b)
+            z = nested_section_mega_outer(a)
+            return x + y + z
+
+        a = torch.randint(0, (1 << 16), (32, 32, 32), dtype=torch.int32)
+        b = torch.randint(0, (1 << 16), (32, 32, 32), dtype=torch.int32)
+        self._common_test(fn, a, b)
+
 
 if __name__ == "__main__":
     run_tests()
