@@ -158,9 +158,8 @@ def all_permute_mesh_dim(
 
     permuted_rank = list(range(0, torch.distributed.get_world_size()))
     for src_rank in range(mesh.size()):
-        # get target coordinate for src_rank
+        src_coordinate = idx2crd(src_rank, mesh.shape)
         tgt_coordinate = [0] * mesh.ndim
-
         src_distr_idx, tgt_distr_idx = 0, 0
         for tensor_dim in range(len(full_tensor_shape)):
             src_distribute_to_mesh_dims: tuple[int, ...] = ()
@@ -177,30 +176,56 @@ def all_permute_mesh_dim(
             ):
                 tgt_distribute_to_mesh_dims = tgt_distribution[tgt_distr_idx].mesh_dims
                 tgt_distr_idx += 1
-            # map current rank to global coordinate [x, y, u]
-            src_coordinate = idx2crd(src_rank, mesh.shape)
+
+            # check if local size and global size match between src and tgt
+            # distribution for this tensor dim. In addition, make sure there is
+            # no padding needed with the sharding specification.
+            if (
+                src_prod := math.prod(
+                    [mesh.size(i) for i in src_distribute_to_mesh_dims]
+                )
+            ) != (
+                tgt_prod := math.prod(
+                    [mesh.size(i) for i in tgt_distribute_to_mesh_dims]
+                )
+            ):
+                raise ValueError(
+                    f"local size mismatch between source (shard into: {src_prod} parts) "
+                    f"and target (shard into: {tgt_prod} parts) distribution for tensor dim {tensor_dim}."
+                )
+            for mesh_dim in src_distribute_to_mesh_dims:
+                if full_tensor_shape[tensor_dim] % mesh.size(mesh_dim) != 0:
+                    raise ValueError(
+                        f"tensor dim {tensor_dim} (size: {full_tensor_shape[tensor_dim]}) "
+                        f"is not divisible by mesh dim {mesh_dim} (size: {mesh.size(mesh_dim)}) "
+                        f"based on source distribution."
+                    )
+            for mesh_dim in tgt_distribute_to_mesh_dims:
+                if full_tensor_shape[tensor_dim] % mesh.size(mesh_dim) != 0:
+                    raise ValueError(
+                        f"tensor dim {tensor_dim} (size: {full_tensor_shape[tensor_dim]}) "
+                        f"is not divisible by mesh dim {mesh_dim} (size: {mesh.size(mesh_dim)}) "
+                        f"based on target distribution."
+                    )
+
+            # main algorithm to find which rank to send data to
             dividend_size = 0
-            # map back from src_distribution
             prev_size = full_tensor_shape[tensor_dim]
             for mesh_dim in src_distribute_to_mesh_dims:
                 cur_size = math.ceil(prev_size / mesh.size(mesh_dim))
-                assert isinstance(src_coordinate, tuple), (
-                    "src_coordinate should be a tuple"
-                )
-                coord_val = src_coordinate[mesh_dim]
-                assert isinstance(coord_val, int), (
-                    f"Expected int coordinate, got {type(coord_val)}"
-                )
-                dividend_size += coord_val * cur_size
+                dividend_size += src_coordinate[mesh_dim] * cur_size  # type: ignore[index, operator]
+
                 prev_size = cur_size
             divisor_size = full_tensor_shape[tensor_dim]
             for mesh_dim in tgt_distribute_to_mesh_dims:
                 divisor_size = math.ceil(divisor_size / mesh.size(mesh_dim))
-                tgt_coordinate[mesh_dim] = dividend_size // divisor_size
-
-            tgt_rank = crd2idx(tuple(tgt_coordinate), mesh.shape)
-            # plan to send src_rank data to tgt_rank
-            permuted_rank[src_rank] = tgt_rank
+                tgt_coordinate[mesh_dim], dividend_size = divmod(
+                    dividend_size, divisor_size
+                )
+        tgt_rank = crd2idx(tuple(tgt_coordinate), mesh.shape)
+        # indicate to send src_rank data to tgt_rank
+        permuted_rank[src_rank] = tgt_rank
+    assert sorted(permuted_rank) == list(range(len(permuted_rank)))
     output = funcol.permute_tensor(input, permuted_rank, mesh)
     if isinstance(output, funcol.AsyncCollectiveTensor):
         output = output.wait()
