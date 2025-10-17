@@ -4474,6 +4474,9 @@ struct BackendStaticInitializer {
           // Skip the key and its value
           i = tokenizer.skipKey(i);
         }
+        if (i + 1 < tokenizer.size()) {
+          tokenizer.checkToken(++i, ",");
+        }
       }
     }
     // Default fallback allocator.
