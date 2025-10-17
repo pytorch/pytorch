@@ -374,8 +374,8 @@ third_party/ruy/
 third_party/glog/
 
 # Virtualenv
-venv/
 .venv/
+venv/
 
 # Log files
 *.log
