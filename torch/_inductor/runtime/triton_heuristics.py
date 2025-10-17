@@ -3447,9 +3447,9 @@ class GridExpr:
     inductor_meta: dict[str, Any]
     mode: Literal["python", "cpp"] = "python"
     prefix: list[str] = dataclasses.field(default_factory=list)
-    x_grid: Union[str, int] = 1
-    y_grid: Union[str, int] = 1
-    z_grid: Union[str, int] = 1
+    x_grid: str | int = 1
+    y_grid: str | int = 1
+    z_grid: str | int = 1
 
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
@@ -3457,9 +3457,7 @@ class GridExpr:
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
 
-    def ceildiv(
-        self, numel: Union[str, int], block: Union[None, int, str]
-    ) -> Union[str, int]:
+    def ceildiv(self, numel: str | int, block: None | int | str) -> str | int:
         if block is None or block == 1:
             return numel
         if isinstance(numel, int) and isinstance(block, int):
@@ -3471,7 +3469,7 @@ class GridExpr:
         # For cpp code gen
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
-    def maximum(self, seq: list[Union[int, str]]) -> Union[int, str]:
+    def maximum(self, seq: list[int | str]) -> int | str:
         """Codegen for max function with constant folding, constants are represented as int"""
         items = self._constant_fold(max, seq)
         if len(items) <= 1:
@@ -3480,7 +3478,7 @@ class GridExpr:
             return f"max({', '.join(map(str, items))})"
         return functools.reduce(lambda x, y: f"std::max({x}, {y})", items)
 
-    def summation(self, seq: list[Union[int, str]]) -> Union[int, str]:
+    def summation(self, seq: list[int | str]) -> int | str:
         """Codegen for sum function with constant folding, constants are represented as int"""
         items = self._constant_fold(sum, seq)
         if len(items) <= 1:
@@ -3488,16 +3486,16 @@ class GridExpr:
         return " + ".join(map(str, items))
 
     def _constant_fold(
-        self, fn: Callable[[list[int]], int], seq: list[Union[int, str]]
-    ) -> list[Union[int, str]]:
+        self, fn: Callable[[list[int]], int], seq: list[int | str]
+    ) -> list[int | str]:
         """Constant fold through a commutative fn where ints are constants"""
-        items: list[Union[int, str]] = [x for x in seq if not isinstance(x, int)]
+        items: list[int | str] = [x for x in seq if not isinstance(x, int)]
         const_items = [x for x in seq if isinstance(x, int)]
         if const_items:
             items.append(fn(const_items))
         return items
 
-    def assign_tmp(self, name: str, expr: Union[str, int]) -> str:
+    def assign_tmp(self, name: str, expr: str | int) -> str:
         # Grid functions are one per kernel, so name collisions are fine
         if self.mode == "python":
             return f"{name} = {expr}"
@@ -3508,7 +3506,7 @@ class GridExpr:
     @staticmethod
     def from_meta(
         inductor_meta: dict[str, Any],
-        cfg: Union[Config, dict[str, int]],
+        cfg: Config | dict[str, int],
         mode: Literal["python", "cpp"] = "python",
     ) -> GridExpr:
         grid_cls = globals()[inductor_meta["grid_type"]]
@@ -3632,20 +3630,20 @@ class ComboKernelGrid(GridExpr):
 
     def combo_x_grid(
         self,
-        xnumels: list[Union[int, str]],
+        xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
-    ) -> Union[str, int]:
+    ) -> str | int:
         raise NotImplementedError
 
 
 class SequentialComboKernelGrid(ComboKernelGrid):
     def combo_x_grid(
         self,
-        xnumels: list[Union[int, str]],
+        xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
-    ) -> Union[str, int]:
+    ) -> str | int:
         assert len(xnumels) == len(no_x_dims)
         return self.summation(
             [
@@ -3658,7 +3656,7 @@ class SequentialComboKernelGrid(ComboKernelGrid):
 class RoundRobinComboKernelGrid(ComboKernelGrid):
     def combo_x_grid(
         self,
-        xnumels: list[Union[int, str]],
+        xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
     ) -> str:

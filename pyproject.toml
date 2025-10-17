@@ -180,6 +180,7 @@ ignore = [
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
+    "SIM300", # Yoda condition detected
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
@@ -195,8 +196,7 @@ select = [
     "E",
     "EXE",
     "F",
-    "SIM1",
-    "SIM911",
+    "SIM",
     "W",
     # Not included in flake8
     "FURB",
