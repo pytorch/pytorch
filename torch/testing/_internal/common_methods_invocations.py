@@ -12599,7 +12599,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('addmv',
            dtypes=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                    torch.bfloat16),
+                                     torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            torch.bfloat16),
            supports_forward_ad=True,
