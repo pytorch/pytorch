@@ -127,7 +127,7 @@ C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, unifor
 
 template<typename scalar_t>
 C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
-  const static scalar_t kTailValues[] = {
+  constexpr static scalar_t kTailValues[] = {
     0.0810614667953272,
     0.0413406959554092,
     0.0276779256849983,
@@ -139,7 +139,7 @@ C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
     0.00925546218271273,
     0.00833056343336287
   };
-  if (k <= 9) {
+  if (k <= sizeof(kTailValues)/sizeof(scalar_t)) {
     return kTailValues[static_cast<size_t>(k)];
   }
   scalar_t kp1sq = (k + 1) * (k + 1);
