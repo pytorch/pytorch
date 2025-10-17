@@ -6,7 +6,7 @@
 // initializers that are not supported in older C++ standards, but is supported
 // in C.
 
-#if defined(_WIN32)
+#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
 
 #define Py_BUILD_CORE
 #include <Python.h>

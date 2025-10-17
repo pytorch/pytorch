@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(_WIN32)
+#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
 
 #ifdef __cplusplus
 extern "C" {
