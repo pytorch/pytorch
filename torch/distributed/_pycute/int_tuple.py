@@ -54,6 +54,12 @@ def is_tuple(x: object) -> TypeIs[tuple]:
     return isinstance(x, tuple)
 
 
+def as_tuple(x: IntTuple) -> tuple[IntTuple, ...]:
+    if is_int(x):
+        return (x,)
+    return x
+
+
 def match_structure(a: IntTuple, b: IntTuple) -> bool:
     if is_int(a) and is_int(b):
         return True
