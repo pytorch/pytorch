@@ -10,6 +10,7 @@ else
   arch_path='sbsa'
 fi
 
+CUDNN_VERSION=9.14.0.64
 NVSHMEM_VERSION=3.3.24
 
 function install_cuda {
@@ -95,7 +96,6 @@ function install_124 {
 }
 
 function install_126 {
-  CUDNN_VERSION=9.10.2.21
   echo "Installing CUDA 12.6.3 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.7.1"
   install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
 
@@ -111,7 +111,6 @@ function install_126 {
 }
 
 function install_129 {
-  CUDNN_VERSION=9.10.2.21
   echo "Installing CUDA 12.9.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.7.1"
   # install CUDA 12.9.1 in the same container
   install_cuda 12.9.1 cuda_12.9.1_575.57.08_linux
@@ -129,7 +128,6 @@ function install_129 {
 }
 
 function install_128 {
-  CUDNN_VERSION=9.8.0.87
   echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.7.1"
   # install CUDA 12.8.1 in the same container
   install_cuda 12.8.1 cuda_12.8.1_570.124.06_linux
@@ -147,7 +145,6 @@ function install_128 {
 }
 
 function install_130 {
-  CUDNN_VERSION=9.13.0.50
   echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.7.1"
   # install CUDA 13.0 in the same container
   install_cuda 13.0.0 cuda_13.0.0_580.65.06_linux
