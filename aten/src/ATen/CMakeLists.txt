@@ -314,12 +314,13 @@ IF(USE_FBGEMM_GENAI)
     # Add additional HIPCC compiler flags for performance
     set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
       -mllvm
-      -amdgpu-coerce-illegal-types=1
-      -mllvm
       -enable-post-misched=0
       -mllvm
       -greedy-reverse-local-assignment=1
       -fhip-new-launch-api)
+    if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
+        list(PREPEND FBGEMM_GENAI_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
+      endif()
 
     # Only compile for gfx942 for now.
     # This is rather hacky, I could not figure out a clean solution :(
