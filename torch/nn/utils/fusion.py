@@ -38,7 +38,8 @@ def fuse_conv_bn_eval(
     assert not (conv.training or bn.training), "Fusion only for eval!"
     fused_conv = copy.deepcopy(conv)
 
-    assert bn.running_mean is not None and bn.running_var is not None
+    if bn.running_mean is None or bn.running_var is None:
+        raise AssertionError("BatchNorm running_mean and running_var must not be None")
     fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
         fused_conv.weight,
         fused_conv.bias,
@@ -139,7 +140,8 @@ def fuse_linear_bn_eval(
         "To fuse, linear.out_features == bn.num_features or bn.num_features == 1"
     )
 
-    assert bn.running_mean is not None and bn.running_var is not None
+    if bn.running_mean is None or bn.running_var is None:
+        raise AssertionError("BatchNorm running_mean and running_var must not be None")
     fused_linear.weight, fused_linear.bias = fuse_linear_bn_weights(
         fused_linear.weight,
         fused_linear.bias,

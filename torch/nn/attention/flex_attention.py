@@ -271,7 +271,10 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
         for param in inspect.signature(fn).parameters.values()
         if param.default is inspect.Parameter.empty
     )
-    assert num_positional_args == 5 or num_positional_args == 4
+    if num_positional_args not in (4, 5):
+        raise AssertionError(
+            f"mask_mod function must have 4 or 5 positional arguments, got {num_positional_args}"
+        )
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD
     elif num_positional_args == 4:
@@ -499,7 +502,10 @@ class BlockMask:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
-        assert kv_indices is not None, "kv_indices must be provided"
+        if full_kv_indices is None:
+            raise AssertionError(
+                "full_kv_indices must not be None when transpose flag is set"
+            )
         assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
             "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
         )
@@ -688,7 +694,10 @@ class BlockMask:
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
-            assert self.full_kv_indices is not None
+            if self.full_kv_indices is None:
+                raise AssertionError(
+                    "full_kv_indices must not be None for small sequence lengths"
+                )
             new_full_kv_num_blocks = self.full_kv_num_blocks[index]
             new_full_kv_indices = self.full_kv_indices[index]
         else:
@@ -733,7 +742,10 @@ class BlockMask:
             self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
         )
         if self.full_kv_num_blocks is not None:
-            assert self.full_kv_indices is not None
+            if self.full_kv_indices is None:
+                raise AssertionError(
+                    "full_kv_indices must not be None for small sequence lengths"
+                )
             (
                 new_full_kv_num_blocks,
                 new_full_kv_indices,
@@ -893,7 +905,8 @@ def _convert_mask_to_block_mask(
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     separate_full_blocks: bool = False,
 ) -> tuple[Tensor, Optional[Tensor]]:
-    assert mask.dtype == torch.bool
+    if mask.dtype != torch.bool:
+        raise AssertionError(f"mask must have dtype torch.bool, got {mask.dtype}")
     mask = _broadcast_to_dim(mask, 4)
 
     def padding_needed_for_multiple(x, multiple):
@@ -909,8 +922,14 @@ def _convert_mask_to_block_mask(
         ),
     )
     B, H, Q, KV = mask.shape
-    assert Q % Q_BLOCK_SIZE == 0
-    assert KV % KV_BLOCK_SIZE == 0
+    if Q % Q_BLOCK_SIZE != 0:
+        raise AssertionError(
+            f"Q dimension ({Q}) must be divisible by Q_BLOCK_SIZE ({Q_BLOCK_SIZE})"
+        )
+    if KV % KV_BLOCK_SIZE != 0:
+        raise AssertionError(
+            f"KV dimension ({KV}) must be divisible by KV_BLOCK_SIZE ({KV_BLOCK_SIZE})"
+        )
     mask = mask.view(
         B, H, Q // Q_BLOCK_SIZE, Q_BLOCK_SIZE, KV // KV_BLOCK_SIZE, KV_BLOCK_SIZE
     )  # [B, H, Q//Q_BLOCK_SIZE, Q_BLOCK_SIZE, KV//KV_BLOCK_SIZE, KV_BLOCK_SIZE]
@@ -1184,7 +1203,8 @@ def _apply_kernel_options(
         output_max = return_aux.max_scores
 
     # If forward kernel needs to return logsumexp is decided by this rule internally.
-    assert "OUTPUT_LOGSUMEXP" not in kernel_options
+    if "OUTPUT_LOGSUMEXP" in kernel_options:
+        raise AssertionError("OUTPUT_LOGSUMEXP is not supported for nested tensors")
     kernel_options["OUTPUT_LOGSUMEXP"] = True
     if not output_lse:
         # We used to check if q,k,v required grads but since captured buffers can require grad
@@ -1196,7 +1216,8 @@ def _apply_kernel_options(
             kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.
-    assert "OUTPUT_MAX" not in kernel_options
+    if "OUTPUT_MAX" in kernel_options:
+        raise AssertionError("OUTPUT_MAX cannot be specified in kernel_options")
     kernel_options["OUTPUT_MAX"] = output_max
     if any_inputs_on_cpu_device and output_max:
         # CPU doesn't support returning max yet
@@ -1425,8 +1446,14 @@ def flex_attention(
                 f"block_mask was created for block_mask.shape={block_mask.shape} but got q_len={query.size(-2)} and kv_len={key.size(-2)}. "
                 "As the block mask was created for a larger length than you're using it for, you can either 1. create a new block mask with the correct length, or 2. 'adjust' the existing block mask to the correct length by calling block_mask._adjust(q_len, kv_len). This essentially 'crops' the block mask to the upper left corner, which does not work for all mask_mods!"
             )
-        assert query.size(-2) == block_mask_q_len
-        assert key.size(-2) == block_mask_kv_len
+        if query.size(-2) != block_mask_q_len:
+            raise AssertionError(
+                f"Query sequence length ({query.size(-2)}) must match block mask Q length ({block_mask_q_len})"
+            )
+        if key.size(-2) != block_mask_kv_len:
+            raise AssertionError(
+                f"Key sequence length ({key.size(-2)}) must match block mask KV length ({block_mask_kv_len})"
+            )
 
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))

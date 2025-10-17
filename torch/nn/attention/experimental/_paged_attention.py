@@ -249,7 +249,10 @@ class PagedAttention:
 
         new_full_kv_indices, new_full_kv_num_blocks = None, None
         if block_mask.full_kv_num_blocks is not None:
-            assert block_mask.full_kv_indices is not None
+            if block_mask.full_kv_indices is None:
+                raise AssertionError(
+                    "block_mask.full_kv_indices must not be None for variable length kv-cache"
+                )
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
             new_full_kv_indices = torch.zeros(
                 (B, H, ROWS, self.n_pages), dtype=torch.int32, device=device

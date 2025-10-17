@@ -997,7 +997,8 @@ class Module:
                 out_param = param
             else:
                 assert isinstance(param, Parameter)
-                assert param.is_leaf
+                if not param.is_leaf:
+                    raise AssertionError("Parameter must be a leaf tensor")
                 # pyrefly: ignore  # bad-argument-type
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
@@ -1018,10 +1019,14 @@ class Module:
                         ) from e
                     out_param.grad = param_grad
                 elif g_should_use_set_data:
-                    assert out_param.grad is not None
+                    if out_param.grad is None:
+                        raise AssertionError(
+                            "out_param.grad should not be None at this point"
+                        )
                     out_param.grad.data = grad_applied
                 else:
-                    assert param_grad.is_leaf
+                    if not param_grad.is_leaf:
+                        raise AssertionError("Parameter gradient must be a leaf tensor")
                     out_param.grad = grad_applied.requires_grad_(
                         param_grad.requires_grad
                     )

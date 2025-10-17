@@ -19,7 +19,8 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
     if func == F.conv2d:
         return conv2dOpt
     else:
-        assert func == F.conv3d
+        if func != F.conv3d:
+            raise AssertionError("string padding is only supported for conv3d")
         return conv3dOpt
 
 

@@ -803,7 +803,10 @@ class CustomFromMask(BasePruningMethod):
         self.mask = mask
 
     def compute_mask(self, t, default_mask):
-        assert default_mask.shape == self.mask.shape
+        if default_mask.shape != self.mask.shape:
+            raise AssertionError(
+                f"default_mask shape {default_mask.shape} does not match provided mask shape {self.mask.shape}"
+            )
         mask = default_mask * self.mask.to(dtype=default_mask.dtype)
         return mask
 

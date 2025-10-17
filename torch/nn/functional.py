@@ -492,7 +492,8 @@ def fractional_max_pool2d_with_indices(
             "fractional_max_pool2d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio must not be None")
         if len(output_ratio) > 2:
             raise ValueError(
                 "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."
@@ -611,7 +612,8 @@ def fractional_max_pool3d_with_indices(
             "fractional_max_pool3d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio must not be None")
         _output_ratio = _triple(output_ratio)
         output_size = [
             int(input.size(-3) * _output_ratio[0]),
@@ -4710,7 +4712,8 @@ def interpolate(  # noqa: F811
     if size is not None and scale_factor is not None:
         raise ValueError("only one of size or scale_factor should be defined")
     elif size is not None:
-        assert scale_factor is None
+        if scale_factor is not None:
+            raise AssertionError("scale_factor must be None when size is specified")
         scale_factors = None
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
@@ -4730,7 +4733,8 @@ def interpolate(  # noqa: F811
         else:
             output_size = [size for _ in range(dim)]
     elif scale_factor is not None:
-        assert size is None
+        if size is not None:
+            raise AssertionError("size must be None when scale_factor is specified")
         output_size = None
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
@@ -4764,7 +4768,10 @@ def interpolate(  # noqa: F811
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
-        assert scale_factors is not None
+        if scale_factors is None:
+            raise AssertionError(
+                "scale_factors must be computed for nearest mode interpolation"
+            )
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
@@ -4816,18 +4823,28 @@ def interpolate(  # noqa: F811
         return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError(
+                "output_size must be specified for linear interpolation"
+            )
         # pyrefly: ignore  # bad-argument-type
         return adaptive_avg_pool1d(input, output_size)
     if input.dim() == 4 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError(
+                "output_size must be specified for bilinear interpolation"
+            )
         return adaptive_avg_pool2d(input, output_size)
     if input.dim() == 5 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size must be specified when using antialias")
         return adaptive_avg_pool3d(input, output_size)
 
     if input.dim() == 3 and mode == "linear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError(
+                "align_corners must be specified for linear interpolation"
+            )
         return torch._C._nn.upsample_linear1d(
             input,
             # pyrefly: ignore  # bad-argument-type
@@ -4836,7 +4853,10 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 4 and mode == "bilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError(
+                "align_corners must be specified for bilinear interpolation"
+            )
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(
                 input,
@@ -4863,7 +4883,10 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 5 and mode == "trilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError(
+                "align_corners must be specified for trilinear interpolation"
+            )
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
@@ -4882,7 +4905,10 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 4 and mode == "bicubic":
-        assert align_corners is not None
+        if output_size is None:
+            raise AssertionError(
+                "output_size must be specified when using antialias with bicubic interpolation"
+            )
         if antialias:
             return torch._C._nn._upsample_bicubic2d_aa(
                 input,
@@ -6481,8 +6507,14 @@ def multi_head_attention_forward(
             # pyrefly: ignore  # bad-argument-type
             key_padding_mask = pad(key_padding_mask, (0, 1))
     else:
-        assert bias_k is None
-        assert bias_v is None
+        if bias_k is not None:
+            raise AssertionError(
+                "bias_k must be None when key_padding_mask is provided"
+            )
+        if bias_v is not None:
+            raise AssertionError(
+                "bias_v must be None when key_padding_mask is provided"
+            )
 
     #
     # reshape q, k, v for multihead attention and make them batch first

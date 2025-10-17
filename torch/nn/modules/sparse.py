@@ -171,10 +171,12 @@ class Embedding(Module):
             )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [
-                num_embeddings,
-                embedding_dim,
-            ], "Shape of weight does not match num_embeddings and embedding_dim"
+            expected_shape = [num_embeddings, embedding_dim]
+            if list(_weight.shape) != expected_shape:
+                raise AssertionError(
+                    f"Shape of weight {list(_weight.shape)} does not match "
+                    f"expected shape {expected_shape} (num_embeddings={num_embeddings}, embedding_dim={embedding_dim})"
+                )
             self.weight = Parameter(_weight, requires_grad=not _freeze)
 
         self.sparse = sparse
@@ -408,10 +410,12 @@ class EmbeddingBag(Module):
             )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [
-                num_embeddings,
-                embedding_dim,
-            ], "Shape of weight does not match num_embeddings and embedding_dim"
+            expected_shape = [num_embeddings, embedding_dim]
+            if list(_weight.shape) != expected_shape:
+                raise AssertionError(
+                    f"Shape of weight {list(_weight.shape)} does not match "
+                    f"expected shape {expected_shape} (num_embeddings={num_embeddings}, embedding_dim={embedding_dim})"
+                )
             self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse

@@ -50,11 +50,17 @@ def parallel_apply(
         f"The number of modules {len(modules)} is not equal to the number of inputs {len(inputs)}"
     )
     if kwargs_tup is not None:
-        assert len(modules) == len(kwargs_tup)
+        if len(modules) != len(kwargs_tup):
+            raise AssertionError(
+                f"Number of modules ({len(modules)}) must match number of kwargs tuples ({len(kwargs_tup)})"
+            )
     else:
         kwargs_tup = (cast(dict[str, Any], {}),) * len(modules)
     if devices is not None:
-        assert len(modules) == len(devices)
+        if len(modules) != len(devices):
+            raise AssertionError(
+                f"Number of modules ({len(modules)}) must match number of devices ({len(devices)})"
+            )
     else:
         devices = [None] * len(modules)
     devices = [_get_device_index(x, True) for x in devices]
