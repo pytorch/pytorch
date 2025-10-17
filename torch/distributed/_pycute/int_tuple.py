@@ -209,9 +209,11 @@ def crd2idx(
             assert len(shape) == len(stride)
             result = 0
             # Process from right to left for lexicographic ordering
-            for i in range(len(shape) - 1, -1, -1):
+            for i in range(len(shape) - 1, 0, -1):
                 result += crd2idx(crd % product(shape[i]), shape[i], stride[i])
                 crd = crd // product(shape[i])
+            if len(shape) > 0:
+                result += crd2idx(crd, shape[0], stride[0])
             return result
         else:  # "int" "int" "int"
             assert not is_tuple(shape) and not is_tuple(stride)
