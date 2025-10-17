@@ -2980,10 +2980,11 @@ def _persistent_reduction_configs(
         elif reduction_hint == ReductionHint.OUTER_TINY:
             configs = tiny_configs
     else:
-        # If autotune is enabled append tiny configs
-        for conf in tiny_configs:
-            if conf not in configs:
-                configs.append(conf)
+        if torch.version.hip:
+            # If autotune is enabled append tiny configs
+            for conf in tiny_configs:
+                if conf not in configs:
+                    configs.append(conf)
 
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
