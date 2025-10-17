@@ -10,6 +10,7 @@ import time
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
+from itertools import chain
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 
@@ -377,6 +378,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
+                    # pyrefly: ignore  # unbound-name
                     **nn_module_stack,
                 }
                 node.meta["nn_module_stack"] = {
@@ -525,6 +527,7 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
                 simplify=True,
             )
         ):
+            # pyrefly: ignore  # unbound-name
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
@@ -662,7 +665,6 @@ def _rename_constants_nodes(
         if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
             const_prefix
         ):
-            # pyrefly: ignore  # bad-argument-type
             if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
                 c_name = rename_constant(
                     const_prefix + spec.arg.name[len(buffer_prefix) :]
@@ -692,24 +694,21 @@ def _restore_state_dict(
     Restores the state dict of the traced module to that of the original module.
     """
     param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
-    # Since the graph module is flattened (no module hierarchy), we
-    # need to normalize the module by replacing "." with "_". If we
-    # don't, it will try to save the weight to a submodule which no
-    # longer exists.
-    for name, fqn in param_buffer_table.items():
-        param_buffer_table[name] = fqn.replace(".", "_")
+    # Don't want to change the convention of previous call.
+    param_buffer_table_reverse = {v: k for k, v in param_buffer_table.items()}
 
     # Replace state dict attr names with the fqn
-    for name, fqn in param_buffer_table.items():
-        if not hasattr(traced_module, name):
-            continue
-
-        attr = getattr(traced_module, name)
-        if isinstance(attr, torch.Tensor) and not isinstance(attr, torch.nn.Parameter):
-            traced_module.register_buffer(fqn, attr)
-        else:
-            setattr(traced_module, fqn, attr)
-        delattr(traced_module, name)
+    for name, _ in list(
+        chain(
+            original_module.named_parameters(remove_duplicate=False),
+            original_module.named_buffers(remove_duplicate=False),
+        )
+    ):
+        if name in param_buffer_table_reverse:
+            dynamo_name = param_buffer_table_reverse[name]
+            param = torch.fx.graph_module._get_attr(traced_module, dynamo_name)
+            torch.fx.graph_module._assign_attr(param, traced_module, name)
+            torch.fx.graph_module._del_attr(traced_module, dynamo_name)
 
     # Replace graph getattr nodes with the correct name
     for node in traced_module.graph.nodes:
@@ -831,6 +830,12 @@ def _export_to_torch_ir(
                     gm_torch_level = _dynamo_graph_capture_for_export(
                         f, constraints=constraints, dynamic_shapes=dynamic_shapes
                     )(*args, **kwargs)
+                    # We can't serialize entire fake mode yet, so this is to make sure
+                    # things like copy.deepcopy(ep.graph_module) not crash.
+                    # see test_export.py::test_custom_tag_metadata_re_export
+                    # Once we delete the old strict export, we can use this fake mode in the
+                    # subsequent logic when lowering to aten IR.
+                    del gm_torch_level.meta["fake_mode"]
 
                 else:
                     gm_torch_level, _ = torch._dynamo.export(

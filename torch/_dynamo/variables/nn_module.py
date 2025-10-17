@@ -962,10 +962,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
 
-        if (
-            not isinstance(mod, torch.fx.GraphModule)
-            and mod.__call__.__func__ is not unpatched_nn_module_call
-        ):
+        if not isinstance(mod, torch.fx.GraphModule):
             name = "__call__"
             fn = getattr(self.value_type, name)
         else:
@@ -1222,7 +1219,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     """
 
     def __init__(self, value, **kwargs) -> None:
-        source = kwargs.get("source", None)
+        source = kwargs.get("source")
         assert source is not None, (
             "FSDPManagedNNModule depends on having an accurate source to control guarding."
         )

@@ -167,6 +167,7 @@ class ChunkShardingSpec(ShardingSpec):
                     )
 
                 tensors_to_scatter[
+                    # pyrefly: ignore  # bad-argument-type
                     dist.get_group_rank(process_group, remote_global_rank)
                 ] = tensor_to_scatter
 
