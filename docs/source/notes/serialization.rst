@@ -281,7 +281,7 @@ is not allowed to dynamically import anything during unpickling.
 
 Note that even if memory corruption does not occur during ``torch.load`` itself, loading CAN create
 unexpected objects for the downstream code that can also lead to memory corruption (e.g. a Tensor of
-indices and values made in to a sparse Tensor in user code might write/read out of bounds).
+indices and values made to a sparse Tensor in user code might write/read out of bounds).
 
 .. _weights-only-allowlist:
 
