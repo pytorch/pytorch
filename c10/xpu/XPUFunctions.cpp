@@ -170,9 +170,9 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 #define ASSIGN_DEVICE_ASPECT(member) \
   device_prop->has_##member = raw_device.has(sycl::aspect::member);
 
-#define ASSIGN_EXP_CL_ASPECT(member)                                       \
-  device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
-      "cl_intel_" #member);
+#define ASSIGN_EXP_CL_ASPECT(member) \
+  device_prop->has_##member =        \
+      raw_device.ext_oneapi_supports_cl_extension("cl_intel_" #member);
 
 #define ASSIGN_EXP_DEVICE_PROP(property) \
   device_prop->property =                \
