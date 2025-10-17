@@ -18,6 +18,8 @@
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
 
+#include "ATen/core/function_schema.h"
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -2092,13 +2094,13 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
     default:
-      linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, infos, compute_eigenvectors);
+      linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
       return;
     case at::LinalgBackend::Magma:
       break; // fallback to CPU path below
   }
 #endif
-
+  TORCH_WARN("Going to CPU");
   Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
   input_working_copy.copy_(input);

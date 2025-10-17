@@ -1632,39 +1632,152 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
 #pragma message("Compiling with cuSOLVER >= 11.7.2 — Xgeev bindings enabled")
 
-void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool compute_eigenvectors) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(eigenvalues.is_cuda());
-  TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
 
-  cusolverDnHandle_t handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+
+
+template <typename scalar_t>
+void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
+  TORCH_WARN("apply_xgeev: creating temporary GPU copies for testing");
+
+  auto device = input.device();  // sollte CUDA sein
+
+  // --- Lokale Kopien der Arbeitstensoren auf GPU ---
+  auto values_gpu  = values.is_cuda()    ? values    : values.to(device);
+  auto vectors_gpu = vectors.is_cuda()   ? vectors   : vectors.to(device);
+  auto infos_gpu   = infos.is_cuda()     ? infos     : infos.to(device);
+
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values_gpu.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors_gpu.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_gpu.is_cuda());
+  TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
+  TORCH_WARN("vectors dtype: ", vectors.scalar_type());
+  TORCH_WARN("values dtype: ", values_gpu.scalar_type());
+  TORCH_WARN("values sizes: ", values_gpu.sizes());
+  TORCH_WARN("values numel: ", values_gpu.numel());
+  auto flat_vecs = vectors.flatten();
+  TORCH_WARN("vectors[0:3]: ", flat_vecs.slice(0, 3));
+
+
+
+  using real_t = typename c10::scalar_value_type<scalar_t>::type;
+  using eig_t = typename std::conditional<
+    std::is_same<scalar_t, c10::complex<float>>::value ||
+    std::is_same<scalar_t, c10::complex<double>>::value,
+    scalar_t,                      // A ist bereits komplex
+    c10::complex<scalar_t>         // A ist reell -> EV/EVec komplex
+    >::type;
+
+  int64_t n = input.size(-1);
+  int64_t lda = std::max<int64_t>(1, n);
+  Tensor A_fortran = input.mT().contiguous();
+  scalar_t* A = A_fortran.data_ptr<scalar_t>();
+
+
+
+  auto batch_size = batchCount(vectors);
+
+
+
+  auto vectors_data = vectors_gpu.data_ptr<scalar_t>();
+
+  auto values_data = values_gpu.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
+
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
   cusolverDnParams_t params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
-
-  const double* A = nullptr;
-  const double* W = nullptr;
-  const double* VL = nullptr;
-  const double* VR = nullptr;
+  const int64_t ldvl = 1; // ldvl >= 1 if jobvl = CUSOLVER_EIG_MODE_NOVECTOR
+  int64_t ldvr = n; // ldvr >= n if jobvr = CUSOLVER_EIG_MODE_VECTOR
 
 
-  // Query workspace (dummy for now)
-  size_t ws_dev = 0, ws_host = 0;
-  ::at::cuda::solver::xgeev_bufferSize(
-      handle,
-      params,
-      CUSOLVER_EIG_MODE_VECTOR,
-      CUSOLVER_EIG_MODE_VECTOR,
-      3, // dummy n
-      A,
-      3,
-      W,
-      VL,
-      3,
-      VR,
-      3,
-      &ws_dev,
-      &ws_host);
+
+  scalar_t* W  = values_gpu.data_ptr<scalar_t>();
+  scalar_t*    VL = nullptr;
+
+
+//  if constexpr (std::is_same<eig_t, scalar_t>::value) {
+//    VR_tensor = at::empty_like(vectors);
+//  } else {
+//    VR_tensor = at::empty(vectors.sizes(), vectors.options().dtype(
+//    	c10::CppTypeToScalarType<eig_t>::value));
+//  }
+  Tensor VR_tensor;
+  VR_tensor = at::empty_like(vectors_gpu);
+  scalar_t* VR = VR_tensor.data_ptr<scalar_t>();
+
+
+
+
+const scalar_t*		A_const = A;
+const scalar_t* 	W_const = W;
+const scalar_t*    	VL_const = VL;
+const scalar_t*    	VR_const = VR;
+
+size_t ws_dev = 0, ws_host = 0;
+at::cuda::solver::xgeev_bufferSize<scalar_t>(
+    handle, params,
+    CUSOLVER_EIG_MODE_NOVECTOR, CUSOLVER_EIG_MODE_VECTOR,
+    n,
+    A_const, lda,
+    W_const,
+    VL_const, ldvl,
+    VR_const, ldvr,
+    &ws_dev, &ws_host);
 
   TORCH_WARN("linalg_eig_cusolver_xgeev: bufferSize query complete (placeholder)");
+  // allocate workspace storage on device and host
+  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_device_data = device_allocator.allocate(ws_dev);
+  auto& host_allocator = *at::getCPUAllocator();
+  auto work_host_data = host_allocator.allocate(ws_host);
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_gpu.is_cuda());
+  TORCH_WARN("=== XGEEV DEBUG ===");
+  TORCH_WARN("vectors shape: ", vectors_gpu.sizes());
+  TORCH_WARN("values  shape: ", values_gpu.sizes());
+  TORCH_WARN("input   shape: ", input.sizes());
+  TORCH_WARN("vectors dtype: ", vectors_gpu.scalar_type());
+  TORCH_WARN("values  dtype: ", values_gpu.scalar_type());
+  TORCH_WARN("vectors numel: ", vectors_gpu.numel());
+  TORCH_WARN("values  numel: ", values_gpu.numel());
+  TORCH_WARN("input   numel: ", input.numel());
+  TORCH_WARN("===================");
+
+
+
+
+  at::cuda::solver::xgeev<scalar_t>(  // <- A-Typ zuerst, dann EV/EVec-Typ
+    handle, params,
+    CUSOLVER_EIG_MODE_NOVECTOR, CUSOLVER_EIG_MODE_VECTOR,
+    n,
+    A, lda,
+    W,
+    VL, ldvl,
+    VR, ldvr,
+    static_cast<scalar_t*>(work_device_data.get()), ws_dev,
+    static_cast<scalar_t*>(work_host_data.get()),  ws_host,
+    infos_gpu.data_ptr<int>());
+
+  TORCH_WARN("eigvalues (first 5): ", values_gpu.flatten().slice(0, 0, 5));
+  TORCH_WARN("infos: ", infos_gpu);
+
+
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+  values.copy_(values_gpu.to(values.device()));
+  vectors.copy_(vectors_gpu.to(vectors.device()));
+  infos.copy_(infos_gpu.to(infos.device()));
+
+
+}
+
+void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(eigenvectors.scalar_type(), "linalg_eig_cuda", [&] {
+    apply_xgeev<scalar_t>(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
+  });
 }
 
 #endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
