@@ -4,6 +4,7 @@ import logging
 import operator
 from collections import defaultdict
 from collections.abc import Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, cast
 
@@ -12,6 +13,7 @@ import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -78,7 +80,15 @@ def _inplace_generalized_scatter(
             lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
             (view.args, view.kwargs),
         )
-        tmp = view.target(tmp, *fake_args, **fake_kwargs)
+        # slice and select can allocate new unbacked symints, but those won't be reflected
+        # in the output of this function, hence shall be ignored.
+        fake_mode = detect_fake_mode(fake_args)
+        with (
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if fake_mode and fake_mode.shape_env
+            else nullcontext()
+        ):
+            tmp = view.target(tmp, *fake_args, **fake_kwargs)
     try:
         tmp.copy_(src)
     except RuntimeError as e:
