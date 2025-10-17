@@ -1315,6 +1315,7 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool] = None
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
+    compiler_config: Optional[str] = None
     is_forward: Optional[bool] = None
     num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
@@ -1555,6 +1556,30 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
     return json.dumps(config_dict, sort_keys=True)
 
 
+def _compiler_config_for_logging() -> Optional[str]:
+    def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
+        blocklist = {
+            "TYPE_CHECKING",
+        }
+
+        return {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in d.items()
+            if key not in blocklist
+        }
+
+    if not torch.compiler.config:
+        return None
+
+    try:
+        compiler_config_copy = torch.compiler.config.get_config_copy()  # type: ignore[attr-defined]
+    except (TypeError, AttributeError):
+        return "Compiler Config cannot be pickled"
+
+    config_dict = clean_for_json(compiler_config_copy)
+    return json.dumps(config_dict, sort_keys=True)
+
+
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
@@ -1642,6 +1667,7 @@ def record_compilation_metrics(
         "config_suppress_errors": config.suppress_errors,
         "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
