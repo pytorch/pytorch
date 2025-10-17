@@ -2962,7 +2962,7 @@ def filter_reduction_configs_for_determinism(
     def _do_filter_due_to_inductor_config():
         return (
             inductor_meta.get("deterministic", False)
-            or torch._inductor.config.test_configs.force_filter_reduction_configs
+            or inductor_meta.get("force_filter_reduction_configs", False)
         ) or inductor_meta.get("are_deterministic_algorithms_enabled")
 
     if not _do_filter_due_to_inductor_config() or len(configs) == 1:
