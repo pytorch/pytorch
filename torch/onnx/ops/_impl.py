@@ -2,11 +2,11 @@
 import math
 from collections.abc import Callable
 from typing import Optional, TypeVar
-
 from typing_extensions import ParamSpec
 
 import torch
 from torch.onnx.ops import _dtype_mappings
+
 
 # Use ParamSpec for better type preservation instead of bound Callable TypeVar
 _P = ParamSpec("_P")
