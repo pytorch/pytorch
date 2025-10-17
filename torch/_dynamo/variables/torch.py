@@ -1258,16 +1258,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._check)
         def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
-            # first arg is a predicate vt, second is optional message vt
-
             message_eager = None
             message_graph_proxy = None
             if len(args) >= 2:
                 message_vt = args[1]
-
                 if message_vt.has_closure():
                     unimplemented_v2(
-                        gb_type="Can't extract message from torch._check",
+                        gb_type="Message in torch._check cannot have a closure",
                         context="Message VT has a closure",
                         explanation=(
                             "Trying to build a proxy of torch._check() message, but failed to"
@@ -1304,7 +1301,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     "call_function",
                     self.value,
                     (predicate_proxy, message_graph_proxy),
-                    *proxy_args_kwargs(args, kwargs),
+                    {},
                 ),
             )
 
