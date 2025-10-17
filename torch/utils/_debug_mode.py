@@ -198,6 +198,17 @@ class _RedistributeCall(_DebugCall):
         return f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
 
 
+class _NNModuleCall(_DebugCall):
+    """Designates entering an nn.Module's forward method"""
+
+    def __init__(self, module_name: str, call_depth: int):
+        super().__init__(call_depth)
+        self.module_name = module_name
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[nn.Mod] {self.module_name}"
+
+
 class _FXNodeCall(_DebugCall):
     """FX graph node call"""
 
@@ -474,14 +485,14 @@ class DebugMode(TorchDispatchMode):
 
         super().__enter__()
         if self.record_nn_module:
-            self.module_tracker.__enter__()  # type: ignore[attribute]
+            self.module_tracker.__enter__()  # type: ignore[attribute, union-attr]
         return self
 
     # pyrefly: ignore  # bad-override
     def __exit__(self, *args):
         super().__exit__(*args)
         if self.record_nn_module:
-            self.module_tracker.__exit__()  # type: ignore[attribute]
+            self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
 
@@ -492,7 +503,7 @@ class DebugMode(TorchDispatchMode):
 
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input):
-            fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute]
+            fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
             self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
             self.call_depth += 1
 
