@@ -8,6 +8,7 @@ import operator
 import unittest
 
 import numpy as np
+import pytest
 import sympy
 
 import torch
@@ -1425,6 +1426,15 @@ class f(torch.nn.Module):
             self.assertEqual(
                 f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
             )
+
+    @fresh_cache()
+    def test_slice_backed_size_oblivious(self):
+        @torch.compile(backend="inductor", fullgraph=True, dynamic=True)
+        def f(x):
+            return x[:5]
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            f(torch.randn(10, 10))
 
     def test_baddbmm_symint(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -3194,6 +3204,37 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    @skipIfTorchDynamo("Attempt to trace generator")
+    @torch.fx.experimental._config.patch("use_duck_shape", False)
+    def test_size_comparison_no_recompile(self):
+        """
+        Test that size comparisons don't cause recompilation.
+        When comparing x.size() == b.size() with different sizes,
+        the compiled function should only compile once.
+        We should not guard in sizes of the inner elements.
+        """
+        cnt = CompileCounter()
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def f(x, b):
+            if x.size() == b.size():
+                return x
+            return x * 2
+
+        # First call: shapes differ (1, 2) vs (2, 4, 9), so if branch is False
+        f(torch.rand(10, 2), torch.rand(20, 4, 9))
+
+        # Second call: shapes differ again (1, 2) vs (1, 4, 9), so if branch is False
+        f(torch.rand(10, 2), torch.rand(10, 4, 9))
+
+        # Should only compile once despite different input shapes
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            f"Expected 1 compilation, got {cnt.frame_count}. "
+            f"Size comparison should not cause recompilation.",
+        )
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 
@@ -3332,6 +3373,7 @@ class TestUnbacked(TestCase):
         with self.assertRaises((AssertionError, RuntimeError)):
             func(a, torch.rand(2, 1))
 
+    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
@@ -3356,7 +3398,7 @@ class TestUnbacked(TestCase):
         self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_div_unabacked_eq_input_tensors(self):
+    def test_div_unbacked_eq_input_tensors(self):
         @torch.compile(fullgraph=True)
         def func(a, b):
             x = a.size()[0]
@@ -3376,7 +3418,7 @@ class TestUnbacked(TestCase):
         func(a, b)
 
     @torch.compiler.config.patch(unbacked_sources="L['x'],L['y']")
-    def test_div_unabacked_eq_input_ints(self):
+    def test_div_unbacked_eq_input_ints(self):
         @torch.compile(fullgraph=True)
         def func(x, y):
             a = torch.rand(1)
@@ -3391,7 +3433,7 @@ class TestUnbacked(TestCase):
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     @torch.compiler.config.patch(unbacked_sources="L['y']")
-    def test_div_unabacked_eq_globals(self):
+    def test_div_unbacked_eq_globals(self):
         tensor = torch.rand(10, 44)
         y = 10
 
@@ -3410,7 +3452,7 @@ class TestUnbacked(TestCase):
         func()
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_div_unabacked_eq_item(self):
+    def test_div_unbacked_eq_item(self):
         @torch.compile(fullgraph=True)
         def func(a, b):
             x = a.item()
@@ -3478,8 +3520,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -3519,8 +3561,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -3581,15 +3623,15 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
         select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
-        ge_5: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_5 = _assert_scalar_2 = None
+        ge_4: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_4 = _assert_scalar_2 = None
         sym_sum: "Sym(u0 + 1)" = torch.sym_sum((1, _local_scalar_dense))
         gt: "Sym(u0 + 1 > 0)" = sym_sum > 0;  sym_sum = None
         _assert_scalar_3 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 0 < u0 + 1 on node 'gt'");  gt = _assert_scalar_3 = None
         select_1: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1);  arg0_1 = None
         _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
-        ge_7: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
-        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_7 = _assert_scalar_4 = None
+        ge_5: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
+        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_5 = _assert_scalar_4 = None
         sym_sum_1: "Sym(u1 + 1)" = torch.sym_sum((1, _local_scalar_dense_1))
         gt_1: "Sym(u1 + 1 > 0)" = sym_sum_1 > 0;  sym_sum_1 = None
         _assert_scalar_5 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 + 1 on node 'gt_1'");  gt_1 = _assert_scalar_5 = None
@@ -3721,13 +3763,13 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
         slice_1: "f32[u2][1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, _local_scalar_dense, _local_scalar_dense_1);  arg1_1 = _local_scalar_dense = _local_scalar_dense_1 = None
         sym_size_int: "Sym(u2)" = torch.ops.aten.sym_size.int(slice_1, 0)
-        ge_2: "Sym(u2 >= 0)" = sym_size_int >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge_2 = _assert_scalar = None
+        ge_1: "Sym(u2 >= 0)" = sym_size_int >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         le: "Sym(u2 <= 10)" = sym_size_int <= 10;  sym_size_int = None
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u2 <= 10 on node 'le'");  le = _assert_scalar_1 = None
         sym_storage_offset_default: "Sym(u3)" = torch.ops.aten.sym_storage_offset.default(slice_1)
-        ge_3: "Sym(u3 >= 0)" = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_2 = None
+        ge_2: "Sym(u3 >= 0)" = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_2 = None
         return (slice_1,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
@@ -4041,6 +4083,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                nz = x.nonzero()
+                return nz[-1]
+
+        mod = M()
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(mod)(x), mod(x))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_select_index_with_check(self):
         def func3(x, y):
             u0 = y.item()
@@ -4150,8 +4203,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -4186,8 +4239,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -4203,6 +4256,20 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item(self):
+        def func():
+            _x_ms = torch.tensor([True, False], dtype=torch.int64)
+            _mask_ms = torch.zeros_like(_x_ms, dtype=torch.bool)
+            _mask_ms[:1] = True
+            var_node_2 = torch.masked_select(_x_ms, _mask_ms)
+            var_node_0 = var_node_2.item()
+            return var_node_0
+
+        result_original = func()
+        compiled_program = torch.compile(func, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program()
+        self.assertEqual(result_original, result_compiled)
+
     def test_unbacked_item_set_item(self):
         def my_arithmetic(a, b):
             wrk = torch.zeros(a.size(0))
@@ -4223,7 +4290,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         def accumulate(X0, start):
             start = start.item()
             N = 3
-            result = X0[start].clone()
+            result = X0[start]
             for i in range(0, N):
                 result += X0[start + 1 + i]
             return result
