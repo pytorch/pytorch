@@ -2603,7 +2603,11 @@ def pointwise(
                             4096,  # wrt: better than the max_block for some kernel
                         ),
                         triton_config_with_settings(
-                            size_hints, 2048, num_warps=8, num_stages=2, waves_per_eu=1,  # 20% improvement
+                            size_hints,
+                            2048,
+                            num_warps=8,
+                            num_stages=2,
+                            waves_per_eu=1,  # 20% improvement
                         ),
                     ]
                 )
@@ -2638,8 +2642,10 @@ def pointwise(
                         triton_config_with_settings(
                             size_hints, 128, 16
                         ),  # +10% for some kernels
-                        triton_config_with_settings(size_hints, 128, 32),  # additional 10% more
-                            triton_config_with_settings(
+                        triton_config_with_settings(
+                            size_hints, 128, 32
+                        ),  # additional 10% more
+                        triton_config_with_settings(
                             size_hints, 32, 512
                         ),  # +30% for some kernels
                     ]
