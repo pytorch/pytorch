@@ -43,7 +43,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
     "size mismatch, got input (", self.size(0), "), mat (", mat.size(0), "x", mat.size(1), "), vec (", vec.size(0), ")");
   bool is_all_floating_dtype = at::isFloatingType(self.scalar_type()) && at::isFloatingType(mat.scalar_type()) && at::isFloatingType(vec.scalar_type());
-  bool is_all_complex_dtype = at::isComplexType(self.scalar_type()) && at::isComplexType(mat.scalar_type()) && at::isComplexType(vec.scalar_type()); 
+  bool is_all_complex_dtype = at::isComplexType(self.scalar_type()) && at::isComplexType(mat.scalar_type()) && at::isComplexType(vec.scalar_type());
   TORCH_CHECK(is_all_floating_dtype || is_all_complex_dtype,
     "addmv input tensors should all be floating type or all complex type. Got either unsupported types or mix of float and complex types.");
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
