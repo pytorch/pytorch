@@ -356,7 +356,9 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
     return size
 
 
-def estimate_nccl_collective_runtime_from_fx_node(fx_node: torch.fx.Node) -> float:
+def estimate_nccl_collective_runtime_from_fx_node(
+    fx_node: torch.fx.Node, override_size: Optional[int] = None
+) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
 
@@ -371,7 +373,10 @@ def estimate_nccl_collective_runtime_from_fx_node(fx_node: torch.fx.Node) -> flo
     """
     from torch.distributed.distributed_c10d import _get_group_size_by_name
 
-    tensor_storage_size_bytes = estimate_fx_collective_size(fx_node)
+    if override_size is None:
+        tensor_storage_size_bytes = estimate_fx_collective_size(fx_node)
+    else:
+        tensor_storage_size_bytes = override_size
 
     assert not isinstance(fx_node.target, str)
     opt_args_kwargs = normalize_function(
