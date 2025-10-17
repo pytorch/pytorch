@@ -379,6 +379,7 @@ namespace {
       const auto grid_offset = n * grid.strides[0] + h_out * grid.strides[1] + w_out * grid.strides[2];
       const opmath_t x = grid.data[grid_offset];
       const opmath_t y = grid.data[grid_offset + grid.strides[3]];
+      // Tthe gradient data being propagated
       const opmath_t gOut = static_cast<opmath_t>(grad_output.data[n * grad_output.strides[0] + c * grad_output.strides[1] + h_out * grad_output.strides[2] + w_out * grad_output.strides[3]]);
 
       opmath_t gix_mult, giy_mult;
@@ -397,29 +398,32 @@ namespace {
         opmath_t ty = iy - iy_nw;
 
         if (input_requires_grad) {
-          // NW, NE, SW, sE pixel values from (x, y)
-          opmath_t nw = (1 - tx) * (1 - ty) * gOut;
-          opmath_t ne = tx * (1 - ty) * gOut;
-          opmath_t sw = (1 - tx) * ty * gOut;
-          opmath_t se = tx * ty * gOut;
+          // NW, NE, SW, SE pixel values from (x, y)
+          // The pure, geometric bilinear interpolation weights derived solely from the relative position of the sampling coordinate (ix, iy) within its surrounding 2x2 grid
+          opmath_t nw = (1 - tx) * (1 - ty);
+          opmath_t ne = tx * (1 - ty);
+          opmath_t sw = (1 - tx) * ty;
+          opmath_t se = tx * ty;
 
           // Atomics on shared memory
           index_t s_ix_nw = ix_nw - w_base;
           index_t s_iy_nw = iy_nw - h_base;
-          if (s_iy_nw >= 0 && s_iy_nw < SMEM_H) {
-            if (s_ix_nw >= 0 && s_ix_nw < SMEM_W) {
-              atomicAdd(&s_grad_input[s_iy_nw][s_ix_nw], nw);
+          if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+            if (s_iy_nw >= 0 && s_iy_nw < SMEM_H) {
+              if (s_ix_nw >= 0 && s_ix_nw < SMEM_W) {
+                atomicAdd(&s_grad_input[s_iy_nw][s_ix_nw], nw * gOut);
+              }
+              if (s_ix_nw + 1 >= 0 && s_ix_nw + 1 < SMEM_W) {
+                atomicAdd(&s_grad_input[s_iy_nw][s_ix_nw + 1], ne * gOut);
+              }
             }
-            if (s_ix_nw + 1 >= 0 && s_ix_nw + 1 < SMEM_W) {
-              atomicAdd(&s_grad_input[s_iy_nw][s_ix_nw + 1], ne);
-            }
-          }
-          if (s_iy_nw + 1 >= 0 && s_iy_nw + 1 < SMEM_H) {
-            if (s_ix_nw >= 0 && s_ix_nw < SMEM_W) {
-              atomicAdd(&s_grad_input[s_iy_nw + 1][s_ix_nw], sw);
-            }
-            if (s_ix_nw + 1 >= 0 && s_ix_nw + 1 < SMEM_W) {
-              atomicAdd(&s_grad_input[s_iy_nw + 1][s_ix_nw + 1], se);
+            if (s_iy_nw + 1 >= 0 && s_iy_nw + 1 < SMEM_H) {
+              if (s_ix_nw >= 0 && s_ix_nw < SMEM_W) {
+                atomicAdd(&s_grad_input[s_iy_nw + 1][s_ix_nw], sw * gOut);
+              }
+              if (s_ix_nw + 1 >= 0 && s_ix_nw + 1 < SMEM_W) {
+                atomicAdd(&s_grad_input[s_iy_nw + 1][s_ix_nw + 1], se * gOut);
+              }
             }
           }
         }
@@ -443,15 +447,18 @@ namespace {
 
     // Cooperatively write back from shared memory to global memory
     if (input_requires_grad) {
-      index_t h_in = h_base + threadIdx.y;
-      index_t w_in = w_base + threadIdx.x;
       index_t NC_offset = n * grad_input.strides[0] + c * grad_input.strides[1];
-
-      if (threadIdx.y < SMEM_H && threadIdx.x < SMEM_W) {
-        opmath_t val = s_grad_input[threadIdx.y][threadIdx.x];
-        if (val != 0) {
-          safe_add_2d(grad_input.data, h_in, w_in, grad_input.strides[2], grad_input.strides[3],
-                      inp_H, inp_W, static_cast<scalar_t>(val), NC_offset, grad_input_memory_span);
+      // Cooperative block-stride loop for the 16x16 thread block
+      // to cover the entire 18x18 shared memory (with padding).
+      for (int i = threadIdx.y; i < SMEM_H; i += blockDim.y) {
+        for (int j = threadIdx.x; j < SMEM_W; j += blockDim.x) {
+          opmath_t val = s_grad_input[i][j];
+          if (val != 0) {
+            index_t h_in = h_base + i;
+            index_t w_in = w_base + j;
+            safe_add_2d(grad_input.data, h_in, w_in, grad_input.strides[2], grad_input.strides[3],
+                        inp_H, inp_W, static_cast<scalar_t>(val), NC_offset, grad_input_memory_span);
+          }
         }
       }
     }
