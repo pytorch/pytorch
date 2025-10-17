@@ -4537,7 +4537,7 @@ class Scheduler:
         memory operations.
         """
         node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
-        node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
+        node2_dep_len = len(node2.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
         if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
