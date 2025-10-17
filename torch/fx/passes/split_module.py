@@ -2,7 +2,8 @@
 import inspect
 import logging
 from collections import OrderedDict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 from torch.fx._compatibility import compatibility
