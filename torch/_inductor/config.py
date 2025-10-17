@@ -1505,7 +1505,9 @@ class triton:
     # If set to false, will never generate PDL code.
     enable_pdl = False
 
-    mix_order_reduction = os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "1") == "1"
+    mix_order_reduction = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "1") == "1"
+    )
 
 
 class aot_inductor:

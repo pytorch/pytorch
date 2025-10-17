@@ -938,7 +938,9 @@ class MetalKernel(SIMDKernel):
 
         return code.getvalue()
 
-    def call_kernel(self, name: str, node: Any = None) -> None:
+    def call_kernel(
+        self, name: str, node: Any = None, deallocate_ws: bool = True
+    ) -> None:
         """
         Codegens a call to this kernel
         """

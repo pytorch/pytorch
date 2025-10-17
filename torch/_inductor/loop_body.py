@@ -550,8 +550,7 @@ class LoopBodyBlock:
 
         with self.graph.inserting_after(store):
             self.graph.call_method(
-                "partial_accumulate",
-                (ops, buf, reduction_type, red_arg)
+                "partial_accumulate", (ops, buf, reduction_type, red_arg)
             )
         self.graph.erase_node(store)
         self.graph.erase_node(red)

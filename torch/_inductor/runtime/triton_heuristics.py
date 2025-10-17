@@ -3270,6 +3270,14 @@ def persistent_reduction(
     if inductor_meta.get("RSPLIT_SIZE"):
         for c in configs:
             c.kwargs["RSPLIT_SIZE"] = inductor_meta.get("RSPLIT_SIZE")
+
+            # does not make sense if XBLOCK > RSPLIT_SIZE
+            if c.kwargs["XBLOCK"] > c.kwargs["RSPLIT_SIZE"]:
+                c.kwargs["XBLOCK"] = c.kwargs["RSPLIT_SIZE"]
+
+                # We use power of 2 RSPLIT_SIZE for now
+                assert c.kwargs["RSPLIT_SIZE"] % c.kwargs["XBLOCK"] == 0
+
     return cached_autotune(
         size_hints,
         configs,
@@ -3565,10 +3573,16 @@ class Grid2DWithYZOverflow(GridExpr):
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
 
+
 class MixOrderReductionGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
-        assert self.inductor_meta.get("RSPLIT_SIZE") % meta.get("XBLOCK") == 0  # TODO can allow RSPLIT_SIZE to be not a multiple of XBLOCK later
-        self.x_grid = self.ceildiv("xnumel", self.inductor_meta.get("RSPLIT_SIZE"))
+        split_size = meta.get("RSPLIT_SIZE")
+        xblock = meta.get("XBLOCK")
+        assert split_size
+        assert xblock
+        assert split_size % xblock == 0
+        self.x_grid = self.ceildiv("xnumel", split_size)
+
 
 class CooperativeReductionGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:

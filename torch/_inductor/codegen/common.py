@@ -1556,7 +1556,9 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nelem: sympy.Expr, zero_fill: bool, dtype=torch.uint8) -> tuple[str, int]:
+    def workspace(
+        self, nelem: sympy.Expr, zero_fill: bool, dtype: torch.dtype = torch.uint8
+    ) -> tuple[str, int]:
         """
         Allocate or extend a workspace buffer of nelem elements.
 
@@ -2157,6 +2159,14 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         raise NotImplementedError
 
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
+
     def scan(
         self,
         dtypes: tuple[torch.dtype, ...],
@@ -2748,7 +2758,7 @@ class CSEProxy(DefaultHandler):
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
 
-    def partial_accumulate(self, *args) -> None:
+    def partial_accumulate(self, *args: Any) -> None:
         self.kernel.partial_accumulate(*args)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
