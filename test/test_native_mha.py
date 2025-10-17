@@ -6,9 +6,11 @@ import torch
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     onlyOn,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_WITH_ROCM
 from torch.nn.attention import SDPBackend
@@ -90,6 +92,7 @@ class TestMHADeviceType(TestCase):
                 torch.testing.assert_close(v, correct_v)
 
     @dtypesIfCUDA(torch.float)
+    @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
     def test_transform_bias_rescale_qkv(self, device, dtype):
@@ -100,8 +103,10 @@ class TestMHADeviceType(TestCase):
                 )
 
     @dtypesIfCUDA(torch.float)
+    @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2182")
     @onlyOn(["cuda", "xpu"])
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
@@ -267,6 +272,7 @@ class TestMHADeviceType(TestCase):
             self.assertEqual(weight_pt, weight_npt)
 
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
     @parametrize("use_nt", [False, True])
@@ -322,6 +328,7 @@ class TestMHADeviceType(TestCase):
                         )
 
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
     @torch.no_grad()
@@ -336,6 +343,7 @@ class TestMHADeviceType(TestCase):
         )
 
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
     @torch.no_grad()

@@ -13,8 +13,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyCUDA,
     onlyNativeDeviceTypes,
+    onlyOn,
     skipCUDAIf,
     skipMeta,
     skipXPUIf,
@@ -316,6 +316,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 torch.nn.functional.embedding(indices, weight)
 
     @dtypesIfCUDA(torch.float16, torch.float64)
+    @dtypesIfXPU(torch.float16, torch.float64)
     @dtypes(torch.float64)
     def test_embedding_backward(self, device, dtype):
         embedding = nn.Embedding(10, 3, sparse=True)
@@ -356,6 +357,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
+    @dtypesIfXPU(
+        *(
+            (torch.float, torch.double, torch.bfloat16, torch.half)
+            if TEST_WITH_ROCM
+            else (torch.float, torch.double, torch.half)
+        )
+    )
     @dtypes(torch.float32)
     def test_embedding_max_norm_backward(self, device, dtype):
         # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
@@ -380,6 +388,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
+    @dtypesIfXPU(
+        *(
+            (torch.float, torch.double, torch.bfloat16, torch.half)
+            if TEST_WITH_ROCM
+            else (torch.float, torch.double, torch.half)
+        )
+    )
     @dtypes(torch.float32)
     def test_embedding_max_norm_fwd_AD(self, device, dtype):
         if torch.device(device).type == "xla":
@@ -398,6 +413,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         self.assertEqual(jvp, expected_grad)
 
     @dtypesIfCUDA(
+        *(
+            (torch.float, torch.double, torch.bfloat16, torch.half)
+            if TEST_WITH_ROCM
+            else (torch.float, torch.double, torch.half)
+        )
+    )
+    @dtypesIfXPU(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
             if TEST_WITH_ROCM
@@ -496,6 +518,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
+    @dtypesIfXPU(torch.half, torch.bfloat16)
     def test_embedding_bag_1D_padding_idx(self, device, dtype):
         num_features = 3
         max_indices_per_bag = 10
@@ -640,11 +663,12 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol
                 )
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(
         torch.bfloat16,
     )
     @largeTensorTest("80GB", device="cuda")
+    @largeTensorTest("80GB", device="xpu")
     def test_embedding_backward_large_batch_overflow(self, device, dtype):
         """
         Test that embedding_dense_backward handles large batches that exceed INT32_MAX thread IDs.
@@ -716,6 +740,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
+    @dtypesIfXPU(torch.half, torch.bfloat16)
     def test_embedding_bag_2D_padding_idx(self, device, dtype):
         # Use a Python implementation of embedding_bag with padding_idx support
         # to check torch.nn.functional.embedding_bag correctness
@@ -826,7 +851,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -1075,6 +1100,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             (torch.float, torch.double, torch.half),
         )
     )
+    @dtypesIfXPU(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.double, torch.half),
+        )
+    )
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
         # Test empty input and per sample weight, and backward pass. There was a CUDA
         # invalid configuration bug (more context in #46572)
@@ -1141,6 +1173,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             (torch.float, torch.double, torch.half),
         )
     )
+    @dtypesIfXPU(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.double, torch.half),
+        )
+    )
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
         def test_per_sample_weights(mode, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[2], device=device)
@@ -1196,6 +1235,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         )
     )
     @dtypesIfCUDA(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.double, torch.half),
+        )
+    )
+    @dtypesIfXPU(
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
@@ -1566,6 +1612,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             (torch.float, torch.double, torch.half),
         )
     )
+    @dtypesIfXPU(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.double, torch.half),
+        )
+    )
     def test_embedding_bag_device(self, device, dtypes):
         if IS_JETSON and torch.bfloat16 in dtypes and device == "cpu":
             self.skipTest("bfloat16 not supported with Jetson cpu")
@@ -1634,6 +1687,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         )
     )
     @dtypesIfCUDA(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.double, torch.half),
+        )
+    )
+    @dtypesIfXPU(
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
