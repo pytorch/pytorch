@@ -1359,7 +1359,8 @@ _scaled_gemm(
           const ScalingType scaling_choice_a, const ScalingType scaling_choice_b,
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
-          Tensor& out) {
+          Tensor& out,
+          const std::optional<Tensor>& alpha = std::nullopt) {
   cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
@@ -1410,7 +1411,8 @@ _scaled_gemm(
           args.scale_result_ptr,
           args.result_ld,
           out_dtype_,
-          use_fast_accum);
+          use_fast_accum,
+          alpha);
       return out;
   }
 }
