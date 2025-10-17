@@ -1,5 +1,4 @@
 #include <c10/core/AllocatorConfig.h>
-#include <c10/core/DeviceType.h>
 #include <c10/util/env.h>
 
 namespace c10::CachingAllocator {
