@@ -1317,3 +1317,15 @@ PyTorch,where,"where_cond_shape(8,16,1)_input_shape(16,1)_other_shape(8,16,1)_cp
 PyTorch,where,"where_cond_shape(8,16,1)_input_shape(8,1,1)_other_shape(1,)_cpu_dtypetorch.float32",short,FALSE,5.744666667
 PyTorch,clamp,clamp_M512_N512_cpu,short,FALSE,15.26233333
 PyTorch,gelu,gelu_M512_N512_cpu,short,FALSE,31.33166667
+PyTorch,asr,asr_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,4.578821
+PyTorch,asr,asr_M64_N64_K64_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,15.321683
+PyTorch,asr,asr_M64_N64_K128_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,14.196072
+PyTorch,lsl,lsl_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,4.492635
+PyTorch,lsl,lsl_M64_N64_K64_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,15.091643
+PyTorch,lsl,lsl_M64_N64_K128_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,14.050452
+PyTorch,xor,xor_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,4.720688
+PyTorch,xor,xor_M64_N64_K64_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,15.412292
+PyTorch,xor,xor_M64_N64_K128_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,False,14.312783
+PyTorch,all,all_M1_N1_K1_cpu,short,False,5.698034
+PyTorch,all,all_M64_N64_K64_cpu,short,False,51.141673
+PyTorch,all,all_M64_N64_K128_cpu,short,False,54.042887
