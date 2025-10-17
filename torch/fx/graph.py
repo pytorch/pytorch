@@ -12,10 +12,10 @@ import re
 import typing
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -606,29 +606,31 @@ class CodeGen:
             else:
                 body.append("\n")
 
-        prev_stacktrace = None
+        prev_summary_str = None
 
         def append_stacktrace_summary(node: Node):
             """
             Append a summary of the stacktrace to the generated code. This is
             useful for debugging.
             """
-            nonlocal prev_stacktrace
+            nonlocal prev_summary_str
 
             if node.op not in {"placeholder", "output"}:
-                stack_trace = node.stack_trace
-                if stack_trace:
-                    if stack_trace != prev_stacktrace:
-                        prev_stacktrace = stack_trace
-                        if parsed_stack_trace := _parse_stack_trace(stack_trace):
-                            summary_str = parsed_stack_trace.get_summary_str()
-                        else:
-                            summary_str = ""
-                        body.append(f"\n {dim(f'# {summary_str}')}\n")
-                elif prev_stacktrace != "":
-                    prev_stacktrace = ""
-                    no_stacktrace_msg = "# No stacktrace found for following nodes"
-                    body.append(f"\n{dim(no_stacktrace_msg)}\n")
+                annotation_str = ""
+                annotation = node.meta.get("custom", {})
+                if annotation:
+                    annotation_str = f" Annotation: {annotation}"
+
+                stack_trace_str = "No stacktrace found for following nodes"
+                if stack_trace := node.stack_trace:
+                    if parsed_stack_trace := _parse_stack_trace(stack_trace):
+                        stack_trace_str = parsed_stack_trace.get_summary_str()
+
+                summary_str = f"\n{dim(f'#{annotation_str} {stack_trace_str}')}\n"
+
+                if summary_str != prev_summary_str:
+                    prev_summary_str = summary_str
+                    body.append(summary_str)
 
         def stringify_shape(shape: Iterable) -> str:
             return f"[{', '.join([str(x) for x in shape])}]"
@@ -648,24 +650,37 @@ class CodeGen:
                     "val",
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
+
+                def _tensor_annotation(t: torch.Tensor) -> str:
+                    stride = stringify_shape(t.stride()) if include_stride else ""
+                    device = f"{t.device}" if include_device else ""
+                    return (
+                        f"{red(dtype_abbrs[t.dtype])}"
+                        f"{blue(stringify_shape(t.shape))}"
+                        f"{dim_blue(stride)}"
+                        f"{dim_green(device)}"
+                    )
+
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
                     torch.sparse_csc,
                     torch.sparse_csr,
                 ):
-                    stride_annotation = (
-                        f"{stringify_shape(meta_val.stride())}"
-                        if include_stride
-                        else ""
+                    # Fake tensors cause tests to wobble, so do not custom print them.
+                    is_plain = type(meta_val) is torch.Tensor or isinstance(
+                        meta_val, torch._subclasses.FakeTensor
                     )
-                    device_annotation = f"{meta_val.device}" if include_device else ""
-                    maybe_type_annotation = (
-                        f': "{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}'
-                        f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
-                    )
+                    core = _tensor_annotation(meta_val)
+                    if is_plain:
+                        maybe_type_annotation = f': "{core}"'
+                    else:
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = f': "{cls}({core})"'
+
                 elif isinstance(meta_val, py_sym_types):
                     val_str = CodeGen._sym_repr(meta_val)
                     maybe_type_annotation = f': "Sym({val_str})"'
+
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
@@ -835,6 +850,44 @@ class CodeGen:
 # 2. In the FX graph, we need to access 2 attributes - in_spec and out_spec.
 #    Since we can't access .graph within the FX forward, we need to copy the attribute to the module.
 # 3. We currently can't register the pytree imports with `add_global` - not sure why.
+class _BoxedCodeGen(CodeGen):
+    """
+    CodeGen subclass that generates code using the "boxed" calling convention.
+
+    The boxed calling convention takes a single list argument and clears it
+    after extracting the arguments, which allows for early deallocation of
+    input tensors.
+    """
+
+    def gen_fn_def(
+        self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
+    ):
+        """
+        Generate function definition for boxed calling convention.
+
+        Instead of taking individual arguments, the generated function takes
+        a single 'args_list' parameter, extracts placeholder values from it,
+        and clears the list.
+        """
+        # Generate the function signature with args_list parameter
+        fn_def = f"def {self._func_name}(self, args_list){maybe_return_annotation}:"
+
+        if free_vars:
+            # This is horribly manual but we don't get the "raw" free vars
+            # without a bigger refactor.
+            placeholder_vars = [
+                v.split(":")[0].split("=")[0].strip() for v in free_vars if v != "self"
+            ]
+
+            if placeholder_vars:
+                fn_def += "\n    args_iter = iter(args_list)"
+                for var in placeholder_vars:
+                    fn_def += f"\n    {var} = next(args_iter)"
+                fn_def += "\n    args_list.clear()"
+
+        return fn_def
+
+
 class _PyTreeCodeGen(CodeGen):
     def __init__(self, pytree_info: _PyTreeInfo):
         super().__init__()
@@ -900,10 +953,10 @@ class _PyTreeCodeGen(CodeGen):
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = (
-                self.pytree_info.in_spec.type == tuple
+                self.pytree_info.in_spec.type is tuple
                 and self.pytree_info.in_spec.num_children == 2
-                and self.pytree_info.in_spec.children_specs[0].type == tuple
-                and self.pytree_info.in_spec.children_specs[1].type == dict
+                and self.pytree_info.in_spec.children_specs[0].type is tuple
+                and self.pytree_info.in_spec.children_specs[1].type is dict
             )
             fn_kwargs = "{}"
             fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
@@ -1823,6 +1876,7 @@ class Graph:
                             "a str is expected"
                         )
                 if node.op in ["get_attr", "call_module"]:
+                    # pyrefly: ignore  # missing-attribute
                     target_atoms = node.target.split(".")
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):

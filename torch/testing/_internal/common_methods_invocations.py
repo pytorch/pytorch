@@ -28,7 +28,7 @@ from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
-     toleranceOverride, tol)
+     toleranceOverride, tol, skipXPU)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION
+    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION,
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -1915,7 +1915,7 @@ def sample_inputs_new_full(self, device, dtype, requires_grad, **kwargs):
     for sample in sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
         # The scalar we are passing to new_full must be the same dtype
         # as the one of the resulting tensor
-        use_dtype = sample.kwargs['dtype'] if 'dtype' in sample.kwargs else dtype
+        use_dtype = sample.kwargs.get('dtype', dtype)
         yield SampleInput(
             sample.input, *sample.args, get_val(use_dtype), **sample.kwargs)
 
@@ -3011,7 +3011,7 @@ def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
     err_msg_aminmax = "cannot compute aminmax over an empty dimension as the operation has no identity"
     if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_amax_amin)
-    elif op_info.name in ['aminmax']:
+    elif op_info.name == 'aminmax':
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_aminmax)
 
     # Error Inputs for tensors with more than 64 dimension
@@ -3050,7 +3050,7 @@ def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
     if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': illegal_values}),
                          error_regex=err_msg_amax_amin2)
-    elif op_info.name in ['aminmax']:
+    elif op_info.name == 'aminmax':
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': (max_values, min_values)}),
                          error_regex=err_msg_aminmax2)
 
@@ -4883,7 +4883,7 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 def reference_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs)
 
-    if mode in ('bilinear', ):
+    if mode == 'bilinear':
         make_arg = partial(
             make_tensor,
             device=device,
@@ -9346,7 +9346,7 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
             "k_proj_weight" : k_proj_weight,
             "v_proj_weight" : v_proj_weight,
             "attn_mask" : attn_mask,
-            "training" : True if dropout_p > 0.0 else False,
+            "training" : dropout_p > 0.0,
             "use_separate_proj_weight" : use_separate_proj_weight
         }
 
@@ -9468,7 +9468,7 @@ class foreach_inputs_sample_func:
             # unary
             if opinfo.ref in (torch.abs, torch.neg):
                 return False
-            if opinfo.ref_inplace in (torch.Tensor.zero_,):
+            if opinfo.ref_inplace == torch.Tensor.zero_:
                 return False
             return dtype in integral_types_and(torch.bool)
         if self.arity < 2 or rightmost_arg_type == ForeachRightmostArgType.Tensor:
@@ -9698,7 +9698,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         super().__init__(arity, rightmost_supports_scalar, rightmost_supports_scalarlist)
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
-        return dtype in integral_types_and(torch.bool) and opinfo.ref in (torch.addcmul,)
+        return dtype in integral_types_and(torch.bool) and opinfo.ref == torch.addcmul
 
     def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
         assert "num_input_tensors" not in kwargs
@@ -9710,8 +9710,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
             sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
             for _ in range(2)
         ]
-        if "scalars" in kwargs:
-            del kwargs["scalars"]
+        kwargs.pop("scalars", None)
         kwargs.update(self._sample_kwargs(opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype))
         yield ForeachSampleInput(input, *args, **kwargs)
 
@@ -13646,7 +13645,8 @@ op_db: list[OpInfo] = [
                skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
                                or (_get_torch_rocm_version() >= (5, 2))),
                           "cusparseSDDMM was added in 11.2.1"),
-               skipCPUIfNoMklSparse, ],
+               skipCPUIfNoMklSparse,
+               skipXPU],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
@@ -14889,7 +14889,8 @@ op_db: list[OpInfo] = [
            skips=(
                DecorateInfo(unittest.skip('Works for int64, fails for everything else'), 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
-               DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.skip('Fails on cuda'), 'TestCommon', 'test_complex_half_reference_testing',
+                            active_if=not TEST_WITH_ROCM),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
@@ -16373,7 +16374,7 @@ op_db: list[OpInfo] = [
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        decorators=[skipXPU, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -16500,7 +16501,8 @@ op_db: list[OpInfo] = [
         # FIXME: mask_type == 2 (LowerRight)
         decorators=[
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
-            skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2")],
+            skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2"),
+            skipXPU],
         skips=(
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
@@ -20863,6 +20865,8 @@ op_db: list[OpInfo] = [
             # AssertionError: Tensor-likes are not close!
             # Fails in cuda11.7
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='cuda'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='xpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases

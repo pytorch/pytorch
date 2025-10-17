@@ -5,7 +5,7 @@ import operator
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Union
+from typing import Any, Callable, cast
 
 import torch
 import torch.fx.node
@@ -503,7 +503,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
-            copy_node = copy_nodes.get(mutated_arg, None)
+            copy_node = copy_nodes.get(mutated_arg)
             if copy_node is None:
                 # There is no copy_ back to the candidate mutated_arg (which is a graph input).
                 # Therefore the semantics of the program are that it does not mutate
@@ -578,7 +578,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         old_tensors_to_clone, kwargs, node_name, trigger
     ):
         tensors_to_clone: list[str] = []
-        storage_of_reinplaced_args = OrderedSet[Union[int, None]]()
+        storage_of_reinplaced_args = OrderedSet[int | None]()
 
         # Those used to count possibly_missed_reinplacing_opportunities
         missed_nodes = []
@@ -615,7 +615,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
-                if not trigger == ReInplaceTrigger.AUTO_FUNC_V2:
+                if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
                         # output atindex size(out)+i.
@@ -679,7 +679,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
 
             tensors_to_clone, _ = get_mutable_args(_mutable_op)
-            # Don't try to reinplace Optional[Tensor] args that are None.
+            # Don't try to reinplace Tensor | None args that are None.
             tensors_to_clone = [
                 t for t in tensors_to_clone if node.kwargs[t] is not None
             ]

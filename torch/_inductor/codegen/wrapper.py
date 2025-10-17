@@ -26,6 +26,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
@@ -370,7 +371,7 @@ class MemoryPlanningState:
 
 class WrapperLine:
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        raise NotImplementedError("FX codegen not yet supported for type {type(self)}")
+        raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
 
 
 @dataclasses.dataclass
@@ -976,6 +977,22 @@ class SymbolicCallArgLine(WrapperLine):
         return converter._generate_symbolic_call_arg
 
 
+@dataclasses.dataclass
+class UnbackedSymbolDefsLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    output_name: str
+    outputs: Any
+    unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_unbacked_symbol_defs_for_outputs(
+            self.output_name, self.outputs, self.unbacked_bindings
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_unbacked_symbol_defs
+
+
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -1098,6 +1115,7 @@ class PythonWrapperCodegen(CodeGen):
         return PythonWrapperCodegen()
 
     def set_launcher_fn_name(self) -> None:
+        # pyrefly: ignore  # bad-assignment
         self.launcher_fn_name = "call"
 
     def write_constant(self, name: str, hashed: str) -> None:
@@ -1188,6 +1206,18 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
+        try:
+            from torch._C import _cuda_getCurrentRawStream  # noqa: F401
+
+            self.kernel_autotune_defs.splice(
+                """
+                get_raw_stream = torch._C._cuda_getCurrentRawStream
+                """,
+                strip=True,
+            )
+        except (ImportError, AttributeError):
+            pass
+
     @cache_on_self
     def write_triton_header_once(self) -> None:
         import_str = f"""
@@ -1222,14 +1252,17 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
+        # pyrefly: ignore  # bad-assignment
         meta = repr(meta)
         if meta not in self._metas:
             var = f"meta{len(self._metas)}"
+            # pyrefly: ignore  # unsupported-operation
             self._metas[meta] = var
             self.header.writeline(f"{var} = {meta}")
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(f"{var} = {meta}")
                 self._meta_vars.add(var)
+        # pyrefly: ignore  # index-error
         return self._metas[meta]
 
     @cache_on_self
@@ -1665,6 +1698,7 @@ class PythonWrapperCodegen(CodeGen):
             with self.set_writeline(self.wrapper_call.writeline):
                 for line in self.lines:
                     if isinstance(line, WrapperLine):
+                        # pyrefly: ignore  # missing-attribute
                         line.codegen(self.wrapper_call)
                     else:
                         self.wrapper_call.writeline(line)
@@ -1759,6 +1793,14 @@ class PythonWrapperCodegen(CodeGen):
                 "Auto-tuning code written to %s",
                 file_path,
             )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_autotune_at_compile_time_code",
+                "encoding": "string",
+            },
+            payload_fn=lambda: tuning_code,
+        )
         # Execute the code to autotune kernels
         try:
             exec(tuning_code, scope)
@@ -1771,7 +1813,8 @@ class PythonWrapperCodegen(CodeGen):
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
-        out_names = V.graph.get_output_names()
+        outputs = self.get_graph_outputs()
+        out_names = V.graph._get_output_names(outputs)
 
         while (
             self.lines
@@ -1982,13 +2025,39 @@ class PythonWrapperCodegen(CodeGen):
         arg_name = node.input_name(0)
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
 
-    def codegen_dynamic_select_index(self, node):
+    def codegen_dynamic_select_index(self, node, clamp):
         index_str = f"{node.index} + {node.size} if {node.index} < 0 else {node.index}"
+        if clamp:
+            index_str = f"max(0, min({node.size}, {index_str}))"
         self.writeline(
             f"{node.unbacked_offset_symbol} = {node.base_offset} + {node.base_dim_stride} * ({index_str})"
         )
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
+
+    def codegen_dynamic_slice_size(self, node):
+        def clamp_index(x):
+            pos = self.codegen_sizevar(sympy.Max(0, sympy.Min(x, node.size)))
+            neg = self.codegen_sizevar(
+                sympy.Max(0, sympy.Min(x + node.size, node.size))
+            )
+            return f"{pos} if {x} >= 0 else {neg}"
+
+        def codegen_with_step(start_var, end_var, step):
+            if step == 1:
+                return f"{end_var} - {start_var}"
+            step_ = self.codegen_sizevar(step)
+            return f"({end_var} - {start_var} + {step_} - 1) // {step_}"
+
+        # codegen start, end
+        sym = node.unbacked_size_symbol
+        start = clamp_index(node.start)
+        end = clamp_index(node.end)
+        self.writeline(f"{sym}_start = {start}")
+        self.writeline(f"{sym}_end = {end}")
+        with_step = codegen_with_step(f"{sym}_start", f"{sym}_end", node.step)
+        self.writeline(f"{sym} = max(0, {with_step})")
+        self.unbacked_symbol_decls.add(str(node.unbacked_size_symbol))
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
@@ -2562,7 +2631,6 @@ class PythonWrapperCodegen(CodeGen):
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
                         kernel.save_gpu_kernel(
-                            grid=(0, 0, 0),   # use dummy grid
                             stream="stream",  # use dummy stream
                             launcher=kernel.launchers[0],
                         )
@@ -2710,13 +2778,18 @@ class PythonWrapperCodegen(CodeGen):
                 self,
                 kernel_name=kernel_name,
                 call_args=call_args,
+                # pyrefly: ignore  # bad-argument-type
                 raw_keys=raw_keys,
+                # pyrefly: ignore  # bad-argument-type
                 raw_args=raw_args,
+                # pyrefly: ignore  # bad-argument-type
                 arg_types=arg_types,
                 triton=triton,
+                # pyrefly: ignore  # bad-argument-type
                 triton_meta=triton_meta,
                 device=device,
                 graph_name=V.graph.name,
+                # pyrefly: ignore  # bad-argument-type
                 original_fxnode_name=original_fxnode_name,
             )
         )
@@ -2837,6 +2910,7 @@ class PythonWrapperCodegen(CodeGen):
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
+                # pyrefly: ignore  # no-matching-overload
                 zip(call_args, arg_types, raw_keys, raw_args)
             ):
                 key = None
@@ -3177,7 +3251,16 @@ class PythonWrapperCodegen(CodeGen):
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env, unbacked_bindings
         )
+        self.writeline(
+            UnbackedSymbolDefsLine(self, output_name, outputs, unbacked_bindings)
+        )
 
+    def _codegen_unbacked_symbol_defs_for_outputs(
+        self,
+        output_name: str,
+        outputs: Any,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
+    ) -> None:
         if not unbacked_bindings:
             return
 
@@ -3615,6 +3698,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
+        # pyrefly: ignore  # bad-assignment
         self.launcher_fn_name = self.subgraph_name
 
     def write_header(self) -> None:

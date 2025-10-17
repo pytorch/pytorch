@@ -4,7 +4,7 @@
 requires = [
     # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=70.1.0,<80.0",
+    "setuptools>=70.1.0",
     "cmake>=3.27",
     "ninja",
     "numpy",
@@ -155,7 +155,6 @@ ignore = [
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
-    "E721",
     "E741",
     "EXE001",
     "F405",
@@ -181,13 +180,13 @@ ignore = [
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
+    "SIM300", # Yoda condition detected
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
     "UP035",
-    "FURB161",
 ]
 select = [
     "B",
@@ -197,8 +196,7 @@ select = [
     "E",
     "EXE",
     "F",
-    "SIM1",
-    "SIM911",
+    "SIM",
     "W",
     # Not included in flake8
     "FURB",
@@ -243,6 +241,7 @@ select = [
     "Q003",  # avoidable escaped quote
     "Q004",  # unnecessary escaped quote
     "RSE",
+    "RUF007", # pairwise over zip
     "RUF008", # mutable dataclass default
     "RUF013", # ban implicit optional
     "RUF015", # access first ele in constant time
