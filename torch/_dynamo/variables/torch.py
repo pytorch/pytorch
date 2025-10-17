@@ -1258,28 +1258,39 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._check)
         def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
-            # both args are variable trackers
             # first arg is a predicate vt, second is optional message vt
-            assert args
 
-            # emit missing proxy that was impossible to implement inside NestedUserFunctionVariable
-            # but needed to fix the issue https://github.com/pytorch/pytorch/issues/163668
             message_eager = None
-            message_graph = None
+            message_graph_proxy = None
             if len(args) >= 2:
                 message_vt = args[1]
 
-                if message_vt.is_python_constant():
-                    message_eager = message_vt.as_python_constant()
-                    message_graph = message_eager
-                else:
-                    assert isinstance(message_vt, NestedUserFunctionVariable)
-                    assert not message_vt.has_closure()
-                    message_eager = message_vt.get_function()
-                    attr_prefix = f"_check_msg_{tx.output.graph.nodes.__len__()}"
-                    message_graph = tx.output.register_static_attr_and_return_proxy(
-                        attr_prefix, message_eager
+                if message_vt.has_closure():
+                    unimplemented_v2(
+                        gb_type="Can't extract message from torch._check",
+                        context="Message VT has a closure",
+                        explanation=(
+                            "Trying to build a proxy of torch._check() message, but failed to"
+                            ", because it has a closure, which are unsupported for now."
+                            "If possible, remove any variables from message and try again."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
+                if not isinstance(message_vt, NestedUserFunctionVariable):
+                    unimplemented_v2(
+                        gb_type="Can't extract message from torch._check",
+                        context="torch._check() has a second argument, which is expected to be a message",
+                        explanation=(
+                            "Trying to build a proxy of torch._check() message, but failed to"
+                            ", because message variable tracker is not NestedUserFunctionVariable"
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                message_eager = message_vt.get_function()
+                attr_prefix = f"_check_msg_{tx.output.graph.nodes.__len__()}"
+                message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
+                    attr_prefix, message_eager
+                )
             predicate_vt = args[0]
 
             if predicate_vt.is_python_constant():
@@ -1287,13 +1298,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return ConstantVariable.create(None)
 
             predicate_proxy = predicate_vt.as_proxy()
-            tx.output.create_proxy(
-                "call_function",
-                self.value,
-                (predicate_proxy, message_graph),
-                {},
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    (predicate_proxy, message_graph_proxy),
+                    *proxy_args_kwargs(args, kwargs),
+                ),
             )
-            return ConstantVariable.create(None)
 
         return handlers
 
