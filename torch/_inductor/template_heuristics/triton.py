@@ -1007,7 +1007,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
-            if capability == (10, 0):
+            if capability >= (10, 0) and head_dim >= 192:
                 flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs_sm_100
             else:
                 flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
