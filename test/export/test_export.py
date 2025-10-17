@@ -17184,8 +17184,8 @@ def forward(self, x):
             offsets=torch.IntTensor([0, 0, 2, 2, 3, 4, 5, 5, 8]),
         )
         # TODO tmanlaibaatar
-        # because we call unflatten in the flat tracer, it creates a new JaggedTensor 
-        # and it gets pruned as it is not reachable. Not sure what the right way to fix 
+        # because we call unflatten in the flat tracer, it creates a new JaggedTensor
+        # and it gets pruned as it is not reachable. Not sure what the right way to fix
         # is but since it is just warning, probably ok to xfail it for now.
         with self.assertWarnsRegex(
             UserWarning,
