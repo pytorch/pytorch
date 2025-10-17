@@ -16,7 +16,10 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._collective_utils import shard_dim_alltoall
+from torch.distributed.tensor._collective_utils import (
+    all_permute_mesh_dim,
+    shard_dim_alltoall,
+)
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.debug import CommDebugMode
@@ -1161,6 +1164,49 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),),
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
+
+    @with_comms
+    def test_all_permute_mesh_dim(self):
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_tensor = torch.randn(4, 4, 4, self.world_size, device=self.device_type)
+        src_distribution = (
+            ShardOrderEntry(tensor_dim=0, mesh_dims=(0,)),
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(1,)),
+            ShardOrderEntry(tensor_dim=2, mesh_dims=(2,)),
+        )
+
+        input_tensor_dt = self.distribute_tensor(
+            input_tensor,
+            mesh,
+            [Shard(0), Shard(1), Shard(2)],
+            shard_order=src_distribution,
+        )
+        full_tensor_shape = input_tensor.shape
+        tgt_distribution = (
+            ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(0,)),
+            ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
+        )
+
+        # TODO: test with comm
+
+        # all_permute_mesh_dim can mutate on multiple mesh dims together
+        new_tensor = all_permute_mesh_dim(
+            input_tensor_dt.to_local(),
+            full_tensor_shape,
+            src_distribution,
+            tgt_distribution,
+            mesh,
+        )
+
+        input_tensor_from_spec_dt = self.distribute_tensor(
+            input_tensor,
+            mesh,
+            [Shard(1), Shard(2), Shard(0)],
+            shard_order=tgt_distribution,
+        )
+        self.assertEqual(new_tensor, input_tensor_from_spec_dt.to_local())
 
 
 if __name__ == "__main__":

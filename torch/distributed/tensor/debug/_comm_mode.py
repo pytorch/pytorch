@@ -249,6 +249,7 @@ class CommDebugMode(TorchDispatchMode):
             self.comm_registry.add(py_op)
 
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
+        self.comm_registry.add(torch.ops._c10d_functional.all_to_all_single)
         self.advanced_module_tracker = _CommModeModuleTracker()
 
     def generate_json_dump(self, file_name="comm_mode_log.json", noise_level=3):
