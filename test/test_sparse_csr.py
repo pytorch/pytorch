@@ -4099,7 +4099,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             left_alpha = make_tensor(M, dtype=dtype, device=device, low=0.5, high=high) if has_left_alpha else None
             right_alpha = make_tensor(N, dtype=dtype, device=device, low=0.5, high=high) if has_right_alpha else None
 
-            if 0 and op == "bsr_dense_addmm":
+            if 0 and op == "bsr_dense_addmm":  # noqa: SIM223
                 # Find optimal kernel parameters, the speed-up is
                 # about 10x for running this test.
                 #

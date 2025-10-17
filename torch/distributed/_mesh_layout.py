@@ -17,6 +17,7 @@ from torch.distributed._pycute import (
     is_int,
     is_tuple,
     Layout,
+    match_structure,
     suffix_product,
 )
 
@@ -48,14 +49,9 @@ class _MeshLayout(Layout):
             raise TypeError(f"shape must be a tuple or int, got {type(self.shape)}")
         if not is_tuple(self.stride) and not is_int(self.stride):
             raise TypeError(f"stride must be a tuple or int, got {type(self.stride)}")
-        if (
-            is_tuple(self.shape)
-            and is_tuple(self.stride)
-            and len(flatten(self.shape)) != len(flatten(self.stride))
-        ):
+        if not match_structure(self.shape, self.stride):
             raise ValueError(
-                f"sizes {len(flatten(self.shape))} and "
-                f"strides {len(flatten(self.stride))} must have the same length"
+                f"sizes {self.shape} and strides {self.stride} don't match"
             )
 
     @property
