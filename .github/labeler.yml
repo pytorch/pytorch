@@ -142,3 +142,4 @@
 - torch/**/*cublas*
 - torch/_inductor/kernel/mm.py
 - test/inductor/test_max_autotune.py
+- third_party/fbgemm
