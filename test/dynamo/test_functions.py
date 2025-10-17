@@ -5173,10 +5173,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure
     def test_property_class_transmute(self):
         class PropertyGetter:
-            def __call__(self):
+            def __call__(self, obj):
                 return True
 
         p = property(PropertyGetter())
@@ -5190,6 +5189,31 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         mod = Mod()
         mod.__class__ = type(mod.__class__.__name__, (mod.__class__,), {"p": p})
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+        self.assertEqual(opt_mod(x), x + 1)
+
+    def test_property_functools_partial(self):
+        def p_getter(obj, *, delta: int):
+            # Use instance state + a bound constant
+            return (getattr(obj, "flag", 0) + delta) > 0
+
+        class Mod(torch.nn.Module):
+            def __init__(self, flag: int):
+                super().__init__()
+                self.flag = flag
+
+            # fget is a functools.partial object
+            p = property(functools.partial(p_getter, delta=1))
+
+            def forward(self, x):
+                if self.p:  # calls p_getter(self, delta=1)
+                    return x + 1
+                else:
+                    raise RuntimeError("whoops")
+
+        mod = Mod(flag=1)
 
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.randn(1)

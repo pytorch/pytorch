@@ -6531,6 +6531,7 @@
   dispatch:
     CPU, CUDA: var
     MPS: var_mps
+    MTIA: var_mtia
   tags: core
 
 - func: var.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)

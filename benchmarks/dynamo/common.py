@@ -2284,9 +2284,11 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+                exception_string = str(e)
+                accuracy_status = f"fail_exception: {exception_string}"
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if not is_same:
                 accuracy_status = "eager_two_runs_differ"
@@ -2403,9 +2405,11 @@ class BenchmarkRunner:
                     force_max_multiplier=force_max_multiplier,
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+                exception_string = str(e)
+                accuracy_status = f"fail_exception: {exception_string}"
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if not is_same:
                 if self.args.skip_accuracy_check:
@@ -4060,7 +4064,7 @@ def run(runner, args, original_dir=None):
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
-            speedup_experiment if not args.backend == "torchao" else latency_experiment
+            speedup_experiment if args.backend != "torchao" else latency_experiment
         )
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
