@@ -10178,14 +10178,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_argmax_argmin_transposed_mutation(self):
         # Regression for https://github.com/pytorch/pytorch/issues/163929
         # Ensure argmax/argmin indices are correct on transposed views after base mutation
-        # This test is CPU-only to avoid backend-specific failures unrelated to the core fix
-        device_type = (
-            self.device
-            if isinstance(self.device, str)
-            else getattr(self.device, "type", str(self.device))
-        )
-        if device_type != "cpu":
-            self.skipTest("CPU-only test for argreduce index semantics on views")
 
         def fn(x):
             y = x.transpose(0, 1)
