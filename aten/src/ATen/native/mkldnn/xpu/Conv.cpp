@@ -337,7 +337,6 @@ Tensor _convolution_out(
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
-  
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
   // thus we need the transformation here
@@ -355,7 +354,7 @@ Tensor _convolution_out(
   }
   int64_t dim = k - 2;
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
-  
+
   ConvParams params;
   if (ndim == 3) {
     // PyTorch does not support ChannelsLast1D case,
