@@ -808,6 +808,7 @@ Operator Tags
 .. py:module:: torch.utils.viz
 .. py:module:: torch.quasirandom
 .. py:module:: torch.return_types
+.. py:module:: torch.serialization
 .. py:module:: torch.signal.windows.windows
 .. py:module:: torch.sparse.semi_structured
 .. py:module:: torch.storage
