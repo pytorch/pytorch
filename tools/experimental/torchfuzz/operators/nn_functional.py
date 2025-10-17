@@ -752,6 +752,19 @@ class GroupNormOperator(Operator):
         # GroupNorm needs at least 2 dimensions (batch, channels)
         if len(output_spec.size) < 2:
             return False
+
+        # GroupNorm requires more than 1 value per channel
+        # For shape (N, C, *), num_values_per_channel = N * prod(*)
+        # We need N * prod(*) > 1
+        batch_size = output_spec.size[0]
+        spatial_size = 1
+        for dim in output_spec.size[2:]:
+            spatial_size *= dim
+        num_values_per_channel = batch_size * spatial_size
+
+        if num_values_per_channel <= 1:
+            return False
+
         return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
