@@ -3226,7 +3226,7 @@ def _persistent_reduction_configs(
                 configs = configs[:1]
             else:
                 x_block = 8
-                if xnumel // x_block < 128 or (loads_and_stores >= 5:
+                if xnumel // x_block < 128 or loads_and_stores >= 5:
                     x_block = 1
 
                 configs = [
