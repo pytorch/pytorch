@@ -4646,6 +4646,7 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    @skipIfXpu(msg="Incorrect reference on XPU, see issue #165392")
     def test_conv1d_with_permute(self):
         # fix https://github.com/pytorch/pytorch/issues/159462
         class ConvModel(nn.Module):
@@ -15805,7 +15806,7 @@ if RUN_GPU:
                 ).run(code)
             else:
                 FileCheck().check_count(
-                    "with torch.cuda._DeviceGuard(0)", 1, exactly=True
+                    f"with torch.{GPU_TYPE}._DeviceGuard(0)", 1, exactly=True
                 ).run(code)
 
     class RNNTest(TestCase):

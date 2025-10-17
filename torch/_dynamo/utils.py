@@ -1376,6 +1376,7 @@ class CompilationMetrics:
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
     pytorch_version: Optional[str] = None
+    inductor_provenance: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1575,7 +1576,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     if torch._inductor.config:
         try:
             inductor_config_copy = torch._inductor.config.get_config_copy()
-        except (TypeError, AttributeError):
+        except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
     if inductor_config_copy is not None:
