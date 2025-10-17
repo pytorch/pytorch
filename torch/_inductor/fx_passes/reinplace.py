@@ -525,7 +525,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
-            copy_node = copy_nodes.get(mutated_arg, None)
+            copy_node = copy_nodes.get(mutated_arg)
             if copy_node is None:
                 # There is no copy_ back to the candidate mutated_arg (which is a graph input).
                 # Therefore the semantics of the program are that it does not mutate
@@ -701,7 +701,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
 
             tensors_to_clone, _ = get_mutable_args(_mutable_op)
-            # Don't try to reinplace Optional[Tensor] args that are None.
+            # Don't try to reinplace Tensor | None args that are None.
             tensors_to_clone = [
                 t for t in tensors_to_clone if node.kwargs[t] is not None
             ]
