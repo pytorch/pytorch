@@ -129,9 +129,9 @@ def infer_scale_swizzle(mat, scale):
     if len(scale.shape) > 1:
         if (
             (scale.shape[0] == mat.shape[0]
-            and scale.shape[1] == math.ceil(mat.shape[1] // 128))
+                and scale.shape[1] == math.ceil(mat.shape[1] // 128))
             or (scale.shape[1] == mat.shape[1]
-            and scale.shape[0] == math.ceil(mat.shape[0] // 128))
+                and scale.shape[0] == math.ceil(mat.shape[0] // 128))
         ):
             return ScalingType.BlockWise1x128, SwizzleType.NO_SWIZZLE
 
@@ -144,9 +144,9 @@ def infer_scale_swizzle(mat, scale):
     # NVFP4
     if (
         (scale.numel()
-        == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
-        or scale.numel()
-        == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4))
+            == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
+            or scale.numel()
+            == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4))
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e4m3fn
     ):
@@ -165,9 +165,9 @@ def infer_scale_swizzle(mat, scale):
         # MXFP8 w/ swizzle
         if (
             (scale.numel()
-            == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
-            or scale.numel()
-            == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4))
+                == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
+                or scale.numel()
+                == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4))
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
@@ -176,7 +176,7 @@ def infer_scale_swizzle(mat, scale):
         # MXFP8 w/o swizzle
         if (
             (scale.numel() == math.ceil(mat.shape[0] // 32) * mat.shape[1]
-            or scale.numel() == math.ceil(mat.shape[1] // 32) * mat.shape[0])
+                or scale.numel() == math.ceil(mat.shape[1] // 32) * mat.shape[0])
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
