@@ -206,7 +206,8 @@ class TestExportAPIDynamo(common_utils.TestCase):
         with self.assertWarnsRegex(
             DeprecationWarning,
             "from_dynamic_axes_to_dynamic_shapes is deprecated and will be removed in a future release. "
-            "Please provide 'dynamic_shapes' directly.",
+            "This function converts 'dynamic_axes' format (including custom axis names) to 'dynamic_shapes' format. "
+            "Instead of relying on this conversion, provide 'dynamic_shapes' directly using torch.export.Dim objects with custom names.",
         ):
             self.assert_export(
                 SampleModelForDynamicShapes(),
