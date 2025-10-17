@@ -90,6 +90,9 @@ def get_torch_version(sha: str | None = None) -> str:
                 sha = get_sha(pytorch_root)
             version += "+git" + sha[:7]
             origin += " and git commit"
+    # Add custom suffix if specified
+    if pytorch_version_suffix := os.getenv("PYTORCH_VERSION_SUFFIX"):
+        version += pytorch_version_suffix
     # Validate that the version is PEP 440 compliant
     parsed_version = Version(version)
     if sdist_version:
