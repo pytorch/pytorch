@@ -88,11 +88,13 @@ if has_triton_package():
             divisible_by_16=None,
             equal_to_1=None,
         ):
+            # pyrefly: ignore  # not-iterable
             return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
     AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
+        # pyrefly: ignore  # invalid-argument
         "AttrsDescriptor",
         ["divisible_by_16", "equal_to_1"],
         defaults=[(), ()],
