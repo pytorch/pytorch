@@ -1357,7 +1357,7 @@ class InstructionTranslatorBase(
 
         if self.is_trace_bytecode_log_enabled:
             trace_bytecode_log.debug(
-                "TRACE %s %s %s", inst.opname, inst.argval, self.stack
+                "TRACE %s %s %s", inst.opname, inst.argval, repr(self.stack)
             )
 
         # Store the latest 20 bytecode execution for the process,
