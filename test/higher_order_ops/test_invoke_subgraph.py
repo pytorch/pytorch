@@ -681,6 +681,7 @@ class GraphModule(torch.nn.Module):
             sin: "f32[8]" = torch.ops.aten.sin.default(primals_0)
             return (sin, primals_0)
 """,
+                ignore_empty_lines=True,
             )
 
     @inductor_config.patch("fx_graph_cache", False)
@@ -722,6 +723,7 @@ class <lambda>(torch.nn.Module):
             mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
             return (mul_1,)
 """,
+                ignore_empty_lines=True,
             )
 
     def test_dedupe(self):
@@ -2280,6 +2282,7 @@ class GraphModule(torch.nn.Module):
             cos: "f32[s77, 16]" = torch.ops.aten.cos.default(primals_1)
             return (cos, primals_1, primals_0)
 """,
+                ignore_empty_lines=True,
             )
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
@@ -2322,6 +2325,7 @@ class GraphModule(torch.nn.Module):
             mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
             return (None, mul_10)
 """,
+                ignore_empty_lines=True,
             )
 
     def test_div(self):
