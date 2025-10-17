@@ -33,6 +33,11 @@ Pin: release o=repo.radeon.com
 Pin-Priority: 600
 EOF
 
+    # we want the patch version of 7.0 instead
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 7.0) ]]; then
+        ROCM_VERSION="${ROCM_VERSION}.2"
+    fi
+
     # we want the patch version of 6.4 instead
     if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
         ROCM_VERSION="${ROCM_VERSION}.2"
