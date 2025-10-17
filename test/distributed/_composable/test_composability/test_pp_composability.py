@@ -377,7 +377,7 @@ class ComposabilityTest(MultiProcessTestCase):
             torch.float32,
         ],
     )
-    def test_replicate_pps(self, ScheduleClass, MixedPrecisionParam):
+    def test_replicate_pp(self, ScheduleClass, MixedPrecisionParam):
         torch.accelerator.set_device_index(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
