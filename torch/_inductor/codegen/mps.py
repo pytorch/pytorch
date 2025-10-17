@@ -683,7 +683,6 @@ class MetalKernel(SIMDKernel):
                     # pyrefly: ignore  # missing-argument
                     t
                     for t in self.range_tree_nodes.values()
-                    # pyrefly: ignore  # missing-argument
                     if t.is_reduction
                 )
                 cmp_op = ">" if reduction_type == "argmax" else "<"
@@ -866,7 +865,6 @@ class MetalKernel(SIMDKernel):
                     # pyrefly: ignore  # missing-argument
                     t.numel
                     for t in self.range_trees
-                    # pyrefly: ignore  # missing-argument
                     if t.is_reduction
                 )
                 # If using dynamic shapes, set the threadgroup size to be the

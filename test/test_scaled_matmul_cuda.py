@@ -154,8 +154,8 @@ def infer_scale_swizzle(mat, scale):
 
     # MXFP4 w/o swizzle
     if (
-        scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
-        or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0]
+        (scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
+            or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0])
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e8m0fnu
     ):
