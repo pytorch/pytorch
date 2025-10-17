@@ -337,10 +337,7 @@ Tensor _convolution_out(
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
-  // get computation format for Conv/TransposedConv
-  bool is_channels_last_suggested =
-      use_channels_last_for_conv(input_r, weight_r);
-
+  
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
   // thus we need the transformation here
@@ -348,13 +345,9 @@ Tensor _convolution_out(
     input = view4d(input_r);
     weight = view4d(weight_r);
   }
-  // ensure the input/weight/bias/output are congituous in desired format
-  at::MemoryFormat mfmt = is_channels_last_suggested
-      ? get_cl_tag_by_ndim(input.ndimension())
-      : at::MemoryFormat::Contiguous;
-  auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
-  input = input.contiguous(mfmt);
-  weight = weight.contiguous(mfmt);
+  // get computation format for Conv/TransposedConv
+  bool is_channels_last_suggested =
+      use_channels_last_for_conv(input_r, weight_r);
 
   auto k = weight.ndimension();
   if (k == input.ndimension() + 1) {
@@ -363,7 +356,6 @@ Tensor _convolution_out(
   int64_t dim = k - 2;
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
   
-  bool is_1d = false;
   ConvParams params;
   if (ndim == 3) {
     // PyTorch does not support ChannelsLast1D case,
@@ -375,7 +367,6 @@ Tensor _convolution_out(
     params.output_padding = output_padding_.vec();
     params.groups = groups_;
     params.view1d_as_2d();
-    is_1d = true;
   } else {
     params.stride = expand_param_if_needed(stride_, "stride", dim);
     // PyTorch default Conv padding should be a single integer value
@@ -390,6 +381,14 @@ Tensor _convolution_out(
         expand_param_if_needed(output_padding_, "output_padding", dim);
     params.groups = groups_;
   }
+  
+  // ensure the input/weight/bias/output are congituous in desired format
+  at::MemoryFormat mfmt = is_channels_last_suggested
+      ? get_cl_tag_by_ndim(input.ndimension())
+      : at::MemoryFormat::Contiguous;
+  auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
+  input = input.contiguous(mfmt);
+  weight = weight.contiguous(mfmt);
   check_shape_forward(input, weight, bias, params, true);
 
   Tensor output;
