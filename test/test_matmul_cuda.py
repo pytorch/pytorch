@@ -56,14 +56,15 @@ if TEST_CUDA:
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 
-def xfailIfSM100OrLaterAndCondition(condition_fn):
+def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
     """
-    Conditionally xfail tests on SM100+ based on a condition function.
+    Conditionally xfail tests on SM100+ datacenter SKUs based on a condition function.
     The condition function receives the test parameters dict and returns True to xfail.
     """
+    computeCapabilityCheck = SM100OrLater and torch.cuda.get_device_capability()[0] != 12
     return decorateIf(
         unittest.expectedFailure,
-        lambda params: SM100OrLater and condition_fn(params)
+        lambda params: computeCapabilityCheck and condition_fn(params)
     )
 
 
@@ -163,7 +164,7 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
-    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
+    @xfailIfSM100OrLaterNonRTXAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})

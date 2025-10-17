@@ -4060,7 +4060,7 @@ def run(runner, args, original_dir=None):
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
-            speedup_experiment if not args.backend == "torchao" else latency_experiment
+            speedup_experiment if args.backend != "torchao" else latency_experiment
         )
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"

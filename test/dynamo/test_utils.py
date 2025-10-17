@@ -510,6 +510,7 @@ class TestDynamoTimed(TestCase):
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
         del raw["ir_count"]
+        del raw["inductor_provenance"]
         del raw["param_numel"]
         del raw["param_bytes"]
         del raw["param_count"]
@@ -694,6 +695,7 @@ class TestDynamoTimed(TestCase):
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
         del raw["ir_count"]
+        del raw["inductor_provenance"]
         del raw["guard_latency_us"]
         del raw["param_numel"]
         del raw["param_bytes"]
@@ -910,6 +912,27 @@ class TestDynamoTimed(TestCase):
             torch.compile(test2)(torch.randn(10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
+
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+        }
+    )
+    @inductor_config.patch(
+        {"trace.enabled": True, "trace.provenance_tracking_level": 1},
+    )
+    def test_inductor_provenance(self):
+        module = torch.nn.Linear(6, 66)
+        graph_module = torch.fx.symbolic_trace(module)
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(graph_module)(torch.randn(6, 6))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(
+            compilation_events[0].inductor_provenance,
+            {'{"extern_kernels.addmm:1": []}'},
+        )
 
     @dynamo_config.patch({"log_compilation_metrics": True})
     @inductor_config.patch({"force_disable_caches": True})

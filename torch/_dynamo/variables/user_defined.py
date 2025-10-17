@@ -1458,12 +1458,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Get the getter function
                 source = AttrSource(source, "fget")
 
-            # Avoid using UserMethodVariable here because there is no way to
-            # access the method object here. Direct inline by creating the
-            # UserFunctionVariable.
-            return variables.UserFunctionVariable(
-                subobj.fget, source=source
-            ).call_function(tx, [self], {})
+            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
             # emulate its `__get__`, which is implemented in C.
