@@ -166,7 +166,7 @@ static void pool2d_template(const Tensor& input,
     MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
 
     auto cachedGraph = LookUpOrCreateCachedGraph<PoolingCachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor
+      auto desc = [[MPSGraphPooling2DOpDescriptor
           descriptorWithKernelWidth:kW
                        kernelHeight:kH
                           strideInX:dW
