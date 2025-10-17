@@ -353,6 +353,46 @@ class TestDTensorDebugMode(TestCase):
             f(x)
         self.assertEqual(len(debug_mode.debug_string()), 0)
 
+    def test_nn_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.abc = Foo()
+                self.xyz = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.xyz(self.abc(x))
+
+        mod = Bar()
+        inp = torch.randn(4, 4)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            _ = mod(inp)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [nn.Mod] Bar
+      [nn.Mod] Bar.abc
+        [nn.Mod] Bar.abc.l1
+          aten::t(t: f32[4, 4])
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
+        [nn.Mod] Bar.abc.l2
+          aten::t(t: f32[4, 4])
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
+      [nn.Mod] Bar.xyz
+        aten::t(t: f32[4, 4])
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
+        )
+
     def test_export(self):
         # inherited from test/distributed/tensor/test_dtensor_export.py
         class SimpleModel(torch.nn.Module):
@@ -520,46 +560,6 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue(debug_mode.operators[0].record is None)
         record = debug_mode.operators[3].record["output"]
         self.assertTrue(torch.allclose(record, x1))
-
-    def test_nn_module(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.l1 = torch.nn.Linear(4, 4)
-                self.l2 = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                return self.l2(self.l1(x))
-
-        class Bar(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.abc = Foo()
-                self.xyz = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                return self.xyz(self.abc(x))
-
-        mod = Bar()
-        inp = torch.randn(4, 4)
-        with DebugMode(record_nn_module=True) as debug_mode:
-            _ = mod(inp)
-
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
-    [nn.Mod] Bar
-      [nn.Mod] Bar.abc
-        [nn.Mod] Bar.abc.l1
-          aten::t(t: f32[4, 4])
-          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-        [nn.Mod] Bar.abc.l2
-          aten::t(t: f32[4, 4])
-          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-      [nn.Mod] Bar.xyz
-        aten::t(t: f32[4, 4])
-        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
-        )
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
