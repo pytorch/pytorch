@@ -9942,7 +9942,8 @@ add_docstr(
     r"""
 sin(input, *, out=None) -> Tensor
 
-Returns a new tensor with the sine of the elements in the :attr:`input` tensor where each value in this input tensor is in radians.
+Returns a new tensor with the sine of the elements in the :attr:`input` tensor,
+where each value in this input tensor is in radians.
 
 .. math::
     \text{out}_{i} = \sin(\text{input}_{i})
@@ -11359,7 +11360,8 @@ add_docstr(
     r"""
 tan(input, *, out=None) -> Tensor
 
-Returns a new tensor with the tangent of the elements in the :attr:`input` tensor where each value in this input tensor is in radians.
+Returns a new tensor with the tangent of the elements in the :attr:`input` tensor,
+where each value in this input tensor is in radians.
 
 .. math::
     \text{out}_{i} = \tan(\text{input}_{i})
