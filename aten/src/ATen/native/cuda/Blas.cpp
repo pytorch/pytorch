@@ -2322,7 +2322,6 @@ _scaled_nvfp4_nvfp4(
           const Tensor& scale_b, const SwizzleType swizzle_b,
           const std::optional<Tensor>& bias,
           const c10::ScalarType out_dtype,
-          const bool single_scale,
           Tensor& out,
           const std::optional<Tensor>& global_scale_a = std::nullopt,
           const std::optional<Tensor>& global_scale_b = std::nullopt) {
@@ -2330,7 +2329,7 @@ _scaled_nvfp4_nvfp4(
   TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
 #endif
   std::optional<Tensor> alpha = std::nullopt;
-  if (!single_scale) {
+  if (global_scale_a.has_value() && global_scale_b.has_value()) {
     TORCH_CHECK_VALUE(global_scale_a.has_value(),
         "For two-level-scaled NVFP4, global_scale_a must have a value");
     TORCH_CHECK_VALUE(global_scale_b.has_value(),
@@ -2564,10 +2563,10 @@ _scaled_mm_cuda_v2_out(
   } else if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
     return _scaled_mxfp8_mxfp8(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
-    return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, false /* single_scale */, out,
+    return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out,
                                scale_a[1], scale_b[1]);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
-    return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, true /* single_scale */, out);
+    return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP4_MXFP4) {
     return _scaled_mxfp4_mxfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
   } else {
