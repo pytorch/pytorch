@@ -19,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 
-from .. import config as inductor_config
+from .. import config as inductor_config, distributed_autotune
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -1095,6 +1095,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # Purposely not awaiting the future here - this kicks off the best config lookup at lowering time
         # The future will be awaited at scheduling time in select_algorithm.py
         best_config_future = gen_best_config(mat1, mat2)
+
+    if box := distributed_autotune.maybe_autotune_remote(
+        name, choices, kernel_inputs.nodes(), layout
+    ):
+        return box
 
     return autotune_select_algorithm(
         name,
