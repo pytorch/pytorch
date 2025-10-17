@@ -643,6 +643,11 @@ class _StridedShard(Shard):
 
         return replicate_tensor.contiguous()
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
+        return len(sharded_indices[rank])
+
     def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
@@ -665,7 +670,7 @@ class _StridedShard(Shard):
         # squeeze back to 1D indices tensor
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
-        local_shard_size = len(sharded_indices[rank])
+        local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
 
         # offsets from _StridedShard is never used
         return local_shard_size, None

@@ -4,7 +4,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -31,8 +31,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
         return fn
 
     def distort(
-        ms: Union[list[float], tuple[float], float],
-    ) -> Union[list[float], tuple[float], float]:
+        ms: list[float] | tuple[float] | float,
+    ) -> list[float] | tuple[float] | float:
         if isinstance(ms, (list, tuple)):
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
@@ -50,7 +50,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
     @functools.wraps(fn)
     def wrapper(
         *args: list[Any], **kwargs: dict[str, Any]
-    ) -> Union[list[float], tuple[float], float]:
+    ) -> list[float] | tuple[float] | float:
         ms = fn(*args, **kwargs)
 
         return distort(ms)
@@ -123,6 +123,7 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
+        # pyrefly: ignore  # bad-assignment
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
@@ -196,6 +197,7 @@ class TritonBenchmarker(Benchmarker):
 
     @may_distort_benchmarking_result
     @time_and_count
+    # pyrefly: ignore  # bad-override
     def benchmark_gpu(
         self: Self,
         _callable: Callable[[], Any],
@@ -273,10 +275,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
         return_mode: str = "min",
-        grad_to_none: Optional[list[torch.Tensor]] = None,
+        grad_to_none: list[torch.Tensor] | None = None,
         is_vetted_benchmarking: bool = False,
         **kwargs: Any,
-    ) -> Union[float, list[float]]:
+    ) -> float | list[float]:
         """Benchmark a GPU callable using a custom benchmarking implementation.
 
         Arguments:

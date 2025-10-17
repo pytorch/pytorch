@@ -177,9 +177,7 @@ class TestFXNodeSource(TestCase):
             for node_name_2 in node_name_to_from_node:
                 if node_name_2 in {
                     node_name_1,
-                    same_ancestor_nodes[node_name_1]
-                    if node_name_1 in same_ancestor_nodes
-                    else None,
+                    same_ancestor_nodes.get(node_name_1),
                 }:
                     self.assertEqual(
                         node_name_to_from_node[node_name_1],

@@ -725,7 +725,7 @@ class DistributedTest:
                 lines = out.getvalue().splitlines()
 
             def format_line(var):
-                return f"env:{var}={os.environ[var] if var in os.environ else 'N/A'}"
+                return f"env:{var}={os.environ.get(var, 'N/A')}"
 
             # Check relevant env vars
             vars = [
@@ -1220,7 +1220,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
-        @require_world_size(4)
+        @require_exact_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_3_level_hierarchical_model_averager(self):
             rank = dist.get_rank()
@@ -6212,7 +6212,7 @@ class DistributedTest:
         )
         def test_ddp_logging_data_cpu(self):
             def parse_env(var):
-                return os.environ[var] if var in os.environ else "N/A"
+                return os.environ.get(var, "N/A")
 
             dist.set_debug_level(dist.DebugLevel.INFO)
             _, group_id, _ = self._init_global_test()
@@ -6743,6 +6743,7 @@ class DistributedTest:
         )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        @require_exact_world_size(4)
         def test_gather_object(self):
             return self._test_gather_object()
 
@@ -6751,6 +6752,7 @@ class DistributedTest:
         )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        @require_exact_world_size(4)
         def test_gather_object_subgroup(self):
             default = _get_default_group()
             backend = dist.get_backend(default)

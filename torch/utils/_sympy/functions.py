@@ -510,8 +510,10 @@ class Mod(sympy.Function):
 
         # Evaluate if they are both literals.
         if q.is_Number and p.is_Number:
-            assert p >= 0, p
-            assert q >= 1, q
+            if p < 0:
+                raise AssertionError(p)
+            if q < 1:
+                raise AssertionError(q)
             return p % q
 
         # If q == 2, it's a matter of whether p is odd or even.
@@ -1181,7 +1183,10 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
 
     @classmethod
     def eval(cls, *args):
-        assert len(args) % 2 == 0
+        if len(args) % 2 != 0:
+            raise AssertionError(
+                f"expected an even number of arguments, got {len(args)}"
+            )
         dim = len(args) // 2
         sizes = args[0:dim]
         strides = args[dim:]
@@ -1213,7 +1218,8 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
             # this function could help figure this out.
 
         if all(isinstance(a, sympy.Integer) for a in strides):
-            assert dim != 0
+            if dim == 0:
+                raise AssertionError("dim must not be zero")
             # When all strides are integral, we can sort, and the size for the
             # largest stride doesn't matter and can be arbitrarily symbolic
             s_sizes, s_strides = zip(
@@ -1330,6 +1336,7 @@ class Identity(sympy.Function):
 
     def _sympystr(self, printer):
         """Controls how sympy's StrPrinter prints this"""
+        # pyrefly: ignore  # missing-attribute
         return f"({printer.doprint(self.args[0])})"
 
     def _eval_is_real(self):
