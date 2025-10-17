@@ -1,5 +1,6 @@
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from torch.utils._config_module import install_config_module
 

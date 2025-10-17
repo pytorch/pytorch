@@ -37,8 +37,8 @@ import sys
 import traceback
 import types
 import weakref
-from collections.abc import MutableMapping
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, MutableMapping
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
 
