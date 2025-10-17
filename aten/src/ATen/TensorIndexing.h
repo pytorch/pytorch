@@ -431,8 +431,8 @@ inline void copy_to(const Tensor& dst, const Tensor& src) {
       return;
     }
   }
-  
-  if (src.dim() == 0 && src.device().type() == at::kCPU) {
+
+   (src.dim() == 0 && src.device().type() == at::kCPU) {
     dst.fill_(src);
     return;
   }
@@ -773,3 +773,4 @@ inline void set_item(
 }
 
 } // namespace at::indexing
+  

@@ -100,14 +100,16 @@ inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
   // Only take the fast path if we can PROVE sizes match
-  // Use TORCH_GUARD_OR_FALSE on equality - only returns true when provably equal
+  // Use TORCH_GUARD_OR_FALSE on equality - only returns true when provably
+  // equal
   if (tensor.dim() == to_expand.dim()) {
     bool all_match = true;
     for (int64_t i = 0; i < tensor.dim(); i++) {
       // Returns false if unbacked or if provably different
-      if (TORCH_GUARD_OR_FALSE(tensor.sym_size(i).sym_eq(to_expand.sym_size(i)))) {
+      if (TORCH_GUARD_OR_FALSE(
+              tensor.sym_size(i).sym_eq(to_expand.sym_size(i)))) {
         continue;
-      }else{
+      } else {
         all_match = false;
         break;
       }
@@ -116,8 +118,8 @@ inline c10::MaybeOwned<Tensor> expand_inplace(
       return c10::MaybeOwned<Tensor>::borrowed(to_expand);
     }
   }
-  
-  // Can't prove they match - expand to be safe
+
+   Can't prove they match - expand to be safe
   return c10::MaybeOwned<Tensor>::owned(
       to_expand.expand_symint(tensor.sym_sizes()));
 }
@@ -549,3 +551,4 @@ inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
 }
 
 } // namespace at
+  
