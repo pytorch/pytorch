@@ -198,7 +198,9 @@ def crd2idx(
             for i in range(len(shape) - 1, 0, -1):
                 result += crd2idx(crd % product(shape[i]), shape[i], stride[i])
                 crd = crd // product(shape[i])
-            return result + crd2idx(crd, shape[0], stride[0])
+            if len(shape) > 0:
+                result += crd2idx(crd, shape[0], stride[0])
+            return result
         else:  # "int" "int" "int"
             assert not is_tuple(shape) and not is_tuple(stride)
             return crd * stride  # all are ints after type checks
