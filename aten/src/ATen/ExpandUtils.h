@@ -551,4 +551,3 @@ inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
 }
 
 } // namespace at
-  

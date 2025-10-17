@@ -427,6 +427,10 @@ inline void copy_to(const Tensor& dst, const Tensor& src) {
       }
     }
     if (sizes_match) {
+      // A shortcut to avoid generating hard-coded constant sizes during
+      // tracing. This is not a perfect solution: when src & dst have different
+      // shapes, constants will still appear. Users can workaround that case by
+      // dst[index..] = src.reshape(..)
       dst.copy_(src);
       return;
     }
@@ -773,4 +777,3 @@ inline void set_item(
 }
 
 } // namespace at::indexing
-  
