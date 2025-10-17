@@ -1147,6 +1147,9 @@ def _merge_bw(
     return merged_actions
 
 
+#    TODO: recv operations do not finish until the data is opulated in them by NCCL
+
+
 def _add_send_recv(
     compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
@@ -1157,6 +1160,10 @@ def _add_send_recv(
 
     For actions with sub-actions (OVERLAP_F_B) we ensure that all the subactions have been
     computed and the communication is ready
+
+    TODO: recv operations do not finish until the data is opulated in them by NCCL,
+    as a result, we have a warmup phase re-ordering which moves the SENDs earlier for
+    all the actions before the first backward
     """
     comm_actions: dict[int, list[_Action]] = {rank: [] for rank in compute_actions}
     prev_actions: dict[int, set[_Action]] = {rank: set() for rank in compute_actions}
@@ -1262,82 +1269,66 @@ def _add_send_recv(
                 del compute_actions[rank]
             progress = True
         assert progress, "Malformed compute schedule, can't schedule sends/recvs"
-    return comm_actions
 
+    # Reorder warmup phase: prioritize SENDs before RECVs to avoid bubbles
+    def _reorder_warmup_comms(actions: list[_Action]) -> list[_Action]:
+        """During warmup (before any backward), move SEND_F before RECV_F to avoid bubbles."""
+        # Find the first backward action index
+        first_backward_idx = None
+        for idx, action in enumerate(actions):
+            if action is not None and action.computation_type in (
+                BACKWARD_INPUT,
+                FULL_BACKWARD,
+                SEND_B,
+                RECV_B,
+            ):
+                first_backward_idx = idx
+                break
 
-def _add_send_recv_simple(
-    compute_actions: dict[int, list[_Action]],
-    stage_to_rank: Callable[[int], int],
-    num_stages: int,
-) -> dict[int, list[_Action]]:
-    """
-    Simple version: For each forward/backward action, add recv before and send after if necessary.
-    """
-    comm_actions: dict[int, list[_Action]] = {}
+        if first_backward_idx is None:
+            first_backward_idx = len(actions)
 
-    for rank, actions in compute_actions.items():
-        comm_actions[rank] = []
+        # Split into warmup and rest
+        warmup = actions[:first_backward_idx]
+        rest = actions[first_backward_idx:]
 
-        for action in actions:
-            if action is None:
-                comm_actions[rank].append(action)
-                continue
+        # Reorder warmup: compute/send actions first, then recv actions
+        reordered_warmup = []
+        recv_buffer = []
 
-            # Handle FORWARD: recv before, compute, send after
-            if action.computation_type == F:
-                stage_idx = action.stage_index
-                mb_idx = action.microbatch_index
-
-                # Add RECV_F before if:
-                # - Not first stage (stage 0 has no input)
-                # - Previous stage is on a different rank
-                if stage_idx > 0:
-                    prev_rank = stage_to_rank(stage_idx - 1)
-                    if prev_rank != rank:
-                        recv = _Action(stage_idx, RECV_F, mb_idx)
-                        comm_actions[rank].append(recv)
-
-                # Add the forward computation
-                comm_actions[rank].append(action)
-
-                # Add SEND_F after if:
-                # - Not last stage
-                # - Next stage is on a different rank
-                if stage_idx < num_stages - 1:
-                    next_rank = stage_to_rank(stage_idx + 1)
-                    if next_rank != rank:
-                        send = _Action(stage_idx, SEND_F, mb_idx)
-                        comm_actions[rank].append(send)
-
-            # Handle BACKWARD: recv before, compute, send after
-            elif action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD):
-                stage_idx = action.stage_index
-                mb_idx = action.microbatch_index
-
-                # Add RECV_B before if:
-                # - Not last stage (last stage has no gradient input)
-                # - Next stage is on a different rank
-                if stage_idx < num_stages - 1:
-                    next_rank = stage_to_rank(stage_idx + 1)
-                    if next_rank != rank:
-                        recv = _Action(stage_idx, RECV_B, mb_idx)
-                        comm_actions[rank].append(recv)
-
-                # Add the backward computation
-                comm_actions[rank].append(action)
-
-                # Add SEND_B after if:
-                # - Not first stage
-                # - Previous stage is on a different rank
-                if stage_idx > 0:
-                    prev_rank = stage_to_rank(stage_idx - 1)
-                    if prev_rank != rank:
-                        send = _Action(stage_idx, SEND_B, mb_idx)
-                        comm_actions[rank].append(send)
-
+        for action in warmup:
+            if action is not None and action.computation_type == RECV_F:
+                recv_buffer.append(action)
             else:
-                # For other actions (UNSHARD, RESHARD, W, etc.), just add as-is
-                comm_actions[rank].append(action)
+                # Add buffered recvs before this compute action if it needs them
+                if (
+                    action is not None
+                    and action.computation_type == F
+                    and action.stage_index > 0
+                ):
+                    # Find and add the matching RECV_F for this compute
+                    matching_recv = None
+                    for recv in recv_buffer:
+                        if (
+                            recv.stage_index == action.stage_index
+                            and recv.microbatch_index == action.microbatch_index
+                        ):
+                            matching_recv = recv
+                            break
+                    if matching_recv:
+                        reordered_warmup.append(matching_recv)
+                        recv_buffer.remove(matching_recv)
+
+                reordered_warmup.append(action)
+
+        # Add any remaining RECVs at the end of warmup
+        reordered_warmup.extend(recv_buffer)
+
+        return reordered_warmup + rest
+
+    # Apply reordering to each rank
+    for rank in comm_actions:
+        comm_actions[rank] = _reorder_warmup_comms(comm_actions[rank])
 
     return comm_actions
 
@@ -1942,7 +1933,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     actions[rank]
                 )
 
-            self.pipeline_order_with_comms = _add_send_recv_simple(
+            self.pipeline_order_with_comms = _add_send_recv(
                 self.pipeline_order_with_comms,
                 stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
                 num_stages=self._num_stages,
