@@ -2971,6 +2971,7 @@ def filter_reduction_configs_for_determinism(
     assert len(configs) > 0
 
     def _do_filter_due_to_inductor_config():
+        return True
         return (
             inductor_meta.get("deterministic", False)
             or torch._inductor.config.test_configs.force_filter_reduction_configs
