@@ -2,20 +2,19 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, NamedTuple, Optional, TypeVar, Union, Dict
+from typing import Any, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
 import torch.distributed._tools.fake_collectives
 from torch import nn, optim
 from torch._guards import active_fake_mode
-from torch.autograd.graph import _MultiHandle
-from torch.utils.hooks import RemovableHandle
 from torch.distributed._tools.mem_tracker import _RefType, _State, MemTracker
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
+from torch.utils.hooks import RemovableHandle
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
 
@@ -368,10 +367,10 @@ class FSDPMemTracker(MemTracker):
         # TODO(@sanketpurandare): This will need to be modified after this PR (https://github.com/pytorch/pytorch/pull/127786)
         # lands. For backward we monkey-patch the `FSDPParamGroup.pre_backward` and `FSDPParamGroup.post_backward`.
         # pyrefly: ignore  # missing-attribute
-        
+
         # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
         # the _MultiHandlers object will only need to be grabbed once.
-        unique_handlers: Dict[RemovableHandle, bool] = {}
+        unique_handlers: dict[RemovableHandle, bool] = {}
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
