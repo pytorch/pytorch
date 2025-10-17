@@ -1038,7 +1038,7 @@ struct HelperInterpNearest : public HelperInterpBase {
   // We keep this structure for BC and consider as deprecated.
   // See HelperInterpNearestExact as replacement
 
-  static constexpr int interp_size = 1;
+  static const int interp_size = 1;
 
   static inline void init_indices_weights(
     at::ScalarType output_type,
@@ -1155,7 +1155,7 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
 
 struct HelperInterpLinear : public HelperInterpBase {
 
-  static constexpr int interp_size = 2;
+  static const int interp_size = 2;
 
   // Compute indices and weights for each interpolated dimension
   // indices_weights = {
@@ -1275,7 +1275,7 @@ struct HelperInterpLinear : public HelperInterpBase {
 
 struct HelperInterpCubic : public HelperInterpBase {
 
-  static constexpr int interp_size = 4;
+  static const int interp_size = 4;
 
   // Compute indices and weights for each interpolated dimension
   // indices_weights = {

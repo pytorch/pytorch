@@ -240,8 +240,8 @@ TORCH_META_FUNC(gelu_backward) (
 
 namespace at::native {
 
-static constexpr double SELU_ALPHA = 1.6732632423543772848170429916717;
-static constexpr double SELU_SCALE = 1.0507009873554804934193349852946;
+static const double SELU_ALPHA = 1.6732632423543772848170429916717;
+static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(elu_stub);
 DEFINE_DISPATCH(elu_backward_stub);

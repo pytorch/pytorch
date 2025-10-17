@@ -581,7 +581,7 @@ scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
 template <typename scalar_t>
 static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
   // lanczos approximation
-  static constexpr scalar_t lanczos_sum_expg_scaled_num[13] = {
+  static const scalar_t lanczos_sum_expg_scaled_num[13] = {
     0.006061842346248906525783753964555936883222,
     0.5098416655656676188125178644804694509993,
     19.51992788247617482847860966235652136208,
@@ -596,7 +596,7 @@ static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
     103794043.1163445451906271053616070238554,
     56906521.91347156388090791033559122686859
   };
-  static constexpr scalar_t lanczos_sum_expg_scaled_denom[13] = {
+  static const scalar_t lanczos_sum_expg_scaled_denom[13] = {
     1.,
     66.,
     1925.,
@@ -712,7 +712,7 @@ static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
 template <typename scalar_t>
 static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam) {
   // Compute igam/igamc using DLMF 8.12.3/8.12.4 [igam1]
-  static constexpr scalar_t d[25][25] =
+  static const scalar_t d[25][25] =
     {{-3.3333333333333333e-1, 8.3333333333333333e-2, -1.4814814814814815e-2,
       1.1574074074074074e-3, 3.527336860670194e-4, -1.7875514403292181e-4,
       3.9192631785224378e-5, -2.1854485106799922e-6, -1.85406221071516e-6,

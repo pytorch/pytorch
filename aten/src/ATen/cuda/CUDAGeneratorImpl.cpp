@@ -325,9 +325,9 @@ uint64_t CUDAGeneratorImpl::seed() {
  */
 c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   // The RNG state comprises the seed, and an offset used for Philox.
-  constexpr size_t seed_size = sizeof(uint64_t);
-  constexpr size_t offset_size = sizeof(int64_t);
-  constexpr size_t total_size = seed_size + offset_size;
+  static const size_t seed_size = sizeof(uint64_t);
+  static const size_t offset_size = sizeof(int64_t);
+  static const size_t total_size = seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
@@ -346,9 +346,9 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
  * and size of the internal state.
  */
 void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  constexpr size_t seed_size = sizeof(uint64_t);
-  constexpr size_t offset_size = sizeof(int64_t);
-  constexpr size_t total_size = seed_size + offset_size;
+  static const size_t seed_size = sizeof(uint64_t);
+  static const size_t offset_size = sizeof(int64_t);
+  static const size_t total_size = seed_size + offset_size;
 
   detail::check_rng_state(new_state);
 

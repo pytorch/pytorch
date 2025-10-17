@@ -36,9 +36,9 @@ namespace at::native {
 namespace {
 
 #if defined(USE_ROCM)
-static constexpr int BLOCKDIMY = 16;
+static const int BLOCKDIMY = 16;
 #else
-static constexpr int BLOCKDIMY = 32;
+static const int BLOCKDIMY = 32;
 #endif
 
 template

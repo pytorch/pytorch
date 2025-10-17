@@ -3551,7 +3551,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 
 #if defined(__ARM_NEON__) || defined(__aarch64__)
 
-constexpr static int PARALLEL_THRESHOLD = 1 << 20;
+const static int PARALLEL_THRESHOLD = 1 << 20;
 
 // Generic template defaults to naive quantize implementation
 template <typename T>

@@ -1388,7 +1388,7 @@ namespace at::native {
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
         "onednn int8 linear: act scale/zp size should be 1/<=1");
     static std::optional<at::Tensor> other = std::nullopt;
-    constexpr std::string_view binary_post_op = "none";
+    static const std::string_view binary_post_op = "none";
     int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zp,

@@ -62,7 +62,7 @@
 #include <utility>
 #include <vector>
 
-static constexpr int MIOPEN_DIM_MAX = 5;
+static const int MIOPEN_DIM_MAX = 5;
 
 namespace at::meta {
 

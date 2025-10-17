@@ -146,9 +146,9 @@ uint64_t XPUGeneratorImpl::seed() {
 
 c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
   // The RNG state comprises the seed, and an offset used for Philox.
-  constexpr size_t seed_size = sizeof(uint64_t);
-  constexpr size_t offset_size = sizeof(uint64_t);
-  constexpr size_t total_size = seed_size + offset_size;
+  static const size_t seed_size = sizeof(uint64_t);
+  static const size_t offset_size = sizeof(uint64_t);
+  static const size_t total_size = seed_size + offset_size;
 
   // The internal state is returned as a CPU byte tensor.
   auto state_tensor = at::detail::empty_cpu(
@@ -170,9 +170,9 @@ c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
 void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   at::xpu::assertNotCapturing(
       "Please ensure to utilize the XPUGeneratorImpl::set_state_index method during capturing.");
-  constexpr size_t seed_size = sizeof(uint64_t);
-  constexpr size_t offset_size = sizeof(uint64_t);
-  constexpr size_t total_size = seed_size + offset_size;
+  static const size_t seed_size = sizeof(uint64_t);
+  static const size_t offset_size = sizeof(uint64_t);
+  static const size_t total_size = seed_size + offset_size;
 
   at::detail::check_rng_state(new_state);
 

@@ -16,8 +16,8 @@ namespace {
 
 #ifdef USE_PYTORCH_QNNPACK
 
-constexpr static float qnnpack_softmax_output_scale = 0x1.0p-8f;
-constexpr static int qnnpack_softmax_output_zero_point = 0;
+const static float qnnpack_softmax_output_scale = 0x1.0p-8f;
+const static int qnnpack_softmax_output_zero_point = 0;
 
 bool is_qnnpack_compatible(
     const Tensor& qx,
