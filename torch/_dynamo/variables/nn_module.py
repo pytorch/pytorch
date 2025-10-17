@@ -940,7 +940,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             # will not reflect the mutations. So, trace through the `__iter__`
             # function to reflect any tracked mutations.
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn),
+                VariableTracker.build(tx, fn),
                 [
                     self,
                 ],
@@ -1009,9 +1009,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else nullcontext()
         )
         with ctx:
-            return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
-            )
+            fn_vt = VariableTracker.build(tx, fn, source=source)
+            return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -1027,9 +1026,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else:
                 source = None
 
-            return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
-            )
+            fn_vt = VariableTracker.build(tx, fn, source=source)
+            return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
             try:
@@ -1039,11 +1037,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if isinstance(method, staticmethod):
                 source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(method.__func__, source=source),
-                    args,
-                    kwargs,
-                )
+                fn_vt = VariableTracker.build(tx, method.__func__, source=source)
+                return fn_vt.call_function(tx, args, kwargs)
 
             if (
                 hasattr(method, "__code__")
@@ -1103,11 +1098,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             ) or method is torch.nn.Module.__delattr__:
                 # Trace through __delattr__ to track mutations on the module
                 # members like `_modules``.
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(torch.nn.Module.__delattr__),
-                    [self, args[0]],
-                    kwargs,
-                )
+                fn_vt = VariableTracker.build(tx, torch.nn.Module.__delattr__)
+                return fn_vt.call_function(tx, [self, args[0]], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
