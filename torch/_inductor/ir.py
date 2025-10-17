@@ -1570,6 +1570,7 @@ class Reduction(Loops):
             and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
+            and reduction_type not in ("argmin", "argmax")
             and not (reduction_type == "dot")
         ):
             # When native matmul, don't unroll the dot reduction.
