@@ -1,5 +1,6 @@
 """Neural network functional operator implementations."""
 
+import math
 import random
 from typing import Optional
 
@@ -757,9 +758,7 @@ class GroupNormOperator(Operator):
         # For shape (N, C, *), num_values_per_channel = N * prod(*)
         # We need N * prod(*) > 1
         batch_size = output_spec.size[0]
-        spatial_size = 1
-        for dim in output_spec.size[2:]:
-            spatial_size *= dim
+        spatial_size = math.prod(output_spec.size[2:])
         num_values_per_channel = batch_size * spatial_size
 
         if num_values_per_channel <= 1:
