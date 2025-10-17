@@ -57,6 +57,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakIdKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -2115,6 +2116,14 @@ class FakeTensorMode(TorchDispatchMode):
                 f"FakeTensor cache crosscheck failure: func={func}, "
                 f"args={args}, kwargs={kwargs}"
             ) from e
+
+    def _clear_memos(self) -> None:
+        """
+        Reinitializes all weakref memos
+        """
+        self.fake_tensor_converter.meta_converter.tensor_memo = weakref.WeakValueDictionary()
+        self.fake_tensor_converter.meta_converter.describer.lookup_tensor = WeakIdKeyDictionary()
+        self.fake_tensor_converter.meta_converter.describer.lookup_storage = WeakIdKeyDictionary()
 
     def dispatch(
         self,
