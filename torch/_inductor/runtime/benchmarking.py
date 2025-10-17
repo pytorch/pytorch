@@ -59,7 +59,6 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
 
 
 def may_ban_benchmarking() -> None:
-    # raise RuntimeError("wtf")
     if torch._inductor.config.deterministic:
         raise RuntimeError("""In the deterministic mode of Inductor, we will avoid those
         benchmarkings that would cause non deterministic results. Only benchmarkings in the vetted
