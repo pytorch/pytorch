@@ -136,7 +136,7 @@ Reducer::Reducer(
   {
     std::set<int> unique_devices;
     for (const auto& v : params_) {
-      auto device_idx = int(v.device().index());
+      auto device_idx = static_cast<int>(v.device().index());
       if (unique_devices.find(device_idx) == unique_devices.end()) {
         unique_devices.insert(device_idx);
         if (unique_devices.size() > 1) {
