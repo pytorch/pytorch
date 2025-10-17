@@ -208,7 +208,7 @@ instantiate_device_type_tests(TestUtils, globals())
 
 
 class TestFakeTensorUpdater(TestCase):
-    def _delete_single_vals(self, main_graph: torch.fx.GraphModule) -> None:
+    def _modify_node(self, main_graph: torch.fx.GraphModule) -> None:
         updater = FakeTensorUpdater(main_graph)
 
         def recursively_test_graph_mod(gm: torch.fx.GraphModule) -> None:
@@ -248,13 +248,13 @@ class TestFakeTensorUpdater(TestCase):
         # populate the backend with a captured graph
         torch.compile(backend=backend, fullgraph=True)(fn)(*args)
 
-        self._delete_single_vals(deepcopy(backend.graphs[0]))
+        self._modify_node(deepcopy(backend.graphs[0]))
 
     def test_hop_no_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
             return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))
 
-        a = torch.randn(32)
+        a = torch.randn((32, 32, 32))
         self._common_test(fn, a)
 
     def test_hop_subgraph_inputs(self):
@@ -264,15 +264,20 @@ class TestFakeTensorUpdater(TestCase):
 
         @torch.compiler.nested_compile_region
         def nested_section_outer(a: torch.Tensor) -> torch.Tensor:
-            return torch.pow(torch.sin(a), 2.0)
+            return nested_section_inner(nested_section_inner(a))
+
+        @torch.compiler.nested_compile_region
+        def nested_section_mega_outer(a: torch.Tensor) -> torch.Tensor:
+            return nested_section_outer(nested_section_outer(a))
 
         def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             x = nested_section_inner(a)
             y = nested_section_outer(b)
-            return x + y
+            z = nested_section_mega_outer(a)
+            return x + y + z
 
-        a = torch.randint(0, (1 << 16), (32,), dtype=torch.int32)
-        b = torch.randint(0, (1 << 16), (32,), dtype=torch.int32)
+        a = torch.randint(0, (1 << 16), (32, 32, 32), dtype=torch.int32)
+        b = torch.randint(0, (1 << 16), (32, 32, 32), dtype=torch.int32)
         self._common_test(fn, a, b)
 
 

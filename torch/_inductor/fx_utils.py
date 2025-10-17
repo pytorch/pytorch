@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._inductor.fx_passes.control_dependencies import control_deps
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -239,12 +240,17 @@ class FakeTensorUpdater:
             return False
 
         def should_process_node(node: torch.fx.Node) -> bool:
-            # node.target will called with FakeTensor arguments, which is not supported
-            # by Inductor lowerings.
-            # TODO: Investigate how to remove this. See
-            # https://github.com/pytorch/pytorch/issues/164920
-            return callable(node.target) and not hasattr(
-                node.target, "_inductor_lowering_function"
+            return (
+                callable(node.target)
+                # control_deps doesn't have an impl for DispatchKey.AutogradCUDA, which
+                # causes a test failure in
+                # TestComputeCommReorderingBucketing::test_bucketing_split_for_overlap_blocking_deps_inductor.
+                # TODO: remove this when resolving https://github.com/pytorch/pytorch/issues/165786
+                and node.target is not control_deps
+                # node.target will called with FakeTensor arguments, which are not
+                # supported by Inductor lowerings. TODO: Investigate how to remove
+                # this. See https://github.com/pytorch/pytorch/issues/164920
+                and not hasattr(node.target, "_inductor_lowering_function")
             )
 
         # Since subgraph I/O semantics are assumed not to change, it's safe to

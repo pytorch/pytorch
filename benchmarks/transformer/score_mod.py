@@ -3,10 +3,11 @@ import csv
 import itertools
 import random
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import numpy as np
 from tabulate import tabulate
