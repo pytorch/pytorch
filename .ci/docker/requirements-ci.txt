@@ -10,7 +10,7 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-click
+click==8.3.0
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
 #test that import:
@@ -63,7 +63,7 @@ lark==0.12.0
 #Pinned versions: 0.12.0
 #test that import:
 
-librosa>=0.6.2 ; python_version < "3.11" and platform_machine != "s390x"
+librosa==0.11.0 ; python_version < "3.11" and platform_machine != "s390x"
 librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
@@ -192,7 +192,7 @@ pytest-flakefinder==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pytest-rerunfailures>=10.3
+pytest-rerunfailures==14.0
 #Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
@@ -263,7 +263,7 @@ scipy==1.14.1 ; python_version > "3.9"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions>=4.10.0
+typing_extensions==4.15.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -273,7 +273,7 @@ typing-extensions>=4.10.0
 #Pinned versions:
 #test that import:
 
-unittest-xml-reporting<=3.2.0,>=2.0.0
+unittest-xml-reporting==3.2.0
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
@@ -284,7 +284,7 @@ lintrunner==0.12.7
 #Pinned versions: 0.12.7
 #test that import:
 
-redis>=4.0.0
+redis==6.4.0
 #Description: redis database
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
 
@@ -359,10 +359,10 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pyyaml
-pyzstd
-setuptools>=70.1.0
-six
+PyYAML==6.0.3
+pyzstd==0.18.0
+setuptools==79.0.1
+six==1.17.0
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
