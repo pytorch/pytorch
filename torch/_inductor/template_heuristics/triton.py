@@ -468,6 +468,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             FlexConfig(128, 64, 3, 4),
             FlexConfig(128, 128, 3, 4),
             FlexConfig(128, 128, 2, 8),
+            FlexConfig(128, 128, 1, 8),
             FlexConfig(64, 128, 3, 4),
             FlexConfig(64, 64, 3, 4),
         ]
@@ -947,6 +948,15 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): FlexConfig(32, 64, 3, 4),
         }
 
+        self.flex_attn_bwd_autotune_configs_sm_100: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
+            FlexBwDConfig(BLOCK_M, BLOCK_N, BLOCK_N, BLOCK_M, s, 4)
+            for BLOCK_M in [32, 64]
+            for BLOCK_N in [32, 64]
+            for s in [1, 3, 4, 5]  # num_stages
+            if BLOCK_N % BLOCK_M == 0
+        ]
+
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_fwd_configs: list[FlexConfig] = []
@@ -997,7 +1007,10 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
-            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            if capability == (10, 0):
+                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs_sm_100
+            else:
+                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         major, minor = capability
         if dtype == torch.float32:
