@@ -1321,8 +1321,8 @@ class TestFP8Matmul(TestCase):
         A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
         B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
 
-        A, A_scale, A_global_scale = data_to_nvfp4_with_global_scale(A_ref, 16)
-        B, B_scale, B_global_scale = data_to_nvfp4_with_global_scale(B_ref, 16)
+        A, A_scale, A_global_scale = data_to_nvfp4_with_global_scale(A_ref, BLOCK_SIZE)
+        B, B_scale, B_global_scale = data_to_nvfp4_with_global_scale(B_ref, BLOCK_SIZE)
         A_scale = to_blocked(A_scale)
         B_scale = to_blocked(B_scale)
 
