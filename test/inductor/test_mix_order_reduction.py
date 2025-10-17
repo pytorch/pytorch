@@ -25,11 +25,11 @@ class MixOrderReductionTest(TestCase):
         [
             "sum",
             "prod",
+            "mean",
             # "max",
             # "min",
             # "amax",
             # "amin",
-            # "mean",
         ],
     )
     @parametrize("swap", (False, True))
@@ -52,13 +52,26 @@ class MixOrderReductionTest(TestCase):
         act = opt_f(x)
 
         self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+
+        expected_num_kernel = 1 + (not inductor_config.triton.mix_order_reduction)
+        if name == "mean" and inductor_config.triton.mix_order_reduction:
+            # for mean we generate one more kernel to do the division
+            # this kernel should be very cheap since tensor size is small
+            expected_num_kernel = 2
         self.assertEqual(
-            1 + (not inductor_config.triton.mix_order_reduction),
+            expected_num_kernel,
             metrics.generated_kernel_count,
         )
 
+    @parametrize(
+        "wdtype",
+        [
+            torch.bfloat16,  # extra down cast for dw is needed
+            torch.float,
+        ],
+    )
     @inductor_config.patch(split_reductions=False)
-    def test_rms_norm_bwd(self):
+    def test_rms_norm_bwd(self, wdtype):
         def f(x, w, eps):
             orig_dtype = x.dtype
 
@@ -79,7 +92,7 @@ class MixOrderReductionTest(TestCase):
         # M, N = 1152 * 500, 384
         M, N = 32768, 768
         x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
-        w = torch.randn(N, dtype=torch.float, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=wdtype, device=GPU_TYPE, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
 
@@ -89,16 +102,27 @@ class MixOrderReductionTest(TestCase):
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        expected_num_kernel = 1 + (not inductor_config.triton.mix_order_reduction)
+        if wdtype == torch.bfloat16 and inductor_config.triton.mix_order_reduction:
+            # one extra kernel for downcasting
+            expected_num_kernel = 2
         FileCheck().check_count(
             "@triton.jit",
-            1 + (not inductor_config.triton.mix_order_reduction),
+            expected_num_kernel,
             exactly=True,
         ).run(bwd_wrapper)
 
+    @parametrize(
+        "wbdtype",
+        [
+            torch.bfloat16,  # extra down cast for dw/db is needed
+            torch.float,
+        ],
+    )
     @inductor_config.patch(split_reductions=False)
-    def test_layer_norm_bwd_with_bias(self):
+    def test_layer_norm_bwd_with_bias(self, wbdtype):
         def f(x, w, b, eps):
-            return F.layer_norm(x, x.shape[-1:], w, b, eps)
+            return F.layer_norm(x, x.shape[-1:], w.float(), b.float(), eps)
 
         def fwd_bwd(f):
             x.grad = None
@@ -111,7 +135,6 @@ class MixOrderReductionTest(TestCase):
         # M, N = 1152 * 500, 384
         M, N = 32768, 768
         xdtype = torch.float
-        wbdtype = torch.float
         x = torch.randn(M, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
         w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
         b = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
@@ -124,9 +147,13 @@ class MixOrderReductionTest(TestCase):
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        expected_num_kernel = 1 + (not inductor_config.triton.mix_order_reduction)
+        if wbdtype == torch.bfloat16 and inductor_config.triton.mix_order_reduction:
+            # one extra kernel for downcasting
+            expected_num_kernel = 2
         FileCheck().check_count(
             "@triton.jit",
-            1 + (not inductor_config.triton.mix_order_reduction),
+            expected_num_kernel,
             exactly=True,
         ).run(bwd_wrapper)
 
