@@ -1297,17 +1297,9 @@ def load(
     Loads an object saved with :func:`torch.save` from a file.
 
     .. warning::
-        :func:`torch.load()` unless ``weights_only`` parameter is set to ``True``,
-        uses ``pickle`` module implicitly, which is known to be insecure.
-        It is possible to construct malicious pickle data which will execute arbitrary code
-        during unpickling. Never load data that could have come from an untrusted
-        source in an unsafe mode, or that could have been tampered with. **Only load data you trust**.
+        :func:`torch.load()` uses an unpickler under the hood. **Never load data from an untrusted source.**
 
-        ``weights_only=True`` narrows the surface of remote code execution attacks via a more
-        restricted unpickler but has the following limitations:
-
-        1. ``weights_only=True`` does not guard against denial of service attacks.
-        2. ``weights_only=True`` safeguards against memory corruption are best effort.
+        See :ref:`weights-only-security` for more details.
 
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the
