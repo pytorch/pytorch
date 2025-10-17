@@ -7,7 +7,9 @@
 #include <memory>
 #include <stdexcept>
 #include <vector>
-#define CUDA_HAS_GREEN_CONTEXT
+#define CUDA_HAS_GREEN_CONTEXT 1
+#else
+#define CUDA_HAS_GREEN_CONTEXT 0
 #endif
 
 namespace at::cuda {
@@ -31,7 +33,7 @@ class TORCH_CUDA_CPP_API GreenContext {
   CUcontext getContext() const;
 
   // Get the underlying green context
-#ifdef CUDA_HAS_GREEN_CONTEXT
+#if CUDA_HAS_GREEN_CONTEXT
   CUgreenCtx getGreenContext() const;
 #endif
 
@@ -41,7 +43,7 @@ class TORCH_CUDA_CPP_API GreenContext {
   void popContext();
 
  private:
-#ifdef CUDA_HAS_GREEN_CONTEXT
+#if CUDA_HAS_GREEN_CONTEXT
   int32_t device_id_ = -1;
   CUgreenCtx green_ctx_ = nullptr;
   CUcontext context_ = nullptr;
