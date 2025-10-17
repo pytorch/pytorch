@@ -1965,6 +1965,41 @@ void xsyevd<c10::complex<double>, double>(
 #pragma message("Compiling with cuSOLVER >= 11.7.2 — Xgeev bindings enabled")
 
 template <>
+void xgeev_bufferSize<float>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    const float* A,
+    int64_t lda,
+    const float* W,
+    const float* VL,
+    int64_t ldvl,
+    const float* VR,
+    int64_t ldvr,
+    size_t* workspaceInBytesOnDevice,
+    size_t* workspaceInBytesOnHost) {
+  TORCH_WARN("called experimental xgeev_bufferSize<float>");
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
+      handle, params, jobvl, jobvr, n,
+      CUDA_R_32F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_R_32F,
+      reinterpret_cast<const void*>(W),
+      CUDA_R_32F,
+      reinterpret_cast<const void*>(VL),
+      ldvl,
+      CUDA_R_32F,
+      reinterpret_cast<const void*>(VR),
+      ldvr,
+      CUDA_R_32F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
+}
+
+template <>
 void xgeev_bufferSize<double>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
@@ -1980,11 +2015,147 @@ void xgeev_bufferSize<double>(
     int64_t ldvr,
     size_t* workspaceInBytesOnDevice,
     size_t* workspaceInBytesOnHost) {
-  TORCH_WARN("xgeev_bufferSize<double> not implemented yet");
+  TORCH_WARN("called experimental xgeev_bufferSize<double>");
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
+      handle, params, jobvl, jobvr, n,
+      CUDA_R_64F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_R_64F,
+      reinterpret_cast<const void*>(W),
+      CUDA_R_64F,
+      reinterpret_cast<const void*>(VL),
+      ldvl,
+      CUDA_R_64F,
+      reinterpret_cast<const void*>(VR),
+      ldvr,
+      CUDA_R_64F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
+}
+
+
+template <>
+void xgeev_bufferSize<c10::complex<float>>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    const c10::complex<float>* A,
+    int64_t lda,
+    const c10::complex<float>* W,
+    const c10::complex<float>* VL,
+    int64_t ldvl,
+    const c10::complex<float>* VR,
+    int64_t ldvr,
+    size_t* workspaceInBytesOnDevice,
+    size_t* workspaceInBytesOnHost) {
+  TORCH_WARN("called experimental xgeev_bufferSize<complex<float>>");
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
+      handle, params, jobvl, jobvr, n,
+      CUDA_C_32F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_C_32F,
+      reinterpret_cast<const void*>(W),
+      CUDA_C_32F,
+      reinterpret_cast<const void*>(VL),
+      ldvl,
+      CUDA_C_32F,
+      reinterpret_cast<const void*>(VR),
+      ldvr,
+      CUDA_C_32F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
 }
 
 template <>
-void at::cuda::solver::xgeev<double, double>(
+void xgeev_bufferSize<c10::complex<double>>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    const c10::complex<double>* A,
+    int64_t lda,
+    const c10::complex<double>* W,
+    const c10::complex<double>* VL,
+    int64_t ldvl,
+    const c10::complex<double>* VR,
+    int64_t ldvr,
+    size_t* workspaceInBytesOnDevice,
+    size_t* workspaceInBytesOnHost) {
+  TORCH_WARN("called experimental xgeev_bufferSize<complex<double>>");
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
+      handle, params, jobvl, jobvr, n,
+      CUDA_C_64F,
+      reinterpret_cast<const void*>(A),
+      lda,
+      CUDA_C_64F,
+      reinterpret_cast<const void*>(W),
+      CUDA_C_64F,
+      reinterpret_cast<const void*>(VL),
+      ldvl,
+      CUDA_C_64F,
+      reinterpret_cast<const void*>(VR),
+      ldvr,
+      CUDA_C_64F,
+      workspaceInBytesOnDevice,
+      workspaceInBytesOnHost));
+}
+
+template <>
+void at::cuda::solver::xgeev<float>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    float* A,
+    int64_t lda,
+    float* W,
+    float* VL,
+    int64_t ldvl,
+    float* VR,
+    int64_t ldvr,
+    float* bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    float* bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int* info) {
+  TORCH_WARN("Launching cuSOLVER Xgeev<float>");
+
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
+      handle,
+      params,
+      jobvl,
+      jobvr,
+      n,
+      CUDA_R_32F,
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_R_32F,
+      reinterpret_cast<void*>(W),
+      CUDA_R_32F,
+      reinterpret_cast<void*>(VL),
+      ldvl,
+      CUDA_R_32F,
+      reinterpret_cast<void*>(VR),
+      ldvr,
+      CUDA_R_32F,
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
+}
+
+
+
+
+template <>
+void at::cuda::solver::xgeev<double>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t jobvl,
@@ -2002,8 +2173,127 @@ void at::cuda::solver::xgeev<double, double>(
     double* bufferOnHost,
     size_t workspaceInBytesOnHost,
     int* info) {
-  TORCH_WARN("xgeev<double> not implemented yet");
+    TORCH_WARN("Launching cuSOLVER Xgeev<double>");
+
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
+      handle,
+      params,
+      jobvl,
+      jobvr,
+      n,
+      CUDA_R_64F,  // Datentyp der Matrix
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_R_64F,  // Datentyp der Eigenwerte (reell)
+      reinterpret_cast<void*>(W),
+      CUDA_R_64F,  // Datentyp der linken EV
+      reinterpret_cast<void*>(VL),
+      ldvl,
+      CUDA_R_64F,  // Datentyp der rechten EV
+      reinterpret_cast<void*>(VR),
+      ldvr,
+      CUDA_R_64F,  // Arbeitsbereich-Typ
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
+
 }
+
+template <>
+void at::cuda::solver::xgeev<c10::complex<float>>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    c10::complex<float>* A,
+    int64_t lda,
+    c10::complex<float>* W,
+    c10::complex<float>* VL,
+    int64_t ldvl,
+    c10::complex<float>* VR,
+    int64_t ldvr,
+    c10::complex<float>* bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    c10::complex<float>* bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int* info) {
+  TORCH_WARN("Launching cuSOLVER Xgeev<complex<float>>");
+
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
+      handle,
+      params,
+      jobvl,
+      jobvr,
+      n,
+      CUDA_C_32F,
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_C_32F,
+      reinterpret_cast<void*>(W),
+      CUDA_C_32F,
+      reinterpret_cast<void*>(VL),
+      ldvl,
+      CUDA_C_32F,
+      reinterpret_cast<void*>(VR),
+      ldvr,
+      CUDA_C_32F,
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
+}
+
+template <>
+void at::cuda::solver::xgeev<c10::complex<double>>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    c10::complex<double>* A,
+    int64_t lda,
+    c10::complex<double>* W,
+    c10::complex<double>* VL,
+    int64_t ldvl,
+    c10::complex<double>* VR,
+    int64_t ldvr,
+    c10::complex<double>* bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    c10::complex<double>* bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int* info) {
+  TORCH_WARN("Launching cuSOLVER Xgeev<complex<double>>");
+
+  TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
+      handle,
+      params,
+      jobvl,
+      jobvr,
+      n,
+      CUDA_C_64F,
+      reinterpret_cast<void*>(A),
+      lda,
+      CUDA_C_64F,
+      reinterpret_cast<void*>(W),
+      CUDA_C_64F,
+      reinterpret_cast<void*>(VL),
+      ldvl,
+      CUDA_C_64F,
+      reinterpret_cast<void*>(VR),
+      ldvr,
+      CUDA_C_64F,
+      reinterpret_cast<void*>(bufferOnDevice),
+      workspaceInBytesOnDevice,
+      reinterpret_cast<void*>(bufferOnHost),
+      workspaceInBytesOnHost,
+      info));
+}
+
+
 
 
 #endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
