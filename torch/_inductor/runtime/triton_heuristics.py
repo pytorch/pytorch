@@ -2971,7 +2971,12 @@ def filter_reduction_configs_for_determinism(
     assert len(configs) > 0
 
     def _do_filter_due_to_inductor_config():
+        detmerinistic = inductor_meta.get("deterministic", False)
+        force_filter = torch._inductor.config.test_configs.force_filter_reduction_configs
+        detmerinistic_algos = inductor_meta.get("are_deterministic_algorithms_enabled")
+        print(f"deterministic: {detmerinistic}, force_filter: {force_filter}, deterministic_algos: {detmerinistic_algos}")
         return True
+        return detmerinistic or force_filter or detmerinistic_algos
         return (
             inductor_meta.get("deterministic", False)
             or torch._inductor.config.test_configs.force_filter_reduction_configs
