@@ -2,9 +2,9 @@ import distutils.command.clean
 import shutil
 from pathlib import Path
 
-from setuptools import find_packages, setup
-
 import torch
+
+from setuptools import find_packages, setup
 from torch.utils.cpp_extension import (
     BuildExtension,
     CppExtension,
@@ -48,10 +48,10 @@ def get_extension():
     # (2) extension compiles and links with -fopenmp
     if IS_MACOS:
         extra_compile_args["cxx"].extend(["-Xclang", "-fopenmp"])
+        extra_link_args.append("-lomp")
     else:
         extra_compile_args["cxx"].extend(["-fopenmp"])
-
-    extra_link_args.append("-fopenmp")
+        extra_link_args.append("-fopenmp")
 
     extension = CppExtension
     # allow including <cuda_runtime.h>
