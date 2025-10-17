@@ -812,10 +812,7 @@ def _export_to_torch_ir(
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
     )
 
-    with (
-        torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)),
-        torch.fx.traceback.preserve_node_meta(),
-    ):
+    with torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)):
         try:
             module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
                 _ExportModuleSpecTrackerDict()
@@ -905,7 +902,6 @@ def _export_to_aten_ir(
         _ignore_backend_decomps(),
         _compiling_state_context(),
         custom_triton_ops_decomposition_ctx(),
-        torch.fx.traceback.preserve_node_meta(),
     ):
         gm, graph_signature = transform(aot_export_module)(
             mod,
@@ -1934,8 +1930,9 @@ def _non_strict_export(
                             in mod._forward_pre_hooks.values()
                         ):
                             _check_input_constraints_pre_hook(mod, args, kwargs)
-                        args = (*args, *kwargs.values())
-                        tree_out = torch.fx.Interpreter(mod).run(*args)
+                        with torch.fx.traceback.preserve_node_meta():
+                            args = (*args, *kwargs.values())
+                            tree_out = torch.fx.Interpreter(mod).run(*args)
                     else:
                         tree_out = mod(*args, **kwargs)
                     flat_outs, out_spec = pytree.tree_flatten(tree_out)
@@ -2032,7 +2029,6 @@ def _non_strict_export(
             ),
             _fakify_module_inputs(fake_args, fake_kwargs, fake_mode),
             _override_builtin_ops(),
-            torch.fx.traceback.preserve_node_meta(),
         ):
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
