@@ -11,6 +11,7 @@ import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
 from torch._logging import warning_once
 from torch.distributed._local_tensor import local_tensor_mode
+from torch.distributed._pycute.int_tuple import crd2idx, idx2crd
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
@@ -61,6 +62,174 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
     return torch.ops._dtensor.shard_dim_alltoall(
         input, gather_dim, shard_dim, group_name
     )
+
+
+def all_permute_mesh_dim(
+    input: torch.Tensor,
+    full_tensor_shape: torch.Size,
+    src_distribution: "dtensor_spec.ShardOrder",
+    tgt_distribution: "dtensor_spec.ShardOrder",
+    mesh: DeviceMesh,
+):
+    """
+    Perform an AllPermute operation to redistribute a tensor from source to target sharding.
+
+    AllPermute is a collective communication primitive that can transform any tensor distribution
+    τ1 to τ2 if their local and global shapes match. Unlike traditional redistributions that may
+    require multiple AllGather operations, AllPermute achieves the transformation through a single
+    permutation-based communication, significantly reducing memory overhead.
+
+    Mathematical Background:
+    ------------------------
+    Given a DeviceMesh with dimensions {X, Y, Z, ...} and a tensor with shape [D0, D1, D2, ...],
+    sharding annotations specify how tensor dimensions are distributed across mesh dimensions.
+
+    Notation (from https://arxiv.org/pdf/2112.01075 "section 2.1 Distributed array types"):
+        - [32{X,Y}512, 128]: Tensor of shape [32*512, 128] sharded on mesh dims X,Y for dim 0
+        - [128{Y}512, 32{X}128]: First tensor dim sharded on mesh Y, second dim on mesh X
+
+    Examples:
+    ---------
+    Given mesh with size {X:4, Y:4, Z:16}:
+
+    Example 1: Swap mesh dimension order for the same tensor dimension
+        Source: [32{X,Y}512, 128]  → Target: [32{Y,X}512, 128]
+        This swaps the order in which mesh dimensions X and Y shard the first tensor dimension.
+
+    Example 2: Swap which tensor dimensions are sharded on which mesh dimensions
+        Source: [128{Y}512, 32{X}128] → Target: [128{X}512, 32{Y}128]
+        Tensor dimension 0 moves from mesh dim Y to X, dimension 1 moves from X to Y.
+
+    Example 3: Change mesh dimensions entirely while preserving shapes
+        Source: [32{X,Y}512, 128] → Target: [32{Z}512, 128]
+        Re-shard from mesh dimensions X,Y to mesh dimension Z.
+
+    Algorithm:
+    ----------
+    1. For each source rank, compute its position in the global tensor based on src_distribution
+    2. Determine which target rank should receive this data based on tgt_distribution
+    3. Build a permutation mapping: src_rank → tgt_rank
+    4. Execute permute_tensor to swap data according to the mapping
+
+    The key insight is that each rank knows exactly where its data should go in the target
+    distribution without requiring intermediate gather operations.
+
+    Args:
+        input (torch.Tensor): Local tensor shard to redistribute. Must be the actual data
+            held by the current rank according to src_distribution.
+        full_tensor_shape (torch.Size): Shape of the global (unsharded) tensor before any
+            distribution. Used to compute correct offsets and mappings.
+        src_distribution (ShardOrder): Description of how the input tensor is currently
+            distributed across the mesh. Specifies which tensor dimensions are sharded
+            on which mesh dimensions.
+        tgt_distribution (ShardOrder): Target distribution specification. Describes the
+            desired sharding pattern after the AllPermute operation.
+        mesh (DeviceMesh): The device mesh over which the tensor is distributed. Defines
+            the process group topology for communication.
+
+    Returns:
+        torch.Tensor: The redistributed local tensor shard according to tgt_distribution.
+            The returned tensor represents this rank's portion of the global tensor under
+            the new distribution scheme.
+
+    Preconditions:
+        - Source and target distributions must have matching local and global tensor shapes
+        - Input must be a local tensor (not a DTensor wrapper)
+        - The mesh topology must match both src_distribution and tgt_distribution
+
+    Example Usage:
+        >>> # 2D mesh [4, 4] with tensor shape [64, 128]
+        >>> mesh = DeviceMesh(
+        ...     "cuda", [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]]
+        ... )
+        >>> # Redistribute from [64{mesh_dim=0}, 128] to [64, 128{mesh_dim=1}]
+        >>> src_dist = ShardOrder([ShardEntry(tensor_dim=0, mesh_dims=[0])])
+        >>> tgt_dist = ShardOrder([ShardEntry(tensor_dim=1, mesh_dims=[1])])
+        >>> output = all_permute_mesh_dim(
+        ...     local_shard, (64, 128), src_dist, tgt_dist, mesh
+        ... )
+    """
+    orig_tensor_shape = list(input.shape)
+    for entry in src_distribution:
+        tensor_dim = entry.tensor_dim
+        shard_tensor_on_mesh_dims = entry.mesh_dims
+        for mesh_dim in shard_tensor_on_mesh_dims:
+            orig_tensor_shape[tensor_dim] *= mesh.size(mesh_dim)
+
+    permuted_rank = list(range(0, torch.distributed.get_world_size()))
+    for src_rank in range(mesh.size()):
+        src_coordinate = idx2crd(src_rank, mesh.shape)
+        tgt_coordinate = [0] * mesh.ndim
+        src_distr_idx, tgt_distr_idx = 0, 0
+        for tensor_dim in range(len(full_tensor_shape)):
+            src_distribute_to_mesh_dims: tuple[int, ...] = ()
+            if (
+                src_distr_idx < len(src_distribution)
+                and src_distribution[src_distr_idx].tensor_dim == tensor_dim
+            ):
+                src_distribute_to_mesh_dims = src_distribution[src_distr_idx].mesh_dims
+                src_distr_idx += 1
+            tgt_distribute_to_mesh_dims: tuple[int, ...] = ()
+            if (
+                tgt_distr_idx < len(tgt_distribution)
+                and tgt_distribution[tgt_distr_idx].tensor_dim == tensor_dim
+            ):
+                tgt_distribute_to_mesh_dims = tgt_distribution[tgt_distr_idx].mesh_dims
+                tgt_distr_idx += 1
+
+            # check if local size and global size match between src and tgt
+            # distribution for this tensor dim. In addition, make sure there is
+            # no padding needed with the sharding specification.
+            if (
+                src_prod := math.prod(
+                    [mesh.size(i) for i in src_distribute_to_mesh_dims]
+                )
+            ) != (
+                tgt_prod := math.prod(
+                    [mesh.size(i) for i in tgt_distribute_to_mesh_dims]
+                )
+            ):
+                raise ValueError(
+                    f"local size mismatch between source (shard into: {src_prod} parts) "
+                    f"and target (shard into: {tgt_prod} parts) distribution for tensor dim {tensor_dim}."
+                )
+            for mesh_dim in src_distribute_to_mesh_dims:
+                if full_tensor_shape[tensor_dim] % mesh.size(mesh_dim) != 0:
+                    raise ValueError(
+                        f"tensor dim {tensor_dim} (size: {full_tensor_shape[tensor_dim]}) "
+                        f"is not divisible by mesh dim {mesh_dim} (size: {mesh.size(mesh_dim)}) "
+                        f"based on source distribution."
+                    )
+            for mesh_dim in tgt_distribute_to_mesh_dims:
+                if full_tensor_shape[tensor_dim] % mesh.size(mesh_dim) != 0:
+                    raise ValueError(
+                        f"tensor dim {tensor_dim} (size: {full_tensor_shape[tensor_dim]}) "
+                        f"is not divisible by mesh dim {mesh_dim} (size: {mesh.size(mesh_dim)}) "
+                        f"based on target distribution."
+                    )
+
+            # main algorithm to find which rank to send data to
+            dividend_size = 0
+            prev_size = full_tensor_shape[tensor_dim]
+            for mesh_dim in src_distribute_to_mesh_dims:
+                cur_size = math.ceil(prev_size / mesh.size(mesh_dim))
+                dividend_size += src_coordinate[mesh_dim] * cur_size  # type: ignore[index, operator]
+
+                prev_size = cur_size
+            divisor_size = full_tensor_shape[tensor_dim]
+            for mesh_dim in tgt_distribute_to_mesh_dims:
+                divisor_size = math.ceil(divisor_size / mesh.size(mesh_dim))
+                tgt_coordinate[mesh_dim], dividend_size = divmod(
+                    dividend_size, divisor_size
+                )
+        tgt_rank = crd2idx(tuple(tgt_coordinate), mesh.shape)
+        # indicate to send src_rank data to tgt_rank
+        permuted_rank[src_rank] = tgt_rank
+    assert sorted(permuted_rank) == list(range(len(permuted_rank)))
+    output = funcol.permute_tensor(input, permuted_rank, mesh)
+    if isinstance(output, funcol.AsyncCollectiveTensor):
+        output = output.wait()
+    return output
 
 
 def mesh_scatter(

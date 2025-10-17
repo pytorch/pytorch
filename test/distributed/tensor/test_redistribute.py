@@ -16,7 +16,10 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._collective_utils import shard_dim_alltoall
+from torch.distributed.tensor._collective_utils import (
+    all_permute_mesh_dim,
+    shard_dim_alltoall,
+)
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.debug import CommDebugMode
@@ -1161,6 +1164,110 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),),
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
+
+    @with_comms
+    def test_all_permute_mesh_dim_between_tensor_dims(self):
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_tensor = torch.randn(4, 4, 4, self.world_size, device=self.device_type)
+        # generate all permutations of [0, 1, 2] as the shard order
+        perms = list(itertools.permutations([0, 1, 2]))
+
+        # pick any two from `perms`, to redistribute from one to another using AllPermute op
+        for i in range(len(perms)):
+            src_distribution = {0: [perms[i][0]], 1: [perms[i][1]], 2: [perms[i][2]]}
+            src_shard_order = self._convert_shard_order_dict_to_ShardOrder(
+                src_distribution
+            )
+            for j in range(len(perms)):
+                tgt_distribution = {
+                    0: [perms[j][0]],
+                    1: [perms[j][1]],
+                    2: [perms[j][2]],
+                }
+                tgt_shard_order = self._convert_shard_order_dict_to_ShardOrder(
+                    tgt_distribution
+                )
+                input_tensor_dt = self.distribute_tensor(
+                    input_tensor,
+                    mesh,
+                    self._shard_order_to_placement(src_shard_order, mesh),
+                    shard_order=src_shard_order,
+                )
+                full_tensor_shape = input_tensor.shape
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    new_tensor = all_permute_mesh_dim(
+                        input_tensor_dt.to_local(),
+                        full_tensor_shape,
+                        src_shard_order,
+                        tgt_shard_order,
+                        mesh,
+                    )
+                # only need 1 all_to_all_single to permute over all mesh axes
+                self.assertEqual(
+                    comm_mode.get_total_counts(),
+                    1,
+                    f"detected all comms: {comm_mode.get_comm_counts()}",
+                )
+
+                input_tensor_from_spec_dt = self.distribute_tensor(
+                    input_tensor,
+                    mesh,
+                    self._shard_order_to_placement(tgt_shard_order, mesh),
+                    shard_order=tgt_shard_order,
+                )
+                self.assertEqual(new_tensor, input_tensor_from_spec_dt.to_local())
+
+    @with_comms
+    def test_all_permute_tensor_dim_inner_exchange(self):
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_tensor = torch.randn(8, 8, 4, self.world_size, device=self.device_type)
+        perms = list(itertools.permutations([0, 1, 2]))
+
+        # pick any two from `perms`, to redistribute from one to another using AllPermute op
+        for i in range(len(perms)):
+            for j in range(len(perms)):
+                src_distribution = {0: perms[i]}
+                tgt_distribution = {0: perms[j]}
+                src_shard_order = self._convert_shard_order_dict_to_ShardOrder(
+                    src_distribution
+                )
+                input_tensor_dt = self.distribute_tensor(
+                    input_tensor,
+                    mesh,
+                    self._shard_order_to_placement(src_shard_order, mesh),
+                    shard_order=src_shard_order,
+                )
+                full_tensor_shape = input_tensor.shape
+                tgt_shard_order = self._convert_shard_order_dict_to_ShardOrder(
+                    tgt_distribution
+                )
+
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    new_tensor = all_permute_mesh_dim(
+                        input_tensor_dt.to_local(),
+                        full_tensor_shape,
+                        src_shard_order,
+                        tgt_shard_order,
+                        mesh,
+                    )
+                # only need 1 all_to_all_single to permute over all mesh axes
+                self.assertEqual(
+                    comm_mode.get_total_counts(),
+                    1,
+                    f"detected all comms: {comm_mode.get_comm_counts()}",
+                )
+
+                input_tensor_from_spec_dt = self.distribute_tensor(
+                    input_tensor,
+                    mesh,
+                    self._shard_order_to_placement(tgt_shard_order, mesh),
+                    shard_order=tgt_shard_order,
+                )
+                self.assertEqual(new_tensor, input_tensor_from_spec_dt.to_local())
 
 
 if __name__ == "__main__":
