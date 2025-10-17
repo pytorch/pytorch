@@ -41,6 +41,7 @@ from .int_tuple import (
     IntTuple,
     is_int,
     is_tuple,
+    match_structure,
     product,
     shape_div,
     signum,
