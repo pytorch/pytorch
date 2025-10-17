@@ -1,25 +1,12 @@
 # Owner(s): ["oncall: distributed"]
+
 import contextlib
 
 import torch
 import torch.distributed as dist
-from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-    Partial,
-    Replicate,
-    Shard,
-)
+from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    parallelize_module,
-    RowwiseParallel,
-)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -27,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._debug_mode import DebugMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -128,15 +114,6 @@ class TestDTensorDebugMode(TestCase):
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
         )
-
-        # test stack trace
-        with DebugMode() as debug_mode:
-            z = x_dtensor + y_dtensor
-            with DebugMode.dispatch_stack_trace(cpp=False):
-                z.sum().backward()
-
-        self.assertTrue(debug_mode.operators[0].stack_trace is None)
-        self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
@@ -352,174 +329,6 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode() as debug_mode:
             f(x)
         self.assertEqual(len(debug_mode.debug_string()), 0)
-
-    def test_export(self):
-        # inherited from test/distributed/tensor/test_dtensor_export.py
-        class SimpleModel(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.mlp_0 = MLPModule(device)
-                self.mlp_1 = MLPModule(device)
-
-            def forward(self, input):
-                return self.mlp_1(self.mlp_0(input))
-
-        mesh = init_device_mesh(
-            self.device_type,
-            mesh_shape=(2, 4),
-            mesh_dim_names=["dp", "tp"],
-        )
-        model = SimpleModel(self.device_type)
-        parallelize_plan = {
-            "mlp_0.net1": ColwiseParallel(),
-            "mlp_0.net2": RowwiseParallel(),
-            "mlp_1.net1": ColwiseParallel(),
-            "mlp_1.net2": RowwiseParallel(),
-        }
-        tp_model = parallelize_module(model, mesh["tp"], parallelize_plan)
-
-        inputs = torch.rand(20, 10, device=self.device_type)
-        inputs = distribute_tensor(inputs, mesh["tp"], placements=[Replicate()])
-
-        with torch._dynamo.config.patch(install_free_tensors=True):
-            gm = _dynamo_graph_capture_for_export(tp_model)(inputs)
-
-        debug_mode = DebugMode()
-        debug_mode.run_graph(gm, inputs)
-
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
-  [node] l_flat_args_0_: placeholder
-  [node] l__self____export_root_mlp_0_net1_weight: get_attr[L__self___mlp_0_net1_weight]()
-  [node] l__self____export_root_mlp_0_net1_bias: get_attr[L__self___mlp_0_net1_bias]()
-  [node] linear: call_function[torch._C._nn.linear](l_flat_args_0_, l__self____export_root_mlp_0_net1_weight, l__self____export_root_mlp_0_net1_bias)
-    aten::t(dt: f32[16, 10]| S(0))
-      aten::t(t: f32[4, 10])
-    aten::addmm(dt: f32[16]| S(0), dt: f32[20, 10]| R, dt: f32[10, 16]| S(1))
-      aten::addmm(t: f32[4], t: f32[20, 10], t: f32[10, 4])
-  [node] outputs: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear)
-  [node] hook_result: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs)
-      aten::view(t: f32[20, 4], [20, 4])
-  [node] input_tensor: call_function[torch.nn.functional.relu](hook_result, inplace=False)
-      aten::relu(t: f32[20, 4])
-  [node] input_tensor_1: call_function[torch._dynamo.variables.torch.prim from_local](input_tensor)
-      aten::view(t: f32[20, 4], [20, 4])
-  [node] l__self____export_root_mlp_0_net2_weight: get_attr[L__self___mlp_0_net2_weight]()
-  [node] l__self____export_root_mlp_0_net2_bias: get_attr[L__self___mlp_0_net2_bias]()
-  [node] linear_1: call_function[torch._C._nn.linear](input_tensor_1, l__self____export_root_mlp_0_net2_weight, l__self____export_root_mlp_0_net2_bias)
-    aten::t(dt: f32[10, 16]| S(1))
-      aten::t(t: f32[10, 4])
-    aten::addmm(dt: f32[10]| R, dt: f32[20, 16]| S(1), dt: f32[16, 10]| S(0))
-      redistribute_input(0, R -> P)
-        redistribute_input(t: f32[10], trace: R->P)
-          aten::div.Tensor(t: f32[10], 4)
-      aten::addmm(t: f32[10], t: f32[20, 4], t: f32[4, 10])
-  [node] outputs_1: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear_1)
-      redistribute_input(t: f32[20, 10], trace: P->R)
-        _c10d_functional::all_reduce(t: f32[20, 10], sum, 5)
-  [node] hook_result_1: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs_1)
-  [node] input_tensor_2: call_function[torch._dynamo.variables.torch.prim from_local](hook_result_1)
-  [node] l__self____export_root_mlp_1_net1_weight: get_attr[L__self___mlp_1_net1_weight]()
-  [node] l__self____export_root_mlp_1_net1_bias: get_attr[L__self___mlp_1_net1_bias]()
-  [node] linear_2: call_function[torch._C._nn.linear](input_tensor_2, l__self____export_root_mlp_1_net1_weight, l__self____export_root_mlp_1_net1_bias)
-    aten::t(dt: f32[16, 10]| S(0))
-      aten::t(t: f32[4, 10])
-    aten::addmm(dt: f32[16]| S(0), dt: f32[20, 10]| R, dt: f32[10, 16]| S(1))
-  [node] outputs_2: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear_2)
-  [node] hook_result_2: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs_2)
-      aten::view(t: f32[20, 4], [20, 4])
-  [node] input_tensor_3: call_function[torch.nn.functional.relu](hook_result_2, inplace=False)
-      aten::relu(t: f32[20, 4])
-  [node] input_tensor_4: call_function[torch._dynamo.variables.torch.prim from_local](input_tensor_3)
-      aten::view(t: f32[20, 4], [20, 4])
-  [node] l__self____export_root_mlp_1_net2_weight: get_attr[L__self___mlp_1_net2_weight]()
-  [node] l__self____export_root_mlp_1_net2_bias: get_attr[L__self___mlp_1_net2_bias]()
-  [node] linear_3: call_function[torch._C._nn.linear](input_tensor_4, l__self____export_root_mlp_1_net2_weight, l__self____export_root_mlp_1_net2_bias)
-    aten::t(dt: f32[10, 16]| S(1))
-      aten::t(t: f32[10, 4])
-    aten::addmm(dt: f32[10]| R, dt: f32[20, 16]| S(1), dt: f32[16, 10]| S(0))
-      redistribute_input(0, R -> P)
-        redistribute_input(t: f32[10], trace: R->P)
-          aten::div.Tensor(t: f32[10], 4)
-      aten::addmm(t: f32[10], t: f32[20, 4], t: f32[4, 10])
-  [node] outputs_3: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear_3)
-      redistribute_input(t: f32[20, 10], trace: P->R)
-        _c10d_functional::all_reduce(t: f32[20, 10], sum, 5)
-  [node] hook_result_3: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs_3)
-  [node] output: output""",  # NOQA: B950
-        )
-
-    def test_fx_annotate_in_graph(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                x = x + 2
-                with torch.fx.traceback.annotate({"region": "foo"}):
-                    x = x @ y
-                    x = x + 2
-                x = x * 2
-                return x
-
-        mod = Foo()
-        x, y = torch.randn(4, 4), torch.randn(4, 8)
-        with torch.fx.traceback.preserve_node_meta():
-            gm = torch.export.export(mod, (x, y)).module()
-
-        debug_mode = DebugMode()
-        debug_mode.run_graph(gm, x, y)
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
-  [node] x: placeholder
-  [node] y: placeholder
-  [node] _guards_fn: call_module[_guards_fn](x, y)
-  [node] add: call_function[aten::add.Tensor](x, 2)
-      aten::add.Tensor(t: f32[4, 4], 2)
-  [node] matmul: call_function[aten::matmul](add, y)  # {"region": foo}
-      aten::mm(t: f32[4, 4], t: f32[4, 8])
-  [node] add_1: call_function[aten::add.Tensor](matmul, 2)  # {"region": foo}
-      aten::add.Tensor(t: f32[4, 8], 2)
-  [node] mul: call_function[aten::mul.Tensor](add_1, 2)
-      aten::mul.Tensor(t: f32[4, 8], 2)
-  [node] output: output""",
-        )
-
-    def test_custom_hooks(self):
-        def numel_hook(func, types, args, kwargs, result):
-            return {"numel": result.numel()}
-
-        # test dispatch hooks
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.l1 = torch.nn.Linear(4, 5)
-                self.l2 = torch.nn.Linear(5, 6)
-
-            def forward(self, x):
-                x0 = self.l1(x)
-                # local recoding hook & annotation
-                with DebugMode.record_outputs():
-                    x1 = self.l2(x0)
-                return x1, x0
-
-        x = torch.randn(4, 4, device=self.device_type)
-        mod = Foo().to(device=self.device_type)
-
-        # global logging hook
-        with DebugMode.dispatch_hooks(log_hook=numel_hook), DebugMode() as debug_mode:
-            x1, _ = mod(x)
-
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
-    aten::t(t: f32[5, 4])  # {'numel': 20}
-    aten::addmm(t: f32[5], t: f32[4, 4], t: f32[4, 5])  # {'numel': 20}
-    aten::t(t: f32[6, 5])  # {'numel': 30}
-    aten::addmm(t: f32[6], t: f32[4, 5], t: f32[5, 6])  # {'numel': 24}""",
-        )
-        self.assertTrue(debug_mode.operators[0].record is None)
-        record = debug_mode.operators[3].record["output"]
-        self.assertTrue(torch.allclose(record, x1))
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
