@@ -126,6 +126,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
         torch.fx.traceback.annotate,
+        torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -364,7 +365,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
-        elif self.value is torch.fx.traceback.annotate:
+        elif self.value in (
+            torch.fx.traceback.annotate,
+            torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
+        ):
             assert len(args) <= 1 and len(kwargs) == 0
             return FxTracebackAnnotateVariable(
                 args[0].as_python_constant(), source=self.source
