@@ -5899,10 +5899,24 @@ class ShapeEnv:
                 self.log.warning("Failing guard allocated at %s", guard.sloc)
                 raise
 
+        the_guards = guards if guards is not None else self.guards
+
+        # Ensure all symbols that appear in guards are in symbol_to_source
+        # This is needed because symbols can appear in guard expressions through
+        # simplification or substitution without being directly tracked from inputs
+        for guard in the_guards:
+            for symbol in guard.expr.free_symbols:
+                if (
+                    isinstance(symbol, sympy.Symbol)
+                    and symbol not in symbol_to_source
+                    and symbol in self.var_to_sources
+                ):
+                    symbol_to_source[symbol].extend(self.var_to_sources[symbol])
+
         # First, issue all guards.
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
-        for guard in guards if guards is not None else self.guards:
+        for guard in the_guards:
             if (
                 self._maybe_evaluate_static(
                     guard.expr, axioms=(), size_oblivious=guard.size_oblivious
