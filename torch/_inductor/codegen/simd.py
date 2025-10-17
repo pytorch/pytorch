@@ -18,6 +18,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
@@ -1539,6 +1540,8 @@ class SIMDScheduling(BaseScheduling):
             node1.group[1][0], node1.group[1][1]
         ):
             return self._codegen_mix_order_reduction(node2, node1)
+
+        metrics.codegen_mix_order_reduction += 1
 
         assert V.graph.sizevars.statically_known_gt(
             node1.group[1][0], node1.group[1][1]

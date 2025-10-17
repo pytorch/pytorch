@@ -18,6 +18,8 @@ from collections import Counter, defaultdict
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec, TypeAlias
 
+from torch.utils._ordered_set import OrderedSet
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -35,7 +37,6 @@ from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -156,7 +157,7 @@ class MixOrderReduction:
             var_ranges = node.snodes[0].read_writes.var_ranges
 
         assert var_ranges
-        if not (set(var_ranges) - set(index.free_symbols)):
+        if not (OrderedSet(var_ranges) - OrderedSet(index.free_symbols)):
             return True
 
         # cases that happen after merging loops:
@@ -215,7 +216,9 @@ class MixOrderReduction:
 
         contiguous_node = node1 if node1.group[1][1] == ncol else node2
 
-        return all(cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads)
+        out = all(cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads)
+        # breakpoint()
+        return out
 
     @classmethod
     def are_mix_order_reductions(

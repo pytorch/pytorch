@@ -14,12 +14,61 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-@instantiate_parametrized_tests
-class MixOrderReductionTest(TestCase):
+class TestBase(TestCase):
     def setUp(self):
         super().setUp()
         metrics.reset()
 
+    def check_numeric(self, f, args, tol=1e-3):
+        ref = f(*args)
+        act = torch.compile(f)(*args)
+        self.assertTrue(same(ref, act, tol=tol))
+
+
+class SkipPatternTest(TestBase):
+    """
+    Illustate the cases that we skip mix-order reduction. We skip in cases
+    like when the outer reduction is followed by a pointwise that load
+    the un-reduced tensor.
+    """
+
+    @inductor_config.patch(split_reductions=False)
+    def test_dimension_too_close(self):
+        """
+        Skip if the two reduction size are too close.
+        We require one reduction dimension to be much larger so we can split
+        that dimension and make it efficient.
+        """
+
+        def f(x):
+            out1 = x.sum(dim=1)
+            out2 = x.sum(dim=0)
+            return out1, out2
+
+        x = torch.randn(768, 768, device=GPU_TYPE)
+        torch.compile(f)(x)
+        self.assertEqual(2, metrics.generated_kernel_count)
+
+    @inductor_config.patch(split_reductions=False)
+    def test_skip_if_outer_reduction_followed_by_full_pointwise(self):
+        """
+        Skip for now if the outer reduction is followed by a pointwise node
+        accessing the original tensor. Accessing the reduced tensor is fine
+        (e.g. to support torch.mean).
+        """
+
+        def f(x):
+            out1 = x.sum(dim=1)
+            out2 = x.sum(dim=0, keepdim=True) + x
+            return out1, out2
+
+        x = torch.randn(32768, 768, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(0, metrics.codegen_mix_order_reduction)
+
+
+@instantiate_parametrized_tests
+class MixOrderReductionTest(TestBase):
     @parametrize(
         "name",
         [
