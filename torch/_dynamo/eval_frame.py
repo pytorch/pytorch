@@ -249,14 +249,11 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             )
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
-                all_reasons = []
-                for cache_entry in cache_entries:
-                    reasons = get_and_maybe_log_recompilation_reasons(
-                        cache_entry, frame, skip_logging=True
-                    )
-                    all_reasons.extend(reasons)
-                if all_reasons:
-                    failures = textwrap.indent("\n".join(all_reasons), "- ")
+                reasons = get_and_maybe_log_recompilation_reasons(
+                    cache_entries[0], frame, skip_logging=True
+                )
+                if reasons:
+                    failures = textwrap.indent("\n".join(reasons), "- ")
                     guard_failure_details = (
                         f"triggered by the following guard failure(s):\n{failures}"
                     )
