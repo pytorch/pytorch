@@ -1,0 +1,12 @@
+    inductor_graph_call(
+      inputs: (t: f32[8])
+      cache_key: fdlg4gr257iqkizvidgeq555ihl62dfya4njczxyop7vdzkgbubs
+      fx_kwargs: {static_input_idxs=[], cudagraphs=BoxedBool(value=False), graph_id=0, is_inference=True, boxed_forward_device_index=BoxedDeviceIndex(value=None), is_backward=False, cpp_wrapper=False, fx_wrapper=False, layout_opt=None, extern_node_serializer=None}
+      post_grad_graph:
+        class <lambda>(torch.nn.Module):
+            def forward(self, arg0_1: "f32[8][1]cuda:0"):
+                 # File: /data/users/pianpwk/pytorch/test/distributed/tensor/debug/test_debug_mode.py:349 in f, code: return x.sin().cos()
+                sin: "f32[8][1]cuda:0" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+                cos: "f32[8][1]cuda:0" = torch.ops.aten.cos.default(sin);  sin = None
+                return (cos,)
+    )
