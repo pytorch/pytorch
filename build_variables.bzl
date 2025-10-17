@@ -49,6 +49,7 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/error_report.h",
     "torch/csrc/jit/frontend/tree.h",
     "torch/csrc/stable/library.h",
+    "torch/csrc/stable/c/shim.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
@@ -87,6 +88,7 @@ core_sources_common = [
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/profiler/util.cpp",
+    "torch/csrc/shim_common.cpp"
 ]
 
 torch_unpickler_common = [
