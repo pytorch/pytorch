@@ -665,6 +665,7 @@ class AllocateLine(MemoryPlanningLine):
         )
 
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
+        return True # TODO
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
@@ -685,7 +686,7 @@ class AllocateLine(MemoryPlanningLine):
             ) * get_dtype_size(self.node.get_dtype())
             if self.should_reuse_buffer(free_line, size):
                 free_line.is_reused = True
-                self.wrapper.estimate_peak.update_peak_between(free_line, self)
+                # self.wrapper.estimate_peak.update_peak_between(free_line, self)
                 return ReuseLine(self.wrapper, free_line.node, self.node)
             else:
                 state.push(key, free_line)

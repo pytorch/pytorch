@@ -1522,6 +1522,18 @@ class SIMDScheduling(BaseScheduling):
 
         self._codegen_mix_order_reduction(node1, node2)
 
+    def _split_mix_order_reduction_epilogue(self, node):
+        # TODO: do more validation here
+        nodes = node.get_nodes()
+        reductions = []
+        epilogues = []
+        for node in nodes:
+            if node.is_reduction():
+                reductions.append(node)
+            else:
+                epilogues.append(node)
+        return reductions, epilogues
+
     def _codegen_mix_order_reduction(self, node1, node2):
         if not V.graph.sizevars.statically_known_gt(
             node1.group[1][0], node1.group[1][1]
@@ -1532,6 +1544,9 @@ class SIMDScheduling(BaseScheduling):
             node1.group[1][0], node1.group[1][1]
         )
 
+        # split epilogue out of node2
+        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(node2)
+
         # decide the split size
         nrow, ncol = node1.group[1]
         split_size = 128  # TODO don't hard code
@@ -1539,10 +1554,13 @@ class SIMDScheduling(BaseScheduling):
 
         numel, rnumel = node1.group[1]
 
-        node2 = node2.extract_pw_from_reduction()
-        node2.swap_pw_red_dimension()
+        converted_nodes = []
+        for subnode in node2_reductions:
+            converted = subnode.extract_pw_from_reduction()
+            converted.swap_pw_red_dimension()
+            converted_nodes.append(converted)
         node_schedule = self.generate_node_schedule(
-            node1.get_nodes() + node2.get_nodes(), numel, rnumel
+            node1.get_nodes() + converted_nodes, numel, rnumel
         )
         kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel, None)
         kernel = self.create_kernel_choices(
@@ -1575,7 +1593,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
         # a extra round of reduction
-        assert len(node2.get_buffer_names()) == len(kernel.saved_partial_accumulate)
+        assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
         for idx, (buffer_name, partial_accum) in enumerate(
             zip(node2.get_buffer_names(), kernel.saved_partial_accumulate)
         ):
@@ -1589,6 +1607,10 @@ class SIMDScheduling(BaseScheduling):
             )
 
         kernel.deallocate_workspaces()
+
+        if node2_epilogue:
+            self.codegen_node(node2_epilogue)
+
         self.free_buffers_in_scheduler()
 
     def codegen_node(
@@ -1598,9 +1620,12 @@ class SIMDScheduling(BaseScheduling):
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
 
-        nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+        if isinstance(node, list):
+            nodes = node
+        else:
+            nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
-        if torch._inductor.config.triton.coalesce_tiling_analysis:
+        if torch._inductor.config.triton.coalesce_tiling_analysis and False:
             coalesce_analysis = analyze_memory_coalescing(node)
         else:
             coalesce_analysis = None
