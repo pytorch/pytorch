@@ -1074,6 +1074,11 @@ class Pointwise(Loops):
 
         return self.inner_fn
 
+    def __str__(self) -> str:
+        return self._to_str(("ranges",))
+
+    __repr__ = __str__
+
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return []
 
@@ -1565,7 +1570,7 @@ class Reduction(Loops):
             and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
-            and not (reduction_type == "dot")
+            and reduction_type != "dot"
         ):
             # When native matmul, don't unroll the dot reduction.
 
