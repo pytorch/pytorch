@@ -461,7 +461,6 @@ Tensor _convolution_out(
         params.stride,
         params.dilation,
         params.groups,
-        is_1d,
         attr);
   }
 
