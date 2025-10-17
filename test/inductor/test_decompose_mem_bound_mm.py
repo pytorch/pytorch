@@ -82,7 +82,9 @@ class TestDecomposeMemMM(TestCase):
         if rtol is None:
             rtol = self.rtol
         if atol is None:
-            atol = self.rtol
+            atol = self.atol
+        self.rtol = rtol
+        self.atol = atol
 
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=None, atol=None):
         self.setup_tolerance(rtol, atol)
