@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/public")
+if(USE_ROCM)
+    include(LoadHIP OPTIONAL RESULT_VARIABLE _had_loadhip)
+    if(_had_loadhip)
+        # Exposed by LoadHIP.cmake, e.g. "7.1.2" or "7.2.0"
+        message(STATUS "LoadHIP loaded: ROCM_VERSION_DEV='${ROCM_VERSION_DEV}'")
+    else()
+        message(WARNING "LoadHIP.cmake not found; ROCM_VERSION_DEV unavailable")
+    endif()
+endif()
 
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-ignored-qualifiers")
@@ -302,12 +312,13 @@ IF(USE_FBGEMM_GENAI)
       # Add additional HIPCC compiler flags for performance
       set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
         -mllvm
-        -amdgpu-coerce-illegal-types=1
-        -mllvm
         -enable-post-misched=0
         -mllvm
         -greedy-reverse-local-assignment=1
         -fhip-new-launch-api)
+      if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
+        list(PREPEND FBGEMM_GENAI_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
+      endif()
 
       hip_add_library(
         fbgemm_genai STATIC
