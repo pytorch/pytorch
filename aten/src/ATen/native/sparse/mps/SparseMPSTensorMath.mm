@@ -161,8 +161,8 @@ static void build_batch_ptr_mps(
       mtl_setArgs(enc,
                   indices_dim0,
                   batch_ptr,
-                  static_cast<uint32_t>(nnz),
-                  static_cast<uint32_t>(B));
+                  std::array<uint32_t, 2>{static_cast<uint32_t>(nnz),
+                                          static_cast<uint32_t>(B)});
       [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
     }
   });
@@ -275,7 +275,7 @@ Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tenso
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      auto pso = lib.getPipelineStateForFunc("spmm_bmm_coo_rows_grouped");
+      auto pso = lib.getPipelineStateForFunc("spmm_bmm_coo_rows_grouped_" + mps::scalarToMetalTypeString(values));
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
 
