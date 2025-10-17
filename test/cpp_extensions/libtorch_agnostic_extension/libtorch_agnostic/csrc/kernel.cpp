@@ -12,6 +12,15 @@
 
 #include <optional>
 
+// Fixes error LNK2001: unresolved external symbol PyInit__C
+#if defined(_WIN32)
+#include <Python.h>
+PyMODINIT_FUNC PyInit__C(void) {
+  // No need to do anything.
+  return NULL;
+}
+#endif // defined(_WIN32)
+
 void inline sgd_math(
   float* param_ptr,
   float* grad_ptr,
