@@ -3169,8 +3169,8 @@ def _persistent_reduction_configs(
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
-    max_autotune_enabled = not disable_pointwise_autotuning(inductor_meta) or (
-        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
+        "max_autotune_pointwise"
     )
 
     if torch.version.hip:
