@@ -655,6 +655,33 @@ class TestDistributedBackendCollectivesWithWorldSize4(
                 f"but received {recvd_tensor} instead.",
             )
 
+    @with_comms()
+    def test_permute_tensor_multi_dim_mesh(self, device):
+        """Test permute_tensor can run on multi dimensional mesh"""
+        exit_if_lt_x_accelerators(self.world_size)
+        mesh_2d = dt.init_device_mesh(device, (2, self.world_size // 2))
+
+        # rank0: [[0., 1.], [2., 3.]]
+        # rank1: [[4., 5.], [6., 7.]]
+        # rank2: [[8., 9.], [10., 11.]]
+        # rank3: [[12., 13.], [14., 15.]]
+        send_tensor = (
+            torch.arange(4, dtype=torch.float32, device=device) + 4 * self.rank
+        ).view(2, 2)
+
+        # rotate data left by one rank
+        recvd_tensor = ft_c.permute_tensor(send_tensor, [3, 0, 1, 2], group=mesh_2d)
+        expected = (
+            torch.arange(4, dtype=torch.float32, device=device)
+            + 4 * ((self.rank + 1) % 4)
+        ).view(2, 2)
+        self.assertEqual(
+            recvd_tensor,
+            expected,
+            msg=f"Expected {expected} on {self.rank=} "
+            f"but received {recvd_tensor} instead.",
+        )
+
 
 @instantiate_parametrized_tests
 @skipIfHpu
