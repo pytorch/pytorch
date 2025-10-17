@@ -1376,6 +1376,7 @@ class CompilationMetrics:
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
     pytorch_version: Optional[str] = None
+    inductor_provenance: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1575,7 +1576,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     if torch._inductor.config:
         try:
             inductor_config_copy = torch._inductor.config.get_config_copy()
-        except (TypeError, AttributeError):
+        except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
     if inductor_config_copy is not None:
@@ -2912,6 +2913,15 @@ def rmse(ref: torch.Tensor, res: torch.Tensor) -> torch.Tensor:
     Calculate root mean squared error
     """
     return torch.sqrt(torch.mean(torch.square(ref - res)))
+
+
+def bitwise_same(ref: Any, res: Any, equal_nan: bool = False) -> bool:
+    return same(
+        ref,
+        res,
+        tol=0.0,
+        equal_nan=equal_nan,
+    )
 
 
 def same(
@@ -4716,6 +4726,7 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
 user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
 
 
+# TODO: mlazos to remove after replacing w/ above API
 def get_user_object_from_id(obj_id: int) -> Any:
     obj = user_obj_id_to_weakref[obj_id]()
     assert obj is not None, "User object is no longer alive"
@@ -4730,7 +4741,7 @@ def store_user_object_weakref(obj: object) -> None:
         from .exc import unimplemented_v2
 
         unimplemented_v2(
-            gb_type="Failed to make weakref to User Object",
+            gb_type="Failed to make weakref to User Object when storing by ID",
             context=f"user_objected: {obj}",
             explanation="Object does not allow us to make a weakref to it",
             hints=[],
