@@ -922,6 +922,46 @@ class inner_f(torch.nn.Module):
             in custom_metadata
         )
 
+    def test_preserve_annotate_function(self):
+        """Test basic annotate_fn usage"""
+
+        @fx_traceback.annotate_fn({"pp_stage": 1})
+        def example_function(x):
+            return x * x
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    y = self.linear(x)
+                y = example_function(y)
+                return y - 1
+
+        inputs = (torch.randn(4, 3),)
+        model = SimpleLinear()
+
+        for with_export in [True, False]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 't', {'pp_stage': 0})
+('call_function', 'addmm', {'pp_stage': 0})
+('call_function', 'mul', {'pp_stage': 1})
+('call_function', 'mul_1', {'pp_stage': 1})
+('call_function', 'mul_2', {'pp_stage': 1})
+('call_function', 't_1', {'pp_stage': 0})
+('call_function', 'mm', {'pp_stage': 0})
+('call_function', 't_2', {'pp_stage': 0})
+('call_function', 'sum_1', {'pp_stage': 0})
+('call_function', 'view', {'pp_stage': 0})
+('call_function', 't_3', {'pp_stage': 0})""",
+            )
+
 
 if __name__ == "__main__":
     run_tests()
