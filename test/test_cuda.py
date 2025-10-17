@@ -4583,31 +4583,33 @@ class TestCudaMallocAsync(TestCase):
         self.assertEqual(reg_mem - start_mem, nbytes)
 
         with self.assertRaises(ValueError):
-            torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
+            torch._C._accelerator_setAllocatorSettings("foo:1,bar:2")
 
         with self.assertRaises(ValueError):
-            torch.cuda.memory._set_allocator_settings(
+            torch._C._accelerator_setAllocatorSettings(
                 "garbage_collection_threshold:1.2"
             )
 
         with self.assertRaises(ValueError):
-            torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
+            torch._C._accelerator_setAllocatorSettings("max_split_size_mb:2")
 
         with self.assertRaises(ValueError):
-            torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
+            torch._C._accelerator_setAllocatorSettings(
+                "release_lock_on_cudamalloc:none"
+            )
 
         with self.assertRaises(ValueError):
-            torch.cuda.memory._set_allocator_settings(
+            torch._C._accelerator_setAllocatorSettings(
                 "pinned_use_cuda_host_register:none"
             )
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings(
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings(
                 "pinned_num_register_threads:none"
             )
 
         with self.assertRaises(ValueError):
-            torch.cuda.memory._set_allocator_settings(
+            torch._C._accelerator_setAllocatorSettings(
                 "pinned_num_register_threads:1024"
             )
 
