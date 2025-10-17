@@ -111,8 +111,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
         return benchmarker.benchmark(
-            bm_func,
-            fn_args=([*sym_inputs, *args],),
+            lambda: bm_func([*sym_inputs, *args]),
+            device=benchmarker.infer_device(*sym_inputs, *args),
         )
 
     def hash_key(self) -> str:

@@ -101,6 +101,30 @@ class Benchmarker:
     def __init__(self: Self) -> None:
         pass
 
+    def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
+        inferred_device: Optional[torch.device] = None
+        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+            # Some callables take nested structures as arguments so use the
+            # flattened form to find any tensors
+            for arg_or_kwarg_leaf in pytree.tree_leaves(arg_or_kwarg):
+                if not isinstance(arg_or_kwarg_leaf, torch.Tensor):
+                    continue
+                if inferred_device is None:
+                    inferred_device = arg_or_kwarg_leaf.device
+                elif arg_or_kwarg_leaf.device != inferred_device:
+                    raise ValueError(
+                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    )
+
+        if inferred_device is None:
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types"
+                " in `fn_args` or `fn_kwargs`. Use a direct benchmarking method instead e.g. "
+                "`Benchmarker.benchmark_cpu` or `Benchmarker.benchmark_gpu`."
+            )
+
+        return inferred_device
+
     @time_and_count
     def benchmark(
         self: Self,
@@ -118,6 +142,12 @@ class Benchmarker:
         if multiple device types are found in `fn_args` and `fn_kwargs`, or if no device
         types are found. To bypass device inference, provide the device to the `device`
         parameter.
+
+        WARNING: if `fn` mutates `fn_args` or `fn_kwargs`, benchmarking may fail unexpectedly.
+        For example, if `fn` cleares a mutable object, subsequent invocations of `fn` during
+        benchmarking will fail. In such cases, `fn` should handle cloning its arguments internally.
+        If device inference is required, `Benchmarker.infer_device` can be used prior to calling
+        this method without any arguments for `fn_args` and `fn_kwargs`.
 
         Arguments:
         - fn: The function to benchmark.
