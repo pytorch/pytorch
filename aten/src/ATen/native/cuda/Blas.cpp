@@ -2329,7 +2329,10 @@ _scaled_nvfp4_nvfp4(
   TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
 #endif
   std::optional<Tensor> alpha = std::nullopt;
-  if (global_scale_a.has_value() && global_scale_b.has_value()) {
+  // Note: "Or" here means that if only one scale is passed, we check for the other. Otherwise,
+  //       if this is "And" we would silently do nothing in the case where one global scale is
+  //       passed and not the other.
+  if (global_scale_a.has_value() || global_scale_b.has_value()) {
     TORCH_CHECK_VALUE(global_scale_a.has_value(),
         "For two-level-scaled NVFP4, global_scale_a must have a value");
     TORCH_CHECK_VALUE(global_scale_b.has_value(),
