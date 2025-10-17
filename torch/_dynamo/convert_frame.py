@@ -29,6 +29,7 @@ import cProfile
 import dis
 import functools
 import gc
+import inspect
 import itertools
 import logging
 import os
@@ -116,6 +117,7 @@ from .exc import (
     unimplemented_v2,
     Unsupported,
 )
+from .graph_bytecode_inputs import reset_user_object_tracking
 from .guards import (
     CheckFunctionManager,
     get_and_maybe_log_recompilation_reasons,
@@ -314,6 +316,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
             exit_stack.enter_context(torch_function_mode_stack_state_mgr)
+            reset_user_object_tracking()
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -973,6 +976,10 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
         raise RuntimeError(f"Unsupported model code type {mod}")
 
 
+def _get_signature(fn: Any) -> inspect.Signature:
+    return inspect.signature(fn, follow_wrapped=False)
+
+
 def _get_frame(
     mod: Any,
     args: tuple[Any, ...],
@@ -982,7 +989,6 @@ def _get_frame(
     Create a frame to trace, given a model, args, and optional kwargs.
     """
     import builtins
-    import inspect
 
     fn, self_opt = get_traced_fn(mod)
     if self_opt is not None:
@@ -990,7 +996,7 @@ def _get_frame(
     if kwargs is None:
         kwargs = {}
 
-    signature = inspect.signature(fn)
+    signature = _get_signature(fn)
     bound_arguments = signature.bind(*args, **kwargs)
     bound_arguments.apply_defaults()
     f_locals = bound_arguments.arguments

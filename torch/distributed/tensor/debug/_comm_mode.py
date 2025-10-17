@@ -734,3 +734,6 @@ class CommDebugMode(TorchDispatchMode):
         ].append(operation_dict)
 
         return out
+
+    def __repr__(self):
+        return f"CommDebugMode(get_total_counts()={self.get_total_counts()})"
