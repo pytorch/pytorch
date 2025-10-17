@@ -6686,7 +6686,7 @@ def scaled_mm(
     # So, we need to convert None arguments for lists in python
     # explicitly into empty lists.
     def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return [] if not l else l
+        return l if l else []
 
     def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
         if not isinstance(l, list):
@@ -6772,7 +6772,7 @@ def scaled_grouped_mm(
     # So, we need to convert None arguments for lists in python
     # explicitly into empty lists.
     def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return [] if not l else l
+        return l if l else []
 
     def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
         if not isinstance(l, list):
