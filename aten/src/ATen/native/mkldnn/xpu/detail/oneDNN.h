@@ -26,7 +26,6 @@ TORCH_API sycl::event convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    const bool& is_1d,
     Attr& attr,
     const std::vector<sycl::event>& deps = {});
 
