@@ -8,7 +8,7 @@
 
 #include <torch/csrc/utils/python_compat.h>
 
-#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#if IS_PYTHON_3_14_PLUS
 
 #define Py_BUILD_CORE
 #include <Python.h>
@@ -16,8 +16,7 @@
 #include "stackref_bridge.h"
 #undef Py_BUILD_CORE
 
-
-PyObject* Torch_PyStackRef_AsPyObjectBorrow(void* stackref) {
+PyObject* THP_PyStackRef_AsPyObjectBorrow(void* stackref) {
   _PyStackRef *sr = (_PyStackRef*)stackref;
   return PyStackRef_AsPyObjectBorrow(*sr);
 }

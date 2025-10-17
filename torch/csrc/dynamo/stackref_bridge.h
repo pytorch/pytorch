@@ -2,18 +2,17 @@
 
 #include <torch/csrc/utils/python_compat.h>
 
-#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#if IS_PYTHON_3_14_PLUS
 
 #ifdef __cplusplus
 extern "C" {
-#endif
+#endif // __cplusplus
 
 // Use a void* to avoid exposing the internal _PyStackRef union on this
 // translation unit
-PyObject* Torch_PyStackRef_AsPyObjectBorrow(void* stackref);
+PyObject* THP_PyStackRef_AsPyObjectBorrow(void* stackref);
 
 #ifdef __cplusplus
 }
-#endif
-
-#endif
+#endif // __cplusplus
+#endif // IS_PYTHON_3_14_PLUS
