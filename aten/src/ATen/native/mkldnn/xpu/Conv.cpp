@@ -346,7 +346,7 @@ Tensor _convolution_out(
   }
   // get computation format for Conv/TransposedConv
   bool is_channels_last_suggested =
-      use_channels_last_for_conv(input_r, weight_r);
+      use_channels_last_for_conv(input, weight);
 
   auto k = weight.ndimension();
   if (k == input.ndimension() + 1) {
