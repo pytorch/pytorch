@@ -2,7 +2,7 @@ import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Union
+from typing import Callable
 
 import torch
 import torch.fx as fx
@@ -143,7 +143,7 @@ class GraphAliasTracker:
         return self.node_to_storages_last_used[node]
 
 
-def _size_of_default(num_bytes: Union[int, torch.SymInt]) -> int:
+def _size_of_default(num_bytes: int | torch.SymInt) -> int:
     return hint_int(num_bytes, fallback=torch._inductor.config.unbacked_symint_fallback)
 
 
@@ -154,7 +154,7 @@ def device_filter(device: torch.device) -> bool:
 def build_memory_profile(
     graph: fx.Graph,
     is_releasable: Callable[[fx.Node], bool],
-    size_of: Callable[[Union[int, torch.SymInt]], int] | None = None,
+    size_of: Callable[[int | torch.SymInt], int] | None = None,
 ) -> list[int]:
     """
     Function to estimate the memory profile of an input FX graph.
@@ -165,7 +165,7 @@ def build_memory_profile(
     - is_releasable (Callable[[fx.Node], bool]): A function that
       determines if a node's memory can be released (e.g. primal nodes
       cannot be released).
-    - size_of (Callable[[Union[int, torch.SymInt]], int]): A function that converts
+    - size_of (Callable[[int | torch.SymInt], int]): A function that converts
       byte counts (possibly symbolic) to concrete integers.
 
     Returns:
@@ -216,7 +216,7 @@ def build_memory_profile(
 def get_fwd_bwd_interactions(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
-    size_of: Callable[[Union[int, torch.SymInt]], int] | None = None,
+    size_of: Callable[[int | torch.SymInt], int] | None = None,
 ) -> tuple[int, OrderedSet[str]]:
     """
     Analyze the interactions between the forward (fwd) and backward (bwd) graphs
@@ -225,7 +225,7 @@ def get_fwd_bwd_interactions(
     Args:
     - fwd_graph (fx.Graph): The forward graph representing the forward pass.
     - bwd_graph (fx.Graph): The backward graph representing the backward pass.
-    - size_of (Callable[[Union[int, torch.SymInt]], int]): A function that converts
+    - size_of (Callable[[int | torch.SymInt], int]): A function that converts
       byte counts (possibly symbolic) to concrete integers.
 
     Returns:
