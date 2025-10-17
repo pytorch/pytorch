@@ -76,6 +76,7 @@ class StreamVariable(VariableTracker):
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
+        # pyrefly: ignore  # read-only
         self.device = device
 
     def python_type(self) -> type:
