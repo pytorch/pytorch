@@ -72,6 +72,9 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"dimensionality of sizes \(0\) must match dimensionality of strides \(1\)"
     ),  # https://github.com/pytorch/pytorch/issues/164814
+    re.compile(
+        r"self and mat2 must have the same dtype, but got Float and BFloat16"
+    ),  # https://github.com/pytorch/pytorch/issues/165718
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
