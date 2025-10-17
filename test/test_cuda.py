@@ -4613,6 +4613,24 @@ class TestCudaMallocAsync(TestCase):
                 "pinned_num_register_threads:1024"
             )
 
+    def test_allocator_backend(self):
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import os
+os.environ["PYTORCH_ALLOC_CONF"] = "max_split_size_mb:20,backend:cudaMallocAsync,release_lock_on_cudamalloc:none"
+import torch
+torch.cuda.init()
+print(torch.cuda.get_allocator_backend())
+"""
+        rc = check_output(test_script)
+        self.assertEqual(rc, "cudaMallocAsync")
+
     def test_cachingAllocator_raw_alloc(self):
         # Test that raw_alloc respects the setting that
         # activates/deactivates the caching allocator

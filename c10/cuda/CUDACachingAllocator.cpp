@@ -4453,11 +4453,12 @@ CUDAAllocator* allocator();
 } // namespace CudaMallocAsync
 
 struct BackendStaticInitializer {
-  // Parses env for backend at load time, duplicating some logic from
-  // CUDAAllocatorConfig. CUDAAllocatorConfig double-checks it later (at
-  // runtime). Defers verbose exceptions and error checks, including Cuda
-  // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
-  // works, maybe we should move all of CUDAAllocatorConfig here?
+  // Parses the environment configuration for CUDA/ROCm allocator backend at
+  // load time. This duplicates some logic from CUDAAllocatorConfig to ensure
+  // lazy initialization without triggering global static constructors. The
+  // function looks for the key "backend" and returns the appropriate allocator
+  // instance based on its value. If no valid configuration is found, it falls
+  // back to the default Native allocator.
   CUDAAllocator* parseEnvForBackend() {
     auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
 #ifdef USE_ROCM
@@ -4466,34 +4467,35 @@ struct BackendStaticInitializer {
       val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
     }
 #endif
+    if (!val.has_value()) {
+      val = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+    }
     if (val.has_value()) {
-      const std::string& config = val.value();
-
-      std::regex exp("[\\s,]+");
-      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-      std::sregex_token_iterator end;
-      std::vector<std::string> options(it, end);
-
-      for (auto option : options) {
-        std::regex exp2("[:]+");
-        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-        std::sregex_token_iterator end2;
-        std::vector<std::string> kv(it2, end2);
-        if (kv.size() >= 2) {
-          if (kv[0] == "backend") {
+      c10::CachingAllocator::ConfigTokenizer tokenizer(val.value());
+      for (size_t i = 0; i < tokenizer.size(); i++) {
+        const auto& key = tokenizer[i];
+        if (key == "backend") {
+          tokenizer.checkToken(++i, ":");
+          i++; // Move to the value after the colon
+          if (tokenizer[i] == "cudaMallocAsync"
 #ifdef USE_ROCM
-            // convenience for ROCm users to allow either CUDA or HIP env var
-            if (kv[1] == "cudaMallocAsync" || kv[1] == "hipMallocAsync")
-#else
-            if (kv[1] == "cudaMallocAsync")
+              // convenience for ROCm users to allow either CUDA or HIP env var
+              || tokenizer[i] == "hipMallocAsync"
 #endif
-              return CudaMallocAsync::allocator();
-            if (kv[1] == "native")
-              return &Native::allocator;
+          ) {
+            return CudaMallocAsync::allocator();
           }
+          break;
+        } else {
+          // Skip the key and its value
+          i = tokenizer.skipKey(i);
+        }
+        if (i + 1 < tokenizer.size()) {
+          tokenizer.checkToken(++i, ",");
         }
       }
     }
+    // Default fallback allocator.
     return &Native::allocator;
   }
 
