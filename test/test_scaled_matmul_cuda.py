@@ -1485,7 +1485,6 @@ class TestFP8Matmul(TestCase):
 
                 approx_match_sqnr_target = 15 if torch.version.hip else 15.8
 
-        print(f'{A.dtype=}, {B.dtype=}')
         C_ref = A_ref @ B_ref.t()
 
         # convert to swizzled format
