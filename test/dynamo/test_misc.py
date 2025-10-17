@@ -253,26 +253,33 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 return x.sin().cos()
 
             def foo_impl(x):
-                return torch.compile(inner, fullgraph=True, backend=cnt)(x)
+                return torch.compile(inner, fullgraph=True, dynamic=True, backend=cnt)(
+                    x
+                )
 
             m.impl("foo", foo_impl, "CompositeExplicitAutograd")
 
-            @torch.compile(fullgraph=True, backend=cnt1)
+            @torch.compile(fullgraph=True, dynamic=True, backend=cnt1)
             def f(x):
                 return torch.ops.mylib.foo.default(x)
 
             x = torch.randn(3)
-            f(x)
-            f(x)
-            f(x)
+            res = f(x)
+            res1 = f(x)
+            res2 = f(x)
+            expected = x.sin().cos()
+            self.assertEqual(res, expected)
+            self.assertEqual(res1, expected)
+            self.assertEqual(res2, expected)
             self.assertTrue(len(cnt.inductor_graphs), 1)
             self.assertTrue(len(cnt1.inductor_graphs), 1)
             self.assertExpectedInline(
                 str(cnt.inductor_graphs[0].graph).strip(),
                 """\
 graph():
-    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg0_1,), kwargs = {})
+    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg1_1,), kwargs = {})
     %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%sin,), kwargs = {})
     return (cos,)""",
             )
@@ -280,8 +287,9 @@ graph():
                 str(cnt1.inductor_graphs[0].graph).strip(),
                 """\
 graph():
-    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg0_1,), kwargs = {})
+    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg1_1,), kwargs = {})
     return (foo,)""",
             )
 
