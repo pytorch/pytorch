@@ -3802,6 +3802,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
+        if len(masks) > 2:
+            print('Here')
+
         broadcasted_values = []
         accumulators = []
 
@@ -3811,9 +3814,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         
         if reverse and len(masks) == 2:
             wrapper_fn_base_name = f'{combine_helper_fn}_mask'
-            name = '{name}'
-            wrapper_fn = f"""@triton.jit\ndef {name}(arg0_0, mask_arg0_0, arg1_0, mask_arg1_0):\n    new_val = {combine_helper_fn}(arg0_0, arg1_0)\n    return tl.where(~mask_arg0_0, arg1_0, tl.where(~mask_arg1_0, arg0_0, new_val)), mask_arg1_0\n"""
-            combine_helper_fn = self.helper_functions.add(wrapper_fn, base_name=wrapper_fn_base_name)
+            # name = '{name}'
+            # wrapper_fn = f"""@triton.jit\ndef {name}(arg0_0, mask_arg0_0, arg1_0, mask_arg1_0):\n    new_val = {combine_helper_fn}(arg0_0, arg1_0)\n    return tl.where(~mask_arg0_0, arg1_0, tl.where(~mask_arg1_0, arg0_0, new_val)), mask_arg1_0\n"""
+            # combine_helper_fn = self.helper_functions.add(wrapper_fn, base_name=wrapper_fn_base_name)
+            
+            wrapper_fn_helper = IndentedBuffer()
+            wrapper_fn_helper.writeline("@triton.jit") # jit header
+            cse = CSE()
+            
+            wrapper_args_masks = [
+                tuple(
+                    (
+                        cse.namedvar(f"arg{i}_{n}", dtype=dtype, shape=value.shape),
+                        cse.namedvar(f"arg{i}_{n}_mask", dtype=torch.bool, shape=value.shape)
+                    )
+                    for n, (value, dtype) in enumerate(zip(values, dtypes))
+                )
+                for i in range(2)
+            ]
+            wrapper_signature = ", ".join(f"{str(x[0])}, {str(x[1])}" for x in itertools.chain.from_iterable(wrapper_args_masks))
+            wrapper_fn_helper.writeline(f"def {{name}}({wrapper_signature}):") # function definition
+            wrapper_fn_helper.do_indent()
+            
+            combine_fn_signature = ", ".join(str(x[0]) for x in itertools.chain.from_iterable(wrapper_args_masks))
+            result_vars = [
+                self.cse.newvar(dtype=dtype, shape=value.shape)
+                for (dtype, value) in zip(dtypes, values)
+            ]
+            result_vars_signature = ", ".join(str(x) for x in result_vars)
+            wrapper_fn_helper.writeline(f"{result_vars_signature} = {combine_helper_fn}({combine_fn_signature})") # call combine_fn
+            
+            wrapper_masked_results = []
+            # for ((arg_a, mask_a),), ((arg_b, mask_b),), res in zip(wrapper_args_masks[:len(values)], wrapper_args_masks[len(values):], result_vars):
+            # for ((arg_a, mask_a),), ((arg_b, mask_b),), res in zip(wrapper_args_masks[:1][0], wrapper_args_masks[1:][0], result_vars):
+            for (arg_a, mask_a), (arg_b, mask_b), res in zip(wrapper_args_masks[:1][0], wrapper_args_masks[1:][0], result_vars):
+            # for ((arg_a, mask_a),), ((arg_b, mask_b),), res in zip(itertools.chain.from_iterable(wrapper_args_masks[:1]), itertools.chain.from_iterable(wrapper_args_masks[1:]), result_vars):
+            # for (arg_a, mask_a), (arg_b, mask_b), res in zip(wrapper_args_masks[:1], wrapper_args_masks[1:], result_vars):
+                wrapper_masked_results.append(f'tl.where(~{mask_a}, {arg_b}, tl.where(~{mask_b}, {arg_a}, {res})), {mask_b}')
+            
+            if len(wrapper_masked_results) == 0:
+                print('Here')
+            
+            wrapper_fn_helper.writeline('return ' + ', '.join(wrapper_masked_results)) # return and masking
+            combine_helper_fn = self.helper_functions.add(wrapper_fn_helper.getvalue(), base_name=wrapper_fn_base_name)
         
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
@@ -3877,16 +3920,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
-        # if reverse:
-        #     for csevar in broadcasted_values:
-        #         self.compute.writeline(
-        #             f"{csevar.name}_mask = tl.arange(0, {self.numels['x']})[:, None] + tl.arange(0, {self.numels['r0_']})[None, :]",
-        #         )
-
         partial_scan_vars = cse_multiple(
             f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn}, {reverse})",
-            # f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
-            # f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
             broadcasted_values,
             masks,
             dtypes + dtypes,
@@ -3935,7 +3970,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             assert isinstance(result_var, TritonCSEVariable)
             result_var.mask_vars = OrderedSet(masks)
 
-        return tuple(result_vars)
+        return tuple(result_vars[::2])
 
     def sort(
         self,

@@ -256,9 +256,6 @@ def associative_scan(
         
         # In case of combine_mode='generic', the handling of reverse=True is handled
         # on the PyTorch level, inside the generic_associative_scan
-        # if reverse:
-        #     leaves_xs = [torch.flip(elem, [dim]) for elem in leaves_xs]
-        
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
             combine_fn=torch.vmap(
@@ -272,12 +269,8 @@ def associative_scan(
             spec=spec_xs,
             num_leaves=len(leaves_xs),
         )
-        # breakpoint()
         out = generic_associative_scan(combine_fn, leaves_xs, reverse=reverse, additional_inputs=())
         out = pytree.tree_unflatten(out, spec_xs)
-        
-        # if reverse:
-        #     out = pytree.tree_map(lambda elem: elem.flip([0]), out)
     else:
         # In case of combine_mode='pointwise', the handling of reverse=True is handled
         # on Triton level, e.g., tl.associative_scan(..., reverse=True)
@@ -692,7 +685,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             ys = associative_scan_op(combine_fn, xs, reverse, additional_inputs)
             save_tensors_and_symints_for_backward(ctx, [reverse] + list(operands) + list(ys))
 
-        breakpoint()
         return (*ys,)
 
     @staticmethod
@@ -726,7 +718,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 xs = [torch.flip(elem, [0]).requires_grad_(elem.requires_grad) for elem in xs]
                 outs = [torch.flip(elem, [0]).requires_grad_(elem.requires_grad) for elem in outs]
                 gl_ys = [torch.flip(elem, [0]).requires_grad_(elem.requires_grad) for elem in gl_ys]
-        # breakpoint()
 
         # First_slice_copy does not keep the original requires_grad flag,
         # but we need it here in order to compute the correcte gradients
@@ -841,7 +832,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             bwxs_stacked_leaves, bwys_stacked_leaves, gl_ys_stacked_leaves
         )
         
-        # breakpoint()
         if reverse:
             g_xs = [torch.flip(elem, [0]) for elem in g_xs]
 

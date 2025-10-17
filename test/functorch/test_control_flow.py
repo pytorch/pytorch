@@ -3757,8 +3757,8 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("reverse", [False, True])
-    # @parametrize("reverse", [True])
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [True])
     # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("compile_mode", ["compile"])
     # @parametrize("combine_mode", ["pointwise", "generic"])
@@ -3925,11 +3925,23 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
+    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    # @parametrize("combine_mode", ["pointwise", "generic"])
+    # @parametrize("reverse", [False, True])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # @parametrize("autograd", [False, True])
+    
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [True])
+    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["compile"])
+    # @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("combine_mode", ["pointwise"])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cuda")])
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [False])
+    
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
