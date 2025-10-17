@@ -820,7 +820,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(input_tensor.device.type, GPU_TYPE)
 
         # Verify the computation worked correctly
-        expected = input_tensor / torch.tensor([1000], dtype=torch.int64, device=GPU_TYPE)
+        expected = input_tensor / torch.tensor(
+            [1000], dtype=torch.int64, device=GPU_TYPE
+        )
         self.assertEqual(result, expected)
 
         torch.set_default_device(None)
