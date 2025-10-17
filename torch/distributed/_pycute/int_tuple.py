@@ -54,12 +54,6 @@ def is_tuple(x: object) -> TypeIs[tuple]:
     return isinstance(x, tuple)
 
 
-def as_tuple(x: IntTuple) -> tuple[IntTuple, ...]:
-    if is_int(x):
-        return (x,)
-    return x
-
-
 def flatten(t: IntTuple) -> tuple[int, ...]:
     if is_tuple(t):
         if len(t) == 0:

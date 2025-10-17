@@ -1204,7 +1204,7 @@ class TestFP8Matmul(TestCase):
                 events = sorted(events, key=lambda x: x['ts'])
                 # ROCm carveout is invisible except for kernels running slower on fewer CUs
                 no_carveout, carveout_0, carveout, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
-                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):
+                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):  # noqa: SIM222
                     # something went wrong, print more info to help debug flaky test
                     print("ROCm debug info for test_honor_sm_carveout")
                     print("cu_count", cu_count)
