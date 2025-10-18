@@ -373,7 +373,14 @@ class _PipelineSchedule(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def step(self, *args, target=None, losses: Optional[list] = None, return_outputs = True, **kwargs):
+    def step(
+        self,
+        *args,
+        target=None,
+        losses: Optional[list] = None,
+        return_outputs=True,
+        **kwargs,
+    ):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
