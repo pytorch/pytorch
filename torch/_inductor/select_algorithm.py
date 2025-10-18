@@ -17,6 +17,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
@@ -2102,6 +2103,7 @@ class TritonTemplate(KernelTemplate):
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
+                **{k: kwargs[k] for k in _FLEX_ATTENTION_TUNABLE_KEYS if k in kwargs},
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
@@ -2393,6 +2395,35 @@ def get_mm_log_filename() -> Optional[str]:
         mm_file_name = f"{mm_file_name}.json"
 
     return mm_file_name
+
+
+_FLEX_ATTENTION_TUNABLE_KEYS = frozenset(
+    [
+        "num_warps",
+        "num_stages",
+        "BLOCK_M",
+        "BLOCK_N",
+        "BLOCK_M1",
+        "BLOCK_N1",
+        "BLOCK_M2",
+        "BLOCK_N2",
+        "USE_TMA",
+        "kpack",
+        "matrix_instr_nonkdim",
+        "waves_per_eu",
+    ]
+)
+
+
+@functools.cache
+def get_flex_attention_log_filename() -> Optional[str]:
+    flex_attention_file_name = os.environ.get(
+        "TORCHINDUCTOR_FLEX_ATTENTION_LOGGING_FILE", None
+    )
+    if not flex_attention_file_name:
+        return None
+
+    return str(Path(flex_attention_file_name).with_suffix(".json"))
 
 
 def append_to_log(filename, data):
@@ -3500,6 +3531,7 @@ class AlgorithmSelectorCache(PersistentCache):
         prescreening_elapse: Optional[float] = None,
         hint_override: Optional[int] = None,
     ):
+        """Log the autotuning results, currently only handles mm and flex"""
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
         )
@@ -3557,6 +3589,26 @@ class AlgorithmSelectorCache(PersistentCache):
                 "num_warps": info["num_warps"],
             }
 
+        def get_flex_attention_choice_info(choice):
+            if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+                return {"type": "extern", "time": timings[choice]}
+
+            assert isinstance(
+                choice, torch._inductor.select_algorithm.TritonTemplateCaller
+            )
+
+            info = choice.info_dict()
+            result = {
+                "type": "triton",
+                "time": timings[choice],
+            }
+
+            for key in _FLEX_ATTENTION_TUNABLE_KEYS:
+                if key in info:
+                    result[key] = info[key]
+
+            return result
+
         mm_filename = get_mm_log_filename()
         if mm_filename and "mm" in name:
             M, K = input_nodes[-2].get_size()[:2]
@@ -3567,6 +3619,44 @@ class AlgorithmSelectorCache(PersistentCache):
             }
 
             append_to_log(mm_filename, out_dict)
+
+        flex_attention_filename = get_flex_attention_log_filename()
+        if flex_attention_filename and "flex_attention" in name:
+            if len(input_nodes) >= 3:
+                query_size = input_nodes[0].get_size()
+                key_size = input_nodes[1].get_size()
+                value_size = input_nodes[2].get_size()
+
+                B = query_size[0]
+                Hq = query_size[1]
+                seq_len_q = query_size[2]
+                qk_head_dim = query_size[3]
+                Hkv = key_size[1]
+                seq_len_kv = key_size[2]
+                v_head_dim = value_size[3]
+
+                kernel_type = "backward" if "backward" in name else "forward"
+                dims_key = str(
+                    (
+                        kernel_type,
+                        B,
+                        Hq,
+                        Hkv,
+                        seq_len_q,
+                        seq_len_kv,
+                        qk_head_dim,
+                        v_head_dim,
+                    )
+                )
+
+                sorted_choices = sorted(timings, key=timings.__getitem__)
+                out_dict = {
+                    dims_key: [
+                        get_flex_attention_choice_info(choice)
+                        for choice in sorted_choices
+                    ]
+                }
+                append_to_log(flex_attention_filename, out_dict)
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
