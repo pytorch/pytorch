@@ -373,7 +373,7 @@ class _PipelineSchedule(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def step(self, *args, target=None, losses: Optional[list] = None, **kwargs):
+    def step(self, *args, target=None, losses: Optional[list] = None, return_outputs = True, **kwargs):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
@@ -383,6 +383,7 @@ class _PipelineSchedule(ABC):
         kwargs: keyword arguments to the model (as in non-pipeline case).
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
+        return_outputs: whether to return the outputs from the last stage.
         """
         raise NotImplementedError
 
@@ -1082,9 +1083,7 @@ def _add_unshard_reshard(
                         if sub_action.stage_index not in seen:
                             seen.add(sub_action.stage_index)
                             ret.append(sub_action.stage_index)
-                            if len(ret) == count:
-                                break
-                    if len(ret) == count:
+                    if len(ret) >= count:
                         break
                 else:
                     # Regular action
@@ -1130,6 +1129,10 @@ def _add_unshard_reshard(
         for stage in fetch:
             _unshard(stage)
         fsdp_aware_actions.append(action)
+
+    # Reshard all remaining active stages after processing all operations
+    for stage in list(active_stages):
+        _reshard(stage)
 
     return fsdp_aware_actions
 
@@ -1830,6 +1833,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self.bwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
         self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
 
+        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
+        self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
+        self.unsharded_stages = set()
+
     def register_custom_function(
         self,
         computation_type: _ComputationType,
@@ -1959,6 +1966,20 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
             self._num_stages,
         )
 
+    def _assert_unsharded(self, stage: _PipelineStageBase):
+        """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
+        stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+        if stage_uses_fsdp:
+            stage_idx = stage.stage_index
+            if stage_idx in self.unshard_ops:
+                for op in self.unshard_ops[stage_idx]:
+                    op.wait()
+                del self.unshard_ops[stage_idx]
+                self.unsharded_stages.add(stage_idx)
+            assert stage_idx in self.unsharded_stages, (
+                f"Attempted to compute on sharded {stage_idx=}"
+            )
+
     def _step_microbatches(
         self,
         arg_mbs: Optional[list] = None,
@@ -1988,21 +2009,6 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
 
         # send ops should be waited on before step() exists, mainly for hygiene
         send_ops: list[list[dist.Work]] = []
-
-        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
-        unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
-        unsharded_stages = set()
-
-        def _assert_unsharded(stage_idx: int):
-            """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
-            if stage_idx in unshard_ops:
-                for op in unshard_ops[stage_idx]:
-                    op.wait()
-                del unshard_ops[stage_idx]
-                unsharded_stages.add(stage_idx)
-            assert stage_idx in unsharded_stages, (
-                f"Attempted to compute on sharded {stage_idx=}"
-            )
 
         def _perform_action(action: _Action) -> None:
             comp_type = action.computation_type
@@ -2058,30 +2064,29 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
             elif comp_type == UNSHARD:
                 if stage_uses_fsdp:
                     assert (
-                        stage_idx not in unsharded_stages
-                        and stage_idx not in unshard_ops
+                        stage_idx not in self.unsharded_stages
+                        and stage_idx not in self.unshard_ops
                     ), f"Unsharding the same {stage_idx=} twice"
                     for submodule in stage.submod.modules():
                         if not isinstance(submodule, FSDPModule):
                             continue
                         handle = cast(UnshardHandle, submodule.unshard(async_op=True))
-                        unshard_ops[stage_idx].append(handle)
+                        self.unshard_ops[stage_idx].append(handle)
             elif comp_type == RESHARD:
                 if stage_uses_fsdp:
-                    assert stage_idx in unsharded_stages, (
+                    assert stage_idx in self.unsharded_stages, (
                         f"Resharding {stage_idx=} without unsharding"
                     )
-                    assert stage_idx not in unshard_ops, (
+                    assert stage_idx not in self.unshard_ops, (
                         f"Resharding {stage_idx=} before finishing unshard"
                     )
                     for submodule in stage.submod.modules():
                         if not isinstance(submodule, FSDPModule):
                             continue
                         submodule.reshard()
-                    unsharded_stages.remove(stage_idx)
+                    self.unsharded_stages.remove(stage_idx)
             elif comp_type == FORWARD:
-                if stage_uses_fsdp:
-                    _assert_unsharded(stage_idx)
+                self._assert_unsharded(stage)
 
                 if (
                     not stage.is_first
@@ -2112,8 +2117,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     )
 
             elif comp_type == FULL_BACKWARD:
-                if stage_uses_fsdp:
-                    _assert_unsharded(stage_idx)
+                self._assert_unsharded(stage)
 
                 if (
                     not stage.is_last
@@ -2128,8 +2132,8 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     )
                     _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
                 loss = self._maybe_get_loss(stage, mb_index)
-                backward_counter[stage_idx] += 1
-                last_backward = backward_counter[stage_idx] == self._n_microbatches
+                self.backward_counter[stage_idx] += 1
+                last_backward = self.backward_counter[stage_idx] == self._n_microbatches
                 stage.backward_one_chunk(
                     mb_index,
                     loss=loss,
@@ -2143,8 +2147,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                         stage.get_local_bwd_output(mb_index), mb_index
                     )
             elif comp_type == BACKWARD_INPUT:
-                if stage_uses_fsdp:
-                    _assert_unsharded(stage_idx)
+                self._assert_unsharded(stage)
 
                 if not stage.is_last and not is_next_stage_on_this_rank:
                     assert (
@@ -2168,10 +2171,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                         stage.get_local_bwd_output(mb_index), mb_index
                     )
             elif comp_type == BACKWARD_WEIGHT:
-                if stage_uses_fsdp:
-                    _assert_unsharded(stage_idx)
-                backward_counter[stage_idx] += 1
-                last_backward = backward_counter[stage_idx] == self._n_microbatches
+                self._assert_unsharded(stage)
+                self.backward_counter[stage_idx] += 1
+                last_backward = self.backward_counter[stage_idx] == self._n_microbatches
                 stage.backward_weight_one_chunk(
                     mb_index,
                     last_backward=last_backward,
@@ -2180,7 +2182,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 raise ValueError(f"{action=} is unknown or unsupported")
 
         # count either full_backward or backward_weight together, to determine when to sync DP grads
-        backward_counter: Counter[int] = Counter()
+        self.backward_counter.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
             try:
                 with record_function(_get_profiler_function_name(action)):
@@ -2221,7 +2223,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
         while len(send_ops):
             _wait_batch_p2p(send_ops.pop())
 
-        assert len(unshard_ops) == 0, "Unused unshard operations"
+        assert len(self.unshard_ops) == 0, "Unused unshard operations"
 
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
