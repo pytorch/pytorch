@@ -1248,7 +1248,7 @@ def argument_names(
         # signature. Assign names as {varargs}_0, {varargs}_1, ...
         assert fullargspec.varargs is not None, "More arguments than expected"
         input_strs += [
-            f"{fullargspec.varargs}_{i}" for i in range(0, len(args) - len(input_strs))
+            f"{fullargspec.varargs}_{i}" for i in range(len(args) - len(input_strs))
         ]
     elif len(args) < len(fullargspec.args):
         # 3. If there are fewer arguments in `args` than `fullargspec.args`,
@@ -1538,7 +1538,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         }
 
         self.new_args = []
-        for i in range(0, len(flat_args)):
+        for i in range(len(flat_args)):
             arg = super().placeholder(f"arg{i}", (), {})
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
