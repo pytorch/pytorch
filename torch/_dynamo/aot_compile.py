@@ -168,10 +168,7 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
         self.compiled_fn = compiled_fn
 
     def __getattr__(self, attr: Any) -> Any:
-        if hasattr(self, attr):
-            return getattr(super(), attr)
-        else:
-            return getattr(self.compiled_fn, attr)
+        return getattr(self.compiled_fn, attr)
 
     @classmethod
     def serialize_compile_artifacts(
