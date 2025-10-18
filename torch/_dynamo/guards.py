@@ -2143,6 +2143,19 @@ class GuardBuilder(GuardBuilderBase):
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
+    def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
+        # EQUALS_MATCH but in lambda guard
+        value = deepcopy(self.get(guard.name))
+
+        def guard_fn(x):
+            # Calls DTensor __eq__ method
+            return x == value
+
+        code = f"__dtensor_spec_{id(guard_fn)}"
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard)
+        )
+
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard.name)

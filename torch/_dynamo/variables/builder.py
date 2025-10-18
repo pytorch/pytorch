@@ -2226,11 +2226,45 @@ class VariableBuilder:
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
-            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            install_guard(
-                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
-            )
+            # Tensor subclass guards are very expensive because they are
+            # implemented in Python. Since DTensor is PyTorch-maintained class,
+            # we can skip a lot of these guards.
+            if isinstance(value, torch.distributed.tensor.DTensor):
+                # Question - Do we need TYPE_MATCH guard
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+
+                # The inner tensor name is always _local_tensor. If its not, we
+                # raise assertion to update the check accordingly.
+                inner_tensor_name = value.__tensor_flatten__()[0][0]
+                if inner_tensor_name != "_local_tensor":
+                    raise RuntimeError(
+                        "Expecting Dtensor inner tensor name to be _local_tensor"
+                    )
+
+                # Now selectively guard on the flattening context
+                flattening_ctx = value.__tensor_flatten__()[1]
+                # This is supposed to be (self._spec, self.requires_grad)
+                if not (
+                    len(flattening_ctx) == 2
+                    and flattening_ctx[0] == value._spec
+                    and flattening_ctx[1] == value.requires_grad
+                ):
+                    # If not, raise an assertion to update to the new guards
+                    raise RuntimeError(
+                        "Expecting Dtensor flattening ctx to be _spec, requires_grad"
+                    )
+                # Guard on the dtensor spec - TODO - Can we make this check move to C++
+                install_guard(
+                    AttrSource(self.source, "_spec").make_guard(
+                        GuardBuilder.DTENSOR_SPEC_MATCH
+                    )
+                )
+            else:
+                self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                install_guard(
+                    SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+                )
 
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
