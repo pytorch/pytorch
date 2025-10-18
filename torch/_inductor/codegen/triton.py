@@ -4762,6 +4762,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
+            "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
         }
 
         if config.write_are_deterministic_algorithms_enabled:
