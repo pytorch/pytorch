@@ -2145,6 +2145,9 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = True
     supports_aliasing = True
+    # TODO - Go through all subclasses of WrapHigherOrderVariable to see if
+    # restore_side_effects can be ignored. For now, this is conservative.
+    restore_side_effects = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -2178,6 +2181,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
+            restore_side_effects=self.restore_side_effects,
             should_flatten_outputs=True,
             under_activation_checkpoint=under_activation_checkpoint,
             supports_input_mutation=self.supports_input_mutation,
@@ -2565,6 +2569,14 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # If side effects are allowed under checkpoint, we should not restore
+        # the side effects after speculate subgraph.
+        self.restore_side_effects = (
+            not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
+        )
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
