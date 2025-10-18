@@ -5474,7 +5474,7 @@ class Scheduler:
             available_buffer_names = OrderedSet(self.available_buffer_names)
             completed_operations = OrderedSet(self.completed_operations)
 
-            def wrap_codegen_node(w, *args, **kwargs):
+            def wrap_codegen_node(w, *args, **kwargs):  # type: ignore[no-untyped-def]
                 self.enter_context(node)
                 self.current_node = node
 

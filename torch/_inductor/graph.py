@@ -2130,15 +2130,15 @@ class GraphLowering(torch.fx.Interpreter):
             dual_wrapper = DualWrapperCodegen(
                 original_wrapper_code, self.autotuning_wrapper_code
             )
-            self.wrapper_code = dual_wrapper
+            self.wrapper_code = dual_wrapper  # type: ignore[assignment]
 
         if self.const_module:
             if hasattr(self.wrapper_code, "original_wrapper_code"):
                 # DualWrapperCodegen case
-                self.wrapper_code.original_wrapper_code._names_iter = (
+                self.wrapper_code.original_wrapper_code._names_iter = (  # type: ignore[attr-defined]
                     self.const_module.wrapper_code._names_iter
                 )
-                self.wrapper_code.autotuning_wrapper_code._names_iter = (
+                self.wrapper_code.autotuning_wrapper_code._names_iter = (  # type: ignore[attr-defined]
                     self.const_module.wrapper_code._names_iter
                 )
             else:
@@ -2392,8 +2392,8 @@ class GraphLowering(torch.fx.Interpreter):
         if self.use_dual_wrapper:
             # If we're doing full graph autotuning, we need to generate the autotuning wrapper code
             # and the autotuning kernels
-            original_wrapper_code = self.wrapper_code.original_wrapper_code
-            autotuning_wrapper_code = self.wrapper_code.autotuning_wrapper_code
+            original_wrapper_code = self.wrapper_code.original_wrapper_code  # type: ignore[attr-defined]
+            autotuning_wrapper_code = self.wrapper_code.autotuning_wrapper_code  # type: ignore[attr-defined]
 
             original_cpp_wrapper = self.cpp_wrapper
             self.wrapper_code = autotuning_wrapper_code

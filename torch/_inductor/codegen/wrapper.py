@@ -3858,6 +3858,8 @@ class DualWrapperCodegen(CodeGen):
     """
 
     def __init__(self, original_wrapper_code, autotuning_wrapper_code):
+        from ..scheduler import BaseScheduling  # noqa: TC001
+
         super().__init__()
         self.original_wrapper_code = original_wrapper_code
         self.original_backends: dict[torch.device, BaseScheduling] = {}
