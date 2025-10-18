@@ -417,26 +417,14 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
 }
 
 inline void copy_to(const Tensor& dst, const Tensor& src) {
-  // Use TORCH_GUARD_OR_FALSE to check if sizes match without forcing guards
-  if (dst.dim() == src.dim()) {
-    bool sizes_match = true;
-    for (int64_t i = 0; i < dst.dim(); i++) {
-      if (!TORCH_GUARD_OR_FALSE(dst.sym_size(i).sym_eq(src.sym_size(i)))) {
-        sizes_match = false;
-        break;
-      }
-    }
-    if (sizes_match) {
-      // A shortcut to avoid generating hard-coded constant sizes during
-      // tracing. This is not a perfect solution: when src & dst have different
-      // shapes, constants will still appear. Users can workaround that case by
-      // dst[index..] = src.reshape(..)
-      dst.copy_(src);
-      return;
-    }
-  }
-
-  if (src.dim() == 0 && src.device().type() == at::kCPU) {
+  if (dst.sym_sizes().equals(src.sym_sizes())) {
+    // A shortcut to avoid generating hard-coded constant sizes during tracing.
+    // This is not a perfect solution: when src & dst have different shapes,
+    // constants will still appear. Users can workaround that case by
+    // dst[index..] = src.reshape(..)
+    dst.copy_(src);
+    return;
+  } else if (src.dim() == 0 && src.device().type() == at::kCPU) {
     dst.fill_(src);
     return;
   }

@@ -841,9 +841,9 @@ class DequeVariable(CommonListMethodsVariable):
     def __init__(self, items, maxlen=None, **kwargs) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        assert maxlen.is_python_constant(), (
-            f"maxlen must be a constant, got: {maxlen.debug_repr()}"
-        )
+        assert (
+            maxlen.is_python_constant()
+        ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
         self.maxlen = maxlen
         items = list(items)
         if self.maxlen.as_python_constant() is not None:
@@ -1386,7 +1386,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(VariableTracker):
-    def __init__(self, items, **kwargs) -> None:
+    def __init__(self, items, tx, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -1399,18 +1399,15 @@ class SliceVariable(VariableTracker):
         else:
             raise AssertionError
 
-        if isinstance(start, variables.TensorVariable) or isinstance(
-            stop, variables.TensorVariable
-        ):
-            unimplemented_v2(
-                gb_type="Dynamic slicing with Tensor arguments",
-                context=f"SliceVariable start: {start}, stop: {stop}, step: {step}",
-                explanation="Creating slices with Tensor arguments is not supported. "
-                "e.g. `l[:x]`, where `x` is a 1-element tensor.",
-                hints=[
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
+        # Convert TensorVariable to SymIntVariable by calling .item()
+        # This decomposes a[:t] to u=t.item(); a[:u] at the dynamo level
+        if isinstance(start, variables.TensorVariable):
+            start = start.call_method(tx, "item", [], {})
+        if isinstance(stop, variables.TensorVariable):
+            stop = stop.call_method(tx, "item", [], {})
+        if isinstance(step, variables.TensorVariable):
+            step = step.call_method(tx, "item", [], {})
+
         self.items = (start, stop, step)
 
         super().__init__(**kwargs)

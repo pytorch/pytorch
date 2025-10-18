@@ -94,8 +94,6 @@ C10_API std::ostream& operator<<(std::ostream& os, const SymBool& s);
 
 #define TORCH_SYM_CHECK(cond, ...) \
   TORCH_CHECK((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
-#define TORCH_SYM_CHECK_VALUE(cond, ...) \
-  TORCH_CHECK_VALUE((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
 #define TORCH_SYM_INTERNAL_ASSERT(cond, ...) \
   TORCH_INTERNAL_ASSERT((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
 #define TORCH_MAYBE_SYM_CHECK(cond, ...)                                 \

@@ -99,27 +99,9 @@ inline void check_defined(
 inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
-  // Only take the fast path if we can PROVE sizes match
-  // Use TORCH_GUARD_OR_FALSE on equality - only returns true when provably
-  // equal
-  if (tensor.dim() == to_expand.dim()) {
-    bool all_match = true;
-    for (int64_t i = 0; i < tensor.dim(); i++) {
-      // Returns false if unbacked or if provably different
-      if (TORCH_GUARD_OR_FALSE(
-              tensor.sym_size(i).sym_eq(to_expand.sym_size(i)))) {
-        continue;
-      } else {
-        all_match = false;
-        break;
-      }
-    }
-    if (all_match) {
-      return c10::MaybeOwned<Tensor>::borrowed(to_expand);
-    }
+  if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
+    return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
-
-  // Can't prove they match - expand to be safe
   return c10::MaybeOwned<Tensor>::owned(
       to_expand.expand_symint(tensor.sym_sizes()));
 }
