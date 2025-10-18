@@ -36,7 +36,7 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   }
 
   at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
-    return at::make_generator<OpenRegGeneratorImpl>(device_index);
+    return createOpenRegGenerator(device_index);
   }
 };
 
