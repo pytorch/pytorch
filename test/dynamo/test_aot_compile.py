@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import functools
 import inspect
 import os
 import pickle
@@ -173,6 +174,39 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
     def test_decorated_function_aot(self):
         def check_inputs(fn):
+            def _fn(*args, **kwargs):
+                for arg in args:
+                    assert arg.shape[0] > 1
+
+                return fn(*args, **kwargs)
+
+            return _fn
+
+        @check_inputs
+        def foo(x, y):
+            a = x + x
+            b = y + y
+            c = a + b
+            return c
+
+        example_inputs = (torch.ones(3), torch.ones(3))
+        expected = foo(*example_inputs)
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            compiled_fn = torch.compile(
+                foo,
+                fullgraph=True,
+                backend=backend,
+            ).aot_compile((example_inputs, {}))
+            actual = compiled_fn(*example_inputs)
+            self.assertEqual(expected, actual)
+
+    def test_decorated_function_with_functools_wrap_aot(self):
+        def check_inputs(fn):
+            @functools.wraps(fn)
             def _fn(*args, **kwargs):
                 for arg in args:
                     assert arg.shape[0] > 1

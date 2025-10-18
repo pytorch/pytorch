@@ -29,6 +29,7 @@ import cProfile
 import dis
 import functools
 import gc
+import inspect
 import itertools
 import logging
 import os
@@ -175,6 +176,8 @@ except ModuleNotFoundError:
 
 
 if typing.TYPE_CHECKING:
+    from torch.utils.weak import WeakIdKeyDictionary
+
     from .backends.registry import CompilerFn
     from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
@@ -908,6 +911,7 @@ class BackendInput:
     graph_module: torch.fx.GraphModule
     example_inputs: Any
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    tensor_to_context: WeakIdKeyDictionary
 
 
 @dataclass
@@ -975,6 +979,10 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
         raise RuntimeError(f"Unsupported model code type {mod}")
 
 
+def _get_signature(fn: Any) -> inspect.Signature:
+    return inspect.signature(fn, follow_wrapped=False)
+
+
 def _get_frame(
     mod: Any,
     args: tuple[Any, ...],
@@ -984,7 +992,6 @@ def _get_frame(
     Create a frame to trace, given a model, args, and optional kwargs.
     """
     import builtins
-    import inspect
 
     fn, self_opt = get_traced_fn(mod)
     if self_opt is not None:
@@ -992,7 +999,7 @@ def _get_frame(
     if kwargs is None:
         kwargs = {}
 
-    signature = inspect.signature(fn)
+    signature = _get_signature(fn)
     bound_arguments = signature.bind(*args, **kwargs)
     bound_arguments.apply_defaults()
     f_locals = bound_arguments.arguments
@@ -1076,11 +1083,13 @@ def _fullgraph_capture_frame(
         gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> torch.fx.GraphModule:
         nonlocal backend_input
-        fake_mode = TracingContext.get().fake_mode
+        tracing_context = TracingContext.get()
+        fake_mode = tracing_context.fake_mode
+        tensor_to_context = tracing_context.tensor_to_context
         assert fake_mode is not None
         assert isinstance(gm.meta["backend_id"], str)
         backend_input = BackendInput(
-            gm.meta["backend_id"], gm, example_inputs, fake_mode
+            gm.meta["backend_id"], gm, example_inputs, fake_mode, tensor_to_context
         )
         return gm
 
