@@ -259,7 +259,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 // If a path is specified, we reduce in the order specified by the path, else we
 // default to going left => right. The path is a list of indices processed the same
 // way as opt-einsum: https://optimized-einsum.readthedocs.io/en/stable/path_finding.html#format-of-the-path
-Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArrayRef path, c10::optional<ScalarType> out_dtype=c10::nullopt) {
+Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   const auto num_ops = operands.size();
 
@@ -632,13 +632,16 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
       for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {
         sizes.erase(sizes.begin() + dim);
       }
-return ops[0].view_symint(sizes);    } else {
+      return ops[0].view_symint(sizes);
+    } else {
       std::vector<int64_t> sum_dims(perm_index - out_num_dim);
       std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
-return ops[0].sum(sum_dims);    }
+      return ops[0].sum(sum_dims);
+    }
   }
 
-return ops[0];}
+  return ops[0];
+}
 
 // _trilinear computes a trilinear einstein sum with an unrolled dimension
 // the result is `(i1.unsqueeze(expand1)*i2.unsqueeze(expand2)*i2.unsqueeze(expand3)).sum(sumdim)`
