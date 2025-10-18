@@ -4905,9 +4905,9 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 4 and mode == "bicubic":
-        if output_size is None:
+        if align_corners is None:
             raise AssertionError(
-                "output_size must be specified when using antialias with bicubic interpolation"
+                "align_corners must be specified when using antialias with bicubic interpolation"
             )
         if antialias:
             return torch._C._nn._upsample_bicubic2d_aa(
