@@ -1021,19 +1021,12 @@ torch.cuda.synchronize()
         c = out.size(1)
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
-    @unittest.skipIf(
-        not (
-            TEST_CUDA
-            or torch.backends.mps.is_available()
-            or torch.xpu.is_available()
-            or (hasattr(torch, "hpu") and torch.hpu.is_available())
-        ),
-        "Requires at least one accelerator device",
-    )
+    @onlyCPU
     @dtypes(torch.bfloat16, torch.half)
-    def test_adaptive_avg_pool3d_cpu_gpu_parity(self, device, dtype):
-        # test for CPU-GPU consistency with reduced precision types (BFloat16/Half)
+    def test_adaptive_avg_pool3d_reduced_precision(self, device, dtype):
+        # test for reduced precision types (BFloat16/Half) on CPU
         # this test ensures that the fix for using higher precision accumulation
+        # produces correct results by comparing against float32 reference
 
         input_tensor = torch.tensor(
             [
@@ -1062,15 +1055,18 @@ torch.cuda.synchronize()
                     ],
                 ],
             ],
-            dtype=dtype,
         )
 
         output_size = (None, 1, None)
 
-        result_cpu = F.adaptive_avg_pool3d(input_tensor.cpu(), output_size)
-        result_accelerator = F.adaptive_avg_pool3d(input_tensor.to(device), output_size)
+        # compute reference result in float32
+        result_fp32 = F.adaptive_avg_pool3d(input_tensor.float(), output_size)
 
-        self.assertEqual(result_cpu, result_accelerator.cpu(), atol=1e-2, rtol=1e-3)
+        # compute result in reduced precision
+        result_reduced = F.adaptive_avg_pool3d(input_tensor.to(dtype), output_size)
+
+        # compare reduced precision result against float32 reference
+        self.assertEqual(result_reduced.float(), result_fp32, atol=1e-2, rtol=1e-3)
 
     @expectedFailureMPS  # Runtime Error not raised for mps
     @expectedFailureMeta  # Runtime Error not raised for meta
