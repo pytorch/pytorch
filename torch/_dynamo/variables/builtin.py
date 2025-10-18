@@ -1847,7 +1847,7 @@ class BuiltinVariable(VariableTracker):
                 polyfills.builtins.iter_
             ).call_function(tx, [obj, *args], {})
 
-            if len(args):
+            if args:
                 # iter(obj, sentinel) returns an object that implements
                 # __iter__ and __next__ methods (UserDefinedObjectVariable)
                 # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
