@@ -2144,12 +2144,12 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
-        # EQUALS_MATCH but in lambda guard
+        # Copied from DTensor __metadata_guard__
+        # TODO - Consider moving this to C++ if stable
         value = deepcopy(self.get(guard.name))
 
         def guard_fn(x):
-            # Calls DTensor __eq__ method
-            return x == value
+            return x._check_equals(value, skip_shapes=True)
 
         code = f"__dtensor_spec_{id(guard_fn)}"
         self.get_guard_manager(guard).add_lambda_guard(
