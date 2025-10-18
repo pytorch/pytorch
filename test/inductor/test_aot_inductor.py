@@ -73,6 +73,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfWindows,
+    skipIfWindowsXPU,
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
@@ -1166,6 +1167,7 @@ class AOTInductorTestsTemplate:
             options={"debug_check_inf_and_nan": True},
         )
 
+    @skipIfWindowsXPU(msg="crash on Windows XPU.")
     def test_assert_async(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -1858,6 +1860,7 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
+    @skipIfWindowsXPU(msg="crash on Windows XPU.")
     def test_size_with_unbacked_add_expr_transitive(self):
         # Edge case with torch._check(expr1, expr2) + torch._check(expr2, unbacked).
         # When generating example input sizes for autotuning, it should coalesce
@@ -2336,6 +2339,39 @@ class AOTInductorTestsTemplate:
             inputs,
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_cond_symint_input_disable_one_pass(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b * z
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        input1 = (
+            torch.ones(3, 3, device=self.device),
+            torch.ones(5, device=self.device),
+            torch.ones(3, 3, device=self.device),
+        )
+        input2 = (
+            torch.ones(10, 3, device=self.device),
+            torch.ones(6, device=self.device),
+            torch.ones(10, 3, device=self.device),
+        )
+        inputs = (input1, input2)
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        with torch._inductor.config.patch({"triton.autotune_at_compile_time": False}):
+            self.check_model_with_multiple_inputs(
+                M(),
+                inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
 
     def test_while_loop_simple(self):
         inputs = (
@@ -3438,6 +3474,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @common_utils.parametrize("minmax", [min, max])
+    @skipIfWindowsXPU(msg="crash on Windows XPU.")
     def test_sympy_cpp_printer_min_max(self, minmax):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -3927,6 +3964,7 @@ class AOTInductorTestsTemplate:
         x = torch.randn(16, 16, device=self.device)
         self.check_model(Model(), (x,))
 
+    @skipIfWindowsXPU(msg="crash on Windows XPU.")
     def test_triton_kernel_dynamic_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -4424,6 +4462,7 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
+    @skipIfWindowsXPU(msg="crash on Windows XPU.")
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -5332,7 +5371,7 @@ class AOTInductorTestsTemplate:
                 record_shapes=True,
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
+                    getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
                 ],
             ) as prof,
         ):
