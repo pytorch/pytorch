@@ -501,17 +501,20 @@ class BlockMask:
     ):
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
-        assert kv_num_blocks is not None, "kv_num_blocks must be provided"
+        if kv_num_blocks is None:
+            raise AssertionError("kv_num_blocks must be provided")
         if full_kv_indices is None:
             raise AssertionError(
                 "full_kv_indices must not be None when transpose flag is set"
             )
-        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
-            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
-        )
-        assert (full_q_num_blocks is None) == (full_q_indices is None), (
-            "full_q_num_blocks and full_q_indices must be both provided or omitted"
-        )
+        if (full_kv_num_blocks is None) != (full_kv_indices is None):
+            raise AssertionError(
+                "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+            )
+        if (full_q_num_blocks is None) != (full_q_indices is None):
+            raise AssertionError(
+                "full_q_num_blocks and full_q_indices must be both provided or omitted"
+            )
 
         self.seq_lengths = seq_lengths
         self.kv_num_blocks = kv_num_blocks
@@ -558,15 +561,19 @@ class BlockMask:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
 
-        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
-            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
-        )
+        if (full_kv_num_blocks is None) != (full_kv_indices is None):
+            raise AssertionError(
+                "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+            )
 
         # Generate q_num_blocks and q_indices
         if compute_q_blocks:
             q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
             if full_kv_num_blocks is not None:
-                assert full_kv_indices is not None
+                if full_kv_indices is None:
+                    raise AssertionError(
+                        "full_kv_indices must not be None when full_kv_num_blocks is provided"
+                    )
                 full_q_num_blocks, full_q_indices = _transpose_ordered(
                     full_kv_num_blocks, full_kv_indices
                 )
@@ -791,7 +798,10 @@ class BlockMask:
         """Returns a dense block that is equivalent to the block mask."""
         partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
         if self.full_kv_num_blocks is not None:
-            assert self.full_kv_indices is not None
+            if self.full_kv_indices is None:
+                raise AssertionError(
+                    "full_kv_indices must not be None when full_kv_num_blocks is provided"
+                )
             # pyrefly: ignore  # bad-return
             return partial_dense | _ordered_to_dense(
                 self.full_kv_num_blocks, self.full_kv_indices
@@ -985,7 +995,10 @@ def _convert_block_mask_to_mask(
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> Tensor:
-    assert block_mask.dim() == 4
+    if block_mask.dim() != 4:
+        raise AssertionError(
+            f"block_mask must be a 4-dimensional tensor, got {block_mask.dim()} dimensions"
+        )
     B, H, Q, KV = block_mask.shape
     block_mask = block_mask.expand(Q_BLOCK_SIZE, KV_BLOCK_SIZE, *block_mask.shape)
     block_mask = block_mask.permute(2, 3, 4, 0, 5, 1).reshape(
@@ -1117,9 +1130,10 @@ def create_block_mask(
     if device is None:
         device = torch.accelerator.current_accelerator() or "cpu"
     mod_type = _get_mod_type(mask_mod)
-    assert mod_type == _ModificationType.MASK_MOD, (
-        f"create-block_mask requires a mask_mod function! Got {mask_mod}"
-    )
+    if mod_type != _ModificationType.MASK_MOD:
+        raise AssertionError(
+            f"create_block_mask requires a mask_mod function! Got {mask_mod}"
+        )
     if B is None:
         B = 1
     if H is None:
