@@ -104,62 +104,6 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
     return val
 
 
-def collect_cuda_rng_states() -> list[torch.Tensor]:
-    """
-    Collects RNG state from all available CUDA devices.
-
-    Returns:
-        List of RNG state tensors, one for each CUDA device.
-        Returns empty list if CUDA is not available.
-    """
-    if not torch.cuda.is_available():
-        return []
-
-    num_devices = torch.cuda.device_count()
-    rng_states = []
-
-    for device_idx in range(num_devices):
-        with torch.cuda.device(device_idx):
-            rng_state = torch.cuda.get_rng_state()
-            rng_states.append(rng_state)
-
-    return rng_states
-
-
-def set_cuda_rng_states(rng_states: list[torch.Tensor]) -> None:
-    """
-    Sets RNG state for all CUDA devices from a list of states.
-
-    Args:
-        rng_states: List of RNG state tensors to restore.
-    """
-    if not torch.cuda.is_available():
-        return
-
-    num_devices = min(len(rng_states), torch.cuda.device_count())
-
-    for device_idx in range(num_devices):
-        with torch.cuda.device(device_idx):
-            torch.cuda.set_rng_state(rng_states[device_idx])
-
-
-def _get_rng_state() -> tuple[torch.Tensor, list[torch.Tensor]]:
-    """
-    Gets CPU and CUDA rng states from all devices.
-    """
-    return (torch.get_rng_state(), collect_cuda_rng_states())
-
-
-def _set_rng_state(cpu_state: torch.Tensor, cuda_states: list[torch.Tensor]) -> None:
-    """
-    Sets CPU and CUDA rng states for all devices. If the list of cuda states
-    is shorter than the number of devices only the first len(cuda_states) devices
-    will get their rng state set.
-    """
-    torch.set_rng_state(cpu_state)
-    set_cuda_rng_states(cuda_states)
-
-
 def _for_each_rank_run_func(
     func: Callable[..., Any],
     ranks: frozenset[int],
@@ -173,15 +117,14 @@ def _for_each_rank_run_func(
         a.wait() if isinstance(a, AsyncCollectiveTensor) else a for a in flat_args
     ]
 
-    # NB: Before invoking an op we are collecting rng states from CPU and
-    # CUDA devices such that we can reset to the same before invoking op
-    # for each rank. This is not very efficient and will likely be revisited
-    # to support per rank rng state.
-    rng_state = _get_rng_state()
+    cpu_state = torch.get_rng_state()
+    devices, states = get_device_states((args, kwargs))
+
     flat_rank_rets = {}
 
     for r in sorted(ranks):
-        _set_rng_state(*rng_state)
+        torch.set_rng_state(cpu_state)
+        set_device_states(devices, states)
         rank_flat_args = [_map_to_rank_local_val(a, r) for a in flat_args]
         rank_args, rank_kwargs = pytree.tree_unflatten(rank_flat_args, args_spec)
         rank_ret = func(*rank_args, **rank_kwargs)
@@ -761,11 +704,6 @@ class _LocalDeviceMesh:
 
     @staticmethod
     def get_coordinate(self: DeviceMesh) -> Optional[list[int] | None]:
-        # NB: In order to support submeshes the code below recreates for each
-        # rank submesh with the same mesh dimensions as current mesh. We are
-        # doing this because when submesh is created it is created for a particular
-        # rank (therefore below we are patching get_rank method). We are trying to
-        # limit the invasiveness of local tensor.
         lm = local_tensor_mode()
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
@@ -778,9 +716,7 @@ class _LocalDeviceMesh:
                 coords[d][r] = c
 
         out = [torch.SymInt(LocalIntNode(c)) for c in coords]
-        # The output contains coordinates for each of the ranks with respect to
-        # their meshes formed from root mesh and selecting the same dimensions
-        # as the current mesh.
+
         return out  # type: ignore[return-value]
 
 
@@ -858,6 +794,8 @@ def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
         with lm.disable():
             ret = _for_each_rank_run_func(func, lm.ranks, args, kwargs, alias=False)
 
+        lm = local_tensor_mode()
+        assert lm is not None
         return ret
 
     return wrapper

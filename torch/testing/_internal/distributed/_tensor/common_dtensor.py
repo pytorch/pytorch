@@ -701,9 +701,6 @@ class DTensorConverter:
 
 
 class LocalDTensorTestBase(DTensorTestBase):
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
-
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
 

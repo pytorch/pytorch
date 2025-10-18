@@ -19,17 +19,6 @@ def _get_sharding_prop_cache_info():
     )
 
 
-def _clear_sharding_prop_cache():
-    """
-    Clears the cache for the sharding propagation cache, used for debugging purpose only.
-    """
-    from torch.distributed.tensor._api import DTensor
-
-    return (
-        DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache_clear()  # type:ignore[attr-defined]
-    )
-
-
 # Set namespace for exposed private names
 CommDebugMode.__module__ = "torch.distributed.tensor.debug"
 visualize_sharding.__module__ = "torch.distributed.tensor.debug"

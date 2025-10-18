@@ -359,16 +359,6 @@ class Shard(Placement):
 
         return Shard._select_shard(shards, shard_index)
 
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _get_shard_pad_size(
-        full_size: int, local_tensor: torch.Tensor, dim: int
-    ) -> int:
-        """
-        Get the padding size of the local tensor on the shard dimension.
-        """
-        return full_size - local_tensor.size(dim)
-
     def _to_new_shard_dim(
         self,
         local_tensor: torch.Tensor,
@@ -397,16 +387,14 @@ class Shard(Placement):
             old_dim_full_chunk_size = (
                 old_dim_logical_size + num_chunks - 1
             ) // num_chunks
-            old_dim_pad_size = Shard._get_shard_pad_size(
-                old_dim_full_chunk_size, local_tensor, self.dim
-            )
+            old_dim_pad_size = old_dim_full_chunk_size - local_tensor.size(self.dim)
             local_tensor = pad_tensor(local_tensor, self.dim, old_dim_pad_size)
         if new_dim_padding:
             new_dim_full_chunk_size = (
                 new_dim_logical_size + num_chunks - 1
             ) // num_chunks
-            new_dim_pad_size = Shard._get_shard_pad_size(
-                new_dim_full_chunk_size * num_chunks, local_tensor, new_shard_dim
+            new_dim_pad_size = new_dim_full_chunk_size * num_chunks - local_tensor.size(
+                new_shard_dim
             )
             local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
 
