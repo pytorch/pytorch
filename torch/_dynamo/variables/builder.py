@@ -122,6 +122,7 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
+    SkipGuardSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -2253,7 +2254,7 @@ class VariableBuilder:
                     raise RuntimeError(
                         "Expecting Dtensor flattening ctx to be _spec, requires_grad"
                     )
-                # Guard on the dtensor spec - TODO - Can we make this check move to C++
+                # Guard on the dtensor spec
                 install_guard(
                     AttrSource(self.source, "_spec").make_guard(
                         GuardBuilder.DTENSOR_SPEC_MATCH
@@ -2270,6 +2271,10 @@ class VariableBuilder:
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 inner_source = AttrSource(self.source, attr)
+                if isinstance(value, torch.distributed.tensor.DTensor):
+                    # We can skip the guards on _local_tensor because the outer
+                    # tensor and metadata is enough to guard for _local_tensor.
+                    inner_source = SkipGuardSource(inner_source)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )

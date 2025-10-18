@@ -2148,7 +2148,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO - Consider moving this to C++ if stable
         value = deepcopy(self.get(guard.name))
 
-        def guard_fn(x):
+        def guard_fn(x: Any) -> bool:
             return x._check_equals(value, skip_shapes=True)
 
         code = f"__dtensor_spec_{id(guard_fn)}"
