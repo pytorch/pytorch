@@ -135,7 +135,7 @@ class TestSparseCSRSampler(TestCase):
         index_dtype = torch.int32
         for n_rows in range(1, 10):
             for n_cols in range(1, 10):
-                for nnz in range(0, n_rows * n_cols + 1):
+                for nnz in range(n_rows * n_cols + 1):
                     crow_indices = self._make_crow_indices(
                         n_rows, n_cols, nnz,
                         device=device, dtype=index_dtype)
