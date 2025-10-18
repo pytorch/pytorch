@@ -707,27 +707,13 @@ class _LocalDeviceMesh:
         lm = local_tensor_mode()
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
-        root_mesh = self._get_root_mesh()
-        submesh_dims = self.mesh_dim_names
-
         coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
-        old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
-        try:
-            for r in lm.ranks:
-                DeviceMesh.get_rank = lambda self: r  # type: ignore[method-assign]
-                submesh = (
-                    root_mesh
-                    if submesh_dims is None
-                    else root_mesh.__getitem__(submesh_dims)
-                )
-                rank_coords = (submesh.mesh == r).nonzero().tolist()
-                assert len(rank_coords) in (0, 1)
-                if len(rank_coords) == 0:
-                    continue
-                for d, c in enumerate(rank_coords[0]):
-                    coords[d][r] = c
-        finally:
-            DeviceMesh.get_rank = old_get_rank  # type: ignore[method-assign]
+        for r in lm.ranks:
+            rank_tensor = self._layout.remap_to_tensor(self._rank_map)
+            rank_coords = (rank_tensor == r).nonzero().tolist()
+            assert len(rank_coords) == 1
+            for d, c in enumerate(rank_coords[0][1:]):
+                coords[d][r] = c
 
         out = [torch.SymInt(LocalIntNode(c)) for c in coords]
 

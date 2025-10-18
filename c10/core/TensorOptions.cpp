@@ -1,9 +1,5 @@
 #include <c10/core/TensorOptions.h>
 
-#include <c10/core/Device.h>
-#include <c10/core/Layout.h>
-#include <c10/util/Optional.h>
-
 #include <iostream>
 
 namespace c10 {

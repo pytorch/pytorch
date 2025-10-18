@@ -1073,12 +1073,6 @@ def _set_memory_metadata(metadata: str):
     Args:
         metadata (str): Custom metadata string to attach to allocations.
                        Pass an empty string to clear the metadata.
-
-    Example:
-        >>> torch.cuda.memory._set_memory_metadata("training_phase")
-        >>> # All allocations here will have "training_phase" metadata
-        >>> x = torch.randn(100, 100, device="cuda")
-        >>> torch.cuda.memory._set_memory_metadata("")  # Clear metadata
     """
     torch._C._cuda_setMemoryMetadata(metadata)
 
