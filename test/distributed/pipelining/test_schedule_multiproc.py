@@ -383,7 +383,6 @@ class ScheduleTest(MultiProcContinuousTest):
             stage, stage_module, _ = create_single_stage_pipeline(
                 self.config, mod, x, num_microbatches
             )
-            stage_modules = [stage_module]
             schedule = ScheduleClass(
                 stage,
                 num_microbatches,

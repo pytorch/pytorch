@@ -591,7 +591,14 @@ or equal to the number of stages ({self._num_stages})."
             self._stage._prepare_backward_infra(self._n_microbatches)
             self._stage_backward_initialized = True
 
-    def step(self, *args, target=None, losses: Optional[list] = None, return_outputs: bool = True, **kwargs):
+    def step(
+        self,
+        *args,
+        target=None,
+        losses: Optional[list] = None,
+        return_outputs: bool = True,
+        **kwargs,
+    ):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
@@ -626,7 +633,9 @@ or equal to the number of stages ({self._num_stages})."
             targets_split = None
 
         # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses, return_outputs)
+        self._step_microbatches(
+            args_split, kwargs_split, targets_split, losses, return_outputs
+        )
 
         # Stage post processing
         grad_scale_factor = self._n_microbatches if self.scale_grads else 1
@@ -1529,7 +1538,14 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # This will overwrite the default stage_to_rank_mapping created in the constructor
         self._validate_and_set_stage_mapping(self.pipeline_order)
 
-    def step(self, *args, target=None, losses: Optional[list] = None, return_outputs: bool = True, **kwargs):
+    def step(
+        self,
+        *args,
+        target=None,
+        losses: Optional[list] = None,
+        return_outputs: bool = True,
+        **kwargs,
+    ):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
@@ -1566,7 +1582,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
             targets_split = None
 
         # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses, return_outputs)
+        self._step_microbatches(
+            args_split, kwargs_split, targets_split, losses, return_outputs
+        )
 
         # Stage post processing
         # TODO: remove this section and include as part of the schedule IR?
