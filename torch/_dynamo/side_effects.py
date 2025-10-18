@@ -218,7 +218,10 @@ class SideEffects:
         return bool(
             output_graph
             and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
-            and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
+            and (
+                output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
+                or torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
+            )
         )
 
     def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
