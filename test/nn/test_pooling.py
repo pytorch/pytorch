@@ -1021,11 +1021,12 @@ torch.cuda.synchronize()
         c = out.size(1)
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_adaptive_avg_pool3d_reduced_precision(self, device, dtype):
-        # test for reduced precision types (BFloat16/Half) on CPU
-        # this test ensures that the fix for using higher precision accumulation
+        # regression test for https://github.com/pytorch/pytorch/issues/140696
+        # test for reduced precision types (BFloat16/Half)
+        # test ensures that the fix for using higher precision accumulation
         # produces correct results by comparing against float32 reference
 
         input_tensor = torch.tensor(
@@ -1060,13 +1061,76 @@ torch.cuda.synchronize()
         output_size = (None, 1, None)
 
         # compute reference result in float32
-        result_fp32 = F.adaptive_avg_pool3d(input_tensor.float(), output_size)
+        result_fp32 = F.adaptive_avg_pool3d(
+            input_tensor.float().to(device), output_size
+        )
 
         # compute result in reduced precision
-        result_reduced = F.adaptive_avg_pool3d(input_tensor.to(dtype), output_size)
+        result_reduced = F.adaptive_avg_pool3d(
+            input_tensor.to(dtype).to(device), output_size
+        )
 
         # compare reduced precision result against float32 reference
-        self.assertEqual(result_reduced.float(), result_fp32, atol=1e-2, rtol=1e-3)
+        torch.testing.assert_close(
+            result_reduced.float(), result_fp32, atol=1e-2, rtol=1e-3
+        )
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.bfloat16, torch.half)
+    def test_avg_pool3d_reduced_precision(self, device, dtype):
+        # related to https://github.com/pytorch/pytorch/issues/140696
+        # test for reduced precision types (BFloat16/Half)
+        # test ensures that the avg_pool3d path uses higher precision
+        # accumulation and produces correct results
+
+        input_tensor = torch.tensor(
+            [
+                [
+                    [
+                        [-1.4062, 1.4609, 0.6797],
+                        [-0.6875, -0.9492, 0.4434],
+                        [-1.0312, -0.3730, 0.9453],
+                    ],
+                    [
+                        [0.9766, 0.2070, 0.8242],
+                        [-1.6484, 1.4531, 1.7891],
+                        [0.3945, 0.5352, -0.8711],
+                    ],
+                ],
+                [
+                    [
+                        [-2.5000, 0.2617, -0.3613],
+                        [-1.6094, -1.4219, -0.3281],
+                        [-1.3594, -2.3594, -0.5312],
+                    ],
+                    [
+                        [-1.9375, 1.0938, 1.5547],
+                        [-0.5820, -0.1167, 1.3438],
+                        [1.1953, -1.3750, -1.3438],
+                    ],
+                ],
+            ],
+        )
+
+        # test with kernel_size that averages over spatial dimensions
+        kernel_size = (2, 2, 2)
+        stride = 1
+        padding = 0
+
+        # compute reference result in float32
+        result_fp32 = F.avg_pool3d(
+            input_tensor.float().to(device), kernel_size, stride, padding
+        )
+
+        # compute result in reduced precision
+        result_reduced = F.avg_pool3d(
+            input_tensor.to(dtype).to(device), kernel_size, stride, padding
+        )
+
+        # compare reduced precision result against float32 reference
+        torch.testing.assert_close(
+            result_reduced.float(), result_fp32, atol=1e-2, rtol=1e-3
+        )
 
     @expectedFailureMPS  # Runtime Error not raised for mps
     @expectedFailureMeta  # Runtime Error not raised for meta
