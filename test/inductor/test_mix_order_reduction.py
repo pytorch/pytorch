@@ -75,10 +75,10 @@ class MixOrderReductionTest(TestBase):
             "sum",
             "prod",
             "mean",
+            "amax",
+            "amin",
             # "max",
             # "min",
-            # "amax",
-            # "amin",
         ],
     )
     @parametrize("swap", (False, True))
