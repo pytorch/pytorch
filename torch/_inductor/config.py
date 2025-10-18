@@ -1351,6 +1351,11 @@ class triton:
     # Side effect for this option is increased memory footprint during first pass compilation.
     autotune_with_sample_inputs: bool = False
 
+    # Autotune the full graph instead of just individual kernels.
+    # This provides a comprehensive autotuning approach across the entire computation graph.
+    # This option is mutually exclusive with autotune_with_sample_inputs.
+    autotune_full_graph: bool = True
+
     # Allows tiling reductions into multiple dimensions.
     # For best results, this should be used with prefer_nd_tiling.
     tile_reductions: bool = False
