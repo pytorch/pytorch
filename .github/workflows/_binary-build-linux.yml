@@ -76,6 +76,11 @@ on:
         type: string
         description: Extra install requirements
         default: ""
+      USE_SPIN:
+        required: false
+        type: boolean
+        description: Whether to use spin
+        default: false
     secrets:
       github-token:
         required: true
@@ -110,6 +115,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPIN: ${{ inputs.USE_SPIN }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -134,6 +140,7 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPIN=${{ env.USE_SPIN }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: List the env
@@ -252,6 +259,7 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
+            -e USE_SPIN \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
