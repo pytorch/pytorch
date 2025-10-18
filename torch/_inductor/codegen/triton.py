@@ -4507,6 +4507,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         loop_trees = [tree for tree in self.range_trees if tree.is_loop]
         if self.mix_order_reduction:
+            assert self.persistent_reduction, (
+                "Mix order reduction requires persistent reduction"
+            )
             for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                 reduction_type = partial_accum.reduction_type
                 default = ir.Reduction.default_accumulator(reduction_type, torch.float)
@@ -4517,7 +4520,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             self.body.writeline("for suboff in range(0, RSPLIT_SIZE, XBLOCK):")
             with self.body.indent(offset=1):
-                # TODO don't hard code this
                 self.body.writelines(
                     [
                         "x0 = xindex + suboff",
@@ -4529,7 +4531,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
 
-                # TODO: no need to sum if XBLOCK == 0
+                # no need to sum if XBLOCK == 1, or does that matter?
                 for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                     var = partial_accum.value
                     name = f"accum{idx}"

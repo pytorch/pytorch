@@ -1494,7 +1494,16 @@ class SchedulerNode(BaseSchedulerNode):
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
             f"{type(self.node)=}"
         )
-        return bool(self.node.get_reduction_type())
+        assert self._body
+
+        # self._body containing partial accumulate means the reduction is
+        # converted to a pointwise node.  Need this extra check since
+        # we change self._body but didn't change self.node (IRNode)
+        # when converting a reduction to a pointwise
+        return (
+            bool(self.node.get_reduction_type())
+            and not self._body.has_partial_accumulate
+        )
 
     def is_native_matmul(self) -> bool:
         assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
