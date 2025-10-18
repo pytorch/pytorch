@@ -4291,7 +4291,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             start = start.item()
             N = 3
             result = X0[start]
-            for i in range(0, N):
+            for i in range(N):
                 result += X0[start + 1 + i]
             return result
 
