@@ -94,7 +94,9 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(t, FakeTensor))
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
+        
 
+        
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_initialized(self):
         # doesn't error
@@ -103,7 +105,7 @@ class FakeTensorTest(TestCase):
             x = torch.randn(8, 4, device="cuda")
             y = torch.mm(x, p).square().sum()
             y.backward()
-
+    
     def test_basic(self):
         x = torch.empty(2, 2, device="cpu")
         y = torch.empty(4, 2, 2, device="cpu")
