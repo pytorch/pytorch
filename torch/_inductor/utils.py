@@ -760,7 +760,6 @@ def get_fused_kernel_name(
         ]
     else:
         raise NotImplementedError
-    sources = sources
     return "_".join(["fused"] + sources)
 
 
