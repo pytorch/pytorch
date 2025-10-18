@@ -2178,7 +2178,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 raise e
 
         # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
-        while len(send_ops):
+        while send_ops:
             _wait_batch_p2p(send_ops.pop())
 
         assert len(self.unshard_ops) == 0, "Unused unshard operations"
