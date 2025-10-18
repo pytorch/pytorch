@@ -1867,7 +1867,7 @@ class OutputGraph(OutputGraphCommon):
                 _get_source_debug_name(var.source) for var in potential_side_effects
             ]
 
-            if len(side_effect_refs):
+            if side_effect_refs:
                 warnings.warn(
                     f"While exporting, we found certain side effects happened in the model.forward. "
                     f"Here are the list of potential sources you can double check: {side_effect_refs}"
@@ -3736,7 +3736,7 @@ class SubgraphTracer(fx.Tracer):
             if v1 != v2
         ]
 
-        if len(mutated_inputs):
+        if mutated_inputs:
             mutated_nodes = [input_nodes[i] for i in mutated_inputs]
             msg = f"Input mutation detected at {mutated_nodes}"
             return MutationInfo(True, msg)

@@ -212,6 +212,7 @@ select = [
     "PIE810",
     "PLC0131", # type bivariance
     "PLC0132", # type param mismatch
+    "PLC1802", # len({expression}) used as condition without comparison
     "PLC0205", # string as __slots__
     "PLC3002", # unnecessary-direct-lambda-call
     "PLE",

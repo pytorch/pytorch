@@ -2895,7 +2895,7 @@ def match_target_block_product(
         relative_scores[dim] = score / total_score
 
     # Scale up dimensions by their relative scores until we reach the target
-    while curr_block_product < target_block_product and len(relative_scores):
+    while curr_block_product < target_block_product and relative_scores:
         dim, score = max(relative_scores.items(), key=lambda item: item[1])
 
         # Check if we've hit the max for this dimension
