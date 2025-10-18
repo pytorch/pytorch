@@ -204,12 +204,7 @@ select = [
     "NPY",
     "PERF",
     "PGH004",
-    "PIE790",
-    "PIE794",
-    "PIE800",
-    "PIE804",
-    "PIE807",
-    "PIE810",
+    "PIE",
     "PLC0131", # type bivariance
     "PLC0132", # type param mismatch
     "PLC1802", # len({expression}) used as condition without comparison
