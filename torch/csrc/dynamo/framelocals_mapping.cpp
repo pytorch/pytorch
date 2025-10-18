@@ -67,7 +67,8 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
 #elif IS_PYTHON_3_14_PLUS
   for (int i = 0; i < offset; i++) {
-    update_framelocals(i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
+    update_framelocals(
+      i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
   }
 #else
   for (int i = 0; i < offset; i++) {
