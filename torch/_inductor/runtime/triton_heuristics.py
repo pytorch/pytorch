@@ -2988,9 +2988,7 @@ def _reduction_configs(
     # For 3d tiling, default to more autotuning initially
     if "y" in size_hints:
         pass
-    elif inductor_meta.get("max_autotune") or inductor_meta.get(
-        "max_autotune_pointwise"
-    ):
+    elif max_autotune_enabled:
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
         return configs + [contiguous_config]
@@ -2999,6 +2997,9 @@ def _reduction_configs(
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
 
+    # We continue here under the following conditions:
+    # - max_autotune_enabled is True
+    # - max_autotune_enabled is False and reduction_hint is NOT one of the above cases
     result_configs = configs + [
         contiguous_config,
         outer_config,
