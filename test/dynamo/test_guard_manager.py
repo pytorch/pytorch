@@ -990,7 +990,6 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
 
         def hook(guard_wrapper, f_locals, builder):
             guard_str = str(guard_wrapper)
-            print(guard_str)
             # One for tensor and one for y
             self.assertEqual(guard_str.count("NO_HASATTR"), 2)
 
