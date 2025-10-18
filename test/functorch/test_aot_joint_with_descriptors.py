@@ -38,7 +38,12 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import tracing, TracingContext
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    requires_cuda,
+    run_tests,
+    skipIfCrossRef,
+    TestCase,
+)
 
 
 def graph_capture(model, inputs, with_export):
@@ -57,7 +62,7 @@ def graph_capture(model, inputs, with_export):
         with ExitStack() as stack:
             joint_with_descriptors = aot_export_joint_with_descriptors(
                 stack,
-                model,
+                gm,
                 inputs,
             )
             return joint_with_descriptors.graph_module
@@ -237,9 +242,7 @@ class inner_f(torch.nn.Module):
         where: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le, 0.0, add_4);  le = add_4 = None
         view_of: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(where)
         view_of_1: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of);  view_of = None
-        view_of_2: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
-        view_of_3: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_2);  view_of_2 = None
-        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_3, 0.0);  view_of_3 = None
+        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_1, 0.0);  view_of_1 = None
         where_1: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le_1, 0.0, tangents_1);  le_1 = tangents_1 = None
         broadcast_in_dim_10: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(squeeze_2, [1, 3], [1]);  squeeze_2 = None
         broadcast_in_dim_11: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_10, [1, 3, 1], [0, 1]);  broadcast_in_dim_10 = None
@@ -923,6 +926,85 @@ class inner_f(torch.nn.Module):
             "('call_function', 'flex_attention_backward', {'compile_with_inductor': 'flex_attention'})"
             in custom_metadata
         )
+
+    def test_preserve_annotate_function(self):
+        """Test basic annotate_fn usage"""
+
+        @fx_traceback.annotate_fn({"pp_stage": 1})
+        def example_function(x):
+            return x * x
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    y = self.linear(x)
+                y = example_function(y)
+                return y - 1
+
+        inputs = (torch.randn(4, 3),)
+        model = SimpleLinear()
+
+        for with_export in [True, False]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 't', {'pp_stage': 0})
+('call_function', 'addmm', {'pp_stage': 0})
+('call_function', 'mul', {'pp_stage': 1})
+('call_function', 'mul_1', {'pp_stage': 1})
+('call_function', 'mul_2', {'pp_stage': 1})
+('call_function', 't_1', {'pp_stage': 0})
+('call_function', 'mm', {'pp_stage': 0})
+('call_function', 't_2', {'pp_stage': 0})
+('call_function', 'sum_1', {'pp_stage': 0})
+('call_function', 'view', {'pp_stage': 0})
+('call_function', 't_3', {'pp_stage': 0})""",
+            )
+
+    @skipIfCrossRef
+    def test_custom_op_stack_trace(self):
+        @torch.library.custom_op("my_lib::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @foo.register_fake
+        def foo_fake_impl(x, y):
+            return torch.empty_like(x)
+
+        def foo_setup_context(ctx, inputs, output):
+            pass
+
+        def foo_backward(ctx, grad_output):
+            return grad_output, grad_output
+
+        foo.register_autograd(foo_backward, setup_context=foo_setup_context)
+
+        class CustomOpModule(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = CustomOpModule()
+        inputs = (torch.randn(4, 3), torch.randn(4, 3))
+
+        gm = graph_capture(model, inputs, with_export=True)
+
+        foo_node = None
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and node.name == "foo":
+                foo_node = node
+                break
+
+        self.assertTrue(foo_node is not None)
+        self.assertTrue("return foo(x, y)" in foo_node.meta.get("stack_trace", None))
+        self.assertTrue("return foo(x, y)" in gm.print_readable(print_output=False))
+        self.assertFalse("self._opoverload" in foo_node.meta.get("stack_trace", None))
+        self.assertFalse("self._opoverload" in gm.print_readable(print_output=False))
 
 
 if __name__ == "__main__":

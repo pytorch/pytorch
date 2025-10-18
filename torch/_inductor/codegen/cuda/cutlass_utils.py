@@ -470,6 +470,7 @@ class CUDACompileSourceCapturingContext:
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
+        # pyrefly: ignore  # bad-assignment
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
