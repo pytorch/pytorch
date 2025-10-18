@@ -712,7 +712,7 @@ Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
   } else if (scalar.isBoolean()) {
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kBool));
   } else if (scalar.isComplex()) {
-    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexDouble));
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexFloat));
   } else {
     TORCH_INTERNAL_ASSERT(scalar.isIntegral(false));
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kLong));

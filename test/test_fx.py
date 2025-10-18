@@ -35,7 +35,8 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
+from collections.abc import Callable
 
 import torch
 
@@ -3583,7 +3584,7 @@ class TestFX(JitTestCase):
 
         class LeafTracerNotB(Tracer):
             def is_leaf_module(self, module, name):
-                return False if "b" in name else True
+                return "b" not in name
 
         # Recompile calls added "for fun", since they
         # chain __call__ wrappers.
