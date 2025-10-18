@@ -272,10 +272,10 @@ else:
             # TODO: think about how to allow pg options to be passed to world group
             # or mesh dimension groups
             if not default_initialized:
-                init_pg_kwargs: dict[str, object] = {}
+                backend_override: Optional[str] = None
                 if self._device_type == "cpu" and not torch.cuda.is_available():
-                    init_pg_kwargs["backend"] = "gloo"
-                init_process_group(**init_pg_kwargs)
+                    backend_override = "gloo"
+                init_process_group(backend=backend_override)
 
             world_size = get_world_size()
             if self.mesh.numel() > world_size:
@@ -350,7 +350,10 @@ else:
                             ranks=ranks,
                             group_desc="mesh_default",
                         )
-                    elif torch.cuda.is_available() and get_backend(default_group) == "gloo":
+                    elif (
+                        torch.cuda.is_available()
+                        and get_backend(default_group) == "gloo"
+                    ):
                         dim_group = new_group(
                             backend="cpu:gloo,cuda:nccl",
                             ranks=ranks,
@@ -358,10 +361,7 @@ else:
                         )
                     else:
                         dim_group = default_group
-                elif (
-                    torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                ):
+                elif torch.cuda.is_available() and get_backend(default_group) == "gloo":
                     dim_group = new_group(
                         backend="cpu:gloo,cuda:nccl",
                         ranks=ranks,

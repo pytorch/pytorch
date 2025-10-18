@@ -2,8 +2,8 @@
 # Owner(s): ["oncall: distributed"]
 import os
 import unittest
-from unittest import mock
 from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -102,18 +102,26 @@ class DeviceMeshCPUFallbackTest(TestCase):
         # running without GPUs, which is hard to reproduce deterministically in
         # the shared test harness, so we simulate the relevant state here.
         dummy_pg = _DummyProcessGroup(("cpu",))
-        with mock.patch("torch.distributed.device_mesh.is_initialized", return_value=False), mock.patch(
-            "torch.distributed.device_mesh.get_world_size", return_value=1
-        ), mock.patch(
-            "torch.distributed.device_mesh.get_rank", return_value=0
-        ), mock.patch(
-            "torch.distributed.device_mesh._get_default_group", return_value=dummy_pg
-        ), mock.patch(
-            "torch.distributed.device_mesh.get_backend", return_value="gloo"
-        ), mock.patch(
-            "torch.distributed.device_mesh.init_process_group"
-        ) as mock_init_pg, mock.patch(
-            "torch.distributed.device_mesh.torch.cuda.is_available", return_value=False
+        with (
+            mock.patch(
+                "torch.distributed.device_mesh.is_initialized", return_value=False
+            ),
+            mock.patch("torch.distributed.device_mesh.get_world_size", return_value=1),
+            mock.patch("torch.distributed.device_mesh.get_rank", return_value=0),
+            mock.patch(
+                "torch.distributed.device_mesh._get_default_group",
+                return_value=dummy_pg,
+            ),
+            mock.patch(
+                "torch.distributed.device_mesh.get_backend", return_value="gloo"
+            ),
+            mock.patch(
+                "torch.distributed.device_mesh.init_process_group"
+            ) as mock_init_pg,
+            mock.patch(
+                "torch.distributed.device_mesh.torch.cuda.is_available",
+                return_value=False,
+            ),
         ):
             DeviceMesh("cpu", self.mesh_tensor)
             mock_init_pg.assert_called_once_with(backend="gloo")
@@ -122,20 +130,27 @@ class DeviceMeshCPUFallbackTest(TestCase):
         world_size = 2
         mesh = torch.arange(world_size, dtype=torch.int)
         dummy_pg = _DummyProcessGroup(("cuda",), world_size=world_size)
-        with mock.patch("torch.distributed.device_mesh.is_initialized", return_value=True), mock.patch(
-            "torch.distributed.device_mesh.get_world_size", return_value=world_size
-        ), mock.patch(
-            "torch.distributed.device_mesh.get_rank", return_value=0
-        ), mock.patch(
-            "torch.distributed.device_mesh._get_default_group", return_value=dummy_pg
-        ), mock.patch(
-            "torch.distributed.device_mesh.get_backend", return_value="nccl"
-        ), mock.patch(
-            "torch.distributed.device_mesh.split_group", return_value=None
-        ), mock.patch(
-            "torch.distributed.device_mesh.new_group"
-        ) as mock_new_group, mock.patch(
-            "torch.distributed.device_mesh.torch.cuda.is_available", return_value=False
+        with (
+            mock.patch(
+                "torch.distributed.device_mesh.is_initialized", return_value=True
+            ),
+            mock.patch(
+                "torch.distributed.device_mesh.get_world_size", return_value=world_size
+            ),
+            mock.patch("torch.distributed.device_mesh.get_rank", return_value=0),
+            mock.patch(
+                "torch.distributed.device_mesh._get_default_group",
+                return_value=dummy_pg,
+            ),
+            mock.patch(
+                "torch.distributed.device_mesh.get_backend", return_value="nccl"
+            ),
+            mock.patch("torch.distributed.device_mesh.split_group", return_value=None),
+            mock.patch("torch.distributed.device_mesh.new_group") as mock_new_group,
+            mock.patch(
+                "torch.distributed.device_mesh.torch.cuda.is_available",
+                return_value=False,
+            ),
         ):
             DeviceMesh("cpu", mesh)
             mock_new_group.assert_called_once()
