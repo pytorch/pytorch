@@ -1966,12 +1966,15 @@ class GuardBuilder(GuardBuilderBase):
         contains = not invert  # install_dict_contains_guard inverts "contains"
 
         code = f"set.__contains__({set_ref}, {item!r})"
+        if code in self.already_added_code_parts:
+            return
 
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
             contains, item, get_verbose_code_parts(code, guard)
         )
+        self.already_added_code_parts.add(code)
 
     def BOOL_MATCH(self, guard: Guard) -> None:
         # checks val == True or val == False
