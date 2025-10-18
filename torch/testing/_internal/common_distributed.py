@@ -230,7 +230,7 @@ def skip_if_lt_x_gpu(x):
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
-            if _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
         return wrapper
@@ -248,7 +248,7 @@ def nccl_skip_if_lt_x_gpu(backend, x):
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
-            if _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
         return wrapper
