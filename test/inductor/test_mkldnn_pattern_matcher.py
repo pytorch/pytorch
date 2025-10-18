@@ -835,9 +835,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for dtype in dtypes:
             torch._dynamo.reset()
-            autocast_enabled = (
-                True if dtype in [torch.bfloat16, torch.float16] else False
-            )
+            autocast_enabled = dtype in [torch.bfloat16, torch.float16]
             with (
                 torch.no_grad(),
                 torch.autocast(
@@ -4421,14 +4419,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         out_feature = 64
         q_min, q_max = -32, 31
         # we only test for qlinear_binary in this case
-        test_for_pointwise_binary = (
-            True
-            if M == 1
+        test_for_pointwise_binary = bool(
+            M == 1
             and inplace_add
             and not expand_a_scale
             and not dynamic
             and not has_bias
-            else False
         )
         if test_for_pointwise_binary and not IS_X86:
             self.skipTest("Some UTs are only supported on x86_64 CPUs")
