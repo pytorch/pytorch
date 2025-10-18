@@ -614,8 +614,8 @@ class TestScheduleLowering(TestCase):
                     ],
                     1: [
                         "1RECV_F0",
-                        "1RECV_F1",
                         "1F0",
+                        "1RECV_F1",
                         "1B0",
                         "1SEND_B0",
                         "1F1",
@@ -625,7 +625,7 @@ class TestScheduleLowering(TestCase):
                 },
                 "stage_to_rank": lambda stage_idx: stage_idx,
                 "num_stages": 2,
-                "simulated_steps": 11,
+                "simulated_steps": 10,
             },
             {
                 "schedule": "v_2_rank_4_stage",
@@ -686,18 +686,15 @@ class TestScheduleLowering(TestCase):
                     ],
                     1: [
                         "1RECV_F0",
-                        # interesting that this gets scheduled up front, is that expected?
-                        "1RECV_F1",
                         "1F0",
                         "2F0",
                         "2SEND_F0",
+                        "1RECV_F1",
                         "1F1",
-                        # ditto
                         "2RECV_B0",
                         "2F1",
                         "2SEND_F1",
                         "2B0",
-                        # ditto
                         "2RECV_B1",
                         "1B0",
                         "1SEND_B0",
@@ -712,7 +709,7 @@ class TestScheduleLowering(TestCase):
                 },
                 "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
                 "num_stages": 4,
-                "simulated_steps": 24,
+                "simulated_steps": 22,
             },
         ],
     )
@@ -750,6 +747,7 @@ class TestScheduleLowering(TestCase):
             stage_to_rank=test_info["stage_to_rank"],
             num_stages=test_info["num_stages"],
         )
+        # from torch.distributed.pipelining.schedules import _dump_chrometrace
         # _dump_chrometrace(simulated_schedule, "lowered_comms.json")
         # print(_format_pipeline_order(simulated_schedule))
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
@@ -806,7 +804,7 @@ class TestScheduleLowering(TestCase):
 
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         # print(_format_pipeline_order(simulated_schedule))
-        self.assertEqual(num_steps, 113)
+        self.assertEqual(num_steps, 111)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grad_with_v_schedule(self):
