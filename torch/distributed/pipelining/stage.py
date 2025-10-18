@@ -664,6 +664,7 @@ class _PipelineStageBase(ABC):
         fwd_chunk_id: int,
         args: tuple[Any, ...],
         kwargs: Optional[dict[str, Any]] = None,
+        save_forward_output: bool = True,
     ):
         """
         Perform forward pass on the stage with one microbatch.
@@ -703,9 +704,8 @@ class _PipelineStageBase(ABC):
 
         # Prepare for final output merge or reduction
         # Output chunks is only used for the last stage since we only merge the output of the last stage
-        if self.is_last:
+        if self.is_last and save_forward_output:
             self.output_chunks.append(output)
-
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
         flat_kwargs = flatten_args(composite_kwargs)
