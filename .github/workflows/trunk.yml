@@ -200,6 +200,23 @@ jobs:
       cuda-arch-list: '8.0'
     secrets: inherit
 
+  # Test cross-compiled models with Windows libs extracted from wheel
+  cross-compile-linux-test:
+    name: cross-compile-linux-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-build
+      - get-label-type
+      - win-vs2022-cuda12_8-py3-build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", win_torch_wheel_artifact: "win-vs2022-cuda12.8-py3" },
+        ]}
+    secrets: inherit
+
   verify-cachebench-cpu-build:
     name: verify-cachebench-cpu-build
     uses: ./.github/workflows/_linux-build.yml

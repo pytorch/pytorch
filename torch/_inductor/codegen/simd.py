@@ -187,6 +187,7 @@ class IterationRangesRoot(IterationRanges):
 
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
+        # pyrefly: ignore  # missing-argument
         assert not is_loop or (self.is_reduction and grid_dim is None)
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
@@ -374,6 +375,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
+    # pyrefly: ignore  # bad-override
     kernel_name: str
 
     def __init__(
@@ -570,6 +572,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if tree.tensor_dim is None:
                 continue
 
+            # pyrefly: ignore  # missing-argument
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
@@ -962,7 +965,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def active_range_trees(self) -> list[IterationRangesRoot]:
         return [
-            t for t in self.range_trees if not t.is_reduction or self.inside_reduction
+            # pyrefly: ignore  # missing-argument
+            t
+            for t in self.range_trees
+            if not t.is_reduction or self.inside_reduction
         ]
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
@@ -1110,6 +1116,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 numel = buf_size
             dtype = V.graph.get_dtype(arg)
             dtype_size = get_dtype_size(dtype)
+            # pyrefly: ignore  # bad-argument-type
             nbytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(nbytes)
 
@@ -1130,6 +1137,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         argdefs, call_args, _signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
+        # pyrefly: ignore  # bad-assignment
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
             if not buf:
@@ -1753,11 +1761,13 @@ class SIMDScheduling(BaseScheduling):
 
             for input_name in kernel.named_input_nodes.keys():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                # pyrefly: ignore  # missing-attribute
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
             num_store_subgraphs = kernel.get_store_output_count()
             for i in range(num_store_subgraphs):
                 subgraph_name = kernel._get_store_output_subgraph_name(i)
+                # pyrefly: ignore  # missing-attribute
                 partial_code.finalize_hook(subgraph_name)
 
             if isinstance(partial_code, str):
@@ -1879,6 +1889,7 @@ class SIMDScheduling(BaseScheduling):
                         only_gen_src_code=True,
                     )
                     assert isinstance(src_code, str)
+                    # pyrefly: ignore  # bad-argument-type
                     src_codes.append(src_code)
                 else:
                     if size_hint is None:
@@ -2708,6 +2719,7 @@ class SIMDScheduling(BaseScheduling):
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
 
         # Optionally, prefer tiling into as many dimensions as possible.
+        # pyrefly: ignore  # unbound-name
         if config.triton.prefer_nd_tiling:
             ranked_tilings = (
                 cls.get_nd_tilings(node_schedule, numel, reduction_numel)
@@ -2757,6 +2769,7 @@ class SIMDScheduling(BaseScheduling):
                     hint_override=hint_override,
                 )
 
+        # pyrefly: ignore  # missing-attribute
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return src_code
 
