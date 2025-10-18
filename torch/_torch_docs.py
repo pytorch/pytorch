@@ -7673,8 +7673,6 @@ If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output tensors having 1 fewer dimension than :attr:`input`.
 
-.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
-
 Args:
     {input}
     {opt_dim}
