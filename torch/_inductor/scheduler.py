@@ -3994,6 +3994,12 @@ class Scheduler:
         ):
             return -1
 
+        # in some rare case, a template can be passed in.
+        # Check test_interaction_with_multi_template in test_loop_ordering.py
+        # and https://github.com/pytorch/pytorch/issues/165579
+        if node1.is_template() or node2.is_template():
+            return -1
+
         node1_buffer_names = node1.read_writes.buffer_names()
         node2_buffer_names = node2.read_writes.buffer_names()
         # Fast path: no common buffers.
