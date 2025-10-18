@@ -457,7 +457,9 @@ class ProcessLocalGroup(dist.ProcessGroup):
     ):
         works = [
             self._reduce_scatter_base(output_tensor, input_tensor, opts)
-            for output_tensor, input_tensor in zip(output_tensors, input_tensors)
+            for output_tensor, input_tensor in zip(
+                output_tensors, input_tensors, strict=True
+            )
         ]
         for work in works[:-1]:
             work.wait()
@@ -467,7 +469,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
     ):
         res = None
-        for o_t, i_t in zip(output_tensor_list, input_tensor_list):
+        for o_t, i_t in zip(output_tensor_list, input_tensor_list, strict=True):
             res = self._allgather_base(o_t, i_t)
         return res
 

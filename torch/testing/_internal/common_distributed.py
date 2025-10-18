@@ -1153,7 +1153,7 @@ def run_subtests(
     subtest_config_values: list[list[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
-        subtest_kwargs = dict(zip(subtest_config_keys, values))
+        subtest_kwargs = dict(zip(subtest_config_keys, values, strict=True))
         with cls_inst.subTest(**subtest_kwargs):
             torch._dynamo.reset()
             test_fn(*test_args, **test_kwargs, **subtest_kwargs)
