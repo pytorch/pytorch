@@ -247,8 +247,10 @@ def aot_compile_fullgraph(
         assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         device_type = _graph_device_type(backend_input.graph_module.graph)
+        tracing_context = TracingContext(backend_input.fake_mode)
+        tracing_context.tensor_to_context = backend_input.tensor_to_context
         with (
-            torch._guards.tracing(TracingContext(backend_input.fake_mode)),
+            torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
                     "bundled_autograd_cache": True,
@@ -279,7 +281,7 @@ def aot_compile_fullgraph(
             source_info.add_code(traced_code)
 
         artifacts = CompileArtifacts(
-            signature=inspect.signature(fn),
+            signature=convert_frame._get_signature(fn),
             bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,
