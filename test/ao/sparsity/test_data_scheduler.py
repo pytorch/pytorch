@@ -143,7 +143,7 @@ class TestBaseDataScheduler(TestCase):
 
         # checking step count
         step_cnt = 5
-        for _ in range(step_cnt):
+        for _ in range(0, step_cnt):
             sparsifier.step()
             scheduler.step()
 

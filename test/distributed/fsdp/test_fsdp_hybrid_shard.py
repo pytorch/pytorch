@@ -124,7 +124,7 @@ class TestFSDPHybridShard(FSDPTest):
         model = MyModel().to(device_type)
         num_node_devices = torch.accelerator.device_count()
         shard_rank_lists = (
-            list(range(num_node_devices // 2)),
+            list(range(0, num_node_devices // 2)),
             list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (
@@ -175,7 +175,7 @@ class TestFSDPHybridShard(FSDPTest):
         model = MyModel().to(device_type)
         num_node_devices = torch.accelerator.device_count()
         shard_rank_lists = (
-            list(range(num_node_devices // 2)),
+            list(range(0, num_node_devices // 2)),
             list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (

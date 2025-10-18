@@ -32,7 +32,7 @@ class TestXNNPackBackend(unittest.TestCase):
             },
         )
 
-        for _ in range(20):
+        for _ in range(0, 20):
             sample_input = torch.randn(4, 4, 4)
             actual_output = scripted_module(sample_input)
             expected_output = lowered_module(sample_input)

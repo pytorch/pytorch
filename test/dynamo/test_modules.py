@@ -3047,7 +3047,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         def generate(x, c):
             return mod(x) + c
 
-        for _ in range(10):
+        for _ in range(0, 10):
             generate(torch.randn(10, 10), 0)
             generate(torch.randn(10, 10), 1)
         self.assertEqual(cnt.frame_count, 2)

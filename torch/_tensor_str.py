@@ -307,7 +307,7 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
                 _tensor_str_with_formatter(
                     self[i], indent + 1, summarize, formatter1, formatter2
                 )
-                for i in range(PRINT_OPTS.edgeitems)
+                for i in range(0, PRINT_OPTS.edgeitems)
             ]
             + ["..."]
             + [
@@ -322,7 +322,7 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
             _tensor_str_with_formatter(
                 self[i], indent + 1, summarize, formatter1, formatter2
             )
-            for i in range(self.size(0))
+            for i in range(0, self.size(0))
         ]
 
     tensor_str = ("," + "\n" * (dim - 1) + " " * (indent + 1)).join(slices)
@@ -406,7 +406,7 @@ def get_summarized_data(self):
     if not PRINT_OPTS.edgeitems:
         return self.new_empty([0] * self.dim())
     elif self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        start = [self[i] for i in range(PRINT_OPTS.edgeitems)]
+        start = [self[i] for i in range(0, PRINT_OPTS.edgeitems)]
         end = [self[i] for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))]
         return torch.stack([get_summarized_data(x) for x in (start + end)])
     else:

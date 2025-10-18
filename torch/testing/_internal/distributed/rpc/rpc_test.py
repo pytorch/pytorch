@@ -1818,7 +1818,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Spawn multiple threads that send RPCs to ensure keys are correctly
         # prefixed when there are multiple RPCs being created/in flight at the
         # same time.
-        dst_ranks = [rank for rank in range(self.world_size) if rank != self.rank]
+        dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
 
         def rpc_with_profiling(dst_worker):
             with _profile() as prof:
@@ -1884,7 +1884,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         if self.rank != 1:
             return
 
-        dst_ranks = [rank for rank in range(self.world_size) if rank != self.rank]
+        dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
         for dst in dst_ranks:
             dst_worker = worker_name(dst)
             with _profile() as prof:

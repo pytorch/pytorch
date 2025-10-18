@@ -1146,7 +1146,7 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn1(x):
-            return x + torch.tensor(list(range(12)), device=device)
+            return x + torch.tensor(list(range(0, 12)), device=device)
 
         def fn2(x):
             return x + torch.tensor(list(range(1, 13)), device=device)

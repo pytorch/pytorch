@@ -190,7 +190,7 @@ class TestActivationSparsifier(TestCase):
                 if features is None:
                     assert torch.all(mask * input_data == output)
                 else:
-                    for feature_idx in range(len(features)):
+                    for feature_idx in range(0, len(features)):
                         feature = torch.Tensor(
                             [features[feature_idx]], device=input_data.device
                         ).long()
@@ -378,7 +378,7 @@ class TestActivationSparsifier(TestCase):
         # some dummy data
         data_list = []
         num_data_points = 5
-        for _ in range(num_data_points):
+        for _ in range(0, num_data_points):
             rand_data = torch.randn(16, 1, 28, 28)
             activation_sparsifier.model(rand_data)
             data_list.append(rand_data)

@@ -15,7 +15,7 @@ class CyclingIteratorTest(unittest.TestCase):
     def generator(self, epoch, stride, max_epochs):
         # generate an continuously incrementing list each epoch
         # e.g. [0,1,2] [3,4,5] [6,7,8] ...
-        return iter([stride * epoch + i for i in range(stride)])
+        return iter([stride * epoch + i for i in range(0, stride)])
 
     def test_cycling_iterator(self):
         stride = 3
@@ -25,7 +25,7 @@ class CyclingIteratorTest(unittest.TestCase):
             return self.generator(epoch, stride, max_epochs)
 
         it = CyclingIterator(n=max_epochs, generator_fn=generator_fn)
-        for i in range(stride * max_epochs):
+        for i in range(0, stride * max_epochs):
             self.assertEqual(i, next(it))
 
         with self.assertRaises(StopIteration):

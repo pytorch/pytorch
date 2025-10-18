@@ -5300,7 +5300,7 @@ class TestSparseAny(TestCase):
             x_dense = torch.eye(dense_dim, dtype=dtype, device=device)
             for sparse_dim_in in range(1, dense_dim):
                 x_sparse = x_dense.to_sparse(sparse_dim_in)
-                for sparse_dim_out in range(dense_dim):
+                for sparse_dim_out in range(0, dense_dim):
                     if sparse_dim_out == sparse_dim_in:
                         self.assertTrue(x_sparse.to_sparse(sparse_dim_out).sparse_dim() == sparse_dim_out)
                     else:

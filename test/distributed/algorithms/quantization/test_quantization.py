@@ -79,7 +79,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            group = list(range(self.world_size))
+            group = list(range(0, self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
                 group, group_id, self.rank, dtype=torch.float32, qtype=DQuantType.FP16
@@ -94,7 +94,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            group = list(range(self.world_size))
+            group = list(range(0, self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
                 group, group_id, self.rank, dtype=torch.float32, qtype=DQuantType.BFP16
@@ -111,7 +111,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            group = list(range(self.world_size))
+            group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all(
@@ -135,7 +135,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            group = list(range(self.world_size))
+            group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all(
@@ -158,7 +158,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            group = list(range(self.world_size))
+            group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all_single(
@@ -181,7 +181,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            group = list(range(self.world_size))
+            group = list(range(0, self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
             self._test_all_to_all_single(

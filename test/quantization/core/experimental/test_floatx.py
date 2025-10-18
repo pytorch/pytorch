@@ -275,7 +275,7 @@ class TestFloat8Dtype(TestCase):
         IMO simpler to special case e8m0 here.
         """
 
-        for biased_exponent in range(256):
+        for biased_exponent in range(0, 256):
             # iterate through all the possible options of guard, round, sticky bits
             # for the current exponent
             for grs in range(8):

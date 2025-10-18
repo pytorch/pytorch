@@ -243,7 +243,7 @@ class TestTEFuser(JitTestCase):
             return x2.sum()
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(range(15)), dtype=torch.float, device="cpu")
+            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device="cpu")
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
@@ -259,7 +259,7 @@ class TestTEFuser(JitTestCase):
             return x.sum((-2,)) * 2
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(range(15)), dtype=torch.float, device="cpu")
+            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device="cpu")
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
@@ -271,7 +271,7 @@ class TestTEFuser(JitTestCase):
             return x.sum((0,), keepdim=True, dtype=torch.double) * 2
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(range(15)), dtype=torch.float, device="cpu")
+            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device="cpu")
             a = a.reshape(5, 3)
 
             self.checkScript(func, (a,))
@@ -2234,7 +2234,7 @@ class TestTEFuser(JitTestCase):
 
         indices = [0, 1, 2, 3]
         sets = []
-        for i in range(len(indices) + 1):
+        for i in range(0, len(indices) + 1):
             for subset in combinations(indices, i):
                 sets.append(subset)  # noqa: PERF402
 

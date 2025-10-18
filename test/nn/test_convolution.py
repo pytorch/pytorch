@@ -1292,7 +1292,7 @@ class TestConvolutionNN(NNTestCase):
             kernel_x = torch.zeros([3, 1, 1, radius * 2 + 1], device=image.device)
             image = torch.nn.functional.conv2d(image, kernel_x, groups=image.shape[-3])
 
-        for i in range(128):
+        for i in range(0, 128):
             # This should not fail
             reproducer(radius=i)
 

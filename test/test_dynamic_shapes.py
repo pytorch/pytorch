@@ -1385,7 +1385,7 @@ class f(torch.nn.Module):
             self.assertEqual(x.storage_offset(), y.storage_offset())
 
     def test_tensor_factory_with_symint(self):
-        args = list(range(3))
+        args = list(range(0, 3))
         expected = torch.tensor(args)
 
         shape_env = ShapeEnv()

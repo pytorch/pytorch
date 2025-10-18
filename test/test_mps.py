@@ -1900,7 +1900,7 @@ class TestMPS(TestCaseMPS):
         res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
         self.assertEqual(res_mps, res_cpu)
 
-        for dim in range(B_mps.dim()):
+        for dim in range(0, B_mps.dim()):
             res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
             res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
             self.assertEqual(res_mps, res_cpu)
@@ -2871,8 +2871,8 @@ class TestMPS(TestCaseMPS):
 
     def test_contiguous_slice_2d(self):
         def helper(shape):
-            for i in range(shape[0]):
-                for j in range(shape[1]):
+            for i in range(0, shape[0]):
+                for j in range(0, shape[1]):
                     t_mps = torch.randn(shape, device="mps")
                     t_cpu = t_mps.detach().clone().cpu()
 
@@ -3432,12 +3432,12 @@ class TestMPS(TestCaseMPS):
         elems = torch.arange(n_tensors * n_tensor_elems, dtype=torch.float32)
 
         tensor_list = []
-        for i in range(n_tensors - 1):
+        for i in range(0, n_tensors - 1):
             # create a list of contiguous view tensors (view tensor created by the slice op)
             t = elems[n_tensor_elems * i : n_tensor_elems * (i + 1)]
             tensor_list.append(t)
 
-        for i in range(n_tensors - 1):
+        for i in range(0, n_tensors - 1):
             t = tensor_list[i].view(1, n_tensor_elems)
             t_mps = t.to("mps")
             self.assertEqual(t, t_mps.cpu(), f"i={i}")
@@ -4942,7 +4942,7 @@ class TestMPS(TestCaseMPS):
             x_mps = fn(torch.zeros(shape, device="mps"), dim=dim)
             self.assertEqual(x_cpu, x_mps.cpu())
         for fn in [torch.any, torch.all]:
-            for dim in range(4):
+            for dim in range(0, 4):
                 helper(fn, dim)
 
         # 6D tensor reductions
@@ -9750,7 +9750,7 @@ class TestGatherScatter(TestCaseMPS):
         self.assertEqual(x_cpu, x_mps)
 
     def test_cast_gather_scatter(self):
-        for _ in range(50):
+        for _ in range(0, 50):
             input = np.random.randint(0, 255, size=(5, 5, 4), dtype=np.uint8)
             with torch.no_grad():
                 s = torch.tensor(input, dtype=torch.uint8, device="mps").unsqueeze(0)

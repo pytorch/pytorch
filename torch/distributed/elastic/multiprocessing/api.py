@@ -727,7 +727,7 @@ class MultiprocessContext(PContext):
             # pipe. Hence to prevent deadlocks on large return values,
             # we opportunistically try queue.get on each join call
             # See: https://docs.python.org/2/library/multiprocessing.html#all-platforms
-            for local_rank in range(self.nprocs):
+            for local_rank in range(0, self.nprocs):
                 return_queue = self._ret_vals[local_rank]
                 if not return_queue.empty():
                     # save the return values temporarily into a member var

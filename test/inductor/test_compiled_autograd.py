@@ -1599,7 +1599,7 @@ main()
 
         eager_check()
 
-        for i in range(5):
+        for i in range(0, 5):
             with compiled_autograd._enable(compiler_fn):
                 eager_check()
 

@@ -191,7 +191,7 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
         """
         client = timer.FileTimerClient(file_path)
         sem.release()
-        for _ in range(n):
+        for _ in range(0, n):
             client.acquire("test_scope", 0)
             time.sleep(interval)
 
