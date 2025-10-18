@@ -3913,7 +3913,8 @@ class DualWrapperCodegen(CodeGen):
                         return result1
                     else:
                         raise RuntimeError(
-                            f"DualWrapperCodegen method '{name}' returned different results from original_wrapper_code and autotuning_wrapper_code: {result1} != {result2}"
+                            f"DualWrapperCodegen method '{name}' returned different results."
+                            f"original_wrapper_code v.s. autotuning_wrapper_code: {result1} != {result2}"
                         )
 
                 return dual_method
@@ -3923,7 +3924,8 @@ class DualWrapperCodegen(CodeGen):
                     return attr1
                 else:
                     raise RuntimeError(
-                        f"DualWrapperCodegen attribute '{name}' has different values between original_wrapper_code and autotuning_wrapper_code: {attr1} != {attr2}"
+                        f"DualWrapperCodegen attribute '{name}' has different values."
+                        f"original_wrapper_code v.s. autotuning_wrapper_code: {attr1} != {attr2}"
                     )
         else:
             raise AttributeError(
