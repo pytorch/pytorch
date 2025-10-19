@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import warnings
 import weakref
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -177,6 +178,7 @@ class ModTracker:
                 def custom_formatwarning(msg, category, filename, lineno, line=None):
                     return f"{filename}:{lineno}: {category.__name__}: {msg} \n"
 
+                # pyrefly: ignore  # bad-assignment
                 warnings.formatwarning = custom_formatwarning
                 warnings.warn(
                     "The module hierarchy tracking maybe be messed up."

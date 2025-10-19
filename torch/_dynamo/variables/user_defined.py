@@ -293,9 +293,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
             if isinstance(obj.__func__, property):
-                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
-                    tx, [self], {}
-                )
+                fget_vt = VariableTracker.build(tx, obj.__func__.fget)
+                return fget_vt.call_function(tx, [self], {})
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -716,7 +715,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                 assert all(x is not None for x in items)
 
-            return variables.NamedTupleVariable(items, self.value)
+            # Modify mutability of namedtuple for sourcelesss instantiations.
+            from .base import AttributeMutationNew
+
+            return variables.NamedTupleVariable(
+                items, self.value, mutation_type=AttributeMutationNew()
+            )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
@@ -1442,6 +1446,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj_from_class is subobj
             and self.cls_source is not None
             and self.source is not None
+            and hasattr(self.value, "__dict__")
+            and name not in self.value.__dict__
         )
 
         if isinstance(subobj, property):
@@ -1451,12 +1457,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Get the getter function
                 source = AttrSource(source, "fget")
 
-            # Avoid using UserMethodVariable here because there is no way to
-            # access the method object here. Direct inline by creating the
-            # UserFunctionVariable.
-            return variables.UserFunctionVariable(
-                subobj.fget, source=source
-            ).call_function(tx, [self], {})
+            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
             # emulate its `__get__`, which is implemented in C.
@@ -1665,7 +1667,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         def __eq__(self, other):
             return (
-                type(self) == type(other)
+                type(self) is type(other)
                 and self.cls == other.cls
                 and self.fields == other.fields
             )
@@ -1746,6 +1748,21 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         ctor = self.python_type()
         return ctor(*args, **kwargs)
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Handle specific pytree classes
+        import torch.utils._pytree as pytree
+
+        if self.value_type is pytree.LeafSpec:
+            # Create a new LeafSpec instance by calling the constructor
+            codegen.add_push_null(
+                lambda: codegen.load_import_from("torch.utils._pytree", "LeafSpec")
+            )
+            codegen.extend_output(create_call_function(0, False))
+            return
+
+        # For other frozen dataclasses, fall back to the base class behavior
+        super().reconstruct(codegen)
+
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
     def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
@@ -1771,7 +1788,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        fn_variable = VariableTracker.build(tx, self.value.forward.__func__)
         args = [self] + args
         return tx.inline_user_function_return(
             fn_variable,

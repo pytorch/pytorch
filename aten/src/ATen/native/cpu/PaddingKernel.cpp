@@ -96,7 +96,7 @@ struct ReplicationPad {
 };
 
 template <typename scalar_t>
-static inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
+inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
   using Vec = Vectorized<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -112,7 +112,7 @@ static inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
 }
 
 template <typename scalar_t>
-static inline void add_stub(scalar_t* grad_in, const scalar_t* grad_out, int64_t size) {
+inline void add_stub(scalar_t* grad_in, const scalar_t* grad_out, int64_t size) {
   using Vec = Vectorized<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -156,7 +156,7 @@ void cpu_padding(
   int64_t offset_h = ndim >= 2 ? p.offsets[ndim - 2] : 0;
   int64_t offset_w = p.offsets[ndim - 1];
 
-  // do vectorized copy whe output is overlapped with input on W,
+  // do vectorized copy when output is overlapped with input on W,
   // only applies to positive padding
   auto loop = [=](scalar_t* out, const scalar_t* in, bool positive_padding) {
     if (positive_padding) {

@@ -181,15 +181,15 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/csrc/jit/python/init.cpp @mikaylagawarecki
 
 # CUDA and CUDA math libraries
-aten/src/ATen/cuda/ @eqy @syed-ahmed
-aten/src/ATen/cudnn/ @eqy @syed-ahmed
-aten/src/ATen/native/cuda/ @eqy @syed-ahmed
-aten/src/ATen/native/cudnn/ @eqy @syed-ahmed
-c10/cuda @eqy @syed-ahmed
-torch/cuda/ @eqy @syed-ahmed
-torch/csrc/cuda/ @eqy @syed-ahmed
-torch/backends/cuda/ @eqy @syed-ahmed
-torch/backends/cudnn/ @eqy @syed-ahmed
+aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
+c10/cuda @eqy @syed-ahmed @Aidyn-A
+torch/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 
 # PyTree utilities
 /torch/utils/_pytree.py @XuehaiPan
@@ -201,3 +201,17 @@ torch/backends/cudnn/ @eqy @syed-ahmed
 /torch/csrc/stable/ @janeyx99 @mikaylagawarecki
 /torch/headeronly/ @janeyx99
 /torch/header_only_apis.txt @janeyx99
+
+# FlexAttention
+/torch/nn/attention/flex_attention.py @drisspg
+/torch/_higher_order_ops/flex_attention.py @drisspg
+/torch/_inductor/kernel/flex/ @drisspg
+/torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
+/test/inductor/test_flex_attention.py @drisspg
+/test/inductor/test_flex_decoding.py @drisspg
+
+# Low Precision GEMMs
+/aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
+/test/test_scaled_matmul_cuda.py @drisspg @slayton58

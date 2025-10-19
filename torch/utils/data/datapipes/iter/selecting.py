@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
-from collections.abc import Iterator
-from typing import Callable, TypeVar
+from collections.abc import Callable, Iterator
+from typing import TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
@@ -88,7 +88,7 @@ class FilterIterDataPipe(IterDataPipe[_T_co]):
             for idx, mask in enumerate(df_wrapper.iterate(condition)):
                 if mask:
                     result.append(df_wrapper.get_item(data, idx))
-            if len(result):
+            if result:
                 return True, df_wrapper.concat(result)
             else:
                 return False, None  # type: ignore[return-value]
