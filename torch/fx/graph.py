@@ -454,6 +454,7 @@ class CodeGen:
         include_device = include_device or (
             os.environ.get("FX_GRAPH_SHOW_DEVICE", "0") == "1"
         )
+        include_meta = os.environ.get("FX_GRAPH_SHOW_META", "0") == "1"
 
         def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
@@ -688,6 +689,13 @@ class CodeGen:
                 if desc is not None and node.op == "placeholder":
                     maybe_comment += f"  # {desc}"
                 # output is handled specially
+
+            if include_meta and hasattr(node, "meta") and node.meta:
+                # Print the node.meta dict as a comment above the node
+                import pprint
+                meta_str = pprint.pformat(node.meta, width=80, compact=True)
+                for line in meta_str.splitlines():
+                    body.append(f"# meta: {line}\n")
 
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
