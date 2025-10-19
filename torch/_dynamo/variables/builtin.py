@@ -83,7 +83,6 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -101,6 +100,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .streams import EventVariable, StreamVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -1041,7 +1041,7 @@ class BuiltinVariable(VariableTracker):
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
                         if not has_constant_handler:
-                            log.warning(
+                            log.warning(  # noqa: G200
                                 "incorrect arg count %s %s and no constant handler",
                                 self_handler,
                                 e,
@@ -1560,9 +1560,9 @@ class BuiltinVariable(VariableTracker):
                 try:
                     # Only supports certain function types
                     user_func_variable = variables.UserFunctionVariable(bound_method)
-                except AssertionError as e:
+                except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
-                    log.warning("Failed to create UserFunctionVariable: %s", e)
+                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
                     return
 
                 # Inline the user function
@@ -1831,6 +1831,8 @@ class BuiltinVariable(VariableTracker):
             ret = obj
         elif isinstance(obj, variables.RangeVariable):
             ret = obj.call_method(tx, "__iter__", [], {})
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
+            ret = obj  # type: ignore[assignment]
         else:
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -1845,7 +1847,7 @@ class BuiltinVariable(VariableTracker):
                 polyfills.builtins.iter_
             ).call_function(tx, [obj, *args], {})
 
-            if len(args):
+            if args:
                 # iter(obj, sentinel) returns an object that implements
                 # __iter__ and __next__ methods (UserDefinedObjectVariable)
                 # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)

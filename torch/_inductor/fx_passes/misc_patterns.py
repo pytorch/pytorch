@@ -49,6 +49,7 @@ def _misc_patterns_init():
         # pyrefly: ignore  # bad-argument-type
         randperm_index_add_replacement,
         [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
+        # pyrefly: ignore  # bad-argument-type
         fwd_only,
         # pyrefly: ignore  # bad-argument-type
         [post_grad_patterns, joint_graph_patterns],
@@ -68,6 +69,7 @@ def _misc_patterns_init():
         # pyrefly: ignore  # bad-argument-type
         randperm_index_replacement,
         [torch.empty(4, 8, device=device)],
+        # pyrefly: ignore  # bad-argument-type
         fwd_only,
         # pyrefly: ignore  # bad-argument-type
         [post_grad_patterns, joint_graph_patterns],
