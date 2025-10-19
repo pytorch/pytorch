@@ -1212,7 +1212,7 @@ class KinetoStepTracker:
                     "Profiler step count has increased more than 1 - "
                     f"current_step = {cls._current_step} step dict =  {cls._step_dict}"
                 )
-            for _ in range(0, delta):
+            for _ in range(delta):
                 _kineto_step()
             cls._current_step = new_step
         return cls._current_step

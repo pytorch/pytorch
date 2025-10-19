@@ -1775,15 +1775,18 @@ def _fused_rms_norm(
     # computation_dtype would be one of [Double, Float, ComplexFloat, ComplexDouble]
     if eps is None:
         if computation_dtype in (torch.float32, torch.complex64):
-            eps_val = sys.float_info.epsilon
+            eps_val = torch.finfo(torch.float32).eps
         else:
-            eps_val = sys.float_info.epsilon
+            eps_val = torch.finfo(torch.float64).eps
     else:
         eps_val = eps
 
     rqrst_input = torch.rsqrt(
         # NB: don't inplace here, will violate functional IR invariant
-        torch.pow(upcasted_input, 2).mean(dim=dims_to_reduce, keepdim=True).add(eps_val)
+        # NB: carefully use the Scalar overload of add to ensure compatibility with the C++ decomp
+        torch.ops.aten.add.Scalar(
+            torch.pow(upcasted_input, 2).mean(dim=dims_to_reduce, keepdim=True), eps_val
+        )
     )
 
     upcasted_result = upcasted_input.mul(rqrst_input)
@@ -2842,7 +2845,7 @@ def _index_add(
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
-            python_type == bool
+            python_type is bool
             or utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )

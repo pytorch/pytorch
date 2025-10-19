@@ -774,6 +774,9 @@ def run_test_retries(
                 "Test succeeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
+            # This is for log classifier so it can prioritize consistently
+            # failing tests instead of reruns. [1:-1] to remove quotes
+            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -1119,6 +1122,9 @@ def run_doctests(test_module, test_directory, options):
 
     if torch.mps.is_available():
         os.environ["TORCH_DOCTEST_MPS"] = "1"
+
+    if torch.distributed.is_available():
+        os.environ["TORCH_DOCTEST_DISTRIBUTED"] = "1"
 
     if 0:
         # TODO: could try to enable some of these
