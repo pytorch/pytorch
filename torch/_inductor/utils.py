@@ -277,6 +277,30 @@ def do_bench_using_profiling(
     rep: int = 100,
     is_vetted_benchmarking: bool = False,
 ) -> float:
+    # We did't use decorator may_distort_benchmarking_result directly since that
+    # requires us to import torch._inductor.runtime.benchmarking into global scope.
+    # Importing torch._inductor.runtime.benchmarking will cause cuda initialization
+    # (because of calling torch.cuda.available in global scope)
+    # which cause failure in vllm when it create child processes. Check log:
+    #   https://gist.github.com/shunting314/c194e147bf981e58df095c14874dd65a
+    #
+    # Another way to solve the issue is to just move do_bench_using_profiling
+    # to torch._inductor.runtime.benchmarking and change all the call site.
+    # But that's not trivial due to so many call sites in and out of pytorch.
+
+    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
+
+    return may_distort_benchmarking_result(_do_bench_using_profiling)(
+        fn, warmup, rep, is_vetted_benchmarking
+    )
+
+
+def _do_bench_using_profiling(
+    fn: Callable[[], Any],
+    warmup: int = 25,
+    rep: int = 100,
+    is_vetted_benchmarking: bool = False,
+) -> float:
     """
     Returns benchmark results by examining torch profiler events.
     This could be more accurate as it doesn't count CPU side overhead.
@@ -736,7 +760,6 @@ def get_fused_kernel_name(
         ]
     else:
         raise NotImplementedError
-    sources = sources
     return "_".join(["fused"] + sources)
 
 
@@ -768,7 +791,7 @@ def get_kernel_metadata(
     # where `inductor_nodes` contains nodes from multiple graph instances
     # is not supported. An example of this is conditional statements.
     single_graph = None
-    if len(inductor_nodes):
+    if inductor_nodes:
         unique_graphs = OrderedSet(n.graph for n in inductor_nodes)
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
