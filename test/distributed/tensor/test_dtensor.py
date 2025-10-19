@@ -36,7 +36,9 @@ from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 
@@ -236,7 +238,7 @@ class DTensorTest(DTensorTestBase):
         )
 
         dtensor = DTensor.from_local(
-            tensor_list[self.rank],
+            map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
             device_mesh,
             (Shard(0),),
             shape=global_tensor.size(),
@@ -264,7 +266,7 @@ class DTensorTest(DTensorTestBase):
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
             DTensor.from_local(
-                tensor_list[self.rank],
+                map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
                 device_mesh,
                 (Shard(0),),
                 shape=global_tensor.size(),
@@ -274,7 +276,7 @@ class DTensorTest(DTensorTestBase):
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
             DTensor.from_local(
-                tensor_list[self.rank],
+                map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
                 device_mesh,
                 (Shard(0),),
                 stride=global_tensor.stride(),
@@ -592,7 +594,12 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
         self.assertEqual(sharded_tensor.placements, placements)
         local_tensor = sharded_tensor.to_local()
-        self.assertEqual(local_tensor, full_tensor[range(self.rank, self.rank + 1), :])
+        self.assertEqual(
+            local_tensor,
+            map_local_tensor_for_rank(
+                full_tensor, self.rank, lambda ft, r: ft[range(r, r + 1), :]
+            ),
+        )
 
         # Shard by column
         placements = [Shard(1)]
@@ -600,7 +607,12 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
         self.assertEqual(sharded_tensor.placements, placements)
         local_tensor = sharded_tensor.to_local()
-        self.assertEqual(local_tensor, full_tensor[:, range(self.rank, self.rank + 1)])
+        self.assertEqual(
+            local_tensor,
+            map_local_tensor_for_rank(
+                full_tensor, self.rank, lambda ft, r: ft[:, range(r, r + 1)]
+            ),
+        )
 
         # assert full tensor is not changed
         self.assertEqual(full_tensor, torch.arange(ws * ws).reshape(ws, ws))
@@ -618,6 +630,19 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor.placements, placements)
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(local_tensor.item(), self.rank)
+
+
+DTensorTestWithLocalTensor = create_local_tensor_test_class(
+    DTensorTest,
+    skipped_tests=[
+        # Async output in local mode is not supported
+        "test_dtensor_async_output",
+        # Disabling saving and loading in local mode since it requires a deeper
+        # integration
+        "test_dtensor_save_load",
+        "test_dtensor_save_load_import",
+    ],
+)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -995,6 +1020,19 @@ class DTensorMeshTest(DTensorTestBase):
             self.fail("Unexpected ValueError raised with run_check=False")
 
 
+DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
+    DTensorMeshTest,
+    skipped_tests=[
+        # Test asserts must be rewritten for local tensor
+        "test_from_local_sub_mesh",
+        "test_default_value_sub_mesh",
+        "test_redistribute_sub_mesh",
+        # Local tensor mode doesn't support tensors of different types on different ranks
+        "test_metadata_consistency_check",
+    ],
+)
+
+
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
     def world_size(self):
@@ -1028,7 +1066,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
                 is_tensor_empty = [
-                    False if splitted_tensor.numel() > 0 else True
+                    not splitted_tensor.numel() > 0
                     for splitted_tensor in splitted_tensor_list
                 ]
                 expected_is_tensor_empty = [True] * self.world_size
@@ -1051,14 +1089,17 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [
-                    False if idx < size else True
-                    for idx, _ in enumerate(range(self.world_size))
+                    not idx < size for idx, _ in enumerate(range(self.world_size))
                 ]
                 is_tensor_empty = [
-                    False if unpadded_tensor.numel() > 0 else True
-                    for unpadded_tensor in unpadded_list
+                    not unpadded_tensor.numel() > 0 for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorPlacementTypes,
+)
 
 
 class TestDTensorSpec(DTensorTestBase):
@@ -1239,6 +1280,10 @@ class TestDTensorSpec(DTensorTestBase):
             DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
         )
 
+
+TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorSpec,
+)
 
 if __name__ == "__main__":
     run_tests()

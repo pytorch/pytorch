@@ -847,6 +847,14 @@ class _TorchDynamoContext:
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
+                # We shouldn't compile inside kernel invocation.
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if (
+                        tracing_context.fake_mode is not None
+                        and tracing_context.fake_mode.in_kernel_invocation
+                    ):
+                        return fn(*args, **kwargs)
+                # Skip nested compile - just inline the function
                 if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
@@ -1240,7 +1248,7 @@ def argument_names(
         # signature. Assign names as {varargs}_0, {varargs}_1, ...
         assert fullargspec.varargs is not None, "More arguments than expected"
         input_strs += [
-            f"{fullargspec.varargs}_{i}" for i in range(0, len(args) - len(input_strs))
+            f"{fullargspec.varargs}_{i}" for i in range(len(args) - len(input_strs))
         ]
     elif len(args) < len(fullargspec.args):
         # 3. If there are fewer arguments in `args` than `fullargspec.args`,
@@ -1530,7 +1538,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         }
 
         self.new_args = []
-        for i in range(0, len(flat_args)):
+        for i in range(len(flat_args)):
             arg = super().placeholder(f"arg{i}", (), {})
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
