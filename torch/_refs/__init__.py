@@ -5,6 +5,7 @@ import collections
 import inspect
 import itertools
 import math
+import numbers
 import operator
 import warnings
 from collections.abc import Callable, Iterable, Sequence
@@ -49,6 +50,16 @@ from torch._prims_common.wrappers import (
     elementwise_type_promotion_wrapper,
     elementwise_unary_scalar_wrapper,
     out_wrapper,
+)
+
+
+_FLOAT_DTYPES_WITH_INF = frozenset(
+    {
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    }
 )
 
 
@@ -1967,6 +1978,34 @@ def clamp(
     min: Optional[TensorOrNumberLikeType] = None,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
+    def _saturate_bound(
+        bound: Optional[TensorOrNumberLikeType],
+    ) -> Optional[TensorOrNumberLikeType]:
+        if bound is None or isinstance(bound, torch.Tensor):
+            return bound
+        if not isinstance(a, torch.Tensor):
+            return bound
+        dtype = a.dtype
+        if isinstance(bound, bool):
+            return bound
+        if not dtype.is_floating_point:
+            return bound
+        if isinstance(bound, numbers.Real):
+            value = float(bound)
+            if math.isnan(value) or math.isinf(value):
+                return value
+            info = torch.finfo(dtype)
+            supports_inf = dtype in _FLOAT_DTYPES_WITH_INF
+            if value > info.max:
+                return math.inf if supports_inf else info.max
+            if value < info.min:
+                return -math.inf if supports_inf else info.min
+            return value
+        return bound
+
+    min = _saturate_bound(min)
+    max = _saturate_bound(max)
+
     # NOTE: grad behavior with implementation `where` is not consistent on `nan`
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"

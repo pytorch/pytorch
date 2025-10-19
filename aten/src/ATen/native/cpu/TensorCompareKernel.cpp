@@ -32,9 +32,9 @@ namespace at::native { namespace {
 
 template <typename scalar_t>
 inline scalar_t clamp_cast_with_infinity(const Scalar& bound) {
-  using limits = std::numeric_limits<scalar_t>;
+  using opmath_t = at::opmath_type<scalar_t>;
+  using limits = std::numeric_limits<opmath_t>;
   if constexpr (limits::has_infinity) {
-    using opmath_t = at::opmath_type<scalar_t>;
     const double value = bound.to<double>();
     const opmath_t cast_to_opmath = static_cast<opmath_t>(value);
     return static_cast<scalar_t>(cast_to_opmath);

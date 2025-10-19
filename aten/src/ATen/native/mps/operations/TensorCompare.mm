@@ -1,11 +1,11 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/OpMathType.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <limits>
@@ -30,9 +30,9 @@ namespace mps {
 
 template <typename scalar_t>
 static double clamp_scalar_bound_to_double(const Scalar& bound) {
-  using limits = std::numeric_limits<scalar_t>;
+  using opmath_t = at::opmath_type<scalar_t>;
+  using limits = std::numeric_limits<opmath_t>;
   if constexpr (limits::has_infinity) {
-    using opmath_t = at::opmath_type<scalar_t>;
     const double value = bound.to<double>();
     const opmath_t cast_to_opmath = static_cast<opmath_t>(value);
     const scalar_t casted = static_cast<scalar_t>(cast_to_opmath);
