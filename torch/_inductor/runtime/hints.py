@@ -5,7 +5,6 @@ import collections
 import functools
 import typing
 from enum import auto, Enum
-from typing import Union
 
 from torch.utils._triton import has_triton_package
 
@@ -202,7 +201,7 @@ class HalideMeta(typing.NamedTuple):
     argtypes: list[HalideInputSpec]
     target: str
     scheduler: str | None = None
-    scheduler_flags: dict[str, Union[int, str]] | None = None
+    scheduler_flags: dict[str, int | str] | None = None
     cuda_device: int | None = None
 
     def args(self) -> list[str]:

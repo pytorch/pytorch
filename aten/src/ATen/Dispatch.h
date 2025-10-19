@@ -8,6 +8,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/complex.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
 
 #ifdef __CUDACC__
 #include <cuda.h> // For CUDA_VERSION
@@ -64,11 +65,11 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   } while (0)
 
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
-  THO_PRIVATE_CASE_TYPE_USING_HINT(                           \
+  AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(                       \
       AT_PRIVATE_CHECK_SELECTIVE_BUILD, enum_type, HINT, __VA_ARGS__)
 
 #define AT_DISPATCH_CASE(enum_type, ...) \
-  THO_DISPATCH_CASE(AT_PRIVATE_CASE_TYPE_USING_HINT, enum_type, __VA_ARGS__)
+  AT_DISPATCH_CASE_TMPL(AT_PRIVATE_CASE_TYPE_USING_HINT, enum_type, __VA_ARGS__)
 
 #define AT_DISPATCH_CASE_QINT(enum_type, scalar_type, ...) \
   THO_DISPATCH_CASE_QINT(                                  \
@@ -173,7 +174,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 // use it to shut up warnings about unused store.
 
 #define AT_DISPATCH_SWITCH(TYPE, NAME, ...) \
-  THO_DISPATCH_SWITCH(                      \
+  AT_DISPATCH_SWITCH_TMPL(                  \
       RECORD_KERNEL_FUNCTION_DTYPE,         \
       TORCH_CHECK_NOT_IMPLEMENTED,          \
       TYPE,                                 \

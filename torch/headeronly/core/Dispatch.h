@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/headeronly/core/Dispatch_v2.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <climits>
 
@@ -7,20 +8,20 @@
   This header file provides a set of THO_... macros that can be used
   to define custom dispatch macros as follows:
 
-  1. Define a DISPATCH_CASE macro using THO_DISPATCH_CASE as a
+  1. Define a DISPATCH_CASE macro using AT_DISPATCH_CASE_TMPL as a
     template, for instance:
 
       #define MY_DISPATCH_CASE(enum_type, ...) \
-        THO_DISPATCH_CASE(MY_CASE_PRELUDE, enum_type, __VA_ARGS__)
+        AT_DISPATCH_CASE_TMPL(MY_CASE_PRELUDE, enum_type, __VA_ARGS__)
 
     where MY_CASE_PRELUDE(enum_type) is a CPP macro that will be
     expanded inside each case block of a switch statement.
 
-  2. Define a DISPATCH_SWITCH macro using THO_DISPATCH_SWITCH as a
+  2. Define a DISPATCH_SWITCH macro using AT_DISPATCH_SWITCH_TMPL as a
     template, for instance:
 
       #define MY_DISPATCH_SWITCH(TYPE, NAME, ...)                  \
-        THO_DISPATCH_(MY_SWITCH_PRELUDE, MY_CHECK_NOT_IMPLEMENTED, \
+        AT_DISPATCH_TMPL(MY_SWITCH_PRELUDE, MY_CHECK_NOT_IMPLEMENTED, \
                       TYPE, NAME, __VA_ARGS__)
 
     where
@@ -73,16 +74,6 @@
   within user-defined DISPATCH_CASE and DISPATCH_SWITCH macros.
 */
 
-#define THO_PRIVATE_CASE_TYPE_USING_HINT(PRELUDE, enum_type, HINT, ...)       \
-  case enum_type: {                                                           \
-    PRELUDE(enum_type);                                                       \
-    using HINT [[maybe_unused]] = c10::impl::ScalarTypeToCPPTypeT<enum_type>; \
-    return __VA_ARGS__();                                                     \
-  }
-
-#define THO_DISPATCH_CASE(CASE_TYPE_USING_HINT, enum_type, ...) \
-  CASE_TYPE_USING_HINT(enum_type, scalar_t, __VA_ARGS__)
-
 #define THO_DISPATCH_CASE_QINT(PRELUDE, enum_type, scalar_type, ...)     \
   case enum_type: {                                                      \
     PRELUDE(enum_type);                                                  \
@@ -108,34 +99,6 @@
     [[maybe_unused]] int64_t quant_max = qmax;                           \
     return __VA_ARGS__();                                                \
   }
-
-namespace detail {
-
-inline c10::ScalarType scalar_type(c10::ScalarType s) {
-  return s;
-}
-
-} // namespace detail
-
-#define THO_DISPATCH_SWITCH(PRELUDE, CHECK_NOT_IMPLEMENTED, TYPE, NAME, ...) \
-  [&] {                                                                      \
-    const auto& the_type = TYPE;                                             \
-    constexpr const char* at_dispatch_name = NAME;                           \
-    /* don't use TYPE again in case it is an expensive or side-effect op */  \
-    c10::ScalarType _st = ::detail::scalar_type(the_type);                   \
-    PRELUDE(at_dispatch_name, _st);                                          \
-    switch (_st) {                                                           \
-      __VA_ARGS__                                                            \
-      default:                                                               \
-        CHECK_NOT_IMPLEMENTED(                                               \
-            false,                                                           \
-            '"',                                                             \
-            at_dispatch_name,                                                \
-            "\" not implemented for '",                                      \
-            c10::toString(_st),                                              \
-            "'");                                                            \
-    }                                                                        \
-  }()
 
 #define THO_DISPATCH_TYPES(                                \
     DISPATCH_SWITCH, DISPATCH_CASE_TYPES, TYPE, NAME, ...) \

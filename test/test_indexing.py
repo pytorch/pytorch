@@ -2030,7 +2030,7 @@ class TestIndexing(TestCase):
                 self.assertEqual(output, input_list)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @expectedFailureMPS
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))  # TODO: Add torch.cfloat here
     def test_index_fill(self, device, dtype):
         x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
         index = torch.tensor([0], device=device)
