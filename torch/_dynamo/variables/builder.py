@@ -2271,10 +2271,6 @@ class VariableBuilder:
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 inner_source = AttrSource(self.source, attr)
-                if isinstance(value, torch.distributed.tensor.DTensor):
-                    # We can skip the guards on _local_tensor because the outer
-                    # tensor and metadata is enough to guard for _local_tensor.
-                    inner_source = SkipGuardSource(inner_source)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )
