@@ -2365,7 +2365,7 @@ make_fallback(aten.randint)
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
-    if kwargs.get("generator", None) is not None:
+    if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -2375,7 +2375,7 @@ def rand(*args, **kwargs):
 
 @register_lowering(aten.randn)
 def randn(*args, **kwargs):
-    if kwargs.get("generator", None) is not None:
+    if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -7282,8 +7282,6 @@ def associative_scan(
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
     kwargs["reverse"] = reverse
-    print(reverse)
-    
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,
