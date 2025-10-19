@@ -219,8 +219,7 @@ class UvTcpServer : public UvTcpSocket {
     auto res = c10::make_intrusive<UvTcpServer>(loop);
     res->handleReady();
     try {
-      int uv_res = uv_tcp_open(
-          reinterpret_cast<uv_tcp_t*>(res->unsafeGetStream()), socket);
+      int uv_res = uv_tcp_open(res->unsafeGetSocket(), socket);
       C10D_CHECK_WITH(
           SocketError,
           uv_res == 0,
