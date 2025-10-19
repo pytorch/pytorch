@@ -1023,7 +1023,7 @@ class DTensorMeshTest(DTensorTestBase):
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
     DTensorMeshTest,
     skipped_tests=[
-        # Submeshes are not supported by local tensor mode
+        # Test asserts must be rewritten for local tensor
         "test_from_local_sub_mesh",
         "test_default_value_sub_mesh",
         "test_redistribute_sub_mesh",
