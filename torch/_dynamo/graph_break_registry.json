@@ -2790,5 +2790,15 @@
       "Explanation": "Object does not allow us to make a weakref to it",
       "Hints": []
     }
+  ],
+  "GB0277": [
+    {
+      "Gb_type": "Attempted to wrap sparse Tensor with VariableTracker",
+      "Context": "str(example_value)",
+      "Explanation": "torch.compile does not support sparse Tensors with VariableTracker",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
