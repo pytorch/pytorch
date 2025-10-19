@@ -3053,7 +3053,7 @@ class TestQuantizedOps(TestCase):
                 lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_config_dict
                 )
-                assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
+                assert type(lstm_quantized[0]) is torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)

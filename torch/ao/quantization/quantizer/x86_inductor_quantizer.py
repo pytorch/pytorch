@@ -417,6 +417,7 @@ class X86InductorQuantizer(Quantizer):
         # As we use `_need_skip_config` to skip all invalid configurations,
         # we can safely assume that the all existing non-None configurations
         # have the same quantization mode.
+        # pyrefly: ignore  # bad-assignment
         for qconfig in (
             list(self.module_name_qconfig.values())
             + list(self.operator_type_qconfig.values())
@@ -808,6 +809,7 @@ class X86InductorQuantizer(Quantizer):
                 )
                 binary_node.meta[QUANT_ANNOTATION_KEY] = (
                     _X86InductorQuantizationAnnotation(
+                        # pyrefly: ignore  # bad-argument-type
                         input_qspec_map=binary_node_input_qspec_map,
                         _annotated=True,
                     )
@@ -878,6 +880,7 @@ class X86InductorQuantizer(Quantizer):
                 )
                 binary_node.meta[QUANT_ANNOTATION_KEY] = (
                     _X86InductorQuantizationAnnotation(
+                        # pyrefly: ignore  # bad-argument-type
                         input_qspec_map=binary_node_input_qspec_map,
                         # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                         output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
@@ -1085,6 +1088,7 @@ class X86InductorQuantizer(Quantizer):
                 quantization_config
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                # pyrefly: ignore  # bad-argument-type
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
             )
@@ -1139,6 +1143,7 @@ class X86InductorQuantizer(Quantizer):
                 quantization_config
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                # pyrefly: ignore  # bad-argument-type
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -1352,9 +1357,7 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_output_share_observer_as_input(
         self, input_node: Node, source_node: Node
     ):
-        source_node_quantization_annotation = source_node.meta.get(
-            QUANT_ANNOTATION_KEY, None
-        )
+        source_node_quantization_annotation = source_node.meta.get(QUANT_ANNOTATION_KEY)
         if (
             source_node_quantization_annotation
             and source_node_quantization_annotation._is_output_of_quantized_pattern
@@ -1394,7 +1397,7 @@ class X86InductorQuantizer(Quantizer):
 
                 # Get the quantization_annotation from getitem_node
                 maxpool_node_quantization_annotation = maxpool_node.meta.get(
-                    QUANT_ANNOTATION_KEY, None
+                    QUANT_ANNOTATION_KEY
                 )
                 if (
                     maxpool_node_quantization_annotation
@@ -1495,6 +1498,7 @@ class X86InductorQuantizer(Quantizer):
             has_unary = unary_op is not None
             seq_partition = [torch.nn.Linear, binary_op]
             if has_unary:
+                # pyrefly: ignore  # bad-argument-type
                 seq_partition.append(unary_op)
             fused_partitions = find_sequential_partitions(gm, seq_partition)
             for fused_partition in fused_partitions:

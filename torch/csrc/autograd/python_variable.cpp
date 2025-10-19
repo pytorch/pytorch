@@ -213,7 +213,7 @@ static PyObject* THPVariable_NewWithVar(
     std::optional<bool> has_torch_dispatch_if_known = std::nullopt);
 
 // clang-tidy gets confused by static const
-static const char* VOLATILE_WARNING =
+static constexpr const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
@@ -265,7 +265,8 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
   }
 
   std::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -328,8 +329,8 @@ static bool isResurrectable(THPVariable* self) {
     return false;
   }
   // Check if this is hermetic. If it is, no resurrection.
-  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() !=
-      (PyObject*)self) {
+  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false) != (PyObject*)self) {
     return false;
   }
   return true;
@@ -354,7 +355,8 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
       !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
   c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj();
+  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj(
+      /*ignore_hermetic_tls=*/false);
 
   TORCH_INTERNAL_ASSERT(
       maybe_pyobj.has_value(),
@@ -684,7 +686,7 @@ static Tensor make_tensor_for_subclass_helper(
 }
 
 static PyObject* THPVariable_make_wrapper_subclass(
-    PyObject*,
+    PyObject* /*unused*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -893,7 +895,7 @@ static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
 // DTensor-specific variant of make_wrapper_subclass to minimize DTensor
 // overhead.
 static PyObject* THPVariable_dtensor_new(
-    PyObject*,
+    PyObject* /*unused*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -1317,13 +1319,18 @@ static int THPVariable_set_grad(
       self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  TORCH_CHECK(
-      var.dtype() == grad.dtype(),
-      "attempting to assign a gradient with dtype '",
-      grad.dtype(),
-      "' to a tensor with dtype '",
-      var.dtype(),
-      "'. Please ensure that the gradient and the tensor have the same dtype");
+  if (var.grad_dtype().has_value()) {
+    TORCH_CHECK(
+        grad.dtype() == var.grad_dtype().value(),
+        "attempting to assign a gradient with dtype '",
+        grad.dtype(),
+        "' to a tensor with grad_dtype '",
+        var.grad_dtype().value(),
+        "'. The gradient must match the tensor's grad_dtype (defaults to the tensor's "
+        "dtype). You can set the tensor's grad_dtype attribute with a specific dtype, or "
+        "None to allow any dtype. Set grad_dtype with caution. Diverging the dtypes of "
+        "a tensor and its gradient may break downstream systems that assume they match.");
+  }
   TORCH_CHECK(
       var.device().type() == grad.device().type(),
       "attempting to assign a gradient with device type '",
@@ -1332,8 +1339,11 @@ static int THPVariable_set_grad(
       var.device().type(),
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
+    auto expected_options = var.options().dtype(
+        var.grad_dtype().has_value() ? var.grad_dtype().value()
+                                     : grad.scalar_type());
     TORCH_CHECK(
-        grad.options().type_equal(var.options()),
+        grad.options().type_equal(expected_options),
         "attempting to assign a gradient to a tensor that has data of a different type");
   }
   TORCH_CHECK(
@@ -1839,6 +1849,56 @@ static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "grad_dtype");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      !var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
+  if (!var.grad_dtype().has_value()) {
+    Py_RETURN_NONE;
+  } else {
+    return torch::autograd::utils::wrap(var.grad_dtype().value());
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static int THPVariable_set_grad_dtype(
+    THPVariable* self,
+    PyObject* obj,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_setter(self, "grad_dtype", obj);
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      THPDtype_Check(obj) || obj == Py_None,
+      "grad_dtype must be a torch.dtype or None, but got ",
+      Py_TYPE(obj)->tp_name);
+  if (var.grad().defined() && obj != Py_None) {
+    auto new_dtype = reinterpret_cast<THPDtype*>(obj);
+    TORCH_CHECK(
+        var.grad().dtype() == new_dtype->scalar_type,
+        "Cannot set grad_dtype to '",
+        new_dtype->scalar_type,
+        "' because there is already a gradient with dtype '",
+        var.grad().dtype(),
+        "'. Please clear the gradient (.grad = None) before changing grad_dtype, "
+        "or ensure the new grad_dtype matches the existing gradient's dtype.");
+  }
+  std::optional<at::ScalarType> new_dtype;
+  if (obj != Py_None) {
+    auto* dtype = reinterpret_cast<THPDtype*>(obj);
+    new_dtype = dtype->scalar_type;
+  }
+  var.set_grad_dtype(new_dtype);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1995,6 +2055,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"imag",
      (getter)PropertyImag::getter,
      (setter)THPVariable_set_imag,
+     nullptr,
+     nullptr},
+    {"grad_dtype",
+     (getter)THPVariable_get_grad_dtype,
+     (setter)THPVariable_set_grad_dtype,
      nullptr,
      nullptr},
     {nullptr}};
@@ -2220,8 +2285,8 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed() &&
-        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() ==
-            (PyObject*)self) {
+        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+            /*ignore_hermetic_tls=*/false) == (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -2407,7 +2472,8 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+      /*ignore_hermetic_tls=*/false);
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common

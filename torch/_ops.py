@@ -521,19 +521,14 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
-        def wrapper():
-            flat_args = _to_flat_tuple(args, kwargs)
-            if torch.overrides.has_torch_function(flat_args):
-                return torch.overrides.handle_torch_function(
-                    self, flat_args, *args, **kwargs
-                )
-
-            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return self.dispatch(
-                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
+        flat_args = _to_flat_tuple(args, kwargs)
+        if torch.overrides.has_torch_function(flat_args):
+            return torch.overrides.handle_torch_function(
+                self, flat_args, *args, **kwargs
             )
 
-        return wrapper()
+        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
     # NOTE [HigherOrderOprator Schema]
     # Each invocation of a HigherOrderOperator (hop) should have its own schema because

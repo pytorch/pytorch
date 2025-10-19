@@ -282,6 +282,7 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
+    # pyrefly: ignore  # bad-override
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)
@@ -390,7 +391,7 @@ class DetachExecutor(fx.Interpreter):
 
         """
         def dont_traverse_size(a):
-            return type(a) != torch.Size
+            return type(a) is not torch.Size
         """
 
         args = map_aggregate(

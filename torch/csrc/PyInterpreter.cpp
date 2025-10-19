@@ -57,7 +57,7 @@ struct ConcretePyInterpreterVTable final
   void reportErrorCallback(PyObject* callback, DispatchKey key) const override;
   void python_dispatcher(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet,
+      c10::DispatchKeySet /*ks*/,
       torch::jit::Stack* stack) const override;
   // NB: this is defined in python_dispatch.cpp
   void python_op_registration_trampoline(
@@ -80,12 +80,15 @@ struct ConcretePyInterpreterVTable final
             opname, pymodule, context);
   }
 
-  bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
-      const override;
-  c10::SymBool sym_is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
-      const override;
-  bool is_strides_like(const c10::TensorImpl* self, at::MemoryFormat)
-      const override;
+  bool is_contiguous(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
+  c10::SymBool sym_is_contiguous(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
+  bool is_strides_like(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
   bool is_non_overlapping_and_dense(const c10::TensorImpl* self) const override;
   c10::Device device(const c10::TensorImpl* self) const override;
   int64_t dim(const c10::TensorImpl* self) const override;
@@ -614,7 +617,8 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj();
+  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
+      /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   auto obj = mb_obj.value();
@@ -641,7 +645,8 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj();
+  std::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   auto tensor_obj = mb_obj.value();
