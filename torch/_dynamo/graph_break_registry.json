@@ -2800,5 +2800,25 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0278": [
+    {
+      "Gb_type": "Message in torch._check cannot have a closure",
+      "Context": "Message VT has a closure",
+      "Explanation": "Trying to build a proxy of torch._check() message, but failed to, because it has a closure, which are unsupported for now.If possible, remove any variables from message and try again.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0279": [
+    {
+      "Gb_type": "Can't extract message from torch._check",
+      "Context": "torch._check() has a second argument, which is expected to be a message",
+      "Explanation": "Trying to build a proxy of torch._check() message, but failed to, because message variable tracker is not NestedUserFunctionVariable",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
