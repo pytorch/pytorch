@@ -1249,9 +1249,6 @@ def _exported_program_to_onnx_program(
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
 
-    # TODO(justinchuby): Remove the hack
-    _ir_passes.add_torchlib_common_imports(model)
-
     # Collect and add opset imports to the model
     _ir_passes.add_opset_imports(model)
 

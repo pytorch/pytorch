@@ -577,7 +577,7 @@ print(t.is_pinned())
             src = torch.randn(
                 1000000,
                 device="cuda" if dst == "cpu" else "cpu",
-                pin_memory=True if dst == "cuda" else False,
+                pin_memory=dst == "cuda",
             )
             _test_to_non_blocking(src, try_non_blocking, dst)
 
@@ -4375,6 +4375,28 @@ class TestCudaMallocAsync(TestCase):
 
                 ss = json.dumps(torch.cuda.memory._snapshot())
                 self.assertEqual(("empty_cache" in ss), (context == "all"))
+            finally:
+                torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    @requiresCppContext
+    def test_memory_plots_metadata(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._set_memory_metadata("metadata test")
+                torch.cuda.memory._record_memory_history(context="all")
+                x = torch.rand(3, 4, device="cuda")
+                del x
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._set_memory_metadata("")
+
+                ss = torch.cuda.memory._snapshot()
+                for event in ss["device_traces"][0]:
+                    self.assertTrue(event["user_metadata"] == "metadata test")
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
