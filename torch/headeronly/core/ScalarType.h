@@ -300,8 +300,24 @@ inline const char* toString(ScalarType t) {
 
 inline std::ostream& operator<<(
     std::ostream& stream,
-    at::ScalarType scalar_type) {
+    c10::ScalarType scalar_type) {
   return stream << toString(scalar_type);
+}
+
+inline ScalarType toUnderlying(ScalarType t) {
+  switch (t) {
+    case ScalarType::QUInt8:
+    case ScalarType::QUInt4x2:
+      [[fallthrough]];
+    case ScalarType::QUInt2x4:
+      return ScalarType::Byte;
+    case ScalarType::QInt8:
+      return ScalarType::Char;
+    case ScalarType::QInt32:
+      return ScalarType::Int;
+    default:
+      return t;
+  }
 }
 
 } // namespace c10
@@ -316,4 +332,5 @@ using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
 using c10::toString;
 using c10::operator<<;
+using c10::toUnderlying;
 } // namespace torch::headeronly
