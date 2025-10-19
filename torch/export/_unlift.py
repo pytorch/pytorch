@@ -219,6 +219,7 @@ def _convert_guards_code_to_fn(
     return guards_fn
 
 
+@torch._dynamo.disable
 def _check_input_constraints_for_module(self, args, kwargs):
     flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
     _check_input_constraints_for_graph(
@@ -325,8 +326,7 @@ def _insert_copy_for_mutations(
             return_nodes_to_copy[return_node] = copy_node
 
     output_args = tuple(
-        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
-        for node in user_output_nodes
+        return_nodes_to_copy.get(node, node) for node in user_output_nodes
     )
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
@@ -355,10 +355,10 @@ def _get_codegen(
     if forward_arg_names:
         names = forward_arg_names
     elif (
-        in_spec.type == tuple
+        in_spec.type is tuple
         and in_spec.num_children == 2
-        and in_spec.children_specs[0].type == tuple
-        and in_spec.children_specs[1].type == dict
+        and in_spec.children_specs[0].type is tuple
+        and in_spec.children_specs[1].type is dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
         names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]

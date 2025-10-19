@@ -158,7 +158,7 @@ class CompiledArtifact:
                         AOTAutogradCache,
                     )
 
-                    entry = AOTAutogradCache._lookup(
+                    result = AOTAutogradCache._lookup(
                         key,
                         local=True,
                         remote=False,
@@ -167,7 +167,8 @@ class CompiledArtifact:
                         aot_config=None,
                     )
 
-                assert entry is not None
+                assert result is not None
+                (entry, _) = result
 
                 from .compile_fx import _CompileFxKwargs
 

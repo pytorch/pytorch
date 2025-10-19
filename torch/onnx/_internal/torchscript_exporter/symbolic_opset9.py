@@ -14,7 +14,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -33,7 +33,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.types import Number
 
@@ -840,7 +840,7 @@ def t(g: jit_utils.GraphContext, self):
 def numpy_T(g: jit_utils.GraphContext, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     assert ndim is not None
-    perm = list(reversed(range(0, ndim)))
+    perm = list(reversed(range(ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
 
@@ -990,7 +990,7 @@ def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
 @_onnx_symbolic("aten::permute")
 @symbolic_helper.parse_args("v", "is")
 def permute(g: jit_utils.GraphContext, self, dims):
-    if dims == list(range(0, len(dims))):
+    if dims == list(range(len(dims))):
         return self
     return g.op("Transpose", self, perm_i=dims)
 
@@ -1051,6 +1051,7 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
@@ -1068,6 +1069,7 @@ def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split_with_sizes", 9, 11, "Dynamic number of outputs not supported", self
         )
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=_outputs)
 
 
@@ -1365,9 +1367,8 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             "get_pool_ceil_padding", "input size not accessible", input
         )
     ceiled_output_dim = [
-        int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])))
-        + 1
-        for i in range(0, len(padding))
+        math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
+        for i in range(len(padding))
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
@@ -1376,7 +1377,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
             else ceiled_output_dim[i]
         )
-        for i in range(0, len(ceiled_output_dim))
+        for i in range(len(ceiled_output_dim))
     ]
     padding_ceil = [
         (
@@ -1391,7 +1392,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
                 )
             )
         )
-        for i in range(0, len(padding))
+        for i in range(len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
@@ -1404,7 +1405,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
             else int(padding_ceil[i])
         )
-        for i in range(0, len(padding_ceil))
+        for i in range(len(padding_ceil))
     ]
     return padding_ceil
 
@@ -1696,16 +1697,17 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
                 name, "input size not accessible", input
             )
         # verify if output size % input size = 0 for all dim
-        mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
+        mod = [dim[i] % output_size[i] for i in range(len(dim))]
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return symbolic_helper._unimplemented(
                 name, "output size that are not factor of input size", output_size_value
             )
-        k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
+        k = [int(dim[i] / output_size[i]) for i in range(len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
+            # pyrefly: ignore  # not-callable
             return fn(g, input, k, k, (0,) * len(dim), (1,) * len(dim), False)
         output = g.op(type, input, kernel_shape_i=tuple_fn(k), strides_i=tuple_fn(k))
         return output
@@ -1760,6 +1762,7 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
         )
 
     padding = _convert_padding_node(padding)
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value, opset_before=11
@@ -1813,6 +1816,7 @@ def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
 def reflection_pad(g: jit_utils.GraphContext, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
@@ -1825,6 +1829,7 @@ def reflection_pad(g: jit_utils.GraphContext, input, padding):
 def replication_pad(g: jit_utils.GraphContext, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
@@ -2205,6 +2210,7 @@ def where(g: jit_utils.GraphContext, condition, self=None, other=None, _outputs=
         return symbolic_helper._unbind_helper(
             g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs
         )
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Where", condition, self, other)
 
 
@@ -2380,6 +2386,7 @@ def _convolution_mode(
         "group_i": groups,
     }
 
+    # pyrefly: ignore  # bad-argument-type
     n = g.op("Conv", *args, **kwargs)
 
     if (
@@ -2724,10 +2731,12 @@ def native_layer_norm(
 
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     if g.opset < 18:
+        # pyrefly: ignore  # no-matching-overload
         variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
     else:
         variance = g.op(
             "ReduceMean",
+            # pyrefly: ignore  # no-matching-overload
             pow(g, numerator, two_cst),
             g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)),
         )
@@ -2897,7 +2906,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
             for low, hi in zip(low_indices, hi_indices)
         ]
         ndim = len(sizes)
-        perm = list(range(0, ndim))
+        perm = list(range(ndim))
         perm.append(perm.pop(dimension))
         unsqueeze = [
             symbolic_helper._unsqueeze_helper(
@@ -3066,10 +3075,12 @@ def pairwise_distance(g: jit_utils.GraphContext, input1, input2, p, eps, keepdim
     )
     summation = symbolic_helper._reducesum_helper(
         g,
+        # pyrefly: ignore  # no-matching-overload
         pow(g, sub(g, input1, input2), p),
         axes_i=[-1],
         keepdims_i=symbolic_helper._parse_arg(keepdim, "i"),
     )
+    # pyrefly: ignore  # no-matching-overload
     return pow(g, summation, inv_p)
 
 
@@ -3179,6 +3190,7 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::maximum")
 @symbolic_helper.quantized_args(True, True)
 def maximum(g: jit_utils.GraphContext, input, other):
+    # pyrefly: ignore  # no-matching-overload
     return max(g, input, dim_or_y=other)
 
 
@@ -3191,6 +3203,7 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::minimum")
 @symbolic_helper.quantized_args(True, True)
 def minimum(g: jit_utils.GraphContext, input, other):
+    # pyrefly: ignore  # no-matching-overload
     return min(g, input, dim_or_y=other)
 
 
@@ -3487,6 +3500,7 @@ def zeros_like(
             input, _type_utils.JitScalarType.FLOAT
         )
     else:
+        # pyrefly: ignore  # bad-argument-type
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
@@ -3546,6 +3560,7 @@ def ones_like(
             input, _type_utils.JitScalarType.FLOAT
         )
     else:
+        # pyrefly: ignore  # bad-argument-type
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
@@ -4536,7 +4551,7 @@ def lstm_cell(g: jit_utils.GraphContext, self, hidden, w_ih, w_hh, b_ih, b_hh):
     weight = (
         (w_ih, w_hh, b_ih, b_hh) if symbolic_helper._is_tensor(b_ih) else (w_ih, w_hh)
     )
-    has_biases = True if symbolic_helper._is_tensor(b_ih) else False
+    has_biases = bool(symbolic_helper._is_tensor(b_ih))
     _, h_outs, c_outs = _generic_rnn(
         g,
         "LSTM",
@@ -5535,6 +5550,7 @@ def linalg_matrix_norm(
             g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim
         )
         if ord_value > 0:
+            # pyrefly: ignore  # no-matching-overload
             result, _indices = max(
                 g,
                 sum,
@@ -5542,6 +5558,7 @@ def linalg_matrix_norm(
                 keepdim=keepdim,
             )
         else:
+            # pyrefly: ignore  # no-matching-overload
             result, _indices = min(
                 g,
                 sum,
@@ -5905,7 +5922,9 @@ def as_strided(g: jit_utils.GraphContext, self, sizes, strides, offset=None):
             else:
                 ind = g.op("Add", ind, tmp_ind)
         if offset:
+            # pyrefly: ignore  # bad-argument-type
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Gather", self_1d, ind)
 
 
@@ -6188,6 +6207,7 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     assert rank is not None
     x1_norm = symbolic_helper._reducesum_helper(
         g,
+        # pyrefly: ignore  # no-matching-overload
         pow(g, x1, symbolic_helper._generate_wrapped_number(g, 2.0)),
         axes_i=[-1],
         keepdims_i=True,
@@ -6195,6 +6215,7 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     x1_pad = ones_like(g, x1_norm)
     x2_norm = symbolic_helper._reducesum_helper(
         g,
+        # pyrefly: ignore  # no-matching-overload
         pow(g, x2, symbolic_helper._generate_wrapped_number(g, 2.0)),
         axes_i=[-1],
         keepdims_i=True,

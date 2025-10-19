@@ -5,6 +5,7 @@ import itertools
 import json
 import random
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial, wraps
@@ -329,7 +330,7 @@ def run_single_backend_sdpa(
 
         if config.calculate_bwd_time:
             # TODO: debug backward pass for njt
-            if eager_sdpa and not config.attn_type == "document_mask":
+            if eager_sdpa and config.attn_type != "document_mask":
                 d_out = torch.randn_like(out_eager.transpose(1, 2)).transpose(1, 2)
                 backward_eager_time = benchmark_torch_function_in_microseconds(
                     out_eager.backward, d_out, retain_graph=True

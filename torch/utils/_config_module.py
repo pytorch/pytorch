@@ -404,7 +404,7 @@ class ConfigModule(ModuleType):
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
-            raise AttributeError("config alias {alias} does not exist") from e
+            raise AttributeError(f"config alias {alias} does not exist") from e
         return module, constant_name
 
     def _get_alias_val(self, entry: _ConfigEntry) -> Any:
@@ -613,6 +613,9 @@ class ConfigModule(ModuleType):
 
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
+
+    def get_serializable_config_copy(self) -> dict[str, Any]:
+        return self._get_dict(ignored_keys=getattr(self, "_save_config_ignore", []))
 
     def patch(
         self,

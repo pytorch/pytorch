@@ -21,7 +21,7 @@ from ..kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
     mm_template,
     persistent_tma_mm_template,
-    scaled_mm_device_tma_template,
+    scaled_mm_device_tma_epilogue_scaling_template,
 )
 from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
@@ -313,6 +313,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 3, 4),
             GemmConfig(256, 128, 64, 3, 8),
             GemmConfig(128, 128, 128, 3, 8),
+        ]
+
+        self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
+            GemmConfig(256, 128, 64, 2, 4),
         ]
 
         self.scaled_mm_configs: list[BaseConfig] = [
@@ -1634,6 +1638,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         )
 
         # Build options dict
+        # pyrefly: ignore  # no-matching-overload
         options_dict = dict(
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
@@ -1716,6 +1721,7 @@ class TMAWorkspaceMixin(MMTemplateConfigMixin):
         )
         return kwargs
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering, as num_warps=2 not safe for TMA
@@ -1841,7 +1847,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate scaled MM template configs with scaled MM-specific options.
-        Handles the remaining logic from mm_common including assertions and SCALING_ROWWISE.
+        Handles the remaining logic from mm_common, including assertions.
         """
         kernel_inputs = self.adjust_kernel_inputs(kernel_inputs, op_name)
         input_nodes = kernel_inputs.nodes()
@@ -1891,9 +1897,6 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
             template_kwargs["ACC_TYPE"] = "tl.float32"
-            # Add SCALING_ROWWISE attribute based on scale tensor shapes
-            both_scalar_like = is_scalar_like(size_a) and is_scalar_like(size_b)
-            template_kwargs["SCALING_ROWWISE"] = not both_scalar_like
 
             yield template_kwargs
 
@@ -1940,6 +1943,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering:
@@ -1980,6 +1984,7 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -2094,7 +2099,11 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.blackwell_persistent_mm_configs
+        # NOTE: to ensure that we pass tests, addmm needs a small config
+        self.mm_configs = (
+            self.blackwell_persistent_mm_configs
+            + self.blackwell_persistent_addmm_configs
+        )
 
 
 @register_template_heuristic(
@@ -2108,18 +2117,22 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)
 
 
 @register_template_heuristic(
-    scaled_mm_device_tma_template.uid,
+    scaled_mm_device_tma_epilogue_scaling_template.uid,
     "cuda",
     register=torch.version.hip is None,
+    op_name="scaled_mm",
 )
-class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuristic):
-    """Scaled TMA template heuristic for CUDA"""
+class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
+    ScaledTMAConfigMixin, CUDAConfigHeuristic
+):
+    """Scaled TMA template heuristic for CUDA: epilogue scaling variants (TensorWise, RowWise)"""
 
     def __init__(self) -> None:
         super().__init__()

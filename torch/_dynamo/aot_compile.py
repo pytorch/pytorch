@@ -69,6 +69,7 @@ class CompileArtifacts:
 @dataclass
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
+    _guard_check_enabled: bool = True
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
@@ -76,6 +77,8 @@ class AOTCompiledFunction:
         return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
+        from .package import load_guard_manager, load_guards_state
+
         self._artifacts.check_compatibility()
 
         import_sources = {
@@ -86,22 +89,22 @@ class AOTCompiledFunction:
             **import_sources,
             self._artifacts.backend_id: self._artifacts.compiled_fn,
         }
+        # pyrefly: ignore  # read-only
         self.fn = types.FunctionType(
             self._artifacts.bytecode, f_globals, closure=self._artifacts.closure
         )
 
         if self._artifacts.guard_manager is None:
-            guards_state = pickle.loads(self._artifacts.guards_state)
-            self._artifacts.guard_manager = torch._dynamo.guards.CheckFunctionManager(
+            guards_state = load_guards_state(self._artifacts.guards_state)
+            self._artifacts.guard_manager = load_guard_manager(
+                guards_state,
                 self._artifacts.original_code,
-                guards_state.output_graph,
-                shape_code_parts=guards_state.shape_code_parts,
-                runtime_global_scope=f_globals,
-            ).guard_manager
+                f_globals,
+            )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         assert self._artifacts.guard_manager is not None
-        if not self.guard_check(*args, **kwargs):
+        if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
             raise RuntimeError(f"GuardManager check failed, reason: {reason}")
@@ -141,6 +144,9 @@ class AOTCompiledFunction:
 
         artifacts = CompileArtifacts(**state)
         return cls(artifacts)
+
+    def disable_guard_check(self) -> None:
+        self._guard_check_enabled = False
 
 
 class BundledAOTAutogradSerializableCallable(SerializableCallable):
@@ -241,8 +247,10 @@ def aot_compile_fullgraph(
         assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         device_type = _graph_device_type(backend_input.graph_module.graph)
+        tracing_context = TracingContext(backend_input.fake_mode)
+        tracing_context.tensor_to_context = backend_input.tensor_to_context
         with (
-            torch._guards.tracing(TracingContext(backend_input.fake_mode)),
+            torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
                     "bundled_autograd_cache": True,
@@ -273,7 +281,7 @@ def aot_compile_fullgraph(
             source_info.add_code(traced_code)
 
         artifacts = CompileArtifacts(
-            signature=inspect.signature(fn),
+            signature=convert_frame._get_signature(fn),
             bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,

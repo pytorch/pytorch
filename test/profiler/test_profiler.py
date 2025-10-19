@@ -967,7 +967,7 @@ class TestProfiler(TestCase):
         profiler_output = prof.key_averages(group_by_input_shape=True).table(
             sort_by="cpu_time_total", row_limit=10
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
@@ -983,7 +983,7 @@ class TestProfiler(TestCase):
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
 
     def test_override_time_units(self):
         US_IN_SECOND = 1000.0 * 1000.0
@@ -1930,7 +1930,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         event_list.table()
 
     def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
-        for i in range(0, max_gpu_count):
+        for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
 
     # Do json sanity testing. Checks that all events are between profiler start and end
@@ -2139,8 +2139,8 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         step_helper_funcs.append(event)
             self.assertEqual(len(prof_steps), 5)
             self.assertEqual(len(step_helper_funcs), 5)
-            for i in range(0, len(step_helper_funcs)):
-                for j in range(0, len(step_helper_funcs)):
+            for i in range(len(step_helper_funcs)):
+                for j in range(len(step_helper_funcs)):
                     self.assertTrue(
                         not self._partial_overlap(prof_steps[i], step_helper_funcs[j])
                     )

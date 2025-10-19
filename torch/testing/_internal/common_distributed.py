@@ -16,13 +16,14 @@ import time
 import traceback
 import types
 import unittest
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -33,6 +34,7 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
+from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
@@ -209,6 +211,14 @@ def at_least_x_gpu(x):
     return False
 
 
+def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
+    _handle_test_skip = getattr(args[0], "_handle_test_skip", None)
+    if len(args) == 0 or _handle_test_skip is None:
+        return False
+    _handle_test_skip(msg)
+    return True
+
+
 def skip_if_lt_x_gpu(x):
     def decorator(func):
         @wraps(func)
@@ -219,7 +229,9 @@ def skip_if_lt_x_gpu(x):
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+                sys.exit(test_skip.exit_code)
 
         return wrapper
 
@@ -235,7 +247,9 @@ def nccl_skip_if_lt_x_gpu(backend, x):
                 return func(*args, **kwargs)
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+                sys.exit(test_skip.exit_code)
 
         return wrapper
 
@@ -442,11 +456,11 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
     """Skips a test for given ROCm archs - multiprocess UTs"""
 
     def decorator(func):
-        prop = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
-        arch_match = prop in arch
         reason = None
-        if TEST_WITH_ROCM and arch_match:
-            reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
+        if TEST_WITH_ROCM:
+            prop = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            if prop in arch:
+                reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
 
         return unittest.skipIf(reason is not None, reason)(func)
 
@@ -772,7 +786,12 @@ class MultiProcessTestCase(TestCase):
             process = proc(
                 target=self.__class__._run,
                 name="process " + str(rank),
-                args=(rank, self._current_test_name(), self.file_name, child_conn),
+                args=(
+                    rank,
+                    self._current_test_name(),
+                    self.file_name,
+                    child_conn,
+                ),
                 kwargs={
                     "fake_pg": getattr(self, "fake_pg", False),
                 },
@@ -849,13 +868,14 @@ class MultiProcessTestCase(TestCase):
             torch._C._set_print_stack_traces_on_fatal_signal(True)
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
         os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+        common_utils.set_rng_seed()
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         try:
             getattr(self, test_name)()
         except unittest.SkipTest as se:
-            logger.info(
+            logger.info(  # noqa: G200
                 "Process %s skipping test %s for following reason: %s",
                 self.rank,
                 test_name,
@@ -897,11 +917,10 @@ class MultiProcessTestCase(TestCase):
                 try:
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
                     pipes.append((i, pipe))
-                except ConnectionError as e:
-                    logger.error(
-                        "Encountered error while trying to get traceback for process %s: %s",
+                except ConnectionError:
+                    logger.exception(
+                        "Encountered error while trying to get traceback for process %s",
                         i,
-                        e,
                     )
 
         # Wait for results.
@@ -924,11 +943,10 @@ class MultiProcessTestCase(TestCase):
                     logger.error(
                         "Could not retrieve traceback for timed out process: %s", rank
                     )
-            except ConnectionError as e:
-                logger.error(
-                    "Encountered error while trying to get traceback for process %s: %s",
+            except ConnectionError:
+                logger.exception(
+                    "Encountered error while trying to get traceback for process %s",
                     rank,
-                    e,
                 )
 
     def _join_processes(self, fn) -> None:
@@ -1133,7 +1151,7 @@ def run_subtests(
     subtest_config_values: list[list[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
-        subtest_kwargs = dict(zip(subtest_config_keys, values))
+        subtest_kwargs = dict(zip(subtest_config_keys, values, strict=True))
         with cls_inst.subTest(**subtest_kwargs):
             torch._dynamo.reset()
             test_fn(*test_args, **test_kwargs, **subtest_kwargs)
@@ -1424,7 +1442,7 @@ class MultiThreadedTestCase(TestCase):
                 logger.error("Caught exception: \n%s exiting thread %s", msg, rank)
                 error_msg += f"Thread {rank} exited with exception:\n{msg}\n"
             elif isinstance(exc, SystemExit):
-                if type(exc.code) == int and skip_code < 0:
+                if type(exc.code) is int and skip_code < 0:
                     skip_code = exc.code
 
         # check exceptions
@@ -1670,6 +1688,10 @@ class MultiProcContinuousTest(TestCase):
         self.rank = cls.rank
         self.world_size = cls.world_size
         test_fn = getattr(self, test_name)
+
+        # Ensure all the ranks use the same seed.
+        common_utils.set_rng_seed()
+
         # Run the test function
         test_fn(**kwargs)
 

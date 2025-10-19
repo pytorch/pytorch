@@ -27,6 +27,7 @@ import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
+    create_build_tuple,
     create_call_function,
     create_instruction,
     create_rot_n,
@@ -46,7 +47,7 @@ from ..utils import (
     range_iterator,
     set_example_value,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
@@ -146,13 +147,11 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             from .tensor import TensorVariable
 
-            if len(args) != 1:
-                msg = ConstantVariable.create(
-                    f"{name} takes exactly one argument ({len(args)} given)"
+            if kwargs or len(args) != 1:
+                raise_type_error_exc(
+                    tx, f"{name} takes exactly one argument ({len(args)} given)"
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
 
-            assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
@@ -199,7 +198,7 @@ class BaseListVariable(VariableTracker):
             if kwargs or len(args) != 1:
                 raise_args_mismatch(tx, name)
 
-            if type(self) != type(args[0]):
+            if type(self) is not type(args[0]):
                 tp_name = self.python_type_name()
                 other = args[0].python_type_name()
                 msg = ConstantVariable.create(
@@ -622,9 +621,11 @@ class CommonListMethodsVariable(BaseListVariable):
                 else:
                     items = slice(
                         *[
-                            s.evaluate_expr()
-                            if isinstance(s, SymNodeVariable)
-                            else s.as_python_constant()
+                            (
+                                s.evaluate_expr()
+                                if isinstance(s, SymNodeVariable)
+                                else s.as_python_constant()
+                            )
                             for s in key.items
                         ]
                     )
@@ -966,7 +967,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
-        codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
+        codegen.append_output(create_build_tuple(len(self.items)))
 
     def call_method(
         self,
@@ -1069,7 +1070,7 @@ class SizeVariable(TupleVariable):
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
         codegen.foreach(self.items)
         build_torch_size = [
-            create_instruction("BUILD_TUPLE", arg=len(self.items)),
+            create_build_tuple(len(self.items)),
         ] + create_call_function(1, False)
         codegen.extend_output(build_torch_size)
 
@@ -1112,11 +1113,15 @@ class SizeVariable(TupleVariable):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
-            assert not kwargs and len(args) == 1
+            if kwargs or len(args) != 1:
+                raise_type_error_exc(
+                    tx, f"{name} takes exactly one argument ({len(args)} given)"
+                )
             out = self.get_item_dyn(tx, args[0])
             return out
         elif name == "numel":
-            assert not args and not kwargs
+            if args or kwargs:
+                raise_type_error_exc(tx, f"{name} takes no arguments")
             return self.numel(tx)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1151,7 +1156,7 @@ class NamedTupleVariable(TupleVariable):
     def __init__(self, items, tuple_cls, dynamic_attributes=None, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
-        self.dynamic_attributes = {} if not dynamic_attributes else dynamic_attributes
+        self.dynamic_attributes = dynamic_attributes if dynamic_attributes else {}
 
     def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
@@ -1219,7 +1224,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.foreach(self.items)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(self.items)),
+                create_build_tuple(len(self.items)),
             ]
             + create_call_function(1, False)
         )
@@ -1499,7 +1504,7 @@ class ListIteratorVariable(IteratorVariable):
         codegen.foreach(remaining_items)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
+                create_build_tuple(len(remaining_items)),
                 create_instruction("GET_ITER"),
             ]
         )
