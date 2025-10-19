@@ -5638,7 +5638,7 @@ class TritonScheduling(SIMDScheduling):
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
-                log.debug(
+                log.debug(  # noqa: G200
                     "Exception (%s) in compiling fused nodes %s",
                     e,
                     node_names,

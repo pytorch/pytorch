@@ -753,8 +753,10 @@ class _TorchDynamoContext:
                             fn, result.dynamo, ignore_inlined_sources=False
                         )
                         self._package.install(result.backends)
-                    except RuntimeError as e:
-                        log.warning("Failed to load entry from dynamo cache: %s", e)
+                    except RuntimeError:
+                        log.warning(
+                            "Failed to load entry from dynamo cache", exc_info=True
+                        )
                         self._package.initialize(fn, None, ignore_inlined_sources=False)
 
         fn = innermost_fn(fn)

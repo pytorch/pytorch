@@ -1041,7 +1041,7 @@ class BuiltinVariable(VariableTracker):
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
                         if not has_constant_handler:
-                            log.warning(
+                            log.warning(  # noqa: G200
                                 "incorrect arg count %s %s and no constant handler",
                                 self_handler,
                                 e,
@@ -1560,9 +1560,9 @@ class BuiltinVariable(VariableTracker):
                 try:
                     # Only supports certain function types
                     user_func_variable = variables.UserFunctionVariable(bound_method)
-                except AssertionError as e:
+                except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
-                    log.warning("Failed to create UserFunctionVariable: %s", e)
+                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
                     return
 
                 # Inline the user function
