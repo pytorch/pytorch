@@ -318,6 +318,22 @@ inline std::ostream& operator<<(
   return stream << toString(scalar_type);
 }
 
+inline ScalarType toUnderlying(ScalarType t) {
+  switch (t) {
+    case ScalarType::QUInt8:
+    case ScalarType::QUInt4x2:
+      [[fallthrough]];
+    case ScalarType::QUInt2x4:
+      return ScalarType::Byte;
+    case ScalarType::QInt8:
+      return ScalarType::Char;
+    case ScalarType::QInt32:
+      return ScalarType::Int;
+    default:
+      return t;
+  }
+}
+
 } // namespace c10
 
 namespace torch::headeronly {
@@ -330,4 +346,5 @@ using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
 using c10::toString;
 using c10::operator<<;
+using c10::toUnderlying;
 } // namespace torch::headeronly
