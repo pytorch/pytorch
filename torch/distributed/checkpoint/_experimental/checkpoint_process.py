@@ -135,7 +135,8 @@ class CheckpointProcess:
         )
 
         # wait for the timeout or a response from subprocess
-        assert self._parent_end is not None, "Parent end of pipe should be initialized"
+        if self._parent_end is None:
+            raise AssertionError("Parent end of pipe should be initialized")
         if not self._parent_end.poll(timeout=config.subprocess_init_timeout_secs):
             msg = f"Timed out after {config.subprocess_init_timeout_secs}s waiting for checkpoint subprocess to initialize"
             logger.error(msg)
@@ -161,7 +162,8 @@ class CheckpointProcess:
             os.getpid(),
         )
 
-        assert sub_rank == 0, "We need only one checkpointer per parent training"
+        if sub_rank != 0:
+            raise AssertionError("We need only one checkpointer per parent training")
         request = WorkerRequest(request_type=RequestType.PING, payload={})
 
         try:
@@ -226,9 +228,8 @@ class CheckpointProcess:
 
     def _send(self, request_type: RequestType, payload: dict[str, Any]) -> None:
         try:
-            assert self._parent_end is not None, (
-                "Parent end of pipe should be initialized"
-            )
+            if self._parent_end is None:
+                raise AssertionError("Parent end of pipe should be initialized")
             self._parent_end.send(
                 WorkerRequest(
                     request_type=request_type,
@@ -244,9 +245,8 @@ class CheckpointProcess:
 
     def _recv(self) -> Optional[dict[str, Any]]:
         try:
-            assert self._parent_end is not None, (
-                "Parent end of pipe should be initialized"
-            )
+            if self._parent_end is None:
+                raise AssertionError("Parent end of pipe should be initialized")
             response = self._parent_end.recv()
             if response.success is False:
                 error_msg = (

@@ -2749,7 +2749,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
 
                 for i in range(len(futs)):
                     local_gradients = [p.grad for p in local_layers[i].parameters()]
-                    for g1, g2 in zip(futs[i].wait(), local_gradients):
+                    for g1, g2 in zip(futs[i].wait(), local_gradients, strict=True):
                         self.assertEqual(g1, g2)
 
         rpc.shutdown()

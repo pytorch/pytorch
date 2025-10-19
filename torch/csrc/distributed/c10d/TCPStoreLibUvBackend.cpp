@@ -361,13 +361,12 @@ class UvTcpServer : public UvTcpSocket {
 
     int addr_len = sizeof(addr_s);
 
-    if (uv_tcp_getsockname(
+    TORCH_CHECK(
+        uv_tcp_getsockname(
             (uv_tcp_t*)unsafeGetStream(),
             reinterpret_cast<::sockaddr*>(&addr_s),
-            &addr_len) != 0) {
-      throw std::runtime_error(
-          "The port number of the socket cannot be retrieved.");
-    }
+            &addr_len) == 0,
+        "The port number of the socket cannot be retrieved.");
 
     if (addr_s.ss_family == AF_INET) {
       portNum_ = ntohs(reinterpret_cast<sockaddr_in*>(&addr_s)->sin_port);
