@@ -1004,6 +1004,7 @@ class FxConverter:
                 # pyrefly: ignore  # missing-attribute
                 call_kwargs[key]
                 for key in signature
+                # pyrefly: ignore  # missing-attribute
                 if key not in cfg.kwargs
             ]
 
