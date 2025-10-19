@@ -5502,12 +5502,12 @@ Arguments:
         of classes will be inferred as one greater than the largest class
         value in the input tensor. Default: -1
     dtype (:class:`torch.dtype`): the desired output dtype.
-        Default: ``torch.int64``
+        Default: ``torch.int64``, supported: ``torch.bool``, ``torch.uint8``, ``torch.int64``
 
 Returns:
-    LongTensor that has one more dimension with 1 values at the
+    Tensor that has one more dimension with 1 values at the
     index of last dimension indicated by the input, and 0 everywhere
-    else.
+    else, with the specified ``dtype``.
 
 Examples:
     >>> F.one_hot(torch.arange(0, 5) % 3)
@@ -5522,13 +5522,13 @@ Examples:
             [0, 0, 1, 0, 0],
             [1, 0, 0, 0, 0],
             [0, 1, 0, 0, 0]])
-    >>> F.one_hot(torch.arange(0, 6).view(3,2) % 3)
-    tensor([[[1, 0, 0],
-             [0, 1, 0]],
-            [[0, 0, 1],
-             [1, 0, 0]],
-            [[0, 1, 0],
-             [0, 0, 1]]])
+    >>> F.one_hot(torch.arange(0, 6).view(3,2) % 3, dtype=torch.bool)
+    tensor([[[ True, False, False],
+             [False,  True, False]],
+            [[False, False,  True],
+             [ True, False, False]],
+            [[False,  True, False],
+             [False, False,  True]]])
 """,
 )
 
