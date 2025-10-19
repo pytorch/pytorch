@@ -2503,7 +2503,7 @@ def compile(
     to compile it and cache the compiled result on the code object for future
     use.  A single frame may be compiled multiple times if previous compiled
     results are not applicable for subsequent calls (this is called a "guard
-    failure), you can use TORCH_LOGS=guards to debug these situations.
+    failure"), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
     ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
