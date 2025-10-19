@@ -1745,7 +1745,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_slice(self, tx: "InstructionTranslator", *args):
-        return variables.SliceVariable(args)
+        return variables.SliceVariable(args, tx)
 
     def _dyn_proxy(self, tx: "InstructionTranslator", *args, **kwargs):
         from .builder import wrap_fx_proxy
@@ -1847,7 +1847,7 @@ class BuiltinVariable(VariableTracker):
                 polyfills.builtins.iter_
             ).call_function(tx, [obj, *args], {})
 
-            if len(args):
+            if args:
                 # iter(obj, sentinel) returns an object that implements
                 # __iter__ and __next__ methods (UserDefinedObjectVariable)
                 # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
