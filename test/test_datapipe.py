@@ -520,7 +520,7 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(list(range(9)), list(n))
 
         # Functional Test: Uneven DataPipes
-        source_numbers = list(range(0, 10)) + [10, 12]
+        source_numbers = list(range(10)) + [10, 12]
         numbers_dp = dp.iter.IterableWrapper(source_numbers)
         n1, n2 = numbers_dp.demux(2, lambda x: x % 2)
         self.assertEqual([0, 2, 4, 6, 8, 10, 12], list(n1))
@@ -1257,7 +1257,7 @@ class TestFunctionalIterDataPipe(TestCase):
         )
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(5, 10)), output1)
-        self.assertEqual(list(range(0, 5)), output2)
+        self.assertEqual(list(range(5)), output2)
 
         # Functional Test: values of the same classification are lumped together, and unlimited buffer
         with warnings.catch_warnings(record=True) as wa:
@@ -1271,7 +1271,7 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertRegex(str(wa[-1].message), r"Unlimited buffer size is set")
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(5, 10)), output1)
-        self.assertEqual(list(range(0, 5)), output2)
+        self.assertEqual(list(range(5)), output2)
 
         # Functional Test: classifier returns a value outside of [0, num_instance - 1]
         dp0 = input_dp.demux(num_instances=1, classifier_fn=lambda x: x % 2)

@@ -945,7 +945,7 @@ def forward(self, scores_1, mask_1, value_1):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and not dtype == torch.complex32
+            and dtype != torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
