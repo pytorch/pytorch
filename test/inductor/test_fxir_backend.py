@@ -498,7 +498,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation.
+        Test the dynamic launch grid calculation.
         """
 
         func = torch.add
@@ -1075,7 +1075,7 @@ class TestReplaceFloorDiv(InductorTestCase):
         replaced = replace_floor_div(expr)
 
         # Check that all floor's were replaced.
-        # We shoud have no more new FloorDiv's than floor's in the original expression,
+        # We should have no more new FloorDiv's than floor's in the original expression,
         # although we can have less due to simplification.
         self.assertEqual(replaced.count(sympy.floor), 0)
         self.assertLessEqual(

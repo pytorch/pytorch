@@ -1069,15 +1069,15 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             m = prepare_jit(m, qconfig_dict)
             # observers for input, output and value between conv1/conv2
             assert len(attrs_with_prefix(m, "_observer_")) == 3, (
-                "Expected to have 3 obervers"
+                "Expected to have 3 observers"
             )
             # observer for weight
             assert len(attrs_with_prefix(m.conv1, "_observer_")) == 1, (
-                "Expected to have 1 obervers"
+                "Expected to have 1 observers"
             )
             # observer for weight
             assert len(attrs_with_prefix(m.conv2, "_observer_")) == 1, (
-                "Expected to have 1 obervers"
+                "Expected to have 1 observers"
             )
 
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
@@ -1088,13 +1088,13 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
             # check all observers have been removed
             assert len(attrs_with_prefix(m, "_observer_")) == 0, (
-                "Expected to have 0 obervers"
+                "Expected to have 0 observers"
             )
             assert len(attrs_with_prefix(m.conv1, "_observer_")) == 0, (
-                "Expected to have 0 obervers"
+                "Expected to have 0 observers"
             )
             assert len(attrs_with_prefix(m.conv2, "_observer_")) == 0, (
-                "Expected to have 0 obervers"
+                "Expected to have 0 observers"
             )
 
             quant_func = (
@@ -2926,7 +2926,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 m._c, "forward", {"": qconfig}, inplace=False
             )
         )
-        # Checking the model before fianlize contain unfused patterns
+        # Checking the model before finalize contain unfused patterns
         # that numerically matches the model after quantize by checking
         # number of aten::quantize_per_tensor functions
         # conv has 3 quantize_per_tensor for activations and 1 for weight

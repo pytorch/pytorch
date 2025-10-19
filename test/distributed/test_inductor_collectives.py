@@ -1672,7 +1672,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
 
-        # shouldnt have bucketed
+        # shouldn't have bucketed
         FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
