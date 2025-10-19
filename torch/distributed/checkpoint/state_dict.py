@@ -186,7 +186,8 @@ def _get_fqns(
     curr_obj = model
     for i, curr_obj_name in enumerate(obj_names):
         if isinstance(curr_obj, DDP):
-            assert curr_obj_name == "module"
+            if curr_obj_name != "module":
+                raise AssertionError(f"Expected 'module', got '{curr_obj_name}'")
             curr_obj = curr_obj.module
             if not skip_ddp_prefix:
                 fqn_obj_names.append(curr_obj_name)
@@ -203,7 +204,8 @@ def _get_fqns(
                 fqn_obj_names.append(curr_obj_name)
                 curr_obj = getattr(curr_obj, curr_obj_name)
         elif isinstance(curr_obj, torch._dynamo.eval_frame.OptimizedModule):
-            assert curr_obj_name == "_orig_mod"
+            if curr_obj_name != "_orig_mod":
+                raise AssertionError(f"Expected '_orig_mod', got '{curr_obj_name}'")
             curr_obj = curr_obj._orig_mod
             if not skip_compiler_prefix:
                 fqn_obj_names.append(curr_obj_name)
@@ -307,7 +309,7 @@ def _verify_options(
             continue
 
         fqns = _get_fqns(model, name)
-        fqn = fqn_param_mapping.get(param, None)
+        fqn = fqn_param_mapping.get(param)
         if fqn is not None:
             cast(set[str], fqn_param_mapping[param]).update(fqns)
             shared_params_mapping[param] = fqn_param_mapping[param]
@@ -329,7 +331,8 @@ def _verify_options(
             if module not in submodules:
                 continue
             fqns = _get_fqns(model, name)
-            assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
+            if len(fqns) != 1:
+                raise AssertionError("Submodule FQN should only have 1 instance")
             submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
     if options.broadcast_from_rank0 and not options.full_state_dict:
@@ -408,7 +411,8 @@ def _verify_state_dict(
 ) -> None:
     for module in info.fsdp_modules:
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
-        assert fsdp_state is not None, "Expected a fsdp_state with a fsdp module."
+        if fsdp_state is None:
+            raise AssertionError("Expected a fsdp_state with a fsdp module.")
 
     # Verify if the model_state_dict and optim_state_dict are valid. This API
     # should give the users an explicit error message to debug or report.
@@ -483,7 +487,10 @@ def _get_model_state_dict(
 
     for key in list(state_dict.keys()):
         fqns = _get_fqns(model, key)
-        assert len(fqns) == 1, (key, fqns)
+        if len(fqns) != 1:
+            raise AssertionError(
+                f"Expected 1 FQN for key '{key}', got {len(fqns)}: {fqns}"
+            )
         fqn = next(iter(fqns))
         if fqn != key:
             # As we only support FSDP, DDP, and TP, the only cases are
@@ -746,7 +753,8 @@ def _unflatten_optim_state_dict(
                     continue
 
                 params = pg_state[-1][_PARAMS]
-                assert isinstance(params, list)  # typing
+                if not isinstance(params, list):
+                    raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
                 if not param.requires_grad:
                     continue
@@ -808,7 +816,10 @@ def _get_optim_state_dict(
             fqn_pid_mapping = {}
             for key, param in model.named_parameters():
                 fqns = _get_fqns(model, key)
-                assert len(fqns) == 1
+                if len(fqns) != 1:
+                    raise AssertionError(
+                        f"Expected 1 FQN for key '{key}', got {len(fqns)}"
+                    )
                 fqn = next(iter(fqns))
                 if param not in param_pid_mapping:
                     continue
@@ -886,7 +897,8 @@ def _split_optim_state_dict(
                     continue
 
                 params = pg_state[-1][_PARAMS]
-                assert isinstance(params, list)
+                if not isinstance(params, list):
+                    raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
                 if param.requires_grad:
                     state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
@@ -965,7 +977,10 @@ def _load_optim_state_dict(
                 if fqns == fqns_with_compiler:
                     continue
 
-                assert len(fqns) == 1
+                if len(fqns) != 1:
+                    raise AssertionError(
+                        f"Expected 1 FQN for '{original_fqn}', got {len(fqns)}"
+                    )
                 fqn = fqns.pop()
                 fqn_with_compiler = fqns_with_compiler.pop()
                 for g in optim_state_dict[_PG]:
@@ -999,7 +1014,8 @@ def _load_optim_state_dict(
                 return t
 
             _ = tree_map_only(torch.Tensor, _device, local_state_dict)
-            assert device is not None
+            if device is None:
+                raise AssertionError("Expected device to be set")
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
             if info.broadcast_from_rank0:
@@ -1012,7 +1028,10 @@ def _load_optim_state_dict(
             # having additional parameters ultimately.
             for optim_key in flatten_osd.keys():
                 if optim_key not in flatten_local_osd:
-                    assert optim_key in osd_mapping
+                    if optim_key not in osd_mapping:
+                        raise AssertionError(
+                            f"Expected key '{optim_key}' in osd_mapping"
+                        )
                     flatten_local_osd[optim_key] = flatten_osd[optim_key]
                     local_osd_mapping[optim_key] = osd_mapping[optim_key]
             optim_state_dict = _unflatten_state_dict(
@@ -1225,7 +1244,10 @@ def _unflatten_model_state_dict(
                     continue
 
                 fqns = _get_fqns(model, name)
-                assert len(fqns) == 1, "FQNs for a submodule should only have 1 element"
+                if len(fqns) != 1:
+                    raise AssertionError(
+                        "FQNs for a submodule should only have 1 element"
+                    )
                 prefix = f"{next(iter(fqns))}."
                 new_state_dict.update(
                     {prefix + subfqn: value for subfqn, value in sub_state_dict.items()}
