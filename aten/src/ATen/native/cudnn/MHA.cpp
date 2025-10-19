@@ -177,7 +177,7 @@ bool use_ragged_in_dense(
     TORCH_WARN_ONCE(
         "TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works with Q, K, V, and output in BSHD memory layout,"
         "e.g., Q, K, V must be allocated with torch.randn((B, S, H, D).transpose(1, 2)."
-        "Falling back to regualr dense case, which may trigger excessive recompilation.");
+        "Falling back to regular dense case, which may trigger excessive recompilation.");
   }
   return all_bshd;
 }
@@ -771,7 +771,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
-        "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+        "attn_bias not yet supported with cuDNN Attention and NestedTensor");
     scaled_dot_product_flash_attention_options.set_bias(
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
@@ -1196,7 +1196,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
-        "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+        "attn_bias not yet supported with cuDNN Attention and NestedTensor");
     sdpa_backward_options.set_bias(
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
@@ -1864,7 +1864,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   }
   TORCH_CHECK(
       !attn_bias.has_value(),
-      "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+      "attn_bias not yet supported with cuDNN Attention and NestedTensor");
 
   auto workspace_size = mha_graph.get_workspace_size();
   auto workspace_ptr =

@@ -298,7 +298,7 @@ static void jitted_gpu_kernel_impl(
     at::opmath_type<f_inputs_type> scalar_val,
     const std::tuple<ExtraArgs...>& extra_args) {
 
-  // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
+  // TODO: Memory use can probably be optimized by reusing kernels across GPUs with
   //   the same compute capability
   static std::mutex jiterator_mutex;
   static std::vector<JittedKernelVariantCache> device_caches(c10::cuda::device_count());
