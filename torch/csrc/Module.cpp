@@ -334,7 +334,7 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
       THPUtils_checkLong(arg),
       "set_num_threads expects an int, but got ",
       THPUtils_typename(arg));
-  int nthreads = static_cast<int>(THPUtils_unpackLong(arg));
+  int nthreads = THPUtils_unpackInt(arg);
   TORCH_CHECK(nthreads > 0, "set_num_threads expects a positive integer");
   at::set_num_threads(nthreads);
   Py_RETURN_NONE;
@@ -356,7 +356,7 @@ static PyObject* THPModule_setNumInteropThreads(
       "set_num_interop_threads expects an int, "
       "but got ",
       THPUtils_typename(arg));
-  int nthreads = static_cast<int>(THPUtils_unpackLong(arg));
+  int nthreads = THPUtils_unpackInt(arg);
   TORCH_CHECK(
       nthreads > 0, "set_num_interop_threads expects a positive integer");
   at::set_num_interop_threads(nthreads);
@@ -466,7 +466,6 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     m->d_method->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "getset_descriptor") == 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
     PyGetSetDescrObject* m = reinterpret_cast<PyGetSetDescrObject*>(obj);
     if (m->d_getset->doc) {
       return PyErr_Format(
