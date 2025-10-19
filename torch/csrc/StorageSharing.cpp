@@ -256,7 +256,7 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
         "a file descriptor (int) and storage size (int)");
     return nullptr;
   }
-  int tmp_fd = static_cast<int>(THPUtils_unpackLong(_tmp_fd));
+  int tmp_fd = THPUtils_unpackInt(_tmp_fd);
   int64_t size = THPUtils_unpackLong(_size);
   int fd = dup(tmp_fd);
   if (fd == -1) {
