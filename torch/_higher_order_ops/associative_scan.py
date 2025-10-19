@@ -727,14 +727,14 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         ndim = outs[0].ndim
 
         if reverse:
-            xs = (
+            xs = tuple(
                 torch.flip(elem, [0]).requires_grad_(elem.requires_grad) for elem in xs
             )
-            outs = (
+            outs = tuple(
                 torch.flip(elem, [0]).requires_grad_(elem.requires_grad)
                 for elem in outs
             )
-            gl_ys = (
+            gl_ys = tuple(
                 torch.flip(elem, [0]).requires_grad_(elem.requires_grad)
                 for elem in gl_ys
             )
