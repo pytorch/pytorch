@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._inductor.config as config
@@ -8,6 +8,7 @@ from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
     Buffer,
+    FixedLayout,
     get_free_symbols,
     get_symbolic_inputs,
     gm_original_output_strides,
@@ -97,11 +98,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     assert ar.stride() == example_inp.stride()
 
         with V.set_graph_handler(bm_graph_lowering):
-            # Don't bother autotuning on Triton here
+            # Allow Triton autotuning for custom ops when max_autotune is enabled
             with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
+                max_autotune=config.max_autotune,
+                max_autotune_gemm=config.max_autotune_gemm,
+                max_autotune_gemm_backends=config.max_autotune_gemm_backends,
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
@@ -110,7 +111,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func([*sym_inputs, *args])
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
-        return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
+
+        # Use appropriate benchmarker based on layout device type
+        if self.layout.device.type == "cpu":
+            return benchmarker.benchmark_cpu(lambda: bm_func([*sym_inputs, *args]))
+        else:
+            return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
 
     def hash_key(self) -> str:
         return "-".join(
@@ -197,3 +203,152 @@ class SubgraphTemplate(KernelTemplate):
             description=description,
             make_fx_graph=make_fx_graph,
         )
+
+    def generate_custom_op_choices(
+        self,
+        name: str,
+        decompositions: list[Callable[..., Any]],
+        input_nodes: list[Buffer],
+        kwargs: Optional[dict[str, Any]] = None,
+        default_impl: Optional[Callable[..., Any]] = None,
+    ) -> list[SubgraphChoiceCaller]:
+        """
+        Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
+
+        This method extends SubgraphTemplate to support custom op decompositions,
+        allowing multiple implementations to compete in autotuning.
+
+        Args:
+            name: Base name for the choices
+            decompositions: List of decomposition functions to compare
+            input_nodes: Input nodes for the operation
+            kwargs: Additional arguments for decomposition functions
+            default_impl: Default implementation for layout inference
+
+        Returns:
+            List of SubgraphChoiceCaller instances for autotuning
+        """
+        if not decompositions:
+            return []
+
+        kwargs = kwargs or {}
+
+        # Infer layouts and ensure stride consistency for fair autotuning comparison
+        layouts = [
+            self._infer_custom_op_layout(input_nodes, [decomp], kwargs, default_impl)
+            for decomp in decompositions
+        ]
+
+        self._validate_stride_consistency(name, decompositions, layouts)
+
+        # Assert single output layout - assumes custom ops have one output tensor
+        assert len(layouts) > 0, f"No layouts inferred for custom op '{name}'"
+        assert all(
+            layout.device == layouts[0].device
+            and layout.dtype == layouts[0].dtype
+            and layout.size == layouts[0].size
+            for layout in layouts
+        ), f"All decompositions for '{name}' must produce equivalent output layouts"
+
+        layout = layouts[0]  # All layouts have equivalent stride/shape/dtype now
+
+        choices = []
+        for decomp in decompositions:
+            # Create make_fx_graph function for this decomposition
+            def make_fx_graph(*args: Any, decomp: Callable[..., Any] = decomp) -> Any:
+                import functools
+
+                from torch.fx.experimental.proxy_tensor import make_fx
+
+                # Ensure kwargs is not None for unpacking
+                decomp_kwargs = kwargs if kwargs is not None else {}
+                return make_fx(functools.partial(decomp, **decomp_kwargs))(*args)
+
+            choice = self.generate(
+                name=f"{name}_{decomp.__name__}",
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=make_fx_graph,
+                description=f"CustomOp {decomp.__name__}",
+            )
+            choices.append(choice)
+
+        return choices
+
+    def _validate_stride_consistency(
+        self,
+        op_name: str,
+        decompositions: list[Callable[..., Any]],
+        layouts: list[Layout],
+    ) -> None:
+        """Ensure all decompositions produce compatible strides for fair autotuning."""
+        if not layouts:
+            return
+
+        strides = [layout.stride for layout in layouts]
+        reference = strides[0]
+        for i, stride in enumerate(strides[1:]):
+            if stride != reference:
+                raise AssertionError(
+                    f"Stride mismatch in custom op '{op_name}' autotuning: "
+                    f"'{decompositions[i].__name__}' produces stride {stride}, "
+                    f"but '{decompositions[0].__name__}' produces {reference}. "
+                    f"All decompositions must have identical output strides."
+                )
+
+    def _infer_custom_op_layout(
+        self,
+        input_nodes: list[Buffer],
+        decompositions: list[Callable[..., Any]],
+        kwargs: dict[str, Any],
+        default_impl: Optional[Callable[..., Any]] = None,
+    ) -> Layout:
+        """Infer output layout for custom ops using the default implementation when available.
+
+        Note that the Subgraph assumes custom ops return exactly one tensor so far.
+        TODO: Add support for multiple output custom ops.
+        """
+        import functools
+
+        from torch._inductor.virtualized import V
+
+        # Assert kwargs contain only non-tensor arguments for functools.partial
+        for key, value in kwargs.items():
+            assert not isinstance(value, (torch.Tensor, Buffer)), (
+                f"kwargs['{key}'] contains tensor {type(value)}. "
+                f"Tensor arguments should be in input_nodes, not kwargs. "
+                f"Only scalar/non-tensor parameters should be in kwargs."
+            )
+
+        # Use default_impl if available, otherwise use first decomposition
+        impl = default_impl if default_impl is not None else decompositions[0]
+
+        with V.fake_mode:
+            example_inputs = []
+            for inp in input_nodes:
+                raw_shape = inp.get_size()
+                concrete_shape = V.graph.sizevars.size_hints(
+                    raw_shape, fallback=config.unbacked_symint_fallback
+                )
+                fake_tensor = torch.empty(
+                    concrete_shape, dtype=inp.get_dtype(), device=inp.get_device()
+                )
+                example_inputs.append(fake_tensor)
+
+            fn = functools.partial(
+                impl, **kwargs
+            )  # kwargs must be non-tensor for partial
+            output = fn(*example_inputs)
+
+            # Assert single output
+            assert isinstance(output, torch.Tensor), (
+                f"Expected single tensor output, got {type(output)}. "
+                f"Multi-output custom ops not yet supported in autotuning."
+            )
+
+            return FixedLayout(
+                device=output.device,
+                dtype=output.dtype,
+                size=output.shape,
+                stride=output.stride(),
+            )
