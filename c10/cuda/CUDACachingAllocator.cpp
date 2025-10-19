@@ -1995,16 +1995,16 @@ class DeviceCachingAllocator {
       while (base_block->prev) {
         base_block = base_block->prev;
       }
-      offset =
-          static_cast<char*>(block->ptr) - static_cast<char*>(base_block->ptr);
+      offset = static_cast<const char*>(block->ptr) -
+          static_cast<const char*>(base_block->ptr);
       cudaIpcMemHandle_t handle;
       C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_block->ptr));
-      ss.write(reinterpret_cast<char*>(&handle), CUDA_IPC_HANDLE_SIZE);
+      ss.write(reinterpret_cast<const char*>(&handle), CUDA_IPC_HANDLE_SIZE);
     } else {
       ss.put(SHAREABLE_CUDA_EXPANDABLE_SEGMENT);
       auto full_range = block->expandable_segment_->share(
           SegmentRange(block->ptr, block->size), ss);
-      offset = static_cast<char*>(block->ptr) - full_range.ptr;
+      offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
     return ShareableHandle{offset, ss.str()};
   }
