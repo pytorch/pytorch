@@ -598,7 +598,7 @@ class ChunkedStream {
     if (available() < size)
       return false;
     str.resize(size);
-    return read_many(static_cast<char*>(str.data()), size);
+    return read_many(str.data(), size);
   }
 
   bool read_payload(std::vector<uint8_t>& data) {
