@@ -1,7 +1,6 @@
 # Owner(s): ["module: meta tensors"]
 # ruff: noqa: F841
 
-
 import contextlib
 import copy
 import dataclasses
@@ -94,9 +93,18 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(t, FakeTensor))
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
-        
 
-        
+    def test_deepcopy_real_tensor_in_fake_mode(self):
+        """
+        Tests that deepcopying a real tensor (non-meta) inside FakeTensorMode correctly raises a NotImplementedError.
+        """
+
+        real_tensor = torch.randn(2, 3, device="cpu")
+
+        with FakeTensorMode():
+            with self.assertRaisesRegex(NotImplementedError, "deepcopy() is not supported"):
+                copy.deepcopy(real_tensor)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_initialized(self):
         # doesn't error
@@ -105,7 +113,7 @@ class FakeTensorTest(TestCase):
             x = torch.randn(8, 4, device="cuda")
             y = torch.mm(x, p).square().sum()
             y.backward()
-    
+
     def test_basic(self):
         x = torch.empty(2, 2, device="cpu")
         y = torch.empty(4, 2, 2, device="cpu")
@@ -116,6 +124,10 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.shape, (4, 2, 2))
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
+
+
+
+
 
     def test_custom_op_fallback(self):
         from torch.library import impl, Library
