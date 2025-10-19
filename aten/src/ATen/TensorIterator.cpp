@@ -56,7 +56,7 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
 }
 
-static OptionalTensorRef make_otr(const TensorBase &tensor) {
+OptionalTensorRef make_otr(const TensorBase &tensor) {
   if (tensor.defined()) {
     return OptionalTensorRef(tensor);
   } else {

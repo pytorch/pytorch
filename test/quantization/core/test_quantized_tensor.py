@@ -100,7 +100,7 @@ def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
             cur_min, cur_max, cur_loss = cur_min + stepsize, cur_max, loss1
         else:
             cur_min, cur_max, cur_loss = cur_min, cur_max - stepsize, loss2
-    if len(solutions):
+    if solutions:
         best = solutions[0]
         for solution in solutions:
             if solution[-1] < best[-1]:

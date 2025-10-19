@@ -17,17 +17,13 @@ with open(sys.argv[1]) as input_yaml_file:
     for info in model_infos:
         for op in info["root_operators"]:
             # aggregate occurrence per op
-            root_operators[op] = 1 + (root_operators[op] if op in root_operators else 0)
+            root_operators[op] = 1 + (root_operators.get(op, 0))
         for op in info["traced_operators"]:
             # aggregate occurrence per op
-            traced_operators[op] = 1 + (
-                traced_operators[op] if op in traced_operators else 0
-            )
+            traced_operators[op] = 1 + (traced_operators.get(op, 0))
         # merge dtypes for each kernel
         for kernel, dtypes in info["kernel_metadata"].items():
-            new_dtypes = dtypes + (
-                kernel_metadata[kernel] if kernel in kernel_metadata else []
-            )
+            new_dtypes = dtypes + (kernel_metadata.get(kernel, []))
             kernel_metadata[kernel] = list(set(new_dtypes))
 
 
