@@ -48,6 +48,35 @@ def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
 def is_in_any_mode_without_ignore_compile_internals() -> bool:
     return _is_in_any_mode_without_ignore_compile_internals
 
+def any_torch_dispatch_mode_on_stack(
+    *, 
+    include_infra_modes=True, 
+    respect_ignore_compile_internals=False, 
+) -> bool:
+    """
+    Check if there are any ambient (non-entered) modes on the stack.
+    Returns True if there are modes that are on the stack but NOT entered.
+    """
+    stack_len = torch._C._len_torch_dispatch_stack()
+
+    for idx in range(stack_len):
+        mode = _get_dispatch_stack_at(idx)
+        print("MODE", mode)
+
+        # Apply filters first
+        if mode.is_infra_mode():
+            if not include_infra_modes:
+                continue
+        if mode.ignore_compile_internals():
+            print("HUUSH")
+            if respect_ignore_compile_internals:
+                continue
+        print("GOT HERE")
+        breakpoint()
+        return True 
+    breakpoint()
+    return False
+
 
 class TorchDispatchMode:
     """
