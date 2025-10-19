@@ -1386,7 +1386,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(VariableTracker):
-    def __init__(self, items, tx, **kwargs) -> None:
+    def __init__(self, items, tx=None, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -1402,10 +1402,22 @@ class SliceVariable(VariableTracker):
         # Convert TensorVariable to SymIntVariable by calling .item()
         # This decomposes a[:t] to u=t.item(); a[:u] at the dynamo level
         if isinstance(start, variables.TensorVariable):
+            assert tx is not None, (
+                "tx is required when slice indices are TensorVariables"
+            )
+            assert start.size is None or all(s == 1 for s in start.size)
             start = start.call_method(tx, "item", [], {})
         if isinstance(stop, variables.TensorVariable):
+            assert tx is not None, (
+                "tx is required when slice indices are TensorVariables"
+            )
+            assert stop.size is None or all(s == 1 for s in stop.size)
             stop = stop.call_method(tx, "item", [], {})
         if isinstance(step, variables.TensorVariable):
+            assert tx is not None, (
+                "tx is required when slice indices are TensorVariables"
+            )
+            assert step.size is None or all(s == 1 for s in step.size)
             step = step.call_method(tx, "item", [], {})
 
         self.items = (start, stop, step)

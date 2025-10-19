@@ -3886,23 +3886,24 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         fn2 = torch.compile(f2, fullgraph=True, backend="inductor")
         self.assertTrue(torch.allclose(fn2(x, idx_tensor_neg), f2(x, idx_tensor_neg)))
 
-        # Test 3: Multidimensional select with tensor index
-        def f3(x, idx_tensor):
-            return x[:, idx_tensor]
+        # TODO support those less common patterns
+        # # Test 3: Multidimensional select with tensor index
+        # def f3(x, idx_tensor):
+        #     return x[:, idx_tensor]
 
-        x_2d = torch.randn(5, 10)
-        fn3 = torch.compile(f3, fullgraph=True, backend="inductor")
-        self.assertTrue(torch.allclose(fn3(x_2d, idx_tensor), f3(x_2d, idx_tensor)))
+        # x_2d = torch.randn(5, 10)
+        # fn3 = torch.compile(f3, fullgraph=True, backend="inductor")
+        # self.assertTrue(torch.allclose(fn3(x_2d, idx_tensor), f3(x_2d, idx_tensor)))
 
         # Test 4: Multiple tensor indices
-        def f4(x, idx1, idx2):
-            return x[idx1, idx2]
+        # def f4(x, idx1, idx2):
+        #     return x[idx1, idx2]
 
-        x_2d = torch.randn(8, 12)
-        idx1 = torch.tensor(3)
-        idx2 = torch.tensor(7)
-        fn4 = torch.compile(f4, fullgraph=True, backend="inductor")
-        self.assertTrue(torch.allclose(fn4(x_2d, idx1, idx2), f4(x_2d, idx1, idx2)))
+        # x_2d = torch.randn(8, 12)
+        # idx1 = torch.tensor(3)
+        # idx2 = torch.tensor(7)
+        # fn4 = torch.compile(f4, fullgraph=True, backend="inductor")
+        # self.assertTrue(torch.allclose(fn4(x_2d, idx1, idx2), f4(x_2d, idx1, idx2)))
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)

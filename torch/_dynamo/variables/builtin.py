@@ -1235,6 +1235,20 @@ class BuiltinVariable(VariableTracker):
                 # scenario is to de-sugar eagerly.
                 fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
 
+            # Convert size-1 TensorVariable indices to SymIntVariable by calling .item()
+            # This decomposes tensor[t] to u=t.item(); tensor[u] at the dynamo level
+            if (
+                fn is operator.getitem
+                and len(args) == 2
+                and isinstance(args[1], variables.TensorVariable)
+            ):
+                tensor_idx = args[1]
+                # Only convert if we know it's size-1 (not for advanced indexing)
+                if tensor_idx.size is not None and all(s == 1 for s in tensor_idx.size):
+                    args = list(args)
+                    args[1] = tensor_idx.call_method(tx, "item", [], {})
+                    args = tuple(args)
+
             if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                 # Standard indexing will force specialization due to
                 # __index__.  Rewrite as a regular torch op which will
