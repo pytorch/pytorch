@@ -1370,6 +1370,7 @@
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
+    SparseMPS: bmm_sparse_mps
     NestedTensorCPU: bmm_nested
     NestedTensorCUDA: bmm_nested_cuda
   tags: core
@@ -1385,6 +1386,7 @@
     MTIA: bmm_out_mtia
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
+    SparseMPS: bmm_out_sparse_mps
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
 
 - func: bmm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
@@ -4173,7 +4175,7 @@
   structured_delegate: mm.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: _sparse_mm
+    SparseCPU, SparseCUDA, SparseMPS: _sparse_mm
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm
   tags: core
 
@@ -4545,6 +4547,7 @@
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   dispatch:
     CPU, CUDA: _cdist_forward
+    MTIA: _cdist_forward_mtia
     MPS: _cdist_forward_mps
   autogen: _cdist_forward.out
   tags: core
@@ -6530,6 +6533,7 @@
   dispatch:
     CPU, CUDA: var
     MPS: var_mps
+    MTIA: var_mtia
   tags: core
 
 - func: var.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
@@ -7110,6 +7114,7 @@
     MTIA: addmm_out_mtia
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
+    SparseMPS: addmm_out_sparse_dense_mps
     SparseCsrCPU: addmm_out_sparse_compressed_cpu
     SparseCsrCUDA: addmm_out_sparse_compressed_cuda
 
@@ -7119,6 +7124,7 @@
   dispatch:
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
+    SparseMPS: addmm_sparse_dense_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: addmm_sparse_compressed_dense
   tags: core
 
@@ -7180,6 +7186,12 @@
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda
+  tags: needs_exact_strides
+
+- func: _scaled_grouped_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _scaled_grouped_mm_cuda_v2
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -7377,7 +7389,7 @@
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_mask
+    SparseCPU, SparseCUDA, SparseMPS: sparse_mask
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_mask_sparse_compressed
   autogen: sparse_mask.out
 

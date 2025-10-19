@@ -64,10 +64,6 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
-// Included here as this is externally used in CUDAAllocatorConfig
-const size_t kLargeBuffer =
-    20971520; // "large" allocations may be packed in 20 MiB blocks
-
 namespace Native {
 
 //
@@ -1080,19 +1076,12 @@ class RingBuffer {
 
   void getEntries(std::vector<T>& result) const {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    result.reserve(alloc_trace->size());
-    result.insert(
-        result.end(),
-        alloc_trace->begin() +
-            static_cast<typename std::vector<T>::difference_type>(
-                alloc_trace_next),
-        alloc_trace->end());
-    result.insert(
-        result.end(),
+    result.reserve(result.size() + alloc_trace->size());
+    std::rotate_copy(
         alloc_trace->begin(),
-        alloc_trace->begin() +
-            static_cast<typename std::vector<T>::difference_type>(
-                alloc_trace_next));
+        std::next(alloc_trace->begin(), alloc_trace_next),
+        alloc_trace->end(),
+        std::back_inserter(result));
   }
 
   void clear() {
@@ -1271,6 +1260,9 @@ class DeviceCachingAllocator {
   // thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
 
+  // thread local user metadata for annotating allocations
+  static thread_local std::string user_metadata;
+
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
@@ -1311,6 +1303,14 @@ class DeviceCachingAllocator {
     if (!compile_context.empty()) {
       compile_context.pop();
     }
+  }
+
+  void setUserMetadata(const std::string& metadata) {
+    user_metadata = metadata;
+  }
+
+  std::string getUserMetadata() {
+    return user_metadata;
   }
 
   bool checkPoolLiveAllocations(
@@ -2502,8 +2502,6 @@ class DeviceCachingAllocator {
       auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
-      } else if (divisions == 1) {
-        return llvm::PowerOf2Ceil(size);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
       }
@@ -3695,7 +3693,8 @@ class DeviceCachingAllocator {
         mempool_id,
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
-        compile_string);
+        compile_string,
+        user_metadata);
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {
@@ -3750,6 +3749,7 @@ static void uncached_delete(void* ptr) {
 
 static void local_raw_delete(void* ptr);
 thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
+thread_local std::string DeviceCachingAllocator::user_metadata;
 #ifdef __cpp_lib_hardware_interference_size
 using std::hardware_destructive_interference_size;
 #else
@@ -3945,6 +3945,18 @@ class NativeCachingAllocator : public CUDAAllocator {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     device_allocator[device]->popCompileContext();
+  }
+
+  void setUserMetadata(const std::string& metadata) override {
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    device_allocator[device]->setUserMetadata(metadata);
+  }
+
+  std::string getUserMetadata() override {
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    return device_allocator[device]->getUserMetadata();
   }
 
   bool isHistoryEnabled() override {
@@ -4468,10 +4480,7 @@ struct BackendStaticInitializer {
           if (kv[0] == "backend") {
 #ifdef USE_ROCM
             // convenience for ROCm users to allow either CUDA or HIP env var
-            if (kv[1] ==
-                    "cud"
-                    "aMallocAsync" ||
-                kv[1] == "hipMallocAsync")
+            if (kv[1] == "cudaMallocAsync" || kv[1] == "hipMallocAsync")
 #else
             if (kv[1] == "cudaMallocAsync")
 #endif
@@ -4493,9 +4502,7 @@ struct BackendStaticInitializer {
 // HIPAllocatorMasqueradingAsCUDA because it needs to happen during static
 // initialization, and doing so there may introduce static initialization
 // order (SIOF) issues.
-#define HIP_MASQUERADING_AS_CUDA \
-  "cud"                          \
-  "a"
+#define HIP_MASQUERADING_AS_CUDA "cuda"
     at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
     allocator.store(r);
 #undef HIP_MASQUERADING_AS_CUDA
