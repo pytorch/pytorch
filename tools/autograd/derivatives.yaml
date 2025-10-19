@@ -1733,7 +1733,7 @@
   self: grad.t()
   result: auto_linear
 
-- name: one_hot(Tensor self, int num_classes=-1) -> Tensor
+- name: one_hot(Tensor self, int num_classes=-1, *, ScalarType? dtype=None) -> Tensor
   self: non_differentiable
 
 - name: flip(Tensor self, int[] dims) -> Tensor
