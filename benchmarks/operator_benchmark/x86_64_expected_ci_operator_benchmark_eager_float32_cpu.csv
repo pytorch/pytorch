@@ -337,7 +337,7 @@ PyTorch,sum,sum_R256_V32_dim0_contiguousFalse_cpu,short,FALSE,6.7204
 PyTorch,sum,sum_R256_V32_dim1_contiguousTrue_cpu,short,FALSE,4.9148
 PyTorch,sum,sum_R256_V32_dim1_contiguousFalse_cpu,short,FALSE,6.636
 PyTorch,sum,sum_R256_V512_dim0_contiguousTrue_cpu,short,FALSE,9.2026
-PyTorch,sum,sum_R256_V512_dim0_contiguousFalse_cpu,short,FALSE,20.8765
+PyTorch,sum,sum_R256_V512_dim0_contiguousFalse_cpu,short,FALSE,16.165
 PyTorch,sum,sum_R256_V512_dim1_contiguousTrue_cpu,short,FALSE,11.5858
 PyTorch,sum,sum_R256_V512_dim1_contiguousFalse_cpu,short,FALSE,15.3287
 PyTorch,FloatToHalfTensorConversionBenchmark,FloatToHalfTensorConversionBenchmark_M8_N16_cpu,short,FALSE,3.7034
@@ -1277,8 +1277,8 @@ PyTorch,xor,xor_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,FAL
 PyTorch,xor,xor_M64_N64_K64_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,FALSE,10.936
 PyTorch,xor,xor_M64_N64_K128_cpu_dtype_onetorch.int32_dtype_twotorch.int32,short,FALSE,10.973
 PyTorch,all,all_M1_N1_K1_cpu,short,FALSE,4.3335
-PyTorch,all,all_M64_N64_K64_cpu,short,FALSE,51.727
-PyTorch,all,all_M64_N64_K128_cpu,short,FALSE,51.9835
+PyTorch,all,all_M64_N64_K64_cpu,short,FALSE,32.933837
+PyTorch,all,all_M64_N64_K128_cpu,short,FALSE,33.407185
 PyTorch,logical_and,"logical_and_in_one[64,1,64]_in_two[1,64,1]_cpu_dtypetorch.bool",short,FALSE,41.10566667
 PyTorch,logical_and,logical_and_M1_N1_K1_cpu_dtype_onetorch.bool_dtype_twotorch.bool,short,FALSE,3.121
 PyTorch,logical_and,logical_and_M64_N64_K64_cpu_dtype_onetorch.bool_dtype_twotorch.bool,short,FALSE,7.2898
