@@ -272,6 +272,15 @@ def smoke_test_cuda(
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
         print(f"Torch cuDNN version: {torch_cudnn_version}")
 
+        torch_cudnn_compile_version = torch._C._cudnn.getCompileVersion()
+        print(f"Torch cuDNN compile-time version: {torch_cudnn_compile_version}")
+        torch_cudnn_runtime_version = tuple([int(x) for x in torch_cudnn_version.split('.')])
+        if torch_cudnn_runtime_version != torch_cudnn_compile_version:
+            raise RuntimeError(
+                    f"cuDNN runtime version doesn't match comple version. "
+                     f"Loaded: {torch_cudnn_runtime_version} "
+                     f"Expected: {torch_cudnn_compile_version}")
+
         if sys.platform in ["linux", "linux2"]:
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             print(f"Torch nccl; version: {torch_nccl_version}")
