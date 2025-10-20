@@ -225,7 +225,7 @@ AMD/ROCm/HIP
 -  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 
 XPU/Intel GPU
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 - Eikan Wang (`EikanWang <https://github.com/EikanWang>`__)
 - Guangye Yu (`guangyey <https://github.com/guangyey>`__)
