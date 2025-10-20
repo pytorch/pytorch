@@ -19,13 +19,13 @@ mm_short_configs = op_bench.config_list(
 
 
 mm_long_configs = op_bench.cross_product_configs(
-    M=[256],  # , 1024, 3000],
-    N=[512],  # 4096],
-    K=[512],  # 4096],
-    trans_a=[False],  # True],
-    trans_b=[True],  # False],
+    M=[256, 1024, 3000],
+    N=[512, 4096],
+    K=[512, 4096],
+    trans_a=[False, True],
+    trans_b=[True, False],
     device=["cuda"],
-    dtype=[torch.float16],  # torch.bfloat16, torch.float32],
+    dtype=[torch.float16, torch.bfloat16, torch.float32],
     tags=["long"],
 )
 

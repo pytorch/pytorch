@@ -582,7 +582,6 @@ class BenchmarkRunner:
 
             # Extract operator name from test_name
             operator_name = test_name.split("_")[0]
-            print("Operator name:", operator_name)
 
             # Create the record
             @dataclass
