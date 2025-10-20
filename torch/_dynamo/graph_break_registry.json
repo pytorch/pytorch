@@ -2810,5 +2810,13 @@
         "Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict."
       ]
     }
+  ],
+  "GB0279": [
+    {
+      "Gb_type": "data_ptr comparison",
+      "Context": "Comparing data_ptr() when aliasing cannot be determined at compile time.",
+      "Explanation": null,
+      "Hints": []
+    }
   ]
 }
