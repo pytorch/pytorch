@@ -228,7 +228,7 @@ def _chunk_dtensor(
 
     The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
     """
-    root_mesh = device_mesh._get_root_mesh()
+    root_mesh = device_mesh._get_root_mesh() if device_mesh is not None else None
     if root_mesh is None:
         raise RuntimeError("No parent device_mesh is found for FSDP device_mesh.")
     if root_mesh.ndim < 2:
