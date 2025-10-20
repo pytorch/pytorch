@@ -32,7 +32,7 @@ static PyObject* _getDefaultGenerator(PyObject* self, PyObject* arg) {
   return THPGenerator_initDefaultGenerator(
       at::globalContext().defaultGenerator(
           c10::Device(c10::DeviceType::PrivateUse1, idx)));
-          END_HANDLE_TH_ERRORS
+  END_HANDLE_TH_ERRORS
 }
 // LITERALINCLUDE END: OPENREG DEFAULT GENERATOR MODULE
 
@@ -87,7 +87,7 @@ PyObject* _getDeviceCount(PyObject* self, PyObject* noargs) {
 static PyMethodDef methods[] = {
     {"_init", _initExtension, METH_NOARGS, nullptr},
     {"_get_default_generator", _getDefaultGenerator, METH_O, nullptr},
-    {"_is_in_bad_fork",_isInBadFork, METH_NOARGS, nullptr},
+    {"_is_in_bad_fork", _isInBadFork, METH_NOARGS, nullptr},
     {"_get_device", _getDevice, METH_NOARGS, nullptr},
     {"_set_device", _setDevice, METH_O, nullptr},
     {"_exchangeDevice", _exchangeDevice, METH_O, nullptr},
