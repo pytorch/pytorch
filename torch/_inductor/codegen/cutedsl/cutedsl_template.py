@@ -58,10 +58,10 @@ class CuteDSLTemplate(KernelTemplate):
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.debug("CuteDSL template choice generation failed: %s", e)
+            log.debug("CuteDSL template choice generation failed: %s", e)  # noqa: G200
             return e
         except Exception as e:
-            log.debug("CuteDSL template choice generation error: %s", e)
+            log.debug("CuteDSL template choice generation error: %s", e)  # noqa: G200
             return NotImplementedError(f"CuteDSL template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
