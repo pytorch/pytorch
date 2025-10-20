@@ -6100,9 +6100,6 @@ class TestRandomness(TestCase):
             y = x.sin() + torch.rand_like(x)
             return y
 
-        # Test nested vmaps with different chunk_sizes
-        # chunk_size1 must divide x.shape[in_dim1]
-        # chunk_size2 must divide x.shape[in_dim2] or the size after first vmap
         for chunk_size1 in [1, 2, 4]:
             for chunk_size2 in [1, 2, 4]:
                 output = torch.vmap(
@@ -6120,7 +6117,6 @@ class TestRandomness(TestCase):
                     chunk_size=chunk_size1,
                     chunk_with_scan=True,
                 )(x)
-                # Verify that all slices are unique (randomness="different")
                 self._assert_all_slices_unique(output)
 
     def test_jacfwd_with_random(self):
