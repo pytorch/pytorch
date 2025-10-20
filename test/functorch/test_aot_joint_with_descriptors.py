@@ -38,7 +38,12 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import tracing, TracingContext
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    requires_cuda,
+    run_tests,
+    skipIfCrossRef,
+    TestCase,
+)
 
 
 def graph_capture(model, inputs, with_export):
@@ -961,6 +966,45 @@ class inner_f(torch.nn.Module):
 ('call_function', 'view', {'pp_stage': 0})
 ('call_function', 't_3', {'pp_stage': 0})""",
             )
+
+    @skipIfCrossRef
+    def test_custom_op_stack_trace(self):
+        @torch.library.custom_op("my_lib::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @foo.register_fake
+        def foo_fake_impl(x, y):
+            return torch.empty_like(x)
+
+        def foo_setup_context(ctx, inputs, output):
+            pass
+
+        def foo_backward(ctx, grad_output):
+            return grad_output, grad_output
+
+        foo.register_autograd(foo_backward, setup_context=foo_setup_context)
+
+        class CustomOpModule(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = CustomOpModule()
+        inputs = (torch.randn(4, 3), torch.randn(4, 3))
+
+        gm = graph_capture(model, inputs, with_export=True)
+
+        foo_node = None
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and node.name == "foo":
+                foo_node = node
+                break
+
+        self.assertTrue(foo_node is not None)
+        self.assertTrue("return foo(x, y)" in foo_node.meta.get("stack_trace", None))
+        self.assertTrue("return foo(x, y)" in gm.print_readable(print_output=False))
+        self.assertFalse("self._opoverload" in foo_node.meta.get("stack_trace", None))
+        self.assertFalse("self._opoverload" in gm.print_readable(print_output=False))
 
 
 if __name__ == "__main__":
