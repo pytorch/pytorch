@@ -3839,7 +3839,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertTrue(torch.allclose(f(x), fn(x)))
         y = torch.zeros(3, 4)
         self.assertTrue(torch.allclose(f(y), fn(y)))
-    
+
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
@@ -3853,10 +3853,11 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         # This makes x an empty tensor value; we want to validate empty tensor + anything
         # should return empty tensor
-        x = torch.as_strided(torch.randint(5, 30, (20,)).to(torch.int64), (20, 0), (1, 20))
+        x = torch.as_strided(
+            torch.randint(5, 30, (20,)).to(torch.int64), (20, 0), (1, 20)
+        )
         fn = torch.compile(f, fullgraph=True, dynamic=True, backend="inductor")
         self.assertTrue(torch.allclose(f(x), fn(x)))
-
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
