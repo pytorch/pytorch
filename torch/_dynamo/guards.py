@@ -1054,9 +1054,7 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
-        self.already_guarded_not_present_in_generic_dict: OrderedSet[
-            tuple[str, str]
-        ] = OrderedSet()
+        self.already_added_code_parts: OrderedSet[str] = OrderedSet()
 
     def guard_on_dict_keys_and_ignore_order(
         self, example_value: dict[Any, Any], guard: Guard
@@ -1849,6 +1847,10 @@ class GuardBuilder(GuardBuilderBase):
             code = f"hasattr({ref}, {attr!r})"
         else:
             code = f"not hasattr({ref}, {attr!r})"
+
+        if code in self.already_added_code_parts:
+            return
+
         self._set_guard_export_info(
             guard, [code], provided_guarded_object=self.get(base)
         )
@@ -1882,6 +1884,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         else:
             base_manager.add_no_hasattr_guard(attr, get_verbose_code_parts(code, guard))
+        self.already_added_code_parts.add(code)
 
     def NOT_PRESENT_IN_GENERIC_DICT(
         self, guard: Guard, attr: Optional[Any] = None
@@ -1892,7 +1895,8 @@ class GuardBuilder(GuardBuilderBase):
 
         base_manager = self.get_guard_manager(guard)
 
-        if (ref, attr) in self.already_guarded_not_present_in_generic_dict:
+        code = f"not ___dict_contains({attr!r}, {ref}.__dict__)"
+        if code in self.already_added_code_parts:
             return
 
         mod_dict_source = f"{guard.name}.__dict__"
@@ -1902,11 +1906,10 @@ class GuardBuilder(GuardBuilderBase):
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
-        code = f"not ___dict_contains({attr!r}, {ref}.__dict__)"
         mod_generic_dict_manager.add_dict_contains_guard(
             False, attr, get_verbose_code_parts(code, guard)
         )
-        self.already_guarded_not_present_in_generic_dict.add((ref, attr))
+        self.already_added_code_parts.add(code)
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
@@ -1948,11 +1951,14 @@ class GuardBuilder(GuardBuilderBase):
 
         maybe_not = "not " if invert else ""
         code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
+        if code in self.already_added_code_parts:
+            return
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
             not invert, key, get_verbose_code_parts(code, guard)
         )
+        self.already_added_code_parts.add(code)
 
     def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool) -> None:
         set_ref = self.arg_ref(guard)
@@ -1960,12 +1966,15 @@ class GuardBuilder(GuardBuilderBase):
         contains = not invert  # install_dict_contains_guard inverts "contains"
 
         code = f"set.__contains__({set_ref}, {item!r})"
+        if code in self.already_added_code_parts:
+            return
 
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
             contains, item, get_verbose_code_parts(code, guard)
         )
+        self.already_added_code_parts.add(code)
 
     def BOOL_MATCH(self, guard: Guard) -> None:
         # checks val == True or val == False
@@ -2166,6 +2175,8 @@ class GuardBuilder(GuardBuilderBase):
                 range,
                 dict_keys,
                 torch.Size,
+                torch.Stream,
+                torch.cuda.streams.Stream,
                 *np_types,
                 *ok_mutable_types,
             }
@@ -3603,7 +3614,10 @@ class CheckFunctionManager:
                     output_graph.local_scope,
                     CompileContext.current_compile_id(),
                 )
-                raise AssertionError(f"Guard check failed: {reasons}")
+                raise AssertionError(
+                    "Guard failed on the same frame it was created. This is a bug - please create an issue."
+                    f"Guard fail reason: {reasons}"
+                )
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(

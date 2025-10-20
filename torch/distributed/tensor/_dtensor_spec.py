@@ -27,6 +27,7 @@ class ShardOrderEntry(NamedTuple):
                    second, etc. This tuple is guaranteed to be non-empty.
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DISTRIBUTED)
         >>> # Tensor dim 1 sharded across mesh dim 2, then mesh dim 0
         >>> ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0))
 
@@ -89,6 +90,7 @@ class DTensorSpec:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
         if self.shard_order is None:
+            # pyrefly: ignore  # bad-assignment
             self.shard_order = DTensorSpec.compute_default_shard_order(self.placements)
         self._hash: int | None = None
 
@@ -105,7 +107,7 @@ class DTensorSpec:
         # follow default left-to-right device order if shard_order is not specified
         tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
         mesh_ndim = len(placements)
-        for mesh_dim in range(0, mesh_ndim):
+        for mesh_dim in range(mesh_ndim):
             # shard_order doesn't work with _StridedShard
             if isinstance(placements[mesh_dim], _StridedShard):
                 return ()
