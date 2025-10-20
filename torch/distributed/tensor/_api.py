@@ -25,6 +25,7 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -776,18 +777,29 @@ def distribute_tensor(
     # distribute the tensor according to the placements.
     placements = list(placements)
     for idx, placement in enumerate(placements):
-        if placement.is_shard():
-            placement = cast(Shard, placement)
-            if placement.dim < 0:
-                # normalize shard placement dim
-                placement = Shard(placement.dim + tensor.ndim)
-                placements[idx] = placement
-            local_tensor = placement._shard_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
+        if isinstance(placement, Shard):
+            placement_dim = (
+                placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
             )
-        elif placement.is_replicate():
-            placement = cast(Replicate, placement)
-            local_tensor = placement._replicate_tensor(
+            if isinstance(placement, _StridedShard):
+                local_tensor = _StridedShard._make_shard_tensor(
+                    placement_dim,
+                    local_tensor,
+                    device_mesh,
+                    idx,
+                    src_data_rank,
+                    split_factor=placement.split_factor,
+                )
+                placements[idx] = _StridedShard(
+                    placement_dim, split_factor=placement.split_factor
+                )
+            else:
+                local_tensor = Shard._make_shard_tensor(
+                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
+                )
+                placements[idx] = Shard(placement_dim)
+        elif isinstance(placement, Replicate):
+            local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
             )
         else:

@@ -218,6 +218,15 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    # pyrefly: ignore  # invalid-annotation
+    force_flash: NotRequired[bool]
+    """ If True, forces use of the cute-dsl flash attention kernel.
+
+    Raises an error if flash attention cannot be used instead of falling back
+    to the default implementation. Useful for ensuring flash attention is used
+    when expected.
+    """
+
 
 class AuxRequest(NamedTuple):
     """Request which auxiliary outputs to compute from flex_attention.
@@ -258,11 +267,20 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     considered as a score_mod function. If the function has 4 positional arguments, it is
     considered as a mask function.
     """
-    num_positional_args = sum(
-        1
-        for param in inspect.signature(fn).parameters.values()
-        if param.default == inspect.Parameter.empty
-    )
+    if hasattr(fn, "__code__"):
+        code = fn.__code__
+        num_positional_total = code.co_argcount
+        defaults = ()
+        if hasattr(fn, "__defaults__"):
+            defaults = fn.__defaults__ or ()
+        num_defaults = len(defaults)
+        num_positional_args = num_positional_total - num_defaults
+    else:
+        num_positional_args = sum(
+            1
+            for param in inspect.signature(fn).parameters.values()
+            if param.default is inspect.Parameter.empty
+        )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD
