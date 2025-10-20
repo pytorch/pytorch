@@ -1363,14 +1363,15 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process,
         # Used repr for byte processing and limiting the length to 2048
-        try:
-            stack_repr = repr(self.stack)
-        except ValueError:
-            # Handle large integers that exceed sys.int_info.str_digits_check_threshold
-            stack_repr = "<self.stack repr truncated due to large integer>"
-        self.latest_bytecode_queue.append(
-            f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
-        )
+        if config.verbose:
+            try:
+                stack_repr = repr(self.stack)
+            except ValueError:
+                # Handle large integers that exceed sys.int_info.str_digits_check_threshold
+                stack_repr = "<self.stack repr truncated due to large integer>"
+            self.latest_bytecode_queue.append(
+                f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
+            )
 
         self.update_block_stack(inst)
 
