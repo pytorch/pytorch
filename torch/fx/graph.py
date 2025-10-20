@@ -8,6 +8,7 @@ import inspect
 import keyword
 import math
 import os
+import pprint
 import re
 import typing
 import warnings
@@ -691,11 +692,13 @@ class CodeGen:
                 # output is handled specially
 
             if include_meta and hasattr(node, "meta") and node.meta:
-                # Print the node.meta dict as a comment above the node
-                import pprint
-                meta_str = pprint.pformat(node.meta, width=80, compact=True)
+                # use str over repr since repr is susceptible to sympy
+                # errors such as "cannot determine truth value of Relational"
+                meta_str = pprint.pformat(str(node.meta), width=80, compact=True)
+                body.append("# === meta start ===\n")
                 for line in meta_str.splitlines():
-                    body.append(f"# meta: {line}\n")
+                    body.append(f"# {line}\n")
+                body.append("# === meta: end ===\n")
 
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
