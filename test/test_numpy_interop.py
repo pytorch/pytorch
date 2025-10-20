@@ -164,6 +164,28 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
+    @skipIfTorchDynamo(
+        "can't check if value is ZeroTensor since _is_zerotensor returns a bool and not a TensorVariable"
+    )
+    def test_to_numpy_zero_tensor(self, device) -> None:
+        dtypes = [
+            torch.uint8,
+            torch.int8,
+            torch.short,
+            torch.int,
+            torch.half,
+            torch.float,
+            torch.double,
+            torch.long,
+            torch.bool,
+        ]
+        for dtype in dtypes:
+            x = torch._efficientzerotensor((10), dtype=dtype)
+            self.assertRaises(RuntimeError, lambda: x.numpy())
+            y = x.numpy(force=True)
+            for i in range(10):
+                self.assertEqual(y[i], 0)
+
     @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
     def test_to_numpy_force_argument(self, device) -> None:
         for force in [False, True]:
@@ -183,7 +205,7 @@ class TestNumPyInterop(TestCase):
                             x = x.conj()
                             y = x.resolve_conj()
                         expect_error = (
-                            requires_grad or sparse or conj or not device == "cpu"
+                            requires_grad or sparse or conj or device != "cpu"
                         )
                         error_msg = r"Use (t|T)ensor\..*(\.numpy\(\))?"
                         if not force and expect_error:
@@ -574,7 +596,7 @@ class TestNumPyInterop(TestCase):
                 if (
                     dtype == torch.complex64
                     and torch.is_tensor(t)
-                    and type(a) == np.complex64
+                    and type(a) is np.complex64
                 ):
                     # TODO: Imaginary part is dropped in this case. Need fix.
                     # https://github.com/pytorch/pytorch/issues/43579

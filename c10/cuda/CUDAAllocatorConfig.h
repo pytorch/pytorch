@@ -23,6 +23,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static size_t max_split_size() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::max_split_size();
   }
+
   C10_DEPRECATED_MESSAGE(
       "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::garbage_collection_threshold() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::garbage_collection_threshold() instead.")
   static double garbage_collection_threshold() {
@@ -56,6 +57,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_release_lock_on_cudamalloc;
   }
 
+  static bool graph_capture_record_stream_reuse() {
+    return instance().m_graph_capture_record_stream_reuse;
+  }
+
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
     return instance().m_pinned_use_cuda_host_register;
@@ -70,6 +75,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static bool pinned_use_background_threads() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         pinned_use_background_threads();
+  }
+
+  static size_t pinned_reserve_segment_size_mb() {
+    return instance().m_pinned_reserve_segment_size_mb;
   }
 
   static size_t pinned_max_register_threads() {
@@ -93,8 +102,6 @@ class C10_CUDA_API CUDAAllocatorConfig {
         roundup_power2_divisions();
   }
 
-  C10_DEPRECATED_MESSAGE(
-      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::max_non_split_rounding_size() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::max_non_split_rounding_size() instead.")
   static size_t max_non_split_rounding_size() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         max_non_split_rounding_size();
@@ -106,8 +113,27 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return c10::CachingAllocator::getAllocatorSettings();
   }
 
-  static bool use_async_allocator() {
-    return instance().m_use_async_allocator;
+  static CUDAAllocatorConfig& instance() {
+    static CUDAAllocatorConfig* s_instance = ([]() {
+      auto inst = new CUDAAllocatorConfig();
+      auto env = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+#ifdef USE_ROCM
+      // convenience for ROCm users, allow alternative HIP token
+      if (!env.has_value()) {
+        env = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
+      }
+#endif
+      // Note: keep the parsing order and logic stable to avoid potential
+      // performance regressions in internal tests.
+      if (!env.has_value()) {
+        env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+      }
+      if (env.has_value()) {
+        inst->parseArgs(env.value());
+      }
+      return inst;
+    })();
+    return *s_instance;
   }
 
   // Use `Construct On First Use Idiom` to avoid `Static Initialization Order`
@@ -124,31 +150,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
         // NOLINTEND(bugprone-suspicious-missing-comma,-warnings-as-errors)
         "release_lock_on_hipmalloc",
         "pinned_use_hip_host_register",
+        "graph_capture_record_stream_reuse",
+        "pinned_reserve_segment_size_mb",
         "pinned_num_register_threads"};
     return keys;
-  }
-
-  static CUDAAllocatorConfig& instance() {
-    static CUDAAllocatorConfig* s_instance = ([]() {
-      auto inst = new CUDAAllocatorConfig();
-      auto env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
-      if (!env.has_value()) {
-        // For backward compatibility, check for the old environment variable
-        // PYTORCH_CUDA_ALLOC_CONF.
-        env = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
-      }
-#ifdef USE_ROCM
-      // convenience for ROCm users, allow alternative HIP token
-      if (!env.has_value()) {
-        env = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
-      }
-#endif
-      if (env.has_value()) {
-        inst->parseArgs(env.value());
-      }
-      return inst;
-    })();
-    return *s_instance;
   }
 
   void parseArgs(const std::string& env);
@@ -158,15 +163,23 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   size_t parseAllocatorConfig(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
-      size_t i);
+      size_t i,
+      bool& used_cudaMallocAsync);
   size_t parsePinnedUseCudaHostRegister(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
   size_t parsePinnedNumRegisterThreads(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parsePinnedReserveSegmentSize(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
+  size_t parseGraphCaptureRecordStreamReuse(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
+  std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
   std::atomic<Expandable_Segments_Handle_Type> m_expandable_segments_handle_type
 #if CUDA_VERSION >= 12030
       {Expandable_Segments_Handle_Type::UNSPECIFIED};
@@ -175,8 +188,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
 #endif
   std::atomic<bool> m_release_lock_on_cudamalloc{false};
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
-  std::atomic<bool> m_use_async_allocator{false};
-  std::atomic<bool> m_is_allocator_loaded{false};
+  std::atomic<bool> m_graph_capture_record_stream_reuse{false};
 };
 
 // Keep this for backwards compatibility

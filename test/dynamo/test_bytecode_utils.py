@@ -80,7 +80,7 @@ def fn():
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @unittest.skipIf(
-        sys.version_info < (3, 10) or sys.version_info >= (3, 11),
+        sys.version_info >= (3, 11),
         "linetable test for Python 3.10",
     )
     def test_linetable_310_writer(self):
@@ -94,19 +94,6 @@ def fn():
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_linetable)
-
-    @unittest.skipIf(sys.version_info >= (3, 10), "use lnotab when python < 3.10")
-    def test_lnotab_writer(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "lnotab_writer"
-            return f"Test if {f} generates correct co_lnotab: {c}"
-
-        inst = dis.get_instructions(fn)
-        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
-        self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
     def test_if_tensor_is_none(self):
         """
@@ -284,7 +271,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
@@ -300,7 +287,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311

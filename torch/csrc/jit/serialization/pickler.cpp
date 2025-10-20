@@ -110,7 +110,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushGlobal(type_name.prefix(), type_name.name());
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
-    if (checkHasValidSetGetState(type)) {
+    if (checkHasValidSetGetState(*type)) {
       Function& getstate = type->getMethod("__getstate__");
       pushIValue(getstate({obj}));
     } else {

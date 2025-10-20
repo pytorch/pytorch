@@ -41,6 +41,7 @@ def format_frame(frame: dict[str, str]) -> str:
 def format_frames(frames: list[dict[str, str]]) -> str:
     formatted_frames = []
     for frame in frames:
+        # pyrefly: ignore  # bad-argument-type
         formatted_frames.append(format_frame(frame))
     return "\n".join(formatted_frames)
 
@@ -115,13 +116,19 @@ def match_coalesced_groups(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -244,13 +251,19 @@ def match_coalesced_groups_with_non_p2p(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -683,6 +696,7 @@ def check_version(version_by_ranks: dict[str, str], version: str) -> None:
 
 
 def get_version_detail(version: str) -> tuple[int, int]:
+    # pyrefly: ignore  # bad-assignment
     version = version.split(".")
     assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)

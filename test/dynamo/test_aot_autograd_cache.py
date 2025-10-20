@@ -295,6 +295,56 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_vmap(self):
+        """
+        make
+        """
+
+        def fn(x, y):
+            f = lambda x, y: (x * y + 1).sum(dim=0)  # noqa: E731
+            vmapped = torch.vmap(f)(x, y)
+            return vmapped.sum(dim=0)
+
+        x = torch.randn(25, requires_grad=True)
+        y = torch.randn(25, requires_grad=True)
+        x2 = x.detach().clone().requires_grad_(True)
+        y2 = y.detach().clone().requires_grad_(True)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        self.assertEqual(fn(x, y), compiled_fn(x2, y2))
+        fn(x, y).sum().backward()
+        compiled_fn(x2, y2).sum().backward()
+        self.assertEqual(x.grad, x2.grad)
+        self.assertEqual(y.grad, y2.grad)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Reset all tensors
+        x = torch.randn(25, requires_grad=True)
+        y = torch.randn(25, requires_grad=True)
+        x2 = x.detach().clone().requires_grad_(True)
+        y2 = y.detach().clone().requires_grad_(True)
+
+        # A second call should hit. (First reset so in-memory guards
+        # don't prevent compilation).
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(x, y), compiled_fn(x2, y2))
+        fn(x, y).sum().backward()
+        compiled_fn(x2, y2).sum().backward()
+        self.assertEqual(x.grad, x2.grad)
+        self.assertEqual(y.grad, y2.grad)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -469,11 +519,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "view_replay_for_aliased_outputs": True}
     )
-    def test_view_replay_bypass(self):
-        """
-        Should bypass when view replay is turned on
-        """
-
+    def test_view_replay(self):
         def fn(a):
             tmp = a.detach()
             a.mul_(2)
@@ -481,10 +527,25 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         with torch.autograd._force_original_view_tracking(True):
             compiled_fn = torch.compile(fn)
-            compiled_fn(torch.rand(2, 3))
 
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+        def run_and_check(miss, hit, bypass):
+            self._clear_dynamo_and_codecache()
+
+            inp = torch.rand(2, 3)
+            compiled_inp = inp.clone().detach()
+
+            with torch.autograd._force_original_view_tracking(True):
+                out = fn(inp)
+                compiled_out = compiled_fn(compiled_inp)
+
+            self.assertEqual(out, compiled_out)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], miss)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hit)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], bypass)
+
+        run_and_check(miss=1, hit=0, bypass=0)
+        run_and_check(miss=1, hit=1, bypass=0)
+        run_and_check(miss=1, hit=2, bypass=0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

@@ -2,7 +2,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -14,6 +14,10 @@ from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.flop_counter import flop_registry
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 aten = torch.ops.aten
@@ -515,6 +519,7 @@ class RuntimeEstimator(TorchDispatchMode):
         super().__enter__()
         return self
 
+    # pyrefly: ignore  # bad-override
     def __exit__(self, *args: Any) -> None:
         print(
             f"Estimated ({self._estimate_mode_type})"

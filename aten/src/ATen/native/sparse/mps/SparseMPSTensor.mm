@@ -20,45 +20,8 @@ using namespace at::sparse;
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/Sparse_metallib.h>
+#include <ATen/native/mps/Coalesce_metallib.h>
 #endif
-
-
-static Tensor flatten_indices(const Tensor& indices, IntArrayRef size) {
-
-  TORCH_CHECK(indices.dim() == 2, "flatten_indices: indices must be 2D");
-  TORCH_CHECK(static_cast<size_t>(indices.size(0)) == size.size(),
-              "flatten_indices: indices.size(0) must equal size.size()");
-
-  int64_t sparse_dim = indices.size(0);
-  int64_t nnz = indices.size(1);
-
-  if (nnz == 0) {
-    return at::empty({0}, indices.options().dtype(kLong));
-  }
-
-  std::vector<int64_t> strides(sparse_dim);
-  strides[sparse_dim - 1] = 1;
-  for (int64_t i = sparse_dim - 2; i >= 0; i--) {
-    strides[i] = strides[i + 1] * size[i + 1];
-  }
-
-  Tensor flat_indices = at::empty({nnz}, indices.options().dtype(kLong));
-
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto pipeline = lib.getPipelineStateForFunc("flatten_indices_kernel");
-      auto encoder = stream->commandEncoder();
-      [encoder setComputePipelineState:pipeline];
-
-      mtl_setArgs(encoder, indices, strides, flat_indices, sparse_dim, nnz);
-      mtl_dispatch1DJob(encoder, pipeline, nnz);
-    }
-  });
-
-  return flat_indices;
-}
 
 static Tensor compute_output_positions(const Tensor& is_unique) {
 

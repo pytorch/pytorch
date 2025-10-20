@@ -3,12 +3,6 @@
 TorchInductor and AOTInductor Provenance Tracking
 =================================================
 
-.. warning::
-    This feature is a prototype under active development and there will be
-    breaking change in future releases.
-    The current compatibility of this tool is limited to the latest nightly build of PyTorch.
-
-
 This section describes how to use the provenance tracking feature for TorchInductor and AOTInductor in ``tlparse``.
 Provenance tracking helps you visualize the relationships between the input GraphModule to (AOT)Inductor and the optimized code generated. This feature allows you to trace how your original operations are transformed during compilation.
 
@@ -37,7 +31,7 @@ Follow these steps to enable and use provenance tracking in your PyTorch project
 
    .. code-block:: bash
 
-     TORCH_TRACE=~/my_trace_log_dir TORCH_LOGS="+inductor" TORCH_COMPILE_DEBUG=1 python your_program.py
+     TORCH_TRACE=~/my_trace_log_dir INDUCTOR_PROVENANCE=1 python your_program.py
 
    This will generate a log file in ``~/my_trace_log_dir``. The log file will be used by tlparse to generate the provenance tracking highlighter.
 3. Run ``tlparse`` on the log with ``--inductor-provenance`` flag. For example:
@@ -60,6 +54,24 @@ After running ``tlparse <file_name> --inductor-provenance``, you should see an a
 For a demo, see: https://github.com/pytorch/tlparse/pull/93
 
  .. image:: _static/img/inductor_provenance/index.png
+
+
+Source code corresponding to each Inductor kernel
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``INDUCTOR_PROVENANCE=1``, you can also view the source code corresponding to each Inductor kernel in tlparse. To access it, click the "readable_html" link next to "inductor_provenance_tracking_kernel_stack_traces.json" in the tlparse output.
+
+ .. image:: _static/img/inductor_provenance/index_2.png
+
+
+Below are some example screenshots. The ``:1`` and ``:467`` suffixes at the end of the kernel names are used to distinguish different calls to the same kernel. We refer to these suffixes as debug handles.
+
+ .. image:: _static/img/inductor_provenance/kernel_source_1.png
+ .. image:: _static/img/inductor_provenance/kernel_source_2.png
+
+You can also find the debug handle in the comments within the kernel source code.
+
+ .. image:: _static/img/inductor_provenance/kernel_source_3.png
 
 
 See Also
