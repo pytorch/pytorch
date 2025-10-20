@@ -22,7 +22,7 @@ from .common import (
     create_num_blocks_fake_generator,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
-    load_template,
+    load_flex_template,
     maybe_realize,
     set_head_dim_values,
 )
@@ -97,9 +97,9 @@ def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, me
 flex_decoding_template = TritonTemplate(
     name="flex_decoding",
     grid=flex_decoding_grid,
-    source=load_template("flex_decode")
-    + load_template("utilities")
-    + load_template("common"),
+    source=load_flex_template("flex_decode")
+    + load_flex_template("utilities")
+    + load_flex_template("common"),
 )
 
 
