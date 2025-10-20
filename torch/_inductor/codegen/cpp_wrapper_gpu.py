@@ -824,6 +824,7 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args, arg_types = self.prepare_triton_wrapper_args(
                 # pyrefly: ignore  # bad-argument-type
                 call_args,
+                # pyrefly: ignore  # bad-argument-type
                 arg_types,
             )
             wrapper_name = f"call_{kernel_name}"

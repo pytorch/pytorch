@@ -1183,7 +1183,7 @@ def speculate_subgraph(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)
+        log.info(ex)  # noqa: G200
         raise ex
 
 

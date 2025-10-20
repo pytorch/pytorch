@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -8,6 +9,18 @@ import torch._dynamo.testing
 
 # for use in test_side_effects_globals
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
+
+
+class CustomizedCtxManager:
+    def __init__(self, x):
+        self.x = x
+        torch._dynamo.graph_break()
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
 
 
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
@@ -636,6 +649,91 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(3)
         ref = f4(x)
         self.assertEqual(ref, torch.zeros(3) + 15)
+
+    def test_return_after_graph_break_deep_nested(self):
+        @torch.compiler.disable
+        def f1(x):
+            return x + 1
+
+        def f2(x):
+            return f1(x + 2)
+
+        def f3(x):
+            return f2(x + 4)
+
+        def f4(x):
+            x = f3(x + 8)
+            return x + 16
+
+        def f5(x):
+            return f4(x + 32)
+
+        def f6(x):
+            return f5(x + 64)
+
+        def f7(x):
+            x = f6(x + 128)
+            return x + 256
+
+        @torch.compile(backend="eager")
+        def f8(x):
+            return f7(x + 512)
+
+        x = torch.zeros(3)
+        ref = f8(x)
+        self.assertEqual(ref, torch.zeros(3) + 1023)
+
+        # check that only 2 resume functions are created
+        resume_fns = []
+        for val in globals().values():
+            try:
+                name = repr(val)
+                if "resume_in" in name:
+                    resume_fns.append(name)
+            except Exception:
+                pass
+
+        self.assertEqual(len(resume_fns), 2)
+        self.assertTrue(any("resume_in_f4" in name for name in resume_fns))
+        self.assertTrue(any("resume_in_f7" in name for name in resume_fns))
+
+    @unittest.expectedFailure
+    def test_nested_decorated_function(self):
+        # decorator must call ContextWrappingVariable.cleanup_assert to trigger this test
+        def f(x):
+            @torch.autocast("cpu")
+            def inner(y):
+                y = y + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+            return inner(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)
+
+    @unittest.expectedFailure
+    def test_nested_graph_break_in_custom_ctx_manager_init(self):
+        def f(x):
+            with CustomizedCtxManager(x):
+                return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
 
 
 if __name__ == "__main__":
