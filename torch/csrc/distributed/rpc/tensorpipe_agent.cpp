@@ -304,10 +304,9 @@ void TensorPipeAgent::TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
 }
 
 float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
-  return currentCount_ == 0 ? 0
-                            : static_cast<float>(
-                                  static_cast<double>(currentSum_) /
-                                  static_cast<double>(currentCount_));
+  return currentCount_ == 0
+      ? 0
+      : static_cast<float>((double)currentSum_ / (double)currentCount_);
 }
 
 ////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
@@ -504,9 +503,8 @@ void TensorPipeAgent::startImpl() {
   for (const auto& p : workerNameToInfo_) {
     const auto& name = p.first;
     auto nodeAddrData = nameToAddressStore_.get(name);
-    auto nodeAddrStr = std::string(
-        reinterpret_cast<const char*>(nodeAddrData.data()),
-        nodeAddrData.size());
+    auto nodeAddrStr =
+        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
   }
 
@@ -1242,9 +1240,8 @@ void TensorPipeAgent::updateGroupMembership(
     // TODO: we should get nodeAddrStr in the joining process, then pass in as
     // an argument rather than getting from store each time
     auto nodeAddrData = nameToAddressStore_.get(name);
-    auto nodeAddrStr = std::string(
-        reinterpret_cast<const char*>(nodeAddrData.data()),
-        nodeAddrData.size());
+    auto nodeAddrStr =
+        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
 
     for (const auto& it : reverseDeviceMaps) {

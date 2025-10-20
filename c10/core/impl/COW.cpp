@@ -44,8 +44,7 @@ bool has_simple_data_ptr(const c10::StorageImpl& storage) {
 }
 
 bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
-  return reinterpret_cast<const void*>(data_ptr.get_deleter()) ==
-      reinterpret_cast<const void*>(&cow::cow_deleter);
+  return (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
 }
 
 c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
