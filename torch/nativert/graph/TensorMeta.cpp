@@ -106,11 +106,14 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       layout_(convertJsonLayout(tensorMeta.get_layout())),
       requiresGrad_(tensorMeta.get_requires_grad()),
       device_(convertJsonDevice(tensorMeta.get_device())) {
-  if (tensorMeta.get_storage_offset().tag() ==
-      torch::_export::SymInt::Tag::AS_INT) {
+  const auto& storageOffset = tensorMeta.get_storage_offset();
+  if (storageOffset.tag() == torch::_export::SymInt::Tag::AS_INT) {
     storage_offset_ = tensorMeta.get_storage_offset().get_as_int();
-  } else {
-    TORCH_CHECK(false, "SymInt not supported yet");
+  } else if (storageOffset.tag() == torch::_export::SymInt::Tag::AS_EXPR) {
+    // TODO: it's still unclear how SymInt shape should be used in runtime
+    // setting the storage offset to 0 for now
+    hasSymbolicShape_ = true;
+    storage_offset_ = 0;
   }
 
   for (const auto& size : tensorMeta.get_sizes()) {

@@ -9,9 +9,11 @@ import math
 import operator
 import os
 import os.path
+import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -197,14 +199,15 @@ def _extract_graph_with_inputs_outputs(
         new_node = new_graph.placeholder(node.name)
         # Can't use node_copy here as we may be turning previous call_function into placeholders
         new_node.meta = node.meta
+        # pyrefly: ignore  # unsupported-operation
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if _must_be_in_backward(node) and subgraph != "backward":
+        if _must_be_in_backward(node) and subgraph != "backward" and node not in inputs:
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
-        if _must_be_in_forward(node) and subgraph != "forward":
+        if _must_be_in_forward(node) and subgraph != "forward" and node not in inputs:
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
@@ -225,8 +228,10 @@ def _extract_graph_with_inputs_outputs(
             if any(all_args):
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
+            # pyrefly: ignore  # unsupported-operation, bad-argument-type
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
+            # pyrefly: ignore  # unsupported-operation, bad-argument-type
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "output":
             pass
@@ -291,13 +296,27 @@ def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
 
 
 def _must_be_in_forward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_forward(node)
+    if _has_tag_must_be_in_forward(node):
+        return True
+    is_mutable = is_with_effects(node) or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target._schema.is_mutable
+    )
+    return (
+        not _has_tag_is_backward(node)
+        and not _has_tag_must_be_in_backward(node)
+        and is_mutable
+    )
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_backward(node) or (
-        _has_tag_is_backward(node) and is_with_effects(node)
+    if _has_tag_must_be_in_backward(node):
+        return True
+    is_mutable = is_with_effects(node) or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target._schema.is_mutable
     )
+    return _has_tag_is_backward(node) and is_mutable
 
 
 def _extract_fwd_bwd_outputs(
@@ -341,6 +360,7 @@ def calculate_quantization_scaling(
     node: torch.fx.Node,
     max: float = 57344.0,
     min: float = 1e-12,
+    position: int = 0,
 ):
     with graph.inserting_after(node):
         abs_node = graph.call_function(
@@ -404,7 +424,7 @@ def calculate_quantization_scaling(
         scale_node = graph.call_function(
             torch.ops.prims.convert_element_type.default,
             args=(mul_node, torch.float32),
-            name="fp8_scale_" + str(node.name),
+            name=f"fp8_scale_pos_{position}_{node.name}",
         )
         scale_node.meta["val"] = torch.ops.prims.convert_element_type.default(
             mul_node.meta["val"], torch.float32
@@ -420,6 +440,7 @@ def perform_quantization(
     quant_type: torch.dtype,
     clamp_min: float,
     clamp_max: float,
+    position: int,
 ) -> torch.fx.Node:
     with graph.inserting_after(scale_node):
         target_node_32 = graph.call_function(
@@ -469,7 +490,7 @@ def perform_quantization(
         quant_activation_node = graph.call_function(
             torch.ops.prims.convert_element_type.default,
             args=(clamp_max_scaled_node, quant_type),
-            name="fp8_quant_" + str(node.name),
+            name=f"fp8_quant_pos_{position}_{node.name}",
         )
         quant_activation_node.meta["val"] = (
             torch.ops.prims.convert_element_type.default(
@@ -560,9 +581,9 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     fwd_outputs = output.args[0]
     quant_type = get_quant_type()
     clamp_min, clamp_max = calculate_range(quant_type)
-    node_to_quant = dict()
+    position_to_quant = dict()
     tensor_scale_nodes, sym_scale_nodes = [], []
-    for node in fwd_outputs:
+    for position, node in enumerate(fwd_outputs):
         # check if the activation node is the node saved for quantization
         if node.meta.get("saved_for_quantization", False):
             # case: use scaling
@@ -571,11 +592,12 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
             ].get("use_scaling", True):
                 # calculating the scale
                 scale_node = calculate_quantization_scaling(
-                    graph, node, clamp_max, 1e-12
+                    graph, node, clamp_max, 1e-12, position
                 )
+
                 # converting to fp8
                 quant_node = perform_quantization(
-                    graph, node, scale_node, quant_type, clamp_min, clamp_max
+                    graph, node, scale_node, quant_type, clamp_min, clamp_max, position
                 )
                 if not is_sym_node(scale_node):
                     tensor_scale_nodes.append(scale_node)
@@ -587,7 +609,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
                     quant_node = graph.call_function(
                         torch.ops.prims.convert_element_type.default,
                         args=(node, quant_type),
-                        name="fp8_quant_" + str(node.name),
+                        name=f"fp8_quant_pos_{position}_{node.name}",
                     )
                     quant_node.meta["val"] = (
                         torch.ops.prims.convert_element_type.default(
@@ -597,12 +619,16 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
                     quant_node.meta["tensor_meta"] = extract_tensor_metadata(
                         quant_node.meta["val"]
                     )
-            node_to_quant[node] = quant_node
+
+            position_to_quant[position] = quant_node
+
+    # Use position-based lookup for building output
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
-        node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs
+        position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
+    # pyrefly: ignore  # bad-argument-type
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:
@@ -738,7 +764,9 @@ def perform_fp8_activation_quantization(
     # update the corresponding bwd_inputs due to the fwd_outputs quantization
     for fwd_node in quant_fwd_module_outputs:
         if "fp8_quant_" in fwd_node.name:
-            bwd_input = bwd_module_inputs[fwd_node.name.replace("fp8_quant_", "")]
+            bwd_input = bwd_module_inputs[
+                re.sub(r"^fp8_quant_pos_\d+_", "", fwd_node.name)
+            ]
             with bwd_module.graph.inserting_after(bwd_input):
                 quant_bwd_input = bwd_module.graph.placeholder(name=fwd_node.name)
             dequant_type = bwd_input.meta["dequant_type"]
@@ -1002,17 +1030,60 @@ def default_partition(
     forward_node_names = OrderedSet(
         node.name for node in forward_only_graph.nodes if node.op != "output"
     )
+    order = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = []
     saved_sym_nodes = []
 
+    def is_mutated_later_in_fw(node):
+        if _has_tag_is_backward(node):
+            return False
+        tensor_arg_aliases = [
+            x
+            for x in node.args
+            if isinstance(x, fx.Node)
+            and "val" in x.meta
+            and isinstance(x.meta["val"], torch.Tensor)
+        ]
+        while len(tensor_arg_aliases) > 0:
+            a = tensor_arg_aliases.pop()
+            for u in a.users:
+                if not isinstance(u.target, torch._ops.OpOverload):
+                    continue
+                # If we witness a mutation on our node later, and that mutation is not "must be in backward",
+                # then our node needs to be computed in the forward (otherwise we will compute it on the mutated values)
+                if (
+                    # one of the args was mutated
+                    u.target._schema.is_mutable
+                    # and the mutation happens "later"
+                    and order[u] > order[node]
+                    # and the mutation happened during the forward
+                    and not (_has_tag_is_backward(u) or _has_tag_must_be_in_backward(u))
+                ):
+                    for idx, alias_info in enumerate(u.target._schema.arguments):
+                        if alias_info.is_write and u.args[idx] is a:
+                            return True
+                elif u.target.is_view:
+                    tensor_arg_aliases.append(u)
+        return False
+
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
+            # if a node isn't "required" to be in the forward, but any of its arguments
+            # are later mutated in the forward, then it must have been run in the forward
+            # (if not, and the node's arg was saved for backward, we would have mutated a saved value)
+            # NB: doesn't handle nodes where the input is a list of tensors and one of those tensors is later mutated
+            if is_mutated_later_in_fw(node):
+                saved_values.append(node)
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
-        elif "tensor_meta" not in node.meta and node.op == "call_function":
+        elif (
+            "tensor_meta" not in node.meta
+            and node.op == "call_function"
+            and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
+        ):
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
@@ -1163,6 +1234,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             # critical path first.
             cur_nodes += node.all_input_nodes
 
+        # pyrefly: ignore  # bad-assignment
         insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
         for node in insertable_nodes:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -1391,12 +1463,14 @@ def functionalize_rng_ops(
     devices = OrderedSet(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
+    # pyrefly: ignore  # unbound-name
     devices.discard(torch.device("cpu"))
     # multiple cuda devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 
     # this changes numerics, so if fallback_random is set we will not use it
+    # pyrefly: ignore  # unbound-name
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
@@ -1551,6 +1625,8 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
             for user in node.users:
                 if (
                     must_recompute(user)
+                    and "ac_graph_id" in user.meta
+                    and "ac_graph_id" in node.meta
                     and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
@@ -1792,7 +1868,7 @@ def solve_min_cut(
             # If someone saves a input for backward as-is and backward
             # returns that tensor as-is as a grad input, then the node x would
             # be both a required_bw_node and an input. In this case we
-            # (1) connect x_in to to the source, (2) x_out to the sink, and
+            # (1) connect x_in to the source, (2) x_out to the sink, and
             # (3) assign the proper weight to the x_in-x_out edge, so that
             # x would be part of cut nodes. A case where this happens is if
             # NestedTensor saves a offset tensor as part of the singleton int
@@ -2433,7 +2509,10 @@ def choose_saved_values_set(
                 saved_node_idxs=saved_node_idxs,
                 recomputable_node_idxs=recomputable_node_idxs,
                 expected_runtime=expected_runtime,
-                memories_banned_nodes=memories_banned_nodes,
+                memories_banned_nodes=[
+                    _size_of(i) for i in all_recomputable_banned_nodes
+                ],
+                normalized_memories_banned_nodes=memories_banned_nodes,
                 runtimes_banned_nodes=runtimes_banned_nodes,
                 min_cut_saved_values=saved_values,
             )
@@ -2535,7 +2614,7 @@ def _sync_decision_cross_ranks(
         # proxy to check if the graph is the same across different GPUs.
         # We only consider the name and order of nodes. A more robust way
         # would be to check the hash of the whole graph (disregarding input shapes),
-        # this is is a reasonable first-order approximation.
+        # this is a reasonable first-order approximation.
         node_str = "/".join(x.name for x in joint_graph.nodes)
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
         all_inputs = [None for _ in range(torch.distributed.get_world_size())]
@@ -2596,6 +2675,88 @@ def _sync_decision_cross_ranks(
             ]
 
     return saved_values
+
+
+def thread_graphsafe_rng_from_hops(module, is_backward):
+    """
+    Graph-safe RNG lets torch.compile use CUDA Graphs for graphs with RNG ops.
+    For graphs without HOPs, the partitioner adds placeholder nodes
+    fwd_rng_state_* and bw_rng_state_* to the forward and backward graphs. At
+    runtime, the AOTDispatcher retrieves these RNG states and passes them to the
+    compiled graphs.
+
+    This works well for no-HOP graphs. With HOPs, the partitioner runs
+    recursively: it first partitions the HOP (producing forward/backward HOP
+    subgraphs) and then stitches them back into the outer joint graph. For HOPs
+    that contain RNG ops, the outer joint graph now includes HOP subgraph
+    modules with extra RNG placeholders. We must thread these placeholders
+    through the outer module partitioned forward and backward graphs—this
+    function does exactly that. It collects the RNG placeholder nodes from the
+    HOPs and creates corresponding placeholders in the outer forward and
+    backward graphs.
+
+    There is a catch: for a short period, the joint graph is in a “bad” state.
+    The HOP subgraphs expect additional inputs (because of the new
+    placeholders), but the outer graph call sites don't yet provide them. We
+    can't fix this in the joint graph because the joint graph's input signature
+    is fixed (primals, tangents). As a compromise, we keep the joint graph in
+    somewhat of a bad state for some time and, once the outer forward and
+    backward graphs are partitioned, insert the corresponding RNG placeholders
+    and wire up the calls.
+    """
+
+    rng_count = 0
+    rng_string = "bwd_rng_state" if is_backward else "fwd_rng_state"
+    last_input = next(reversed(module.graph.find_nodes(op="placeholder")))
+    for hop_node in module.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(module, hop_node.args[0].target)
+        if isinstance(subgraph, fx.GraphModule):
+            new_rng_inputs = []
+            for idx, placeholder_node in enumerate(
+                subgraph.graph.find_nodes(op="placeholder")
+            ):
+                if rng_string in placeholder_node.name:
+                    # Found a rng state placeholder in the hop graph, lets add
+                    # the corresponding node in the outer graph
+                    with module.graph.inserting_after(last_input):
+                        rng_state = module.graph.placeholder(
+                            f"{rng_string}_{rng_count}"
+                        )
+                        rng_count += 1
+                        rng_state.meta["val"] = placeholder_node.meta["val"]
+                        last_input = rng_state
+                        new_rng_inputs.append(rng_state)
+
+            if new_rng_inputs:
+                # Pass on the new args that include the new_rng_inputs
+                with module.graph.inserting_after(hop_node):
+                    new_hop_node_with_fixed_args = module.graph.create_node(
+                        "call_function",
+                        torch.ops.higher_order.invoke_subgraph,
+                        (*hop_node.args, *new_rng_inputs),  # type: ignore[arg-type]
+                        {},
+                    )
+                    hop_node.replace_all_uses_with(
+                        new_hop_node_with_fixed_args, propagate_meta=True
+                    )
+
+                # Setup the eager_input_vals
+                eager_vals = hop_node.meta.get("eager_input_vals")
+                if eager_vals:
+                    eager_args, eager_kwargs = eager_vals
+                    new_eager_args = (
+                        *eager_args,
+                        *[inp.meta["val"] for inp in new_rng_inputs],
+                    )
+                    new_hop_node_with_fixed_args.meta["eager_input_vals"] = (
+                        new_eager_args,
+                        eager_kwargs,
+                    )
+                module.graph.erase_node(hop_node)
+
+    return module
 
 
 def min_cut_rematerialization_partition(
@@ -2741,6 +2902,7 @@ def min_cut_rematerialization_partition(
         node_info,
         memory_budget=memory_budget,
     )
+    # pyrefly: ignore  # unbound-name
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
@@ -2751,6 +2913,7 @@ def min_cut_rematerialization_partition(
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
+        # pyrefly: ignore  # bad-argument-type
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
@@ -2766,6 +2929,9 @@ def min_cut_rematerialization_partition(
     # this is helpful for memory, especially in the case of aot_eager backend
     fw_module = raise_getitems(fw_module)
     bw_module = raise_getitems(bw_module)
+
+    fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
+    bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
 
     if AOT_PARTITIONER_DEBUG:
         # Calculate sorted sizes of saved values
