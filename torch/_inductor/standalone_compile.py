@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
-from torch._dynamo.aot_compile import BundledAOTAutogradSerializableCallable
+from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
