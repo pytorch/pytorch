@@ -158,9 +158,9 @@ class ActivationSparsifier:
                 # data should be a list [aggregated over each feature only]
                 if data is None:
                     out_data = [
-                        0 for _ in range(0, len(features))
+                        0 for _ in range(len(features))
                     ]  # create one in case of 1st forward
-                    self.state[name]["mask"] = [0 for _ in range(0, len(features))]
+                    self.state[name]["mask"] = [0 for _ in range(len(features))]
                 else:
                     out_data = data  # a list
 
@@ -336,7 +336,7 @@ class ActivationSparsifier:
                 return input_data * mask
             else:
                 # apply per feature, feature_dim
-                for feature_idx in range(0, len(features)):
+                for feature_idx in range(len(features)):
                     feature = (
                         torch.Tensor([features[feature_idx]])
                         .long()

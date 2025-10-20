@@ -263,6 +263,11 @@ class RecompileLimitExceeded(Unsupported):
     pass
 
 
+# debug exception thrown when tracing torch._dynamo.step_unsupported()
+class StepUnsupported(TorchDynamoException):
+    pass
+
+
 class UnsafeScriptObjectError(TorchDynamoException):
     pass
 
@@ -527,8 +532,8 @@ def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
         )
         with open(registry_path) as f:
             registry = json.load(f)
-    except Exception as e:
-        log.error("Error accessing the registry file: %s", e)
+    except Exception:
+        log.exception("Error accessing the registry file")
         registry = {}
 
     mapping = {}
