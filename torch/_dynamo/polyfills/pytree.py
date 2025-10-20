@@ -492,3 +492,15 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         return tree
 
     __all__ += ["tree_map_"]
+
+    _none_unflatten = optree.register_pytree_node.get(type(None)).unflatten_func  # type: ignore[union-attr]
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        _none_unflatten,
+        can_constant_fold_through=True,
+        skip_signature_check=True,
+    )
+    def none_unflatten(_: None, children: Iterable[Any], /) -> None:
+        if len(list(children)) != 0:
+            raise ValueError("Expected no children.")
+        return None
