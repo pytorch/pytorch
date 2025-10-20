@@ -981,6 +981,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             # pyrefly: ignore  # missing-argument
             t
             for t in self.range_trees
+            # pyrefly: ignore  # missing-argument
             if not t.is_reduction or self.inside_reduction
         ]
 
@@ -1554,7 +1555,7 @@ class SIMDScheduling(BaseScheduling):
 
         # decide the split size
         nrow, ncol = node1.group[1]
-        split_size = 128  # TODO don't hard code
+        split_size = 128  # TODO need add heuristics
         nsplit = (nrow + split_size - 1) // split_size
 
         numel, rnumel = node1.group[1]
@@ -1582,6 +1583,8 @@ class SIMDScheduling(BaseScheduling):
         kernel.rsplit_size = split_size
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        with kernel:
+            kernel.codegen_body()
         with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule, kernel)
@@ -1607,8 +1610,15 @@ class SIMDScheduling(BaseScheduling):
             stride_str = f"{nsplit} * {rnumel}"
             start = f"{idx} * {stride_str}"
             end = f"({idx} + 1) * {stride_str}"
+            reduction_type2op = {
+                "min": "amin",
+                "max": "amax",
+            }
+            opname = reduction_type2op.get(
+                partial_accum.reduction_type, partial_accum.reduction_type
+            )
             V.graph.wrapper_code.writeline(
-                f"{buffer_name} = workspace_0[{start} : {end}].view({nsplit}, {rnumel}).{partial_accum.reduction_type}(dim=0)",
+                f"{buffer_name} = workspace_0[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
             )
 
         kernel.deallocate_workspaces()

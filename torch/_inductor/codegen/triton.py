@@ -26,7 +26,6 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
-from torch.utils._sympy.value_ranges import bound_sympy
 from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
@@ -1374,7 +1373,7 @@ class TritonOverrides(OpOverrides):
                 value = triton_reshape(value, initial_shape, shape_2d)
 
                 # broadcast if needed
-                broadcast_needed = not (shape_2d == [YBLOCK, RBLOCK])
+                broadcast_needed = shape_2d != [YBLOCK, RBLOCK]
                 if broadcast_needed:
                     value = f"tl.broadcast_to({value}, ({YBLOCK}, {RBLOCK}))"
 
@@ -1396,7 +1395,7 @@ class TritonOverrides(OpOverrides):
                 value = f"tl.trans({value})"
 
                 # broadcast if needed
-                broadcast_needed = not (shape_2d == [XBLOCK, RBLOCK])
+                broadcast_needed = shape_2d != [XBLOCK, RBLOCK]
                 if broadcast_needed:
                     value = f"tl.broadcast_to({value}, ({RBLOCK}, {XBLOCK}))"
             else:
@@ -4510,6 +4509,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             assert self.persistent_reduction, (
                 "Mix order reduction requires persistent reduction"
             )
+            accumname2var = {}
             for idx, partial_accum in enumerate(self.saved_partial_accumulate):
                 reduction_type = partial_accum.reduction_type
                 default = ir.Reduction.default_accumulator(reduction_type, torch.float)
@@ -4518,6 +4518,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.writeline(
                     f"{name} = tl.full([R0_BLOCK], {default}, tl.float32)[None, :]"
                 )
+                accumname2var[name] = self.cse.namedvar(name, dtype=torch.float)
             self.body.writeline("for suboff in range(0, RSPLIT_SIZE, XBLOCK):")
             with self.body.indent(offset=1):
                 self.body.writelines(
@@ -4539,11 +4540,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         partial_accum.reduction_type, torch.float
                     )
                     triton_reduction_function = get_triton_reductoin_function(
-                        partial_accum.reduction_type
+                        partial_accum.reduction_type,
                     )
-                    updated = combine_fn(
-                        name, f"{triton_reduction_function}({var}, axis=0)"
+                    newval = self.cse.generate(
+                        self.body,
+                        f"{triton_reduction_function}({var}, 0)",
+                        dtype=var.dtype,
                     )
+                    import unittest
+
+                    with unittest.mock.patch.object(self, "compute", self.body):
+                        updated = combine_fn(
+                            accumname2var[name],
+                            newval,
+                        )
                     self.body.writeline(f"{name} = {updated}")
 
             for idx, partial_accum in enumerate(self.saved_partial_accumulate):
@@ -4820,6 +4830,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
+            "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
         }
 
         if config.write_are_deterministic_algorithms_enabled:
@@ -5182,16 +5193,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = int(rnumel)
             val = next_power_of_2(val)
         else:
-            val = bound_sympy(rnumel).upper
-            assert isinstance(val, int) or val.is_constant()
+            val = 2
+            while not V.graph.sizevars.statically_known_leq(rnumel, val):
+                if val > 16 * 1024:
+                    raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+                val *= 2
 
-            if val == torch.utils._sympy.numbers.IntInfinity():
-                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
-
-            val = next_power_of_2(int(val))
-
-            if val > 16 * 1024:
-                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+            return val
 
         return val
 
@@ -5722,7 +5730,7 @@ class TritonScheduling(SIMDScheduling):
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
-                log.debug(
+                log.debug(  # noqa: G200
                     "Exception (%s) in compiling fused nodes %s",
                     e,
                     node_names,

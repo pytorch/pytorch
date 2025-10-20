@@ -292,11 +292,10 @@ def async_save(
 
     if dist.is_available() and dist.is_initialized():
         pg = process_group or _get_default_group()
-        assert (
-            torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
-        ), (
-            "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
-        )
+        if torch.device("cpu") not in pg._device_types:
+            raise AssertionError(
+                "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
+            )
 
     if async_stager is None:
         if storage_writer is not None and isinstance(storage_writer, AsyncStager):
@@ -396,7 +395,8 @@ def _save_state_dict(
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultSavePlanner()
-    assert planner is not None
+    if planner is None:
+        raise AssertionError("planner is None")
 
     global_metadata = None
 
@@ -407,7 +407,8 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
-        assert planner is not None
+        if planner is None:
+            raise AssertionError("planner is None")
         storage_meta = storage_writer.storage_meta()
         if "storage_meta" not in inspect.signature(planner.set_up_planner).parameters:
             warnings.warn(
@@ -443,7 +444,8 @@ def _save_state_dict(
     def global_step(all_local_plans):
         nonlocal global_metadata
 
-        assert planner is not None
+        if planner is None:
+            raise AssertionError("planner is None")
         all_local_plans, global_metadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
@@ -458,8 +460,10 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def write_data():
-        assert planner is not None
-        assert central_plan is not None
+        if planner is None:
+            raise AssertionError("planner is None")
+        if central_plan is None:
+            raise AssertionError("central_plan is None")
         final_local_plan = planner.finish_plan(central_plan)
         all_writes = storage_writer.write_data(final_local_plan, planner)
 
@@ -468,7 +472,8 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def finish_checkpoint(all_results):
-        assert global_metadata is not None
+        if global_metadata is None:
+            raise AssertionError("global_metadata is None")
         storage_writer.finish(metadata=global_metadata, results=all_results)
         return global_metadata
 
