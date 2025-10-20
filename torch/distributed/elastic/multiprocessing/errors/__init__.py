@@ -366,6 +366,8 @@ def record(
                 if se.code == 0:
                     return None
                 else:
+                    # For all other SystemExit, we will let it propagate with error traits injected.
+                    error_handler.record_exception(se)
                     raise
             except ChildFailedError as e:
                 rank, failure = e.get_first_failure()
