@@ -344,9 +344,6 @@ class TestTransformers(NNTestCase):
     @parametrize("key_padding_mask_dim", [2, None])
     @parametrize("mask_dtype", [torch.bool, torch.float32])
     def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim, mask_dtype):
-        if TEST_WITH_ROCM:
-            if attn_mask_dim is not None and mask_dtype == torch.bool:
-                self.skipTest("boolean mask is not fully supported on ROCm yet.")
         # MHA converts all
         with torch.no_grad():
             B = 2
@@ -429,8 +426,7 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @skipIfRocm
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.0021 if TEST_WITH_ROCM else 0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -1420,7 +1416,6 @@ class TestTransformers(NNTestCase):
                         _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
-    @skipIfRocm  # Missing EFFICIENT_ATTENTION
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
     )
@@ -1713,7 +1708,7 @@ class TestSDPAFailureModes(NNTestCase):
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            ctxmgr = self.assertRaises(RuntimeError) if not TEST_WITH_ROCM else contextlib.nullcontext()
+            ctxmgr = self.assertRaises(RuntimeError)
             with ctxmgr:
                 torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
@@ -2611,7 +2606,6 @@ class TestSDPACudaOnly(NNTestCase):
         S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
         return S_converted[:, :, :seqlen_q, :seqlen_k]
 
-    @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
@@ -2635,7 +2629,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-    @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_gqa(self, device):
         batch = 4
@@ -2659,7 +2652,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(output_math, output_cudnn)
 
-    @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_d256_heuristic(self, device):
         dtype = torch.bfloat16
@@ -2690,7 +2682,6 @@ class TestSDPACudaOnly(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 test()
 
-    @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
@@ -2714,7 +2705,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
 
-    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(True, "broken as of cuDNN 9.10")
     def test_cudnn_attention_fail_d128(self, device):
         # Test that cuDNN attention dispatching correctly bails out on d > 128
@@ -2736,7 +2727,6 @@ class TestSDPACudaOnly(NNTestCase):
                 with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                     torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
-    @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_trivial_output_transpose(self, device):
         # see also: https://github.com/pytorch/pytorch/issues/134001
@@ -2752,7 +2742,6 @@ class TestSDPACudaOnly(NNTestCase):
         o.backward(o)
         torch.testing.assert_close(x.grad, x_cpu.grad.cuda(), atol=7e-3, rtol=7e-3)
 
-    @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_nonmodulo64seqlen(self, device):
         # see also: https://github.com/pytorch/pytorch/issues/137347
@@ -2792,7 +2781,6 @@ class TestSDPACudaOnly(NNTestCase):
         torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
@@ -2822,7 +2810,6 @@ class TestSDPACudaOnly(NNTestCase):
         for permute_order in permute_orders:
             test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3])
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_compiles(self):
         q = torch.randn(2, 8, 1024, 128, dtype=torch.half, device='cuda', requires_grad=True)
@@ -2844,6 +2831,15 @@ class TestSDPACudaOnly(NNTestCase):
         out_cpu.backward(grad_cpu)
         self.assertEqual(out, out_cpu.cuda().half(), atol=1e-3, rtol=1e-3)
         self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=5e-3)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_seqlen1_dropout_heuristic(self):
+        q = torch.randn(2, 8, 1, 128, dtype=torch.half, device='cuda', requires_grad=True)
+        grad = torch.randn_like(q)
+
+        with torch.nn.attention.sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]):
+            out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
+            out.backward(grad)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
@@ -2977,7 +2973,7 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED" not in os.environ, "cuDNN Nested Tensor support not enabled")
     @parametrize("type", ["nested"])
-    @parametrize("is_contiguous", [True])
+    @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_cudnn_nested(self, device, type: str, is_contiguous: bool):
         if TEST_WITH_ROCM and type == 'nested':
             self.skipTest("ROCM does not support efficient attention on nested tensors, for now")
@@ -3232,7 +3228,6 @@ class TestSDPACudaOnly(NNTestCase):
             with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
-    @skipIfRocm
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")

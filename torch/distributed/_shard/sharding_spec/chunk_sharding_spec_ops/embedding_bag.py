@@ -4,7 +4,7 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-from torch.distributed._distributed_c10d import ReduceOp
+from torch._C._distributed_c10d import ReduceOp
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
@@ -425,7 +425,9 @@ def _handle_row_wise_sharding(
         else:
             split_sizes = torch.cat(
                 (
+                    # pyrefly: ignore  # unsupported-operation
                     offsets[1 : offsets.size(0)] - offsets[0:-1],
+                    # pyrefly: ignore  # unsupported-operation
                     (input.size(0) - offsets[-1]).unsqueeze(0),
                 ),
                 dim=-1,

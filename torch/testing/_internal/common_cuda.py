@@ -139,7 +139,6 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
-PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
 if TEST_NUMBA:
@@ -253,7 +252,7 @@ def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
 
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
-            kwargs.update(zip(arg_names, args))
+            kwargs.update(zip(arg_names, args, strict=False))
             cond = torch.cuda.is_tf32_supported() and only_if
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')
@@ -326,7 +325,7 @@ def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.
     mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
     mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
     with torch.no_grad():
-        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+        for c, s in zip(mod_control.parameters(), mod_scaling.parameters(), strict=True):
             s.copy_(c)
 
     kwargs = {"lr": 1.0}

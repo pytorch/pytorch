@@ -8,8 +8,9 @@ import itertools
 import math
 import operator
 import warnings
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor
@@ -83,6 +84,7 @@ _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 
 
+# pyrefly: ignore  # invalid-inheritance
 class FlexKernelOptions(TypedDict, total=False):
     """Options for controlling the behavior of FlexAttention kernels.
 
@@ -126,78 +128,104 @@ class FlexKernelOptions(TypedDict, total=False):
     """
 
     # Performance tuning options
+    # pyrefly: ignore  # invalid-annotation
     num_warps: NotRequired[int]
     """Number of warps to use in the CUDA kernel. Higher values may improve performance
     but increase register pressure. Default is determined by autotuning."""
 
+    # pyrefly: ignore  # invalid-annotation
     num_stages: NotRequired[int]
     """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
     but increase shared memory usage. Default is determined by autotuning."""
 
+    # pyrefly: ignore  # invalid-annotation
     BLOCK_M: NotRequired[int]
     """Thread block size for the sequence length dimension of Q in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
+    # pyrefly: ignore  # invalid-annotation
     BLOCK_N: NotRequired[int]
     """Thread block size for the sequence length dimension of K/V in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
     # Backward-specific block sizes (when prefixed with 'bwd_')
+    # pyrefly: ignore  # invalid-annotation
     BLOCK_M1: NotRequired[int]
     """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore  # invalid-annotation
     BLOCK_N1: NotRequired[int]
     """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore  # invalid-annotation
     BLOCK_M2: NotRequired[int]
     """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore  # invalid-annotation
     BLOCK_N2: NotRequired[int]
     """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore  # invalid-annotation
     PRESCALE_QK: NotRequired[bool]
     """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
     may have more numerical error. Default: False."""
 
+    # pyrefly: ignore  # invalid-annotation
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
     """If True, guarantees that at least one value in each row is not masked out.
     Allows skipping safety checks for better performance. Only set this if you are certain
     your mask guarantees this property. For example, causal attention is guaranteed safe
     because each query has at least 1 key-value to attend to. Default: False."""
 
+    # pyrefly: ignore  # invalid-annotation
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
     Allows optimizing block traversal. For example, causal masks would satisfy this,
     but prefix_lm + sliding window would not. Default: False."""
 
+    # pyrefly: ignore  # invalid-annotation
     WRITE_DQ: NotRequired[bool]
     """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
     Setting this to False will force this to happen in the DK loop which depending on your
     specific score_mod and mask_mod might be faster. Default: True."""
 
+    # pyrefly: ignore  # invalid-annotation
     FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
     """If True, forces the use of the flex attention kernel instead of potentially using
     the more optimized flex-decoding kernel for short sequences. This can be a helpful
     option for debugging. Default: False."""
 
+    # pyrefly: ignore  # invalid-annotation
     USE_TMA: NotRequired[bool]
     """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
     This is experimental and may not work on all hardware, currently specific
     to NVIDIA GPUs Hopper+. Default: False."""
 
     # ROCm-specific options
+    # pyrefly: ignore  # invalid-annotation
     kpack: NotRequired[int]
     """ROCm-specific kernel packing parameter."""
 
+    # pyrefly: ignore  # invalid-annotation
     matrix_instr_nonkdim: NotRequired[int]
     """ROCm-specific matrix instruction non-K dimension."""
 
+    # pyrefly: ignore  # invalid-annotation
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
+
+    # pyrefly: ignore  # invalid-annotation
+    force_flash: NotRequired[bool]
+    """ If True, forces use of the cute-dsl flash attention kernel.
+
+    Raises an error if flash attention cannot be used instead of falling back
+    to the default implementation. Useful for ensuring flash attention is used
+    when expected.
+    """
 
 
 class AuxRequest(NamedTuple):
@@ -239,11 +267,20 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     considered as a score_mod function. If the function has 4 positional arguments, it is
     considered as a mask function.
     """
-    num_positional_args = sum(
-        1
-        for param in inspect.signature(fn).parameters.values()
-        if param.default == inspect.Parameter.empty
-    )
+    if hasattr(fn, "__code__"):
+        code = fn.__code__
+        num_positional_total = code.co_argcount
+        defaults = ()
+        if hasattr(fn, "__defaults__"):
+            defaults = fn.__defaults__ or ()
+        num_defaults = len(defaults)
+        num_positional_args = num_positional_total - num_defaults
+    else:
+        num_positional_args = sum(
+            1
+            for param in inspect.signature(fn).parameters.values()
+            if param.default is inspect.Parameter.empty
+        )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD
@@ -318,6 +355,33 @@ def noop_mask(
 ) -> Tensor:
     """Returns a noop mask_mod"""
     return batch.new_ones(size=(), dtype=torch.bool, device=batch.device)
+
+
+def _sliced_mask_mod_error(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    """
+    Raises helpful error when using mask_mod from a sliced BlockMask.
+
+    After slicing a BlockMask, the mask_mod is reset and cannot be used directly.
+    Users must reassign mask_mod from the original (unsliced) BlockMask.
+    """
+    raise RuntimeError(
+        "Cannot use mask_mod from a sliced BlockMask. "
+        "When you slice a BlockMask using [], the mask_mod attribute is reset. "
+        "You must set it from the original BlockMask's mask_mod."
+        "\n\nIncorrect usage:"
+        "\n  base_mask = create_block_mask(my_mask_fn, ...)"
+        "\n  sliced_mask = base_mask[:, :, block_idx]"
+        "\n  sliced_mask.mask_mod = apply_offset(sliced_mask.mask_mod, offset)  # WRONG!"
+        "\n\nCorrect usage:"
+        "\n  base_mask = create_block_mask(my_mask_fn, ...)"
+        "\n  sliced_mask = base_mask[:, :, block_idx]"
+        "\n  sliced_mask.mask_mod = apply_offset(base_mask.mask_mod, offset)  # Use base_mask!"
+    )
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
@@ -580,6 +644,7 @@ class BlockMask:
             block_size = (self.BLOCK_SIZE,)  # type: ignore[assignment]
             seq_lengths = (self.seq_lengths,)  # type: ignore[assignment]
 
+        # pyrefly: ignore  # not-iterable
         return (
             *seq_lengths,
             self.kv_num_blocks,
@@ -648,6 +713,15 @@ class BlockMask:
                 assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
                 assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
+        index = (index,) if not isinstance(index, tuple) else index
+        padded = (*index, slice(None), slice(None), slice(None))[:3]
+        sizes = self.kv_num_blocks.shape[:3]
+        index = tuple(
+            (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
+            if isinstance(i, int)
+            else i
+            for i, n in zip(padded, sizes)
+        )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
@@ -663,7 +737,7 @@ class BlockMask:
             new_full_kv_num_blocks,
             new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
-            mask_mod=None,
+            mask_mod=_sliced_mask_mod_error,
             seq_lengths=self.seq_lengths,
             compute_q_blocks=self.q_indices is not None,
         )
@@ -743,6 +817,7 @@ class BlockMask:
         partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
         if self.full_kv_num_blocks is not None:
             assert self.full_kv_indices is not None
+            # pyrefly: ignore  # bad-return
             return partial_dense | _ordered_to_dense(
                 self.full_kv_num_blocks, self.full_kv_indices
             )
@@ -971,7 +1046,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: Optional[DeviceLikeType] = None,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -986,6 +1061,8 @@ def create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
+    if device is None:
+        device = torch.accelerator.current_accelerator() or "cpu"
     if B is None:
         B = 1
     if H is None:
@@ -1020,7 +1097,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: Optional[DeviceLikeType] = None,
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -1055,6 +1132,8 @@ def create_block_mask(
             value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
+    if device is None:
+        device = torch.accelerator.current_accelerator() or "cpu"
     mod_type = _get_mod_type(mask_mod)
     assert mod_type == _ModificationType.MASK_MOD, (
         f"create-block_mask requires a mask_mod function! Got {mask_mod}"
@@ -1362,6 +1441,11 @@ def flex_attention(
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
 
+    # If BlockMask was sliced, its mask_mod is intentionally replaced with an error-raising stub.
+    # This guard ensures we surface the intended error message before any shape-based checks.
+    if getattr(block_mask, "mask_mod", None) is _sliced_mask_mod_error:
+        raise RuntimeError("Cannot use mask_mod from a sliced BlockMask")
+
     if (
         block_mask.BLOCK_SIZE[0] == _LARGE_SPARSE_BLOCK_SIZE
         and block_mask.BLOCK_SIZE[1] == _LARGE_SPARSE_BLOCK_SIZE
@@ -1404,7 +1488,7 @@ def flex_attention(
     elif return_lse and return_aux is None:
         _warn_once(
             "deprecated_return_lse",
-            "return_lse is deprecated and will be removed in v2.7. "
+            "return_lse is deprecated and will be removed in v2.10. "
             "Please use return_aux=AuxRequest(lse=True) instead.",
             category=FutureWarning,
         )

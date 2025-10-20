@@ -97,7 +97,7 @@ struct TORCH_API LegacyEvent {
       case EventKind::MemoryAlloc:
         return "memory_alloc";
     }
-    throw std::runtime_error("unknown event kind");
+    TORCH_CHECK(false, "unknown event kind");
   }
 
   EventKind kind() const {
@@ -328,7 +328,7 @@ struct TORCH_API ProfilerDisableOptions {
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfilerLegacy(
-    const torch::profiler::impl::ProfilerConfig&);
+    const torch::profiler::impl::ProfilerConfig& /*new_config*/);
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
 TORCH_API thread_event_lists disableProfilerLegacy(
     std::optional<ProfilerDisableOptions> profilerDisableOptions =

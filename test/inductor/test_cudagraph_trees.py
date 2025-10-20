@@ -177,7 +177,7 @@ if HAS_CUDA_AND_TRITON:
 
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
-                self.device_idx if not device_index else device_index
+                device_index if device_index else self.device_idx
             ).tree_manager
 
         def get_roots(self):
@@ -973,6 +973,125 @@ if HAS_CUDA_AND_TRITON:
             _, code = run_and_get_code(f_compiled, x, False)
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        def test_graph_partition_with_memory_plan_reuse(self):
+            BATCH_SIZE = 16
+            MLP_SIZE = 128
+            HIDDEN_SIZE = 128
+            RANDOM_SEED = 0
+
+            @torch.library.custom_op(
+                "silly::attention",
+                mutates_args=["out"],
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def attention(
+                q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor
+            ) -> None:
+                out.copy_(q + k + v)
+
+            @attention.register_fake
+            def _(q, k, v, out):
+                return None
+
+            class ParentModel(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return x
+
+            class Attention(torch.nn.Module):
+                def __init__(self, mlp_size: int, hidden_size: int) -> None:
+                    super().__init__()
+                    self.pre_attn = torch.nn.Linear(mlp_size, hidden_size, bias=False)
+                    self.post_attn = torch.nn.Linear(hidden_size, mlp_size, bias=False)
+                    self.rms_norm_weight = torch.nn.Parameter(torch.ones(hidden_size))
+
+                def rms_norm_ref(self, x: torch.Tensor) -> torch.Tensor:
+                    x_f32 = x.float()
+                    return (
+                        x_f32
+                        * torch.rsqrt(
+                            torch.mean(x_f32.square(), dim=-1, keepdim=True) + 1e-6
+                        )
+                        * self.rms_norm_weight
+                    ).to(x.dtype)
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    x = self.pre_attn(x)
+                    x = self.rms_norm_ref(x)
+                    attn_output = torch.empty_like(x)
+                    torch.ops.silly.attention(x, x, x, attn_output)
+                    x = attn_output
+                    x = self.rms_norm_ref(x)
+                    x = self.post_attn(x)
+                    return x
+
+            class CompiledAttention(torch.nn.Module):
+                def __init__(
+                    self,
+                    *,
+                    mlp_size: int,
+                    hidden_size: int,
+                ) -> None:
+                    super().__init__()
+                    self.attn = Attention(mlp_size, hidden_size)
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.attn(x)
+
+            class CompiledAttentionTwo(CompiledAttention):
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.attn(x) + x
+
+            class SimpleModelWithTwoGraphs(ParentModel):
+                def __init__(
+                    self,
+                    *,
+                    mlp_size: int,
+                    hidden_size: int,
+                ) -> None:
+                    super().__init__()
+                    self.attn_one = CompiledAttention(
+                        mlp_size=mlp_size,
+                        hidden_size=hidden_size,
+                    )
+                    self.attn_two = CompiledAttentionTwo(
+                        mlp_size=mlp_size,
+                        hidden_size=hidden_size,
+                    )
+
+                    self.hidden_states = torch.zeros((BATCH_SIZE, MLP_SIZE)).cuda()
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    bsz = x.shape[0]
+                    # CUDAGraph expects same tensor addresses for each run
+                    self.hidden_states[:bsz].copy_(x)
+                    x = self.attn_one(self.hidden_states[:bsz])
+                    self.hidden_states[:bsz].copy_(x)
+                    x = self.attn_two(self.hidden_states[:bsz])
+                    return x
+
+            eager_model = (
+                SimpleModelWithTwoGraphs(
+                    mlp_size=MLP_SIZE,
+                    hidden_size=HIDDEN_SIZE,
+                )
+                .eval()
+                .cuda()
+            )
+
+            compiled_model = torch.compile(eager_model, mode="reduce-overhead")
+
+            inputs = torch.randn(BATCH_SIZE, MLP_SIZE).cuda()
+
+            for _ in range(3):
+                eager_out = eager_model(inputs)
+                compiled_out = compiled_model(inputs)
+                self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
@@ -1818,25 +1937,19 @@ if HAS_CUDA_AND_TRITON:
                     args.clear()
                     return (x + 3,)
 
-                inp = torch.rand([20, 20], device="cuda:1")
+                inp = torch.rand([20, 20], device=f"cuda:{self.device_idx}")
 
                 inp_list = [inp]
-                foo_cg = tree_cudagraphify_impl(
-                    foo,
-                    inp_list,
-                    (),
-                    device_index=1,
-                    is_backward=False,
-                    is_inference=True,
-                )
+                foo_cg = self.cudagraphify_impl(foo, inp_list, ())
                 for _ in range(3):
                     self.assertEqual(foo_cg([inp]), foo([inp]))
 
-                self.assertTrue(self.get_manager(device_index=0) is None)
-                self.assertFalse(self.get_manager(device_index=1) is None)
+                next_idx = (self.device_idx + 1) % torch.cuda.device_count()
+                self.assertTrue(self.get_manager(device_index=next_idx) is None)
+                self.assertFalse(self.get_manager(device_index=self.device_idx) is None)
 
             test()
-            self.assertTrue(self.get_manager(device_index=1) is None)
+            self.assertTrue(self.get_manager(device_index=self.device_idx) is None)
 
         def test_error_on_dealloc_use(self):
             @torch.compile()
@@ -2146,19 +2259,19 @@ if HAS_CUDA_AND_TRITON:
                 device = x.untyped_storage()
 
         def test_side_stream_memory_allocation(self):
-            from torch._inductor.cudagraph_trees import cudagraphify_impl
+            device = f"cuda:{self.device_idx}"
 
             def multi_stream_allocation(args):
                 side_stream = torch.cuda.Stream()
                 side_stream.wait_stream(torch.cuda.current_stream())
                 with torch.cuda.stream(side_stream):
                     side_stream_buffer = torch.ones(
-                        *args, device="cuda:0", dtype=torch.float32
+                        *args, device=device, dtype=torch.float32
                     )
                 torch.cuda.current_stream().wait_stream(side_stream)
 
                 main_stream_buffer = torch.ones(
-                    *args, device="cuda:0", dtype=torch.float32
+                    *args, device=device, dtype=torch.float32
                 )
 
                 if isinstance(args, list):
@@ -2166,17 +2279,17 @@ if HAS_CUDA_AND_TRITON:
 
                 return main_stream_buffer, side_stream_buffer
 
-            graphed_multi_stream_func = cudagraphify_impl(
+            graphed_multi_stream_func = tree_cudagraphify_impl(
                 multi_stream_allocation,
                 inputs=[],
                 static_input_idxs=[],
                 is_backward=False,
                 is_inference=False,
-                device_index=0,
+                device_index=self.device_idx,
                 stack_traces=["dummy stack trace1", "dummy stack trace2"],
             )
 
-            ref_out = torch.ones((2, 3), device="cuda:0", dtype=torch.float32)
+            ref_out = torch.ones((2, 3), device=device, dtype=torch.float32)
 
             for _ in range(3):
                 torch.compiler.cudagraph_mark_step_begin()
@@ -3978,9 +4091,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(eager_out, compiled_out)
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2, 5, 7))
         def test_cudagraph_capture_sizes(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (2, 5, 7)
-
             def f(x):
                 return x + 1
 
@@ -3997,14 +4109,16 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
-        def test_cudagraph_capture_sizes1(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (
+        @torch._inductor.config.patch(
+            "triton.cudagraph_capture_sizes",
+            (
                 (2, 3),
                 (4, 5),
                 (6, 2),
                 (7, 3),
-            )
-
+            ),
+        )
+        def test_cudagraph_capture_sizes1(self):
             def f(x):
                 return x + 1
 
@@ -4023,14 +4137,16 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
-        def test_cudagraph_capture_sizes2(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (
+        @torch._inductor.config.patch(
+            "triton.cudagraph_capture_sizes",
+            (
                 (2, 3, 4),
                 (4, 4, 3),
                 (3, 4, 4),
                 (4, 2, 3),
-            )
-
+            ),
+        )
+        def test_cudagraph_capture_sizes2(self):
             def f(x):
                 return x + 1
 

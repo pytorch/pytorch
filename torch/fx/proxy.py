@@ -10,9 +10,9 @@ import operator
 import sys
 import traceback
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -863,7 +863,7 @@ _create_arg_bypass = {
     ]
 }
 _create_arg_bypass[Proxy] = lambda self, a: a.node
-_create_arg_bypass[tuple] = lambda self, a: tuple([self.create_arg(elem) for elem in a])
+_create_arg_bypass[tuple] = lambda self, a: tuple(self.create_arg(elem) for elem in a)
 _create_arg_bypass[list] = lambda self, a: [self.create_arg(elem) for elem in a]
 _create_arg_bypass[dict] = _create_arg_dict
 _create_arg_bypass[immutable_list] = _create_arg_bypass[list]

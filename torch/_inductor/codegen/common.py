@@ -482,15 +482,11 @@ def get_wrapper_codegen_for_device(
 
 
 def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModulePass]:
-    return custom_backend_passes[device] if device in custom_backend_passes else None
+    return custom_backend_passes.get(device)
 
 
 def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
-    return (
-        custom_backend_codegen_configs[device]
-        if device in custom_backend_codegen_configs
-        else None
-    )
+    return custom_backend_codegen_configs.get(device)
 
 
 @functools.cache
@@ -709,6 +705,18 @@ def check_dtype(
             is_same_dt = f"std::is_same_v<{c_var_type}, {DTYPE_TO_CPP[dtype]}>"
 
         buffer.writeline(f"static_assert({is_same_dt});")
+
+
+def check_shape(
+    buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
+) -> None:
+    backend = get_current_backend()
+    assert shape is not None
+    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+        shape_str = (
+            ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
+        )
+        buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
 
 
 class DataTypePropagation:
@@ -942,6 +950,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             or _all_in_parens(string)
         ):
             # don't put extra parens for strings that are already wrapped in parens
+            # pyrefly: ignore  # bad-return
             return string
         return f"({string})"
 
@@ -1016,6 +1025,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: store should be handled by CSEProxy"
         )
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )
+
     def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store_reduction should be handled by CSEProxy"
@@ -1073,6 +1087,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: halide_clamp only implemented for Halide backend"
+        )
+
+    def dot(self, x: OpVarT, y: OpVarT) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: dot only implemented for Triton backend"
         )
 
     def inline_asm_elementwise(
@@ -1718,7 +1737,10 @@ class KernelArgs:
                 )
             )
         for outer, inner in chain(
-            self.input_buffers.items(), self.output_buffers.items()
+            # pyrefly: ignore  # bad-argument-type
+            self.input_buffers.items(),
+            # pyrefly: ignore  # bad-argument-type
+            self.output_buffers.items(),
         ):
             if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
@@ -2029,6 +2051,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         super().__init__()
         if increase_kernel_count:
+            # pyrefly: ignore  # bad-assignment
             metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
@@ -2036,6 +2059,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.stores = IndentedBuffer()
 
         self.num_load = 0
+        self.num_store = 0
         self.num_reduction = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
@@ -2094,6 +2118,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             self.compute = compute
             self.stores = stores
             self.cse = cse
+            # pyrefly: ignore  # unbound-name
             if disallow_stores:
                 assert not sb, "unexpected store inside swap_buffers"
 
@@ -2117,6 +2142,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
         raise NotImplementedError
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )
 
     def reduction(
         self,
@@ -2244,6 +2274,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
+                self.num_store -= 1
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -2359,6 +2390,7 @@ class KernelTemplate:
             class DetailedTemplateSyntaxError(TemplateSyntaxError):
                 def __init__(self, original_error: TemplateSyntaxError) -> None:
                     super().__init__(
+                        # pyrefly: ignore  # bad-argument-type
                         original_error.message,
                         original_error.lineno,
                         original_error.name,
@@ -2370,6 +2402,7 @@ class KernelTemplate:
                     error_info = f"Error in template at line {self.lineno}\n"
                     error_info += f"Error message: {self.message}\n"
                     if hasattr(self.original_error, "source"):
+                        # pyrefly: ignore  # missing-attribute
                         lines = self.original_error.source.split("\n")
                         error_info += "Context:\n"
                         start = max(0, self.lineno - 2)
@@ -2460,7 +2493,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2477,6 +2510,10 @@ class KernelTemplate:
 
 
 class CSEProxy(DefaultHandler):
+    """A ops handler that proxies calls to `kernel` and its
+    handler and returns `CSEVariable`s with correct shape and dtype.
+    """
+
     name = "CSEProxy"
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
@@ -2560,6 +2597,11 @@ class CSEProxy(DefaultHandler):
             ):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
+
+            if config.test_configs.runtime_triton_shape_assert:
+                assert output_shape is not None
+                check_shape(V.kernel.compute, csevar, output_shape)
+
             return csevar
 
         return pytree.tree_map(do_cse, value)
@@ -2701,12 +2743,17 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
+            self.kernel.num_store += 1
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        self.kernel.device_assert_async(cond, msg)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
         self._update_store_cache(name, value)
 
         if name not in V.graph.removed_buffers:
+            self.kernel.num_store += 1
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(

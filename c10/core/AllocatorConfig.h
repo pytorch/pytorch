@@ -76,7 +76,7 @@ class ConfigTokenizer {
     } else if (token == "False") {
       return false;
     } else {
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           false,
           "Expected 'True' or 'False' at index ",
           i,
@@ -253,7 +253,7 @@ class C10_API AcceleratorAllocatorConfig {
     device_config_parser_hook_ = std::move(hook);
     auto& mutable_keys = getMutableKeys();
     for (auto& key : keys) {
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           mutable_keys.insert(key).second,
           "Duplicated key '",
           key,

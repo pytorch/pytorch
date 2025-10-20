@@ -432,15 +432,18 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
         ('reduction_none', {'reduction': 'none'}),
+        ('homoscedastic', {'homoscedastic': True}),
     ]
 
     module_inputs = []
     for desc, constructor_kwargs in cases:
+        homoscedastic = constructor_kwargs.pop('homoscedastic', False)
+        var_input = make_input(1, 3).abs() if homoscedastic else make_input(4, 1).abs()
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input(3),
-                                                    make_target(3),
-                                                    make_input(1).abs()),
+                        forward_input=FunctionInput(make_input(4, 3),
+                                                    make_target(4, 3),
+                                                    var_input),
                         desc=desc,
                         reference_fn=no_batch_dim_reference_fn)
         )
@@ -1410,7 +1413,7 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, tra
                     forward_input=FunctionInput(make_input((2, 3, 4)),
                                                 make_input((2, 3, 4))),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
-                                                                         for a, b in zip(i, t))),
+                                                                         for a, b in zip(i, t, strict=True))),
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(()), make_input(())),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
@@ -3505,9 +3508,6 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3553,9 +3553,6 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64, torch.complex128]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16, torch.float32]),
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
@@ -3653,9 +3650,6 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3701,9 +3695,6 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),

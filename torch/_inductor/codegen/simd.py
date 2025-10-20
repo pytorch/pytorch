@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Callable, Generic, no_type_check, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -41,12 +41,11 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 if TYPE_CHECKING:
     from ..ir import IRNode
 
-from ..debug import set_kernel_post_grad_provenance_tracing
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
-    cache_on_self,
+    cache_property_on_self,
     expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
@@ -60,7 +59,7 @@ from ..utils import (
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
-from .multi_kernel import MultiKernel
+from .multi_kernel import MultiKernel, SizeHintMultiKernel
 from .simd_kernel_features import (
     DisableReduction,
     EnableReduction,
@@ -133,8 +132,7 @@ class IterationRanges:
         self.root = root
 
     @property
-    @cache_on_self
-    @no_type_check  # https://github.com/python/mypy/issues/17184
+    @cache_property_on_self
     def is_reduction(self) -> bool:
         return prefix_is_reduction(self.prefix)
 
@@ -142,8 +140,7 @@ class IterationRanges:
         return sympy_index_symbol(self.name)
 
     @property
-    @cache_on_self
-    @no_type_check
+    @cache_property_on_self
     def symt(self) -> SymT:
         prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
         return prefix_to_symt[self.prefix]
@@ -190,6 +187,7 @@ class IterationRangesRoot(IterationRanges):
 
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
+        # pyrefly: ignore  # missing-argument
         assert not is_loop or (self.is_reduction and grid_dim is None)
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
@@ -377,6 +375,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
+    # pyrefly: ignore  # bad-override
     kernel_name: str
 
     def __init__(
@@ -416,6 +415,18 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         )
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: Optional[str] = None
+        # Info to enable multiple store_output calls for epilogue subtiling
+        self.store_output_ctr = itertools.count()
+        self.is_native_matmul = False
+        if config.triton.native_matmul:
+            for node in self.features.node_schedule:
+                if (
+                    isinstance(node, scheduler.SchedulerNode)
+                    and isinstance(node.node, ir.ComputedBuffer)
+                    and node.node.get_reduction_type() == "dot"
+                ):
+                    self.is_native_matmul = True
+                    break
 
         # define this in a closure to make cache local to object
         @functools.cache
@@ -429,9 +440,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
 
+    def _get_store_output_subgraph_name(self, i: int) -> str:
+        return f"<STORE_OUTPUT_{i}>"
+
+    def get_store_output_count(self):
+        total = next(self.store_output_ctr)
+        self.store_output_ctr = itertools.count(start=total - 1, step=1)
+        return total
+
     @property
-    @cache_on_self
-    @no_type_check  # https://github.com/python/mypy/issues/17184
+    @cache_property_on_self
     def num_reduction_dims(self) -> int:
         return sum(prefix_is_reduction(prefix) for prefix in self.numels)
 
@@ -554,6 +572,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if tree.tensor_dim is None:
                 continue
 
+            # pyrefly: ignore  # missing-argument
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
@@ -665,10 +684,19 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return next(var_count)
 
         def make_combined(
-            size: sympy.Expr, idx1: int, idx2: int
+            sizes: list[sympy.Expr], idxs: list[int]
         ) -> Callable[[list[sympy.Expr]], sympy.Expr]:
+            """
+            Builds the nested expression:
+              ((...((s1*v[i1] + v[i2]) * s2 + v[i3]) ... ) * sk + v[i(k+1)])
+            """
+            assert len(idxs) == len(sizes) + 1
+
             def getter(flat_vars: list[sympy.Expr]) -> sympy.Expr:
-                return size * flat_vars[idx1] + flat_vars[idx2]
+                expr = flat_vars[idxs[0]]
+                for s, idx in zip(sizes, idxs[1:]):
+                    expr = s * expr + flat_vars[idx]
+                return expr
 
             return getter
 
@@ -688,7 +716,47 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # scroll to next group with remaining elements
                     current_group += 1
 
-                if current_group + 1 < len(remaining) and sv.statically_known_gt(
+                # During native matmul on bmm, we enforce tiling order (z, y, x, r).
+                # When fusing a bmm node with loop (z, y, x, r) with a pw node
+                # of shape (z*y*x, 1), we need to split the pw iteration range
+                # into three dimensions.
+                # The group becomes [z, y, x, 1], with lengths ([z*y*x], []).
+                # In this case, we decompose the combined size z*y*x into three
+                # consecutive groups. Previously, _split_iteration_ranges supported
+                # splitting into at most two dimensions, but we now extend it to do
+                # three splits when the total size is divisible by all three.
+
+                # is group having (z,y,x,r=1) form?
+                is_bmm_then_pw = len(remaining) == 4 and remaining[-1] == 1
+                if (
+                    current_group + 2 < len(remaining)
+                    and sv.statically_known_gt(
+                        size, remaining[current_group] * remaining[current_group + 1]
+                    )
+                    and is_bmm_then_pw
+                ):
+                    # need to break size in three
+                    if not sv.statically_known_multiple_of(
+                        size, remaining[current_group] * remaining[current_group + 1]
+                    ):
+                        raise CantSplit
+
+                    size1 = remaining[current_group]
+                    size2 = remaining[current_group + 1]
+                    size3 = FloorDiv(size, size1 * size2)
+                    return_getters.append(
+                        make_combined(
+                            [size2, size3],
+                            [
+                                add_range(current_group, size1),
+                                add_range(current_group + 1, size2),
+                                add_range(current_group + 2, size3),
+                            ],
+                        )
+                    )
+
+                # Two-dimensional tiling
+                elif current_group + 1 < len(remaining) and sv.statically_known_gt(
                     size, remaining[current_group]
                 ):
                     # need to break size in two
@@ -701,9 +769,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
                         make_combined(
-                            size2,
-                            add_range(current_group, size1),
-                            add_range(current_group + 1, size2),
+                            [size2],
+                            [
+                                add_range(current_group, size1),
+                                add_range(current_group + 1, size2),
+                            ],
                         )
                     )
                 else:
@@ -716,7 +786,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
-
         return new_ranges, return_getters_groups
 
     @classmethod
@@ -896,7 +965,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def active_range_trees(self) -> list[IterationRangesRoot]:
         return [
-            t for t in self.range_trees if not t.is_reduction or self.inside_reduction
+            # pyrefly: ignore  # missing-argument
+            t
+            for t in self.range_trees
+            # pyrefly: ignore  # missing-argument
+            if not t.is_reduction or self.inside_reduction
         ]
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
@@ -1044,6 +1117,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 numel = buf_size
             dtype = V.graph.get_dtype(arg)
             dtype_size = get_dtype_size(dtype)
+            # pyrefly: ignore  # bad-argument-type
             nbytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(nbytes)
 
@@ -1064,6 +1138,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         argdefs, call_args, _signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
+        # pyrefly: ignore  # bad-assignment
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
             if not buf:
@@ -1190,6 +1265,34 @@ class SIMDScheduling(BaseScheduling):
                     rnumel1,
                     rnumel2,
                 )
+
+            if reduction_can_fuse and (
+                node1.is_native_matmul() or node2.is_native_matmul()
+            ):
+                # Ensure node1 is always the native matmul side
+                if not node1.is_native_matmul():
+                    node1, node2 = node2, node1
+
+                # 1. A native matmul node keeps its original loop order.
+                #    For example: C[z,y,x] = torch.bmm(A[z,y,r], B[z,r,x]) keeps (z,y,x) order.
+                #    (see simplify_and_reorder in ir.py)
+                #
+                # 2. Triton kernels with native matmul always tile loops as (z,y,x)
+                #    (see get_tiling_and_scores in this file)
+                #
+                # 3. If a candidate node (node2) uses a different loop order (e.g., (z,x,y,r)),
+                #    its tiling is incompatible with native matmul tiling (z,y,x,r).
+                #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
+                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
+                if not all(
+                    SIMDKernel.is_compatible(
+                        tiling.values(), n2.get_ranges(), reduction_numel=rnumel1
+                    )
+                    for n2 in node2.get_nodes()
+                ):
+                    why("invalid loop order and tiling for native matmul")
+                    return False
+
             return reduction_can_fuse
 
         if not node1.is_reduction() and not node2.is_reduction():
@@ -1464,17 +1567,10 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
-        debug_handles: list[tuple[str, Optional[int]]] = []
         for kernel in kernels:
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            if config.trace.provenance_tracking_level != 0:
-                debug_handle = set_kernel_post_grad_provenance_tracing(
-                    node_schedule,  # type: ignore[arg-type]
-                    kernel_name,
-                )
-                debug_handles.append((kernel_name, debug_handle))
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1490,11 +1586,11 @@ class SIMDScheduling(BaseScheduling):
             for node in kernel_features.scheduler_nodes():
                 node.mark_run()
 
-        self.codegen_comment(node_schedule)
-        for kernel_name, debug_handle in debug_handles:
-            V.graph.wrapper_code.write_provenance_debug_handle(
-                kernel_name, debug_handle
-            )
+        # filter out NodeScheduleMarker
+        base_scheduler_nodes = [
+            node for node in node_schedule if isinstance(node, BaseSchedulerNode)
+        ]
+        self.codegen_comment(base_scheduler_nodes, final_kernel.kernel_name)
         final_kernel.call_kernel(final_kernel.kernel_name)
 
         if config.nan_asserts:
@@ -1608,10 +1704,13 @@ class SIMDScheduling(BaseScheduling):
 
             partial_code = render()
 
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                for node in epilogue_nodes:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                kernel.cse.invalidate(OrderedSet())
+            num_store_subgraphs = kernel.get_store_output_count()
+            for i in range(num_store_subgraphs):
+                subgraph_name = kernel._get_store_output_subgraph_name(i)
+                with kernel.set_subgraph_body(subgraph_name):
+                    for node in epilogue_nodes:
+                        node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                    kernel.cse.invalidate(OrderedSet())
 
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
@@ -1645,23 +1744,32 @@ class SIMDScheduling(BaseScheduling):
                                 )
                             kernel.cse.invalidate(OrderedSet())
 
-        if not isinstance(partial_code, str):
-            # This is used to calculate flops in TritonTemplateKernels
-            with ir.IRNode.current_origins(template_node.node.origins):
-                partial_code.finalize_hook("<DEF_KERNEL>")
-            partial_code.finalize_hook("<ARGDEFS>", strict=False)
-        # finalize must be called after adding epilogue above
+        # Template hooks must be finalised after kernel.remove_kernel_local_buffers
+        # is called (this is called when the kernel context is exited above), and when
+        # the kernel handler is set (as below). This is because the hooks may add
+        # DeferredLine type lines, which preclude lines involving buffers that have
+        # been removed
 
+        # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
+            if not isinstance(partial_code, str):
+                # This is used to calculate flops in TritonTemplateKernels
+                with ir.IRNode.current_origins(template_node.node.origins):
+                    partial_code.finalize_hook("<DEF_KERNEL>")
+                partial_code.finalize_hook("<ARGDEFS>", strict=False)
+
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
             for input_name in kernel.named_input_nodes.keys():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                # pyrefly: ignore  # missing-attribute
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                if not isinstance(partial_code, str):
-                    partial_code.finalize_hook("<STORE_OUTPUT>")
+            num_store_subgraphs = kernel.get_store_output_count()
+            for i in range(num_store_subgraphs):
+                subgraph_name = kernel._get_store_output_subgraph_name(i)
+                # pyrefly: ignore  # missing-attribute
+                partial_code.finalize_hook(subgraph_name)
 
             if isinstance(partial_code, str):
                 src_code = partial_code
@@ -1685,12 +1793,56 @@ class SIMDScheduling(BaseScheduling):
 
             kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            if config.trace.provenance_tracking_level != 0:
-                set_kernel_post_grad_provenance_tracing(
-                    node_schedule, kernel.kernel_name
-                )
-
             return kernel
+
+    def _get_multikernel_shapes(
+        self, node: MultiTemplateBuffer
+    ) -> tuple[tuple[int, ...], ...]:
+        from ..ir import IRNode
+
+        def get_size(arg):
+            if not isinstance(arg, IRNode):
+                return None
+            if isinstance(arg, ir.BaseView):  # triton templates want the base tensor.
+                arg = arg.unwrap_view()
+            if (size := arg.maybe_get_size()) is None:
+                return None
+            return tuple(s for s in size)
+
+        out = []
+        for arg in list(node.inputs) + [node]:
+            if isinstance(arg, (list, tuple)):
+                out.append(tuple(get_size(_arg) for _arg in arg))
+            else:
+                out.append(get_size(arg))
+        return tuple(out)
+
+    def _kernel_has_dynamic_shapes(self, node: MultiTemplateBuffer) -> bool:
+        shapes = self._get_multikernel_shapes(node)
+        return any(
+            any(
+                isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
+                for s in shape
+            )
+            for shape in shapes
+        )
+
+    def _make_shape_cache_key(
+        self, node: MultiTemplateBuffer, hint: int
+    ) -> tuple[tuple[int, ...], ...]:
+        """
+        Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
+        """
+        shapes = self._get_multikernel_shapes(node)
+        return tuple(
+            tuple(
+                hint
+                if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
+                else s
+                for s in shape
+            )
+            for shape in shapes
+        )
 
     def codegen_template(
         self,
@@ -1714,11 +1866,16 @@ class SIMDScheduling(BaseScheduling):
         if (
             isinstance(template_node.node, MultiTemplateBuffer)
             and template_node.node._make_kernel_renders
+            and len(template_node.node._make_kernel_renders) > 1
+            and self._kernel_has_dynamic_shapes(template_node.node)
         ):
-            kernels = []
+            kernels = {}
             src_codes = []
 
-            for make_kernel_render in template_node.node._make_kernel_renders.values():
+            for (
+                size_hint,
+                make_kernel_render,
+            ) in template_node.node._make_kernel_renders.items():
                 kernel, render = make_kernel_render(
                     template_node.node, hint_override=hint_override
                 )
@@ -1733,8 +1890,11 @@ class SIMDScheduling(BaseScheduling):
                         only_gen_src_code=True,
                     )
                     assert isinstance(src_code, str)
+                    # pyrefly: ignore  # bad-argument-type
                     src_codes.append(src_code)
                 else:
+                    if size_hint is None:
+                        continue  # skip kernel generation based on real runtime value; only use hints
                     kernel = self._codegen_single_template(
                         kernel,
                         render,
@@ -1743,16 +1903,20 @@ class SIMDScheduling(BaseScheduling):
                         prologue_nodes,
                         only_gen_src_code=False,
                     )
-                    kernels.append(kernel)
+                    shape_cache_key = (
+                        None
+                        if size_hint is None
+                        else self._make_shape_cache_key(template_node.node, size_hint)
+                    )
+                    kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:
                 return "\n\n".join(src_codes)
 
-            MultiKernel.merge_workspaces_inplace(kernels)
-            multi_kernel = MultiKernel(kernels)
+            MultiKernel.merge_workspaces_inplace(list(kernels.values()))
+            multi_kernel = SizeHintMultiKernel(kernels)
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
-            self.codegen_comment(node_schedule)
-
+            self.codegen_comment(node_schedule, multi_kernel.kernel_name)
             multi_kernel.call_kernel(multi_kernel.kernel_name)
             V.graph.removed_buffers |= multi_kernel.removed_buffers
             V.graph.inplaced_to_remove |= multi_kernel.inplaced_to_remove
@@ -1783,7 +1947,7 @@ class SIMDScheduling(BaseScheduling):
                 )
 
                 node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
-                self.codegen_comment(node_schedule)
+                self.codegen_comment(node_schedule, kernel.kernel_name)
                 kernel.call_kernel(kernel.kernel_name, template_node.node)
 
                 V.graph.removed_buffers |= kernel.removed_buffers
@@ -1831,6 +1995,8 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel_code_list = []
         for node_group in partitions:
+            if len(node_group) == 0:
+                continue
             fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ComboKernel(
                 enable_autotune=enable_autotune,
@@ -1869,12 +2035,7 @@ class SIMDScheduling(BaseScheduling):
 
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
-            # dump provenance node info for ComboKernelNode/ForeachKernel type
-            if config.trace.provenance_tracking_level != 0:
-                set_kernel_post_grad_provenance_tracing(
-                    combo_kernel_node.snodes, kernel_name
-                )
-            self.codegen_comment([combo_kernel_node])
+            self.codegen_comment(combo_kernel_node.snodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
@@ -2235,7 +2396,7 @@ class SIMDScheduling(BaseScheduling):
                     return ([], [])
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
-            if out := scored_sub_split.get(key, None):
+            if out := scored_sub_split.get(key):
                 return out
 
             splitting_vars = all_iter_vars if is_pointwise else all_red_vars
@@ -2449,6 +2610,22 @@ class SIMDScheduling(BaseScheduling):
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
+        # Force tiling compatible with matmul dimensions
+        # when natively generating matmul without template calls.
+        for node in EnableReduction.filter(node_schedule):
+            if isinstance(node.node, ir.ComputedBuffer):
+                if (
+                    node.node.get_reduction_type() == "dot"
+                    and config.triton.native_matmul
+                ):
+                    # A[M,K] @ B[K,N]
+                    # force tiling to be {'y':M, 'x':N, 'r0_':K}
+                    node_ranges = node.get_ranges()
+                    range_y_x = node_ranges[0]  # (M,N)
+                    range_r = node_ranges[1]  # (K)
+                    tiling = cls.create_tiling(range_y_x, range_r)
+                    return tiling, None
+
         # # TODO: enable by default
         if (
             torch._inductor.config.triton.coalesce_tiling_analysis
@@ -2543,6 +2720,7 @@ class SIMDScheduling(BaseScheduling):
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
 
         # Optionally, prefer tiling into as many dimensions as possible.
+        # pyrefly: ignore  # unbound-name
         if config.triton.prefer_nd_tiling:
             ranked_tilings = (
                 cls.get_nd_tilings(node_schedule, numel, reduction_numel)
@@ -2592,11 +2770,9 @@ class SIMDScheduling(BaseScheduling):
                     hint_override=hint_override,
                 )
 
+        # pyrefly: ignore  # missing-attribute
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return src_code
-
-    def codegen_comment(self, node_schedule):
-        pass
 
     def define_kernel(self, src_code, node_schedule, kernel):
         raise NotImplementedError
