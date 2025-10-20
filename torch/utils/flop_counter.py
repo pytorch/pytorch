@@ -160,7 +160,7 @@ def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed,
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 
-@register_flop_formula([aten.add, aten.sub, aten.mul, aten.div, aten.pow, aten.remainder, aten.add_, aten.sub_, aten.mul_, aten.div_, aten.pow_, aten.remainder_])
+@register_flop_formula([aten.add, aten.sub, aten.mul, aten.div, aten.remainder, aten.add_, aten.sub_, aten.mul_, aten.div_, aten.remainder_])
 def element_wise_flop(x_shape, y_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for element-wise operations."""
     # pyrefly: ignore  # bad-argument-type
@@ -607,17 +607,15 @@ flop_registry = {
     aten._efficient_attention_forward: _efficient_attention_forward_flop,
     aten._flash_attention_backward: _flash_attention_backward_flop,
     aten._efficient_attention_backward: _efficient_attention_backward_flop,
-    aten.add: element_wise_flop, 
-    aten.sub: element_wise_flop, 
-    aten.mul: element_wise_flop, 
-    aten.div: element_wise_flop, 
-    aten.pow: element_wise_flop, 
-    aten.remainder: element_wise_flop, 
-    aten.add_: element_wise_flop, 
-    aten.sub_: element_wise_flop, 
-    aten.mul_: element_wise_flop, 
-    aten.div_: element_wise_flop, 
-    aten.pow_: element_wise_flop, 
+    aten.add: element_wise_flop,
+    aten.sub: element_wise_flop,
+    aten.mul: element_wise_flop,
+    aten.div: element_wise_flop,
+    aten.remainder: element_wise_flop,
+    aten.add_: element_wise_flop,
+    aten.sub_: element_wise_flop,
+    aten.mul_: element_wise_flop,
+    aten.div_: element_wise_flop,
     aten.remainder_: element_wise_flop,
 }
 
