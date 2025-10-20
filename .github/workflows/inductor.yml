@@ -91,7 +91,7 @@ jobs:
           { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
-      build-additional-packages: "vision audio fbgemm torchao"
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
   inductor-test-cuda13:
