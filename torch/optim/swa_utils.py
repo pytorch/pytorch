@@ -297,6 +297,7 @@ class AveragedModel(Module):
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
                         for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
+                            # pyrefly: ignore  # missing-attribute
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
                 for p_averaged, p_model in zip(  # type: ignore[assignment]

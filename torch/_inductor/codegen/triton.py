@@ -26,7 +26,6 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
-from torch.utils._sympy.value_ranges import bound_sympy
 from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
@@ -952,8 +951,7 @@ class TritonCSEVariable(CSEVariable):
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
-        # TODO: uncomment this and fix the few failures left
-        # assert shape is not None, "TritonCSEVariable must have shape"
+        assert shape is not None, "TritonCSEVariable must have shape"
 
     def update_on_args(self, name, args, kwargs):
         for arg in args:
@@ -1145,13 +1143,20 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and not config.is_fbcode()
+            and config.emulate_divison_rounding
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
             out = f"triton.language.div_rn({x}, {y})"
         else:
             out = f"({x} / {y})"
+
+        # Workaround here since the functionality of div_rn has not ready on XPU.
+        # TODO: remove this workaround after https://github.com/intel/intel-xpu-backend-for-triton/issues/5306
+        # resolved.
+        if torch.xpu.is_available():
+            out = f"({x} / {y})"
+
         if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().truediv(x, y)
             if out_dtype in (torch.float16, torch.float32):
@@ -1357,7 +1362,7 @@ class TritonOverrides(OpOverrides):
                 value = triton_reshape(value, initial_shape, shape_2d)
 
                 # broadcast if needed
-                broadcast_needed = not (shape_2d == [YBLOCK, RBLOCK])
+                broadcast_needed = shape_2d != [YBLOCK, RBLOCK]
                 if broadcast_needed:
                     value = f"tl.broadcast_to({value}, ({YBLOCK}, {RBLOCK}))"
 
@@ -1379,7 +1384,7 @@ class TritonOverrides(OpOverrides):
                 value = f"tl.trans({value})"
 
                 # broadcast if needed
-                broadcast_needed = not (shape_2d == [XBLOCK, RBLOCK])
+                broadcast_needed = shape_2d != [XBLOCK, RBLOCK]
                 if broadcast_needed:
                     value = f"tl.broadcast_to({value}, ({RBLOCK}, {XBLOCK}))"
             else:
@@ -2858,6 +2863,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indexing: Union[BlockPtrOptions, TensorDescriptorOptions],
         other="",
     ) -> tuple[str, str]:
+        """Generate a block pointer or tensor descriptor for Triton kernel operations.
+
+        This method creates either a block pointer (for regular Triton operations) or
+        a tensor descriptor (for TMA operations) based on the indexing type. It handles
+        caching and reuse of descriptors for performance optimization.
+
+        Args:
+            name: The name of the buffer/tensor being accessed
+            var: The variable name for the pointer
+            indexing: Block pointer options or tensor descriptor options containing
+                     indexing information and boundary check settings
+            other: Additional parameters string (e.g., padding options)
+
+        Returns:
+            A tuple containing:
+            - block_descriptor: The generated block pointer or tensor descriptor variable name
+            - other: Modified additional parameters string with boundary check options
+        """
         check = indexing.boundary_check()
         if isinstance(indexing, TensorDescriptorOptions):
             if check and other:
@@ -2885,14 +2908,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # tensor descriptor.
                 block_descriptor = self.prologue_cache[var]
             else:
+                block_ptr_line = indexing.format(var, roffset=False)
+                block_var = self.cse.try_get(block_ptr_line)
+
+                # Early return if block descriptor already exists
+                if block_var:
+                    return str(block_var), other
+
                 block_descriptor_id = next(self.block_ptr_id)
                 if isinstance(indexing, BlockPtrOptions):
                     block_descriptor = f"block_ptr{block_descriptor_id}"
                 else:
                     block_descriptor = f"tma_descriptor{block_descriptor_id}"
-                line_body = DeferredLine(
-                    name, f"{block_descriptor} = {indexing.format(var, roffset=False)}"
+                named_var = self.cse.namedvar(
+                    block_descriptor, dtype=torch.uint64, shape=[]
                 )
+                self.cse.put(block_ptr_line, named_var)
+
+                line_body = DeferredLine(name, f"{block_descriptor} = {block_ptr_line}")
                 if indexing.can_lift:
                     self.prologue.writeline(line_body)
                     # Cache the descriptor for epilogue subtiling
@@ -4729,6 +4762,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
+            "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
         }
 
         if config.write_are_deterministic_algorithms_enabled:
@@ -5076,16 +5110,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = int(rnumel)
             val = next_power_of_2(val)
         else:
-            val = bound_sympy(rnumel).upper
-            assert isinstance(val, int) or val.is_constant()
+            val = 2
+            while not V.graph.sizevars.statically_known_leq(rnumel, val):
+                if val > 16 * 1024:
+                    raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+                val *= 2
 
-            if val == torch.utils._sympy.numbers.IntInfinity():
-                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
-
-            val = next_power_of_2(int(val))
-
-            if val > 16 * 1024:
-                raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
+            return val
 
         return val
 
@@ -5607,7 +5638,7 @@ class TritonScheduling(SIMDScheduling):
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
-                log.debug(
+                log.debug(  # noqa: G200
                     "Exception (%s) in compiling fused nodes %s",
                     e,
                     node_names,
