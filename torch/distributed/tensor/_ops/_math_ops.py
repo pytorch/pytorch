@@ -450,9 +450,12 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
       ||input - other||_p = (Σ |input_i - other_i|^p)^(1/p)
 
     Strategy:
-    1. Align input and other tensors (prefer more sharded strategy)
-    2. Subtraction is pointwise (preserves sharding)
-    3. Apply full reduction with NormReduction(p)
+    1. If inputs have Partial placement, force to Replicate before subtraction
+       (Partial values differ across ranks - can't subtract directly)
+    2. Otherwise, align inputs (prefer more sharded for parallelism)
+    3. Subtraction is pointwise (preserves sharding)
+    4. Apply full reduction with NormReduction(p) → returns _NormPartial
+    5. Communication deferred until .full_tensor() (lazy communication)
     """
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
@@ -482,12 +485,22 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
                 f"{input_src.tensor_meta.shape} and {other_src.tensor_meta.shape}"
             )
 
-        # Choose the placement with more shards for better parallelism
-        target_placements = (
-            input_src.placements
-            if input_src.num_shards >= other_src.num_shards
-            else other_src.placements
+        # If either input has Partial placement, we must replicate before
+        # pointwise subtraction (partial values differ across ranks)
+        has_partial = any(p.is_partial() for p in input_src.placements) or any(
+            p.is_partial() for p in other_src.placements
         )
+
+        if has_partial:
+            # Force Partial→Replicate for pointwise operation correctness
+            target_placements = tuple(Replicate() for _ in input_src.placements)
+        else:
+            # Choose the placement with more shards for better parallelism
+            target_placements = (
+                input_src.placements
+                if input_src.num_shards >= other_src.num_shards
+                else other_src.placements
+            )
 
         # Both inputs need to have the same placement for pointwise subtraction
         input_target_spec = DTensorSpec(
