@@ -66,6 +66,20 @@ class SkipPatternTest(TestBase):
         self.check_numeric(f, (x,))
         self.assertEqual(0, metrics.codegen_mix_order_reduction)
 
+    @inductor_config.patch(split_reductions=False)
+    def test_skip_due_to_non_persistent_reduction(self):
+        """
+        We only generate mix order reduction if one of the reduction is
+        persistent reduction.
+        """
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.randn(32768, 2048, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(0, metrics.codegen_mix_order_reduction)
+
 
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):

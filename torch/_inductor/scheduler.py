@@ -59,6 +59,7 @@ from .ir import (
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
+from .runtime.hints import ReductionHint
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -221,6 +222,22 @@ class MixOrderReduction:
         if not all(
             cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
         ):
+            return False
+
+        # Make sure a persistent reduction will be generated
+        if any(
+            subnode.node.data.reduction_hint  # type: ignore[union-attr]
+            not in (
+                ReductionHint.INNER,
+                ReductionHint.DEFAULT,
+            )
+            for subnode in contiguous_node.get_nodes()
+            if subnode.is_reduction()
+        ):
+            return False
+
+        # rnumel so large that we will not generated persistent reduction
+        if not V.graph.sizevars.statically_known_leq(ncol, 1024):
             return False
 
         # Other reduction types like max/min is not supported yet.
