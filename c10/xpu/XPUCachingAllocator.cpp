@@ -202,6 +202,24 @@ class DeviceCachingAllocator {
     }
   }
 
+  static size_t round_size(size_t size) {
+    if (size < kMinBlockSize) {
+      return kMinBlockSize;
+    } else {
+      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+    }
+  }
+
+  static size_t get_allocation_size(size_t size) {
+    if (size <= kSmallSize) {
+      return kSmallBuffer;
+    } else if (size < kMinLargeAlloc) {
+      return kLargeBuffer;
+    } else {
+      return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
+    }
+  }
+
   BlockPool& get_pool(size_t size) {
     if (size < kSmallSize) {
       return small_blocks;
@@ -388,7 +406,7 @@ class DeviceCachingAllocator {
   Block* malloc(DeviceIndex device, size_t orig_size, sycl::queue& queue) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     process_events();
-    const size_t size = get_round_size(orig_size);
+    const size_t size = round_size(orig_size);
     auto& pool = get_pool(size);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, &queue, &pool, alloc_size);
