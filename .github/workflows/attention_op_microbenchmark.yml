@@ -1,0 +1,59 @@
+name: attention_op_microbenchmark
+
+on:
+  push:
+    tags:
+      - ciflow/op-benchmark/*
+  workflow_dispatch:
+  schedule:
+    # Run at 06:00 UTC everyday
+    - cron: 0 7 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # H100 A100 runners
+  attn-microbenchmark-build:
+    if: github.repository_owner == 'pytorch'
+    steps:
+      - name: attn-microbenchmark-build
+        uses: ./.github/workflows/_linux-build.yml
+        with:
+          runner: linux.12xlarge.memory
+          build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+          docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+          cuda-arch-list: '8.0 9.0'
+          test-matrix: |
+            { include: [
+              { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+              { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+            ]}
+        secrets: inherit
+      - name: Clone CodeLlama
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: meta-pytorch/attention-gym
+          ref: main
+          path: attention-gym
+      - name: Install attention-gym
+        shell: bash
+        run: |
+          cd "${GITHUB_WORKSPACE}/attention-gym"
+          python3 -m pip install .
+
+  attn-microbenchmark-test:
+    name: attn-microbenchmark-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: attn-microbenchmark-build
+    with:
+      timeout-minutes: 500
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      docker-image: ${{ needs.attn-microbenchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.attn-microbenchmark-build.outputs.test-matrix }}
+    secrets: inherit
