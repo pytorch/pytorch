@@ -214,11 +214,26 @@ class MixOrderReduction:
         if not V.graph.sizevars.statically_known_geq(nrow, ncol * 10):
             return False
 
-        contiguous_node = node1 if node1.group[1][1] == ncol else node2
+        contiguous_node, other_node = (
+            (node1, node2) if node1.group[1][1] == ncol else (node2, node1)
+        )
 
-        out = all(cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads)
-        # breakpoint()
-        return out
+        if not all(
+            cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+        ):
+            return False
+
+        # Other reduction types like max/min is not supported yet.
+        # There are no real use case as well.
+        return all(
+            subnode.node.get_reduction_type()  # type: ignore[union-attr]
+            in {
+                "sum",
+                "prod",
+            }
+            for subnode in other_node.get_nodes()
+            if subnode.is_reduction()
+        )
 
     @classmethod
     def are_mix_order_reductions(
