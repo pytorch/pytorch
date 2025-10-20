@@ -27,9 +27,7 @@ class TestQuantizePT2EModels(TestCase):
         m = m.eval()
         input_shape = (1, 3, 224, 224)
         example_inputs = (torch.randn(input_shape),)
-        m = torch.export.export_for_training(
-            m, copy.deepcopy(example_inputs), strict=True
-        ).module()
+        m = torch.export.export(m, copy.deepcopy(example_inputs), strict=True).module()
         m(*example_inputs)
         m = export.export(m, copy.deepcopy(example_inputs))
         ops = _get_ops_list(m.graph_module)

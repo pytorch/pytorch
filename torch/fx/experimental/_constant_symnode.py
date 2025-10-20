@@ -41,6 +41,9 @@ class ConstantIntNode:
     def _graph_repr(self) -> str:
         return self._str()
 
+    def add(self, other: Any) -> Any:
+        return other.add(self)
+
     def mul(self, other: Any) -> Any:
         return other.mul(self)
 

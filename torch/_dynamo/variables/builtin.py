@@ -28,7 +28,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 import types
 import typing
 import unittest
@@ -46,6 +45,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
     Unsupported,
@@ -81,9 +81,13 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    raise_type_error_exc,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
-from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -101,6 +105,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .streams import EventVariable, StreamVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -109,9 +114,9 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import (
+    MutableMappingVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
-    UserDefinedSetVariable,
     UserDefinedVariable,
 )
 
@@ -307,6 +312,7 @@ class BuiltinVariable(VariableTracker):
             bool,
             callable,
             chr,
+            complex,
             divmod,
             float,
             getattr,
@@ -988,7 +994,7 @@ class BuiltinVariable(VariableTracker):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                return variables.ExceptionVariable(fn, args, **kwargs)
+                return variables.ExceptionVariable(fn, args, kwargs)
 
             return create_exception_class_object
 
@@ -1027,6 +1033,7 @@ class BuiltinVariable(VariableTracker):
 
             def call_self_handler(tx: "InstructionTranslator", args, kwargs):
                 try:
+                    # pyrefly: ignore  # not-callable
                     result = self_handler(tx, *args, **kwargs)
                     if result is not None:
                         return result
@@ -1034,11 +1041,12 @@ class BuiltinVariable(VariableTracker):
                     # Check if binding is bad. inspect signature bind is expensive.
                     # So check only when handler call fails.
                     try:
+                        # pyrefly: ignore  # bad-argument-type
                         inspect.signature(self_handler).bind(tx, *args, **kwargs)
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
                         if not has_constant_handler:
-                            log.warning(
+                            log.warning(  # noqa: G200
                                 "incorrect arg count %s %s and no constant handler",
                                 self_handler,
                                 e,
@@ -1086,6 +1094,7 @@ class BuiltinVariable(VariableTracker):
                             hints=[*graph_break_hints.DYNAMO_BUG],
                             from_exc=exc,
                         )
+                    # pyrefly: ignore  # unbound-name
                     return VariableTracker.build(tx, res)
 
             else:
@@ -1114,6 +1123,7 @@ class BuiltinVariable(VariableTracker):
                                 tx,
                                 args=list(map(ConstantVariable.create, exc.args)),
                             )
+                        # pyrefly: ignore  # unbound-name
                         return VariableTracker.build(tx, res)
 
             handlers.append(constant_fold_handler)
@@ -1155,6 +1165,21 @@ class BuiltinVariable(VariableTracker):
                 call_unimplemented_v2(args)
 
         return builtin_dispatch
+
+    def call_vars(self, tx: "InstructionTranslator", *args):
+        if len(args) == 0:
+            unimplemented_v2(
+                gb_type="unimplemented builtin op vars() with no arguments",
+                context=f"vars: {self} {args}",
+                explanation=f"Dynamo does not know how to trace builtin operator {self.fn} with no arguments",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        assert len(args) == 1
+        # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
+        try:
+            return args[0].var_getattr(tx, "__dict__")
+        except ObservedAttributeError:
+            raise_observed_exception(TypeError, tx)
 
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -1231,7 +1256,7 @@ class BuiltinVariable(VariableTracker):
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
             if check_numpy_ndarray_args(args, kwargs) and not any(
-                type(arg) == variables.TensorVariable for arg in args
+                type(arg) is variables.TensorVariable for arg in args
             ):
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -1372,11 +1397,11 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and args[1].has_unpack_var_sequence(tx)
+                and args[1].has_force_unpack_var_sequence(tx)
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].unpack_var_sequence(tx)
+                    init_args = args[1].force_unpack_var_sequence(tx)
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
@@ -1421,6 +1446,7 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in dict_methods:
                 if isinstance(args[0], variables.UserDefinedDictVariable):
+                    # pyrefly: ignore  # missing-attribute
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1429,6 +1455,7 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in set_methods:
                 if isinstance(args[0], variables.UserDefinedSetVariable):
+                    # pyrefly: ignore  # missing-attribute
                     return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.SetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1517,10 +1544,12 @@ class BuiltinVariable(VariableTracker):
             if type(arg.value).__str__ is object.__str__:
                 # Rely on the object str method
                 try:
+                    # pyrefly: ignore  # unbound-name
                     return variables.ConstantVariable.create(value=str_method())
                 except AttributeError:
                     # Graph break
                     return
+            # pyrefly: ignore  # unbound-name
             elif is_wrapper_or_member_descriptor(str_method):
                 unimplemented_v2(
                     gb_type="Attempted to a str() method implemented in C/C++",
@@ -1536,9 +1565,9 @@ class BuiltinVariable(VariableTracker):
                 try:
                     # Only supports certain function types
                     user_func_variable = variables.UserFunctionVariable(bound_method)
-                except AssertionError as e:
+                except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
-                    log.warning("Failed to create UserFunctionVariable: %s", e)
+                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
                     return
 
                 # Inline the user function
@@ -1637,8 +1666,10 @@ class BuiltinVariable(VariableTracker):
                 else:
                     raw_b = b.raw_value
                 if self.fn is max:
+                    # pyrefly: ignore  # missing-attribute
                     raw_res = max(a.raw_value, raw_b)
                 else:
+                    # pyrefly: ignore  # missing-attribute
                     raw_res = min(a.raw_value, raw_b)
 
                 need_unwrap = any(
@@ -1792,7 +1823,10 @@ class BuiltinVariable(VariableTracker):
                 list(obj.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
-        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable) or (
+            isinstance(obj, UserDefinedObjectVariable)
+            and obj.has_force_unpack_var_sequence(tx)
+        ):
             return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -1800,6 +1834,10 @@ class BuiltinVariable(VariableTracker):
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
         if isinstance(obj, variables.IteratorVariable):
             ret = obj
+        elif isinstance(obj, variables.RangeVariable):
+            ret = obj.call_method(tx, "__iter__", [], {})
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
+            ret = obj  # type: ignore[assignment]
         else:
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -1814,7 +1852,7 @@ class BuiltinVariable(VariableTracker):
                 polyfills.builtins.iter_
             ).call_function(tx, [obj, *args], {})
 
-            if len(args):
+            if args:
                 # iter(obj, sentinel) returns an object that implements
                 # __iter__ and __next__ methods (UserDefinedObjectVariable)
                 # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
@@ -1865,11 +1903,28 @@ class BuiltinVariable(VariableTracker):
             hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
 
+    def call_dir(self, tx: "InstructionTranslator", arg):
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            return VariableTracker.build(tx, dir(arg.value))
+        if isinstance(arg, BuiltinVariable):
+            return VariableTracker.build(tx, dir(arg.fn))
+
     def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+        args = list(args)
+        if (
+            len(args) == 1
+            and isinstance(args[0], variables.GetAttrVariable)
+            and isinstance(args[0].obj, variables.UserDefinedClassVariable)
+            and not tx.output.side_effects.has_pending_mutation(args[0].obj)
+        ):
+            # Forward the GetAttrVariable(foo, "__dict__") to a realized vt of
+            # VT(foo.__dict__). This simplifies the construction of the new
+            # dict.
+            args[0] = args[0].get_forwarded_dict(tx)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.construct_dict),
             [VariableTracker.build(tx, user_cls), *args],
@@ -1880,20 +1935,36 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        if user_cls not in {dict, OrderedDict, defaultdict}:
+            unimplemented_v2(
+                gb_type="Unsupported dict type for fromkeys()",
+                context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
+                explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
+                f"{user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
+                hints=[
+                    f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
+                ],
+            )
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            assert user_cls is OrderedDict
-            assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
+            if (
+                user_cls is not OrderedDict
+                or len(args) != 1
+                or len(kwargs) != 1
+                or "value" not in kwargs
+            ):
+                raise_type_error_exc(
+                    tx, f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
+                )
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
-            msg = ConstantVariable.create(
-                "fromkeys expected at least 1 arguments, got 0"
-            )
-            raise_observed_exception(TypeError, tx, args=[msg])
+            raise_type_error_exc(tx, "fromkeys expected at least 1 arguments, got 0")
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
-        assert len(args) == 2
+        if len(args) != 2:
+            raise_type_error_exc(
+                tx, f"fromkeys expected at most 2 arguments, got {len(args)}"
+            )
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -1989,12 +2060,13 @@ class BuiltinVariable(VariableTracker):
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
-            assert len(kwargs) == 1 and "strict" in kwargs
+            if not (len(kwargs) == 1 and "strict" in kwargs):
+                raise_type_error_exc(
+                    tx,
+                    f"zip() should only have 'strict' keyword argument, but ({len(kwargs)} given)",
+                )
         strict = kwargs.pop("strict", False)
-        args = [
-            arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
-            for arg in args
-        ]
+        args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             args, strict=strict, mutation_type=ValueMutationNew()
         )
@@ -2071,6 +2143,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
+            # pyrefly: ignore  # unbound-name
             return ConstantVariable.create(isinstance(arg_type, isinstance_type))
 
         isinstance_type_tuple: tuple[type, ...]
@@ -2079,9 +2152,7 @@ class BuiltinVariable(VariableTracker):
             getattr(isinstance_type, "__instancecheck__", None)
         ):
             isinstance_type_tuple = (isinstance_type,)
-        elif sys.version_info >= (3, 10) and isinstance(
-            isinstance_type, types.UnionType
-        ):
+        elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
@@ -2105,8 +2176,10 @@ class BuiltinVariable(VariableTracker):
             # through it. This is a limitation of the current implementation.
             # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
             # might not be a big issue and we trade off it for performance.
+            # pyrefly: ignore  # unbound-name
             val = issubclass(arg_type, isinstance_type_tuple)
         except TypeError:
+            # pyrefly: ignore  # unbound-name
             val = arg_type in isinstance_type_tuple
         return variables.ConstantVariable.create(val)
 
@@ -2128,14 +2201,20 @@ class BuiltinVariable(VariableTracker):
 
         # WARNING: This might run arbitrary user code `__subclasscheck__`.
         # See the comment in call_isinstance above.
+        # pyrefly: ignore  # unbound-name
         return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
 
     def call_super(self, tx: "InstructionTranslator", a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx: "InstructionTranslator", arg: VariableTracker):
+    def call_next(self, tx: "InstructionTranslator", *args):
+        arg = args[0]
         try:
             return arg.next_variable(tx)
+        except ObservedUserStopIteration:
+            if len(args) == 2:
+                return args[1]
+            raise
         except Unsupported as ex:
             if isinstance(arg, variables.BaseListVariable):
                 ex.remove_from_stats()
@@ -2159,6 +2238,20 @@ class BuiltinVariable(VariableTracker):
     def call_filter(self, tx: "InstructionTranslator", fn, seq):
         seq = seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
         return variables.FilterVariable(fn, seq, mutation_type=ValueMutationNew())
+
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        source = self.source and AttrSource(self.source, name)
+        if self.fn is object:
+            # for object, we can just directly read the attribute
+            try:
+                value = getattr(self.fn, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+            # pyrefly: ignore  # unbound-name
+            if not callable(value):
+                # pyrefly: ignore  # unbound-name
+                return VariableTracker.build(tx, value, source)
+        return variables.GetAttrVariable(self, name, source=source)
 
     def call_getattr(
         self,
@@ -2255,7 +2348,6 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertDictEqual",
                     "assertWarns",
                 )
             ):
@@ -2537,6 +2629,13 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
+
+        if (
+            isinstance(a, UserDefinedObjectVariable)
+            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
+        ):
+            return a.call_method(tx, "__neg__", [], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -2671,19 +2770,19 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_xor(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__xor__", [b], {})
 
     def call_ixor(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__ixor__", [b], {})
 
     def call_sub(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__sub__", [b], {})
 
     def call_isub(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__isub__", [b], {})
 
     def call_and_(self, tx: "InstructionTranslator", a, b):
@@ -2700,7 +2799,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__and__", [b], {})
         # None no-ops this handler and lets the driving function proceed
 
@@ -2718,7 +2817,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__iand__", [b], {})
 
     def call_or_(self, tx: "InstructionTranslator", a, b):
@@ -2742,11 +2841,14 @@ class BuiltinVariable(VariableTracker):
             (
                 ConstDictVariable,
                 DictKeysVariable,
+                MutableMappingVariable,
                 SetVariable,
                 UserDefinedDictVariable,
-                UserDefinedSetVariable,
+                UserDefinedObjectVariable,
             ),
         ):
+            # TODO(guilhermeleobas): forward the call to b.__ror__(a) if
+            # a.__ror__(b) returns NotImplemented
             return a.call_method(tx, "__or__", [b], {})
 
         # None no-ops this handler and lets the driving function proceed
@@ -2770,7 +2872,13 @@ class BuiltinVariable(VariableTracker):
         # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
         if isinstance(
             a,
-            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                MutableMappingVariable,
+                SetVariable,
+                UserDefinedObjectVariable,
+            ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
 
