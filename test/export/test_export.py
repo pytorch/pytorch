@@ -16695,6 +16695,23 @@ def forward(self, q, k, v):
 
         self.assertEqual(result_non_strict, result_strict)
 
+    def test_constant_param(self):
+        inp = torch.tensor([0.1, 0.1])
+        linear = torch.nn.Linear(2, 2)
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                y = x.t()
+                y = y.relu()
+                y = linear(y)
+                return y
+
+        foo = Foo()
+        ep = export(foo, (inp,))
+        # The weight/bias from the global linear
+        self.assertEqual(len(ep.constants), 2)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

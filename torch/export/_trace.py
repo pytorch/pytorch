@@ -10,7 +10,6 @@ import time
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
-from itertools import chain
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 
@@ -304,21 +303,6 @@ def _extract_fake_inputs(gm, args, kwargs):
     fake_kwargs = pytree.tree_map(lookup_fake, kwargs)
 
     return fake_args, fake_kwargs, fake_mode
-
-
-def _replace_param_buffer_names(param_buffer_table, sig):
-    for spec in sig.input_specs:
-        if spec.kind in (
-            InputKind.PARAMETER,
-            InputKind.BUFFER,
-        ):
-            spec.target = param_buffer_table[spec.target]
-    for spec in sig.output_specs:
-        if spec.kind in (
-            OutputKind.BUFFER_MUTATION,
-            OutputKind.GRADIENT_TO_PARAMETER,
-        ):
-            spec.target = param_buffer_table[spec.target]
 
 
 def _convert_to_positional_args(orig_arg_names, args, kwargs):
@@ -674,36 +658,101 @@ def _rename_constants_nodes(
         mod.recompile()
 
 
+def _clear_traced_params_buffers(
+    traced_module: torch.fx.GraphModule, const_keys: set[str]
+) -> None:
+    """Remove all parameters and buffers from traced module before restoring."""
+    for key in const_keys:
+        # We don't want constants to show up as a buffer in the state dict.
+        # Instead they should just be a direct attribute.
+        buffer = torch.fx.graph_module._get_attr(traced_module, key)
+
+        if isinstance(buffer, torch.nn.Parameter):
+            # Undo parameter
+            log.warning(
+                "The parameter %s was found in the program but is not "
+                "attached to any submodules in the eager program. We will "
+                "turn it into a constant tensor.",
+                key,
+            )
+            buffer = buffer.data
+
+        torch.fx.graph_module._del_attr(traced_module, key)
+        setattr(traced_module, key, buffer)
+
+
 def _restore_state_dict(
     original_module: torch.nn.Module, traced_module: torch.fx.GraphModule
 ) -> None:
     """
-    Restores the state dict of the traced module to that of the original module.
+    Restores the state dict of the traced module to match the original module exactly.
+    Preserves the original FQNs with dots, creating intermediate empty modules as needed.
+    Ensures that the ordering of parameters/buffers matches the original module.
     """
-    param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
-    # Don't want to change the convention of previous call.
-    param_buffer_table_reverse = {v: k for k, v in param_buffer_table.items()}
+    # Build ID-based lookups for traced module params/buffers
+    traced_params: dict[int, tuple[str, torch.nn.Parameter]] = {}
+    for name, param in traced_module.named_parameters(remove_duplicate=False):
+        traced_params[id(param)] = (name, param)
 
-    # Replace state dict attr names with the fqn
-    for name, _ in list(
-        chain(
-            original_module.named_parameters(remove_duplicate=False),
-            # pyrefly: ignore  # bad-argument-type
-            original_module.named_buffers(remove_duplicate=False),
-        )
+    traced_buffers: dict[int, tuple[str, torch.Tensor]] = {}
+    for name, buffer in traced_module.named_buffers(remove_duplicate=False):
+        traced_buffers[id(buffer)] = (name, buffer)
+
+    # Build mapping from old names to new names for graph node updates
+    name_mapping: dict[str, str] = {}
+
+    non_persistent_buffers = _get_non_persistent_buffers(original_module)
+
+    # Restore parameters in the order they appear in original module
+    for orig_name, orig_param in original_module.named_parameters(
+        remove_duplicate=False
     ):
-        if name in param_buffer_table_reverse:
-            dynamo_name = param_buffer_table_reverse[name]
-            param = torch.fx.graph_module._get_attr(traced_module, dynamo_name)
-            torch.fx.graph_module._assign_attr(param, traced_module, name)
-            torch.fx.graph_module._del_attr(traced_module, dynamo_name)
+        if id(orig_param) in traced_params:
+            # This param exists in traced module - restore it with original FQN
+            traced_name, traced_param = traced_params[id(orig_param)]
+            torch.fx.graph_module._assign_attr(traced_param, traced_module, orig_name)
+            if torch.fx.graph_module._has_attr(traced_module, traced_name):
+                torch.fx.graph_module._del_attr(traced_module, traced_name)
+            name_mapping[traced_name] = orig_name
+        else:
+            # This param doesn't exist in traced module - add it
+            torch.fx.graph_module._assign_attr(orig_param, traced_module, orig_name)
 
-    # Replace graph getattr nodes with the correct name
+    # Restore buffers in the order they appear in original module
+    for orig_name, orig_buffer in original_module.named_buffers(remove_duplicate=False):
+        if id(orig_buffer) in traced_buffers:
+            # This buffer exists in traced module - restore it with original FQN
+            traced_name, traced_buffer = traced_buffers[id(orig_buffer)]
+
+            torch.fx.graph_module._assign_attr(
+                orig_buffer,
+                traced_module,
+                orig_name,
+                persistent=orig_name not in non_persistent_buffers,
+            )
+
+            name_mapping[traced_name] = orig_name
+            if torch.fx.graph_module._has_attr(traced_module, traced_name):
+                torch.fx.graph_module._del_attr(traced_module, traced_name)
+        else:
+            # This buffer doesn't exist in traced module - add it
+            torch.fx.graph_module._assign_attr(
+                orig_buffer,
+                traced_module,
+                orig_name,
+                persistent=orig_name not in non_persistent_buffers,
+            )
+
+    param_names = [v[0] for v in traced_params.values()]
+    buffer_names = [v[0] for v in traced_buffers.values()]
+    const_keys = set(param_names + buffer_names).difference(set(name_mapping.keys()))
+
+    _clear_traced_params_buffers(traced_module, const_keys)
+
+    # Update get_attr nodes in the graph to use the correct FQNs
     for node in traced_module.graph.nodes:
-        if node.op == "get_attr":
-            attr_name = node.target
-            if attr_name in param_buffer_table:
-                node.target = param_buffer_table[attr_name]
+        if node.op == "get_attr" and node.target in name_mapping:
+            node.target = name_mapping[node.target]
 
     traced_module.recompile()
 
@@ -984,27 +1033,6 @@ def _get_non_persistent_buffers(mod: torch.nn.Module) -> set[str]:
             result.update(m._non_persistent_buffers_set)
     return result
 
-
-def _rewrite_dynamo_tensor_constants(
-    orig_mod_buffers: set[torch.Tensor],
-    traced_mod_buffers: dict[str, torch.Tensor],
-    graph_signature: ExportGraphSignature,
-    constants: dict[str, _ConstantAttributeType],
-) -> None:
-    """
-    Dynamo erroneously marks tensor attributes on modules as buffers.
-    Rewrite them to be tensor constants.
-    """
-    for spec in graph_signature.input_specs:
-        if spec.kind == InputKind.BUFFER:
-            assert spec.target is not None
-            value = traced_mod_buffers[spec.target]
-            if value not in orig_mod_buffers:
-                # This was a tensor constant erroneously marked as a buffer.
-                # Convert it into a constant in the graph signature, and add its
-                # value to the constants table.
-                spec.kind = InputKind.CONSTANT_TENSOR
-                constants[spec.target] = value  # type: ignore[arg-type]
 
 
 def _move_non_persistent_buffers_to_tensor_constants(
@@ -1436,7 +1464,7 @@ def _strict_export(
         kwargs,
         dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
-        restore_fqn=False,  # don't need to restore because we will do it later
+        restore_fqn=True,
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         _log_export_usage=False,
     )
@@ -1456,7 +1484,7 @@ def _strict_export(
     # to update "val"
     for node in gm_torch_level.graph.nodes:
         if node.op == "get_attr" and "val" not in node.meta:
-            attr = getattr(gm_torch_level, node.target)
+            attr = torch.fx.graph_module._get_attr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
                 assert dynamo_fake_mode is not None, (
@@ -1502,21 +1530,8 @@ def _strict_export(
     # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
     # from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
-    # params_buffers_to_node_meta = _collect_param_buffer_metadata(gm_torch_level)
 
     constant_attrs = _gather_constant_attrs(mod)
-    param_buffer_table: dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
-
-    # Dynamo does not track which buffers were registered as non-persistent. This info
-    # is available in the original module, so we transfer it to the traced module. Also,
-    # since we didn't restore original param/buffer names yet, we must use traced names.
-    non_persistent_buffers = _get_non_persistent_buffers(mod)
-    reverse_name_lookup = {orig: traced for traced, orig in param_buffer_table.items()}
-    gm_torch_level._non_persistent_buffers_set = {
-        reverse_name_lookup[name]
-        for name in non_persistent_buffers
-        if name in reverse_name_lookup
-    }
 
     tx = TracingContext(dynamo_fake_mode)
     with dynamo_fake_mode, tracing(tx):
@@ -1540,25 +1555,15 @@ def _strict_export(
 
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
-    # 1. Remove tensor constants that were added as buffers.
-    _rewrite_dynamo_tensor_constants(
-        orig_mod_buffers=set(mod.buffers()),
-        traced_mod_buffers=dict(gm_torch_level.named_buffers()),
-        graph_signature=export_graph_signature,
-        constants=constants,
-    )
-    # 2. Restore FQN of param/buffers
-    _replace_param_buffer_names(param_buffer_table, export_graph_signature)
-
-    # 3. Move non-persistent buffers to tensor constants
+    # 1. Move non-persistent buffers to tensor constants
     _move_non_persistent_buffers_to_tensor_constants(
         mod, export_graph_signature, constants
     )
 
-    # 4. Rewrite constants to have the same FQN as the original module.
+    # 2. Rewrite constants to have the same FQN as the original module.
     _remap_constants(constant_attrs, export_graph_signature, constants)
 
-    # 5. Rename constants nodes in graph module from buffers to constants
+    # 3. Rename constants nodes in graph module from buffers to constants
     _rename_constants_nodes(gm, export_graph_signature)
 
     return ExportArtifact(
