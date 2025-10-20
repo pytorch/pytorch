@@ -1232,12 +1232,14 @@ static ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
-  } else if (params.use_mkldnn(input, weight)) {
-    if (params.transposed) {
-      return ConvBackend::MkldnnTranspose;
-    } else {
+  } else if (params.use_mkldnn(input, weight) && !params.transposed) {
       return ConvBackend::Mkldnn;
-    }
+// Skip oneDNN's transposed conv impl when it's built with Arm Compute Library (ACL)
+// due to: https://github.com/pytorch/pytorch/issues/165654
+#if !AT_MKLDNN_ACL_ENABLED()
+  } else if (params.use_mkldnn(input, weight) && params.transposed) {
+      return ConvBackend::MkldnnTranspose;
+#endif // !AT_MKLDNN_ACL_ENABLED()
   } else if (!need_backward && params.use_xnnpack(input, weight, bias_sizes_opt)) {
     // Using prepacked conv is preferred, but XNNPACK is still the fastest
     // option for NHWC.
