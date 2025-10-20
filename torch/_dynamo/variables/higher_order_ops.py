@@ -1378,7 +1378,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
             # need to ensure we increase epoch so we don't memoize unbacked bindings
-            # across different subgraphs which can interefere with runtime assertion
+            # across different subgraphs which can interfere with runtime assertion
             # generation.
             tx.fake_mode.epoch += 1
 
