@@ -209,6 +209,7 @@ def addmm_patterns_init():
         # pyrefly: ignore  # bad-argument-type
         int8_woq_fusion_replacement,
         [val(), val(), val(), val(), scale(), scale(), scale()],
+        # pyrefly: ignore  # bad-argument-type
         fwd_only,
         # pyrefly: ignore  # bad-argument-type
         pass_patterns[0],
@@ -230,6 +231,7 @@ def addmm_patterns_init():
         # pyrefly: ignore  # bad-argument-type
         matmul_replacement,
         [val(), val(), val(), val()],
+        # pyrefly: ignore  # bad-argument-type
         fwd_only,
         # pyrefly: ignore  # bad-argument-type
         pass_patterns[0],
@@ -251,6 +253,7 @@ def addmm_patterns_init():
         # pyrefly: ignore  # bad-argument-type
         matmul_replacement_two,
         [val(), val(), val()],
+        # pyrefly: ignore  # bad-argument-type
         fwd_only,
         # pyrefly: ignore  # bad-argument-type
         pass_patterns[0],
@@ -276,6 +279,7 @@ def addmm_patterns_init():
         # pyrefly: ignore  # bad-argument-type
         addmm_fuse_replacement_second,
         [val() for _ in range(7)],
+        # pyrefly: ignore  # bad-argument-type
         fwd_only,
         # pyrefly: ignore  # bad-argument-type
         pass_patterns[0],
