@@ -690,6 +690,43 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(partial_out.full_tensor(), out)
 
     @with_comms
+    def test_dist(self):
+        """Test torch.dist with DTensor (resolves TODO at line 740 in test_linalg_eigh)."""
+        device_mesh = self.build_device_mesh()
+
+        # Test with different shardings
+        tensor_a = torch.randn(12, 8, device=self.device_type)
+        tensor_b = torch.randn(12, 8, device=self.device_type)
+
+        # Test different p-norms
+        for p in [1, 2, float("inf")]:
+            # Compute reference (local)
+            ref_dist = torch.dist(tensor_a, tensor_b, p)
+
+            # Test with Shard(0)
+            dtensor_a = distribute_tensor(tensor_a, device_mesh, [Shard(0)])
+            dtensor_b = distribute_tensor(tensor_b, device_mesh, [Shard(0)])
+
+            # dist operation returns a Partial result (no communication yet)
+            dtensor_dist = torch.dist(dtensor_a, dtensor_b, p)
+
+            # Result should be a scalar with partial placement that needs reduction
+            self.assertTrue(dtensor_dist.placements[0].is_partial())
+
+            # Communication happens when converting from Partial to Replicate
+            result = dtensor_dist.full_tensor()
+            self.assertEqual(result, ref_dist)
+
+            # Test with Replicate placement
+            dtensor_a_rep = distribute_tensor(tensor_a, device_mesh, [Replicate()])
+            dtensor_b_rep = distribute_tensor(tensor_b, device_mesh, [Replicate()])
+
+            dtensor_dist_rep = torch.dist(dtensor_a_rep, dtensor_b_rep, p)
+            # With replicate inputs, result may still be partial or replicate
+            result_rep = dtensor_dist_rep.full_tensor()
+            self.assertEqual(result_rep, ref_dist)
+
+    @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
@@ -824,14 +861,11 @@ class DistMathOpsTest(DTensorTestBase):
         dtensor_A = dtensor_A + dtensor_A.mT
         dtensor_L, dtensor_Q = torch.linalg.eigh(dtensor_A)
 
-        # TODO: we need to convert A, L, Q to local because we don't have a
-        # sharding strategy registered for aten.dist.default yet.
-        local_A, local_L, local_Q = (
-            dtensor_A.to_local(),
-            dtensor_L.to_local(),
-            dtensor_Q.to_local(),
-        )
-        distance = torch.dist(local_Q @ torch.diag(local_L) @ local_Q.mT, local_A)
+        # Verify eigendecomposition: Q @ diag(L) @ Q.T == A
+        # Now we can use torch.dist directly on DTensors!
+        reconstructed = dtensor_Q @ torch.diag(dtensor_L) @ dtensor_Q.mT
+        distance_dtensor = torch.dist(reconstructed, dtensor_A)
+        distance = distance_dtensor.full_tensor()
         self.assertEqual(distance.item(), 0.0)
 
     @with_comms
