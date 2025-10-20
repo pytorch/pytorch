@@ -1101,10 +1101,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(desc, property) and desc.fset is None:
             raise_observed_exception(AttributeError, tx)
 
-        # Objects using __slots__ can only set attributes that aer in the slots
-        if not hasattr(self.value, "__dict__"):
-            if desc is None:
-                raise_observed_exception(AttributeError, tx)
+        # Objects using __slots__ can only set attributes that are in the slots
+        if not hasattr(self.value, "__dict__") and desc is None:
+            raise_observed_exception(AttributeError, tx)
         if directly_update_dict:
             self.attrs_directly_modifed_on_dict.add(name)
         else:
