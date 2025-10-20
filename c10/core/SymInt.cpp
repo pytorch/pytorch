@@ -4,7 +4,6 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/safe_numerics.h>
-#include <functional>
 
 namespace c10 {
 
