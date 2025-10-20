@@ -1726,7 +1726,7 @@ at::cuda::solver::xgeev_bufferSize<scalar_t>(
   // allocate workspace storage on device and host
   auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_device_data = device_allocator.allocate(ws_dev);
-  auto& host_allocator = *at::getCPUAllocator();//TODO: use pinned allocator (CUDACachingHostAllocator)
+  auto& host_allocator = *at::cuda::getPinnedMemoryAllocator();
   auto work_host_data = host_allocator.allocate(ws_host);
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
@@ -1758,9 +1758,6 @@ at::cuda::solver::xgeev_bufferSize<scalar_t>(
 
 
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
-  values.copy_(values.to(values.device()));
-  vectors.copy_(vectors.to(vectors.device()));
-  infos.copy_(infos.to(infos.device()));
 
 
 }
