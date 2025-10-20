@@ -1967,6 +1967,38 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    @dtypes(torch.float16)
+    @dtypesIfCUDA(torch.float16)
+    def test_dynamic_captured_buffer(self, device, dtype):
+        def run_with_head_count(compiled_fa, head_count):
+            head_scale = torch.randn(
+                head_count, device=device, dtype=dtype, requires_grad=True
+            )
+
+            def score_mod(score, batch, head, token_q, token_kv):
+                return score * head_scale[head]
+
+            q = torch.randn(
+                B, head_count, S, D, device=device, dtype=dtype, requires_grad=True
+            )
+            k = torch.randn_like(q, requires_grad=True)
+            v = torch.randn_like(q, requires_grad=True)
+
+            block_mask = create_block_mask(noop_mask, B, 1, S, S, device=device)
+
+            out = compiled_fa(q, k, v, score_mod=score_mod, block_mask=block_mask)
+            loss = out.sum()
+            loss.backward()
+            return out
+
+        compiled_fa = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+
+        head_counts = [4, 8, 4, 16, 4]
+        for head_count in head_counts:
+            run_with_head_count(compiled_fa, head_count)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
