@@ -366,6 +366,11 @@ def record(
                 if se.code == 0:
                     return None
                 else:
+                    # For all other SystemExit, we will let it propagate with error traits injected.
+                    se["errorTraits"] = {
+                        "category": "system_terminated_error",
+                        "retryability": "False",
+                    }
                     raise
             except ChildFailedError as e:
                 rank, failure = e.get_first_failure()
