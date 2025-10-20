@@ -2800,5 +2800,15 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0278": [
+    {
+      "Gb_type": "Unsupported dict type for fromkeys()",
+      "Context": "{user_cls.__name__}.fromkeys(): {args} {kwargs}",
+      "Explanation": "Failed to call {user_cls.__name__}.fromkeys() because {user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
+      "Hints": [
+        "Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict."
+      ]
+    }
   ]
 }
