@@ -67,7 +67,7 @@ from torch._functorch._aot_autograd.utils import (
 )
 from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
-    aot_export_module,
+    aot_export_joint_with_descriptors,
 )
 from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
@@ -878,25 +878,58 @@ def _export_to_aten_ir(
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with (
-        torch.nn.utils.stateless._reparametrize_module(
-            mod,
-            fake_params_buffers,
-            tie_weights=True,
-            strict=True,
-            stack_weights=True,
-        ),
-        _ignore_backend_decomps(),
-        _compiling_state_context(),
-        custom_triton_ops_decomposition_ctx(),
-    ):
-        gm, graph_signature = transform(aot_export_module)(
+    from contextlib import ExitStack
+
+    from torch._functorch._aot_autograd.graph_compile import aot_stage2_export
+    from torch._functorch._aot_autograd.input_output_analysis import (
+        create_graph_signature,
+    )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            torch.nn.utils.stateless._reparametrize_module(
+                mod,
+                fake_params_buffers,
+                tie_weights=True,
+                strict=True,
+                stack_weights=True,
+            )
+        )
+        stack.enter_context(_ignore_backend_decomps())
+        stack.enter_context(_compiling_state_context())
+        stack.enter_context(custom_triton_ops_decomposition_ctx())
+        stack.enter_context(torch.no_grad())
+
+        joint_with_descriptors = transform(aot_export_joint_with_descriptors)(
+            stack,
             mod,
             fake_args,
-            trace_joint=False,
-            pre_dispatch=pre_dispatch,
-            decompositions=decomp_table,
             kwargs=fake_kwargs,
+            decompositions=decomp_table,
+            _record_nn_module_stack=True,
+        )
+
+        # Convert JointWithDescriptors to graph module and ViewAndMutationMeta
+        gm, fw_metadata = aot_stage2_export(
+            joint_with_descriptors._aot_state,
+            joint_with_descriptors._aot_graph_capture,
+        )
+
+        assert isinstance(gm, torch.fx.GraphModule)
+
+        # Create GraphSignature from the metadata
+        graph_signature = create_graph_signature(
+            gm,
+            fw_metadata,
+            joint_with_descriptors.in_spec,
+            joint_with_descriptors.out_spec,
+            user_args_flat=pytree.tree_leaves((fake_args, fake_kwargs)),
+            params_and_buffers_flat=list(fake_params_buffers.values()),
+            param_names=joint_with_descriptors.params_spec,
+            buffer_names=joint_with_descriptors.buffers_spec,
+            trace_joint=False,
+            num_user_fw_outs=None,
+            loss_index=None,
         )
 
     def _maybe_fixup_gm_and_output_node_meta(old_gm, new_gm):

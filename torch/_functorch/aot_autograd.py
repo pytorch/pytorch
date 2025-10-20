@@ -905,6 +905,7 @@ def prepare_aot_module_simplified(
     *,
     force_non_lazy_backward_lowering: bool = False,
     disable_functionalization: bool = False,
+    _record_nn_module_stack: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -931,7 +932,13 @@ def prepare_aot_module_simplified(
     # NB: This doesn't change the in/out convention, except adding the
     # parameters as explicit arguments
     functional_call = create_functional_call(
-        mod, params_buffers_spec, params_len + buffers_len, strict_out_tuple=not flatten
+        mod,
+        params_buffers_spec,
+        params_len + buffers_len,
+        strict_out_tuple=not flatten,
+        # We need this for export to run ModuleStackTracer
+        # instead of PythonKeyTracer
+        store_orig_mod=_record_nn_module_stack,
     )
 
     full_args = [*params_flat, *buffers_flat, *args]
@@ -1175,6 +1182,7 @@ def aot_export_joint_with_descriptors(
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
     disable_functionalization=False,
+    _record_nn_module_stack=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1265,6 +1273,7 @@ def aot_export_joint_with_descriptors(
         # context.
         force_non_lazy_backward_lowering=True,
         disable_functionalization=disable_functionalization,
+        _record_nn_module_stack=_record_nn_module_stack,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
