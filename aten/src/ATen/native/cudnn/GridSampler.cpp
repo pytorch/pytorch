@@ -61,7 +61,7 @@ void setSamplerDescriptor(
     const at::Tensor& tensor) {
   int inputSize[4] = {0};
   for (const auto i : c10::irange(tensor.dim())) {
-    inputSize[i] = (int)tensor.size(i);
+    inputSize[i] = static_cast<int>(tensor.size(i));
   }
   desc.set(dataType, 4, inputSize);
 }

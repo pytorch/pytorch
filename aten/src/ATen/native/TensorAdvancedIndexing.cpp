@@ -1244,12 +1244,11 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
             "index out of range in self");
         auto self_data = static_cast<char*>(selfSlice.data_ptr()) +
             self_i * self_stride_bytes;
-        auto source_data =
-            static_cast<const char*>(sourceSlice.const_data_ptr()) +
+        auto source_data = static_cast<char*>(sourceSlice.data_ptr()) +
             i * source_stride_bytes;
         iter.unsafe_replace_operand(0, self_data);
         iter.unsafe_replace_operand(1, self_data);
-        iter.unsafe_replace_operand(2, const_cast<char*>(source_data));
+        iter.unsafe_replace_operand(2, source_data);
         add_stub(iter.device_type(), iter, alpha);
       }
     });
@@ -1380,12 +1379,11 @@ static void index_reduce_func_impl(
             "index out of range in self");
         auto self_data = static_cast<char*>(selfSlice.data_ptr()) +
             self_i * self_stride_bytes;
-        auto source_data =
-            static_cast<const char*>(sourceSlice.const_data_ptr()) +
+        auto source_data = static_cast<char*>(sourceSlice.data_ptr()) +
             i * source_stride_bytes;
         iter.unsafe_replace_operand(0, self_data);
         iter.unsafe_replace_operand(1, self_data);
-        iter.unsafe_replace_operand(2, const_cast<char*>(source_data));
+        iter.unsafe_replace_operand(2, source_data);
 
         switch (op) {
           case ReductionType::PROD:
@@ -1701,13 +1699,13 @@ Tensor& index_select_out_cpu_(
                   TORCH_CHECK_INDEX(
                       (self_i >= 0) && (self_i < self_dim_size),
                       "index out of range in self");
-                  auto self_data = static_cast<const char*>(selfSlice_data) +
+                  auto self_data = const_cast<char*>(static_cast<const char*>(
+                                       selfSlice_data)) +
                       self_i * self_stride_bytes;
                   auto result_data = static_cast<char*>(resultSlice_data) +
                       i * result_stride_bytes;
                   sub_iter.unsafe_replace_operand(0, result_data);
-                  sub_iter.unsafe_replace_operand(
-                      1, const_cast<char*>(self_data));
+                  sub_iter.unsafe_replace_operand(1, self_data);
                   copy_stub(sub_iter.device_type(), sub_iter, false);
                 };
               });

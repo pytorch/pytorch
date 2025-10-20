@@ -138,7 +138,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
 
   int size[CUDNN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
-    size[i] = (int) t.size(i);
+    size[i] = static_cast<int>(t.size(i));
   }
   for (const auto i : c10::irange(dim, pad)) {
     size[i] = 1;
