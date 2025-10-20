@@ -2,7 +2,8 @@
 # mypy: allow-untyped-defs
 import enum
 import operator
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 import torch.ao.nn.intrinsic.quantized as nniq
@@ -316,7 +317,7 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> list[int]:
         node.target in (torch.add, torch.ops.quantized.add, operator.add)
         or node.target in (torch.mul, torch.ops.quantized.mul, operator.mul)
     ):
-        result = [i for i in range(2) if type(node.args[i]) == Node]
+        result = [i for i in range(2) if type(node.args[i]) is Node]
         return result
     return [0]
 
@@ -404,7 +405,7 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
                 for model_name, model_results in model_name_to_results.items():
                     if model_name == model_name_with_fqns:
                         continue
-                    # pyrefly: ignore  # bad-assignment
+
                     for i in range(len(model_results)):
                         fqn = ref_model_results[i]["fqn"]
                         model_results[i]["fqn"] = fqn

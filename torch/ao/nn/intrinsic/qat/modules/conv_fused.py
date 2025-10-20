@@ -361,7 +361,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         """
         # The ignore is because _FLOAT_MODULE is a TypeVar here where the bound
         # has no __name__ (code is fine though)
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             "qat."
             + cls.__name__
             + ".from_float only works for "
