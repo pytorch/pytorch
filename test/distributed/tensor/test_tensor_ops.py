@@ -17,6 +17,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorConverter,
     DTensorTestBase,
     with_comms,
@@ -704,6 +705,12 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_dtype_conversion(self):
+        from torch.distributed.tensor.debug import (
+            _clear_sharding_prop_cache,
+            _get_sharding_prop_cache_info,
+        )
+
+        _clear_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
@@ -721,8 +728,6 @@ class DistTensorOpsTest(DTensorTestBase):
         bf16_sharded_dtensor1 = fp32_sharded_dtensor.type_as(bf16_sharded_dtensor)
         self.assertEqual(bf16_sharded_dtensor1.dtype, torch.bfloat16)
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
-
-        from torch.distributed.tensor.debug import _get_sharding_prop_cache_info
 
         # by this point we only have cache misses
         hits, misses, _, _ = _get_sharding_prop_cache_info()
@@ -775,7 +780,7 @@ class DistTensorOpsTest(DTensorTestBase):
         )
 
     def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
-        torch.manual_seed(self.rank)
+        self.init_manual_seed_for_rank()
         mesh = self.build_device_mesh()
 
         partial_tensor = torch.randn(8, 8, device=self.device_type)
@@ -821,6 +826,10 @@ class DistTensorOpsTest(DTensorTestBase):
                 ):
                     self.assertEqual(x.full_tensor(), y)
 
+
+DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()
