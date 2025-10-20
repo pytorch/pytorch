@@ -2,7 +2,6 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/StorageImpl.h>
-#include <c10/core/alignment.h>
 #include <c10/core/impl/COWDeleter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ParallelGuard.h>
