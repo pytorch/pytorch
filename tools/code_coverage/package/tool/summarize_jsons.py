@@ -67,6 +67,7 @@ def is_intrested_file(
 
     # ignore files that are not belong to pytorch
     if platform == TestPlatform.OSS:
+        # pyrefly: ignore  # import-error
         from package.oss.utils import get_pytorch_folder
 
         if not file_path.startswith(get_pytorch_folder()):
