@@ -224,7 +224,7 @@ class CheckpointProcess:
                 )
             )
             parent_pipe.close()
-            logger.error("Subprocess terminated due to exception: %s", e)
+            logger.exception("Subprocess terminated due to exception")
 
     def _send(self, request_type: RequestType, payload: dict[str, Any]) -> None:
         try:
@@ -238,8 +238,8 @@ class CheckpointProcess:
             )
         except OSError as e:
             error_msg = "Child process terminated unexpectedly"
-            logger.error(
-                "Communication failed during %s request: %s", request_type.value, e
+            logger.exception(
+                "Communication failed during %s request", request_type.value
             )
             raise RuntimeError(error_msg) from e
 
@@ -354,10 +354,8 @@ class CheckpointProcess:
                     )
                     self.process.processes[0].kill()
                     logger.info("Subprocess killed forcefully")
-            except ProcessExitedException as e:
-                logger.error(
-                    "ProcessExitedException during subprocess termination: %s", e
-                )
+            except ProcessExitedException:
+                logger.exception("ProcessExitedException during subprocess termination")
                 raise
 
         logger.debug("CheckpointProcess closed successfully")
