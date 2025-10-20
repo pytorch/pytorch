@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
@@ -238,7 +238,7 @@ class CoordescTuner:
         try:
             candidate_timing = self.call_func(func, candidate_config)
         except Exception as e:
-            log.debug("Got exception %s", e)
+            log.debug("Got exception %s", e)  # noqa: G200
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):
@@ -257,7 +257,7 @@ class CoordescTuner:
         self,
         func: Callable[["triton.Config"], float],
         baseline_config: "triton.Config",
-        baseline_timing: Optional[float] = None,
+        baseline_timing: float | None = None,
     ) -> "triton.Config":
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)

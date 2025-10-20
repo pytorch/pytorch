@@ -16,6 +16,7 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config
@@ -372,15 +373,11 @@ persistent_tma_mm_template = TritonTemplate(
 
 load_scales = r"""
 @triton.jit
-def load_scales(a_scale_ptr, b_scale_ptr, SCALING_ROWWISE: tl.constexpr):
-    if SCALING_ROWWISE:
-        # For row-wise scaling, we'll return the pointers
-        return a_scale_ptr, b_scale_ptr
+def load_scales(scale_ptr, SCALE_RECIPE: tl.constexpr):
+    if SCALE_RECIPE == 0:
+        return tl.load(scale_ptr)  # For tensor-wise scaling, we'll load the scalar values
     else:
-        # For per-tensor scaling, we'll load the scalar values
-        a_scale = tl.load(a_scale_ptr)
-        b_scale = tl.load(b_scale_ptr)
-        return a_scale, b_scale
+        return scale_ptr  # For all other scaling recipes, we'll return the pointers
 """
 
 
@@ -390,7 +387,8 @@ def apply_scaling(
     accumulator,
     a_scale,
     b_scale,
-    SCALING_ROWWISE: tl.constexpr,
+    SCALE_RECIPE_A: tl.constexpr,
+    SCALE_RECIPE_B: tl.constexpr,
     offs_cm,
     offs_cn,
     M,
@@ -398,7 +396,7 @@ def apply_scaling(
     stride_a_scale_m,
     stride_b_scale_n,
 ):
-    if SCALING_ROWWISE:
+    if SCALE_RECIPE_A == 1 and SCALE_RECIPE_B == 1:  # (ScalingType.RowWise, ScalingType.RowWise)
         # For row-wise scaling, we need to load the scales for each row/column
         a_scales = tl.load(
             a_scale + (offs_cm * stride_a_scale_m),
@@ -411,7 +409,7 @@ def apply_scaling(
             other=0.0,
         )
         acc_scale = a_scales[:, None] * b_scales[None, :]
-    else:
+    else:  # (ScalingType.TensorWise, ScalingType.TensorWise)
         # For per-tensor scaling, we can directly use the loaded scalar values
         acc_scale = a_scale * b_scale
 
@@ -419,7 +417,7 @@ def apply_scaling(
 """
 
 
-device_tma = r"""
+scaled_mm_device_tma_epilogue_scaling = r"""
 {{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -433,11 +431,14 @@ device_tma = r"""
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
 
-    if SCALING_ROWWISE:
+    if SCALE_RECIPE_A == 1:  # ScalingType.RowWise
         stride_a_scale_m = 1
-        stride_b_scale_n = 1
     else:
         stride_a_scale_m = 0
+
+    if SCALE_RECIPE_B == 1:  # ScalingType.RowWise
+        stride_b_scale_n = 1
+    else:
         stride_b_scale_n = 0
 
     start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
@@ -500,7 +501,8 @@ device_tma = r"""
 
     num_pid_in_group = GROUP_M * num_pid_n
     accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    a_scale, b_scale = load_scales(A_inverse_scale, B_inverse_scale, SCALING_ROWWISE)
+    a_scale = load_scales(A_inverse_scale, SCALE_RECIPE_A)
+    b_scale = load_scales(B_inverse_scale, SCALE_RECIPE_B)
 
     for _ in range(0, k_tiles * tiles_per_SM):
         ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
@@ -542,7 +544,8 @@ device_tma = r"""
                 accumulator,
                 a_scale,
                 b_scale,
-                SCALING_ROWWISE,
+                SCALE_RECIPE_A,
+                SCALE_RECIPE_B,
                 offs_cm,
                 offs_cn,
                 M,
@@ -570,10 +573,10 @@ device_tma = r"""
 """
 
 
-scaled_mm_device_tma_template = TritonTemplate(
-    name="scaled_mm_device_tma",
+scaled_mm_device_tma_epilogue_scaling_template = TritonTemplate(
+    name="scaled_mm_device_tma_epilogue_scaling",
     grid=persistent_mm_grid,
-    source=device_tma + load_scales + apply_scaling,
+    source=scaled_mm_device_tma_epilogue_scaling + load_scales + apply_scaling,
 )
 
 _compute_blackwell_pid = r"""
@@ -1319,6 +1322,38 @@ def tuned_sparse_semi_structured_mm(
     )
 
 
+scaling_pairs = [
+    (ScalingType.TensorWise, ScalingType.TensorWise),
+    (ScalingType.RowWise, ScalingType.RowWise),
+]
+
+
+def _is_tensorwise_scaling(sz: Any) -> bool:
+    return (len(sz) == 0) or all(
+        V.graph.sizevars.statically_known_equals(d, 1) for d in sz
+    )
+
+
+def _is_rowwise_scaling(sz: Any, transpose: bool) -> bool:
+    idx = 0 if transpose else -1
+    return V.graph.sizevars.statically_known_equals(sz[idx], 1)
+
+
+def is_desired_scaling(
+    t: torch.Tensor,
+    scale_size: torch.Tensor,
+    scaling_type: ScalingType,
+    transpose: bool = False,
+) -> bool:
+    match scaling_type:
+        case ScalingType.TensorWise:
+            return _is_tensorwise_scaling(scale_size)
+        case ScalingType.RowWise:
+            return _is_rowwise_scaling(scale_size, transpose)
+        case _:
+            raise AssertionError(f"Unsupported scaling type {scaling_type}")
+
+
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a,
@@ -1404,8 +1439,29 @@ def tuned_scaled_mm(
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
-            templates_to_use.append(scaled_mm_device_tma_template)
-            kwarg_overrides[scaled_mm_device_tma_template.uid] = overriders
+            scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
+
+            for scale_option_a, scale_option_b in scaling_pairs:
+                if is_desired_scaling(
+                    mat_a, scale_a_size, scale_option_a
+                ) and is_desired_scaling(
+                    mat_b, scale_b_size, scale_option_b, transpose=True
+                ):
+                    overriders["SCALE_RECIPE_A"] = scale_option_a.value
+                    overriders["SCALE_RECIPE_B"] = scale_option_b.value
+                    break
+
+            if (
+                "SCALE_RECIPE_A" not in overriders
+            ):  # verify that shapes are supported by at least one existing pairing
+                raise AssertionError(
+                    f"Inductor Triton does not support scale_a.shape = {scale_a_size}, scale_b.shape = {scale_b_size}"
+                )
+
+            templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
+            kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
+                overriders
+            )
 
         if (
             use_triton_blackwell_tma_template(mat_a, mat_b, output_layout=layout)
