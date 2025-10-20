@@ -288,8 +288,6 @@ class TestMHADeviceType(TestCase):
                 self.skipTest("Large numerical errors on ROCM to investigate.")
             if use_padding and not pad_all and fused:
                 self.skipTest("Large numerical errors on ROCM to investigate.")
-        print(device)
-        print(fused)
         for need_weights in (False, not pad_all):
             with self.subTest(use_padding=use_padding, pad_all=pad_all,
                               use_nt=use_nt, need_weights=need_weights,
