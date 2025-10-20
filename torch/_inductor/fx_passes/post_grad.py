@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, TypeVar, Union
+from typing import Any, Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -437,7 +437,7 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
 
 
 def resolve_shape_to_proxy(
-    shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
+    shape: list[int | torch.SymInt], bound_symbols: dict[Any, Any]
 ):
     """
     Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
@@ -1123,8 +1123,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
     inputs = OrderedSet[torch.fx.Node]()
-    input_storages = OrderedSet[Union[int, None]]()
-    output_storages = OrderedSet[Union[int, None]]()
+    input_storages = OrderedSet[int | None]()
+    output_storages = OrderedSet[int | None]()
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
