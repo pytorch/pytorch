@@ -1293,7 +1293,7 @@ else:
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 
-        layout = _MeshLayout(tuple(mesh_shape), suffix_product(mesh_shape))
+        layout = _MeshLayout(tuple(mesh_shape), suffix_product(tuple(mesh_shape)))
         # Always initialize the (identity) rank map on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
