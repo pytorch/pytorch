@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import inspect
 import logging
+from collections.abc import Callable
 from functools import wraps
 from queue import Queue
-from typing import Callable
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
@@ -274,7 +274,6 @@ class PassManager:
                 logger.debug("Running pass '%s'", fn_name)
 
                 try:
-                    # pyrefly: ignore  # not-callable
                     res = fn(module)
 
                     if not isinstance(res, PassResult) and not hasattr(
