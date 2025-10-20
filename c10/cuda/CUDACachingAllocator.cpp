@@ -1378,7 +1378,7 @@ class DeviceCachingAllocator {
         free_safe_blocks_in_capture(context, stream);
       }
     }
-    const size_t size = round_size(orig_size);
+    size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device_id, size, stream, &pool, alloc_size);
