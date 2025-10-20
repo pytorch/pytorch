@@ -4,7 +4,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Union
+from typing import Any, Callable
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -31,8 +31,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
         return fn
 
     def distort(
-        ms: Union[list[float], tuple[float], float],
-    ) -> Union[list[float], tuple[float], float]:
+        ms: list[float] | tuple[float] | float,
+    ) -> list[float] | tuple[float] | float:
         if isinstance(ms, (list, tuple)):
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
@@ -50,7 +50,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
     @functools.wraps(fn)
     def wrapper(
         *args: list[Any], **kwargs: dict[str, Any]
-    ) -> Union[list[float], tuple[float], float]:
+    ) -> list[float] | tuple[float] | float:
         ms = fn(*args, **kwargs)
 
         return distort(ms)
@@ -276,7 +276,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         grad_to_none: list[torch.Tensor] | None = None,
         is_vetted_benchmarking: bool = False,
         **kwargs: Any,
-    ) -> Union[float, list[float]]:
+    ) -> float | list[float]:
         """Benchmark a GPU callable using a custom benchmarking implementation.
 
         Arguments:

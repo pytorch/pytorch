@@ -83,8 +83,8 @@ def is_pt2_package(serialized_model: Union[bytes, str]) -> bool:
         archive_format_path = f"{root_folder}/{ARCHIVE_FORMAT_PATH}"
         if archive_format_path in zip_reader.namelist():
             return zip_reader.read(archive_format_path) == b"pt2"
-    except Exception as ex:
-        logger.info("Model is not a PT2 package: %s", str(ex))
+    except Exception:
+        logger.info("Model is not a PT2 package")
     return False
 
 
