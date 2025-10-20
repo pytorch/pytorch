@@ -1814,7 +1814,44 @@ class DataPtrVariable(VariableTracker):
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
 
+    def python_type(self):
+        return int
+
     def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.from_tensor)
         codegen.load_method("data_ptr")
         codegen.call_method(0)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__eq__" and len(args) == 1:
+            if not isinstance(args[0], DataPtrVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+
+            other = args[0]
+            self_example = self.from_tensor.proxy.node.meta.get("example_value")
+            other_example = other.from_tensor.proxy.node.meta.get("example_value")
+
+            if self_example is not None and other_example is not None:
+                same_storage = torch._C._is_alias_of(self_example, other_example)
+                same_first_element = self_example.storage_offset() == other_example.storage_offset()
+                return variables.ConstantVariable.create(same_storage and same_first_element)
+
+            unimplemented_v2(
+                gb_type="data_ptr comparison",
+                context="Comparing data_ptr() when aliasing cannot be determined at compile time.",
+            )
+
+        elif name == "__ne__" and len(args) == 1:
+            eq_result = self.call_method(tx, "__eq__", args, kwargs)
+            if isinstance(eq_result, variables.ConstantVariable):
+                if eq_result.value is NotImplemented:
+                    return eq_result
+                return variables.ConstantVariable.create(not eq_result.value)
+
+        return super().call_method(tx, name, args, kwargs)
