@@ -117,7 +117,7 @@ static PyObject* THPDTypeInfo_compare(
   return Py_INCREF(Py_NotImplemented), Py_NotImplemented;
 }
 
-static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
+static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
   uint64_t bits = elementSize(self->type) * CHAR_BIT;
   return THPUtils_packUInt64(bits);
 }
@@ -133,7 +133,7 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
       at::ScalarType::BFloat16,                   \
       AT_EXPAND(AT_FLOAT8_TYPES))
 
-static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
+static PyObject* THPFInfo_eps(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "epsilon", [] {
     return PyFloat_FromDouble(
@@ -142,7 +142,7 @@ static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_max(THPFInfo* self, void*) {
+static PyObject* THPFInfo_max(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "max", [] {
     return PyFloat_FromDouble(
@@ -151,7 +151,7 @@ static PyObject* THPFInfo_max(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_min(THPFInfo* self, void*) {
+static PyObject* THPFInfo_min(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "lowest", [] {
     return PyFloat_FromDouble(
@@ -164,7 +164,7 @@ static PyObject* THPFInfo_min(THPFInfo* self, void*) {
   AT_DISPATCH_V2(                                \
       TYPE, NAME, AT_WRAP(__VA_ARGS__), AT_EXPAND(AT_INTEGRAL_TYPES_V2))
 
-static PyObject* THPIInfo_max(THPIInfo* self, void*) {
+static PyObject* THPIInfo_max(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_IINFO_TYPES(self->type, "max", [] {
@@ -182,7 +182,7 @@ static PyObject* THPIInfo_max(THPIInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPIInfo_min(THPIInfo* self, void*) {
+static PyObject* THPIInfo_min(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_IINFO_TYPES(self->type, "min", [] {
@@ -200,7 +200,7 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
+static PyObject* THPIInfo_dtype(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
@@ -209,7 +209,7 @@ static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
+static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "min", [] {
     return PyFloat_FromDouble(
@@ -218,12 +218,12 @@ static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
+static PyObject* THPFInfo_tiny(THPFInfo* self, void* /*unused*/) {
   // see gh-70909, essentially the array_api prefers smallest_normal over tiny
   return THPFInfo_smallest_normal(self, nullptr);
 }
 
-static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
+static PyObject* THPFInfo_resolution(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "digits10", [] {
     return PyFloat_FromDouble(std::pow(
@@ -233,7 +233,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
+static PyObject* THPFInfo_dtype(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
@@ -273,18 +273,34 @@ static PyObject* THPIInfo_str(THPIInfo* self) {
 }
 
 static const std::initializer_list<PyGetSetDef> THPFInfo_properties = {
-    {"bits", (getter)THPDTypeInfo_bits, nullptr, nullptr, nullptr},
-    {"eps", (getter)THPFInfo_eps, nullptr, nullptr, nullptr},
-    {"max", (getter)THPFInfo_max, nullptr, nullptr, nullptr},
-    {"min", (getter)THPFInfo_min, nullptr, nullptr, nullptr},
-    {"smallest_normal",
-     (getter)THPFInfo_smallest_normal,
+    {"bits",
+     reinterpret_cast<getter>(THPDTypeInfo_bits),
      nullptr,
      nullptr,
      nullptr},
-    {"tiny", (getter)THPFInfo_tiny, nullptr, nullptr, nullptr},
-    {"resolution", (getter)THPFInfo_resolution, nullptr, nullptr, nullptr},
-    {"dtype", (getter)THPFInfo_dtype, nullptr, nullptr, nullptr},
+    {"eps", reinterpret_cast<getter>(THPFInfo_eps), nullptr, nullptr, nullptr},
+    {"max", reinterpret_cast<getter>(THPFInfo_max), nullptr, nullptr, nullptr},
+    {"min", reinterpret_cast<getter>(THPFInfo_min), nullptr, nullptr, nullptr},
+    {"smallest_normal",
+     reinterpret_cast<getter>(THPFInfo_smallest_normal),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"tiny",
+     reinterpret_cast<getter>(THPFInfo_tiny),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"resolution",
+     reinterpret_cast<getter>(THPFInfo_resolution),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"dtype",
+     reinterpret_cast<getter>(THPFInfo_dtype),
+     nullptr,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 PyTypeObject THPFInfoType = {
@@ -297,13 +313,13 @@ PyTypeObject THPFInfoType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPFInfo_str, /* tp_repr */
+    reinterpret_cast<reprfunc>(THPFInfo_str), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
     nullptr, /* tp_hash  */
     nullptr, /* tp_call */
-    (reprfunc)THPFInfo_str, /* tp_str */
+    reinterpret_cast<reprfunc>(THPFInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
@@ -311,7 +327,7 @@ PyTypeObject THPFInfoType = {
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
-    (richcmpfunc)THPDTypeInfo_compare, /* tp_richcompare */
+    reinterpret_cast<richcmpfunc>(THPDTypeInfo_compare), /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
@@ -330,10 +346,18 @@ PyTypeObject THPFInfoType = {
 };
 
 static const std::initializer_list<PyGetSetDef> THPIInfo_properties = {
-    {"bits", (getter)THPDTypeInfo_bits, nullptr, nullptr, nullptr},
-    {"max", (getter)THPIInfo_max, nullptr, nullptr, nullptr},
-    {"min", (getter)THPIInfo_min, nullptr, nullptr, nullptr},
-    {"dtype", (getter)THPIInfo_dtype, nullptr, nullptr, nullptr},
+    {"bits",
+     reinterpret_cast<getter>(THPDTypeInfo_bits),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"max", reinterpret_cast<getter>(THPIInfo_max), nullptr, nullptr, nullptr},
+    {"min", reinterpret_cast<getter>(THPIInfo_min), nullptr, nullptr, nullptr},
+    {"dtype",
+     reinterpret_cast<getter>(THPIInfo_dtype),
+     nullptr,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 PyTypeObject THPIInfoType = {
@@ -346,13 +370,13 @@ PyTypeObject THPIInfoType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPIInfo_str, /* tp_repr */
+    reinterpret_cast<reprfunc>(THPIInfo_str), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
     nullptr, /* tp_hash  */
     nullptr, /* tp_call */
-    (reprfunc)THPIInfo_str, /* tp_str */
+    reinterpret_cast<reprfunc>(THPIInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
@@ -360,7 +384,7 @@ PyTypeObject THPIInfoType = {
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
-    (richcmpfunc)THPDTypeInfo_compare, /* tp_richcompare */
+    reinterpret_cast<richcmpfunc>(THPDTypeInfo_compare), /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
@@ -383,14 +407,16 @@ void THPDTypeInfo_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPFInfoType);
-  if (PyModule_AddObject(module, "finfo", (PyObject*)&THPFInfoType) != 0) {
+  if (PyModule_AddObject(
+          module, "finfo", reinterpret_cast<PyObject*>(&THPFInfoType)) != 0) {
     throw python_error();
   }
   if (PyType_Ready(&THPIInfoType) < 0) {
     throw python_error();
   }
   Py_INCREF(&THPIInfoType);
-  if (PyModule_AddObject(module, "iinfo", (PyObject*)&THPIInfoType) != 0) {
+  if (PyModule_AddObject(
+          module, "iinfo", reinterpret_cast<PyObject*>(&THPIInfoType)) != 0) {
     throw python_error();
   }
 }
