@@ -401,6 +401,133 @@ class TestFXGraphPasses(JitTestCase):
                                                  allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
 
+    def test_fx_cudagraph_partition(self):
+        from torch.fx.passes.cudagraph_partition import cudagraph_partition_pass
+
+        BATCH_SIZE = 16
+        MLP_SIZE = 128
+        HIDDEN_SIZE = 256
+        RANDOM_SEED = 0
+
+
+        # Note: this custom op must be an out_variant op, which writes back to a pre-allocated output tensor.
+        # This output tensor would be created within cudagraph memory pool to work with cudagraphs.
+        # Otherwise, we need an extra copy to move the output tensor into the cudagraph memory pool.
+        @torch.library.custom_op(
+            "silly::attention",
+            mutates_args=["out"],
+            tags=(torch._C.Tag.cudagraph_unsafe,),
+        )
+        def attention(
+            q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor
+        ) -> None:
+            out.copy_(q + k + v)
+
+        @attention.register_fake
+        def _(q, k, v, out):
+            return None
+
+        class ParentModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x
+
+        class Attention(torch.nn.Module):
+            def __init__(self, mlp_size: int, hidden_size: int) -> None:
+                super().__init__()
+                self.pre_attn = torch.nn.Linear(mlp_size, hidden_size, bias=False)
+                self.post_attn = torch.nn.Linear(hidden_size, mlp_size, bias=False)
+                # self.rms_norm_weight = torch.nn.Parameter(torch.ones(hidden_size))
+
+            def rms_norm_ref(self, x: torch.Tensor) -> torch.Tensor:
+                x_f32 = x.float()
+                return (
+                    x_f32
+                    * torch.rsqrt(
+                        torch.mean(x_f32.square(), dim=-1, keepdim=True) + 1e-6
+                    )
+                    * self.rms_norm_weight
+                ).to(x.dtype)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.pre_attn(x)
+                # x = self.rms_norm_ref(x)
+                attn_output = torch.empty_like(x)
+                torch.ops.silly.attention(x, x, x, attn_output)
+                x = attn_output
+                # x = self.rms_norm_ref(x)
+                x = self.post_attn(x)
+                return x
+
+        class CompiledAttention(torch.nn.Module):
+            def __init__(
+                self,
+                *,
+                mlp_size: int,
+                hidden_size: int,
+            ) -> None:
+                super().__init__()
+                self.attn = Attention(mlp_size, hidden_size)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.attn(x)
+
+        class CompiledAttentionTwo(CompiledAttention):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.attn(x) + x
+
+        class SimpleModelWithTwoGraphs(ParentModel):
+            def __init__(
+                self,
+                *,
+                mlp_size: int,
+                hidden_size: int,
+            ) -> None:
+                super().__init__()
+                self.attn_one = CompiledAttention(
+                    mlp_size=mlp_size,
+                    hidden_size=hidden_size,
+                )
+                self.attn_two = CompiledAttentionTwo(
+                    mlp_size=mlp_size,
+                    hidden_size=hidden_size,
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                bsz = x.shape[0]
+                # CUDAGraph expects same tensor addresses for each run
+                x = self.attn_one(x)
+                x = self.attn_two(x)
+                return x
+
+        eager_model = (
+            SimpleModelWithTwoGraphs(
+                mlp_size=MLP_SIZE,
+                hidden_size=HIDDEN_SIZE,
+            )
+            .eval()
+            .cuda()
+        )
+
+
+        ep = torch.export.export(eager_model, (torch.randn(BATCH_SIZE, MLP_SIZE, device="cuda"),))
+        example_inputs = [*[param[1].data for param in ep.named_parameters()], *ep.example_inputs[0]]
+
+        # TODO: better ux to identify input_clone_indices.
+        input_clone_indices = [4]
+
+        cg_graph = cudagraph_partition_pass(ep.graph_module, example_inputs, input_clone_indices, ["silly::attention"])
+
+        for _ in range(3):
+            user_input = torch.randn(BATCH_SIZE, MLP_SIZE, device="cuda")
+            example_inputs[input_clone_indices[0]] = user_input
+            eager_out = eager_model(user_input)
+            cg_out = cg_graph(*example_inputs) # <- example_inputs contain params and buffers
+            cg_out = cg_out[0] # <- unwrap to tensor
+            self.assertEqual(eager_out, cg_out)
+
 @dataclass
 class TestCase:
     match_output: bool
