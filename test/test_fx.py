@@ -1626,6 +1626,7 @@ class TestFX(JitTestCase):
 
         self.assertTrue(neg not in relu.users)
 
+    @skipIfTorchDynamo("Dynamo does not free right away")
     def test_prepend_does_not_leak(self):
         g = Graph()
         x = g.placeholder("x")
