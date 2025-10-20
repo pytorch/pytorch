@@ -257,7 +257,7 @@ void THPStorage_writeFileRaw(
         at::device(self->device()).dtype(c10::kByte),
         {self->device()});
     cpu_tensor = device_tensor.to(at::kCPU);
-    data = static_cast<uint8_t*>(cpu_tensor.data_ptr());
+    data = (uint8_t*)cpu_tensor.data_ptr();
   }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
@@ -266,8 +266,8 @@ void THPStorage_writeFileRaw(
     else {
       int64_t nsize{}; // convert big endian cpu to little endian storage
       torch::utils::THP_encodeBuffer(
-          reinterpret_cast<uint8_t*>(&nsize),
-          reinterpret_cast<const int64_t*>(&numel),
+          (uint8_t*)&nsize,
+          (const int64_t*)&numel,
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
           1);
       doWrite(fd, &nsize, sizeof(int64_t));
@@ -279,7 +279,7 @@ void THPStorage_writeFileRaw(
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, size_bytes);
   } else {
-    size_t buffer_size = std::min(numel, static_cast<size_t>(5000));
+    size_t buffer_size = std::min(numel, (size_t)5000);
     std::vector<uint8_t> le_buffer;
     le_buffer.resize(buffer_size * element_size);
     for (size_t i = 0; i < numel; i += buffer_size) {
@@ -287,19 +287,19 @@ void THPStorage_writeFileRaw(
       if (element_size == 2) {
         torch::utils::THP_encodeBuffer(
             le_buffer.data(),
-            reinterpret_cast<const int16_t*>(data) + i,
+            (const int16_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_encodeBuffer(
             le_buffer.data(),
-            reinterpret_cast<const int32_t*>(data) + i,
+            (const int32_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_encodeBuffer(
             le_buffer.data(),
-            reinterpret_cast<const int64_t*>(data) + i,
+            (const int64_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
@@ -333,8 +333,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
     int64_t tsize = size; // convert little endian storage to big endian cpu
-    torch::utils::THP_decodeBuffer(
-        &size, reinterpret_cast<const uint8_t*>(&tsize), true, 1);
+    torch::utils::THP_decodeBuffer(&size, (const uint8_t*)&tsize, true, 1);
   }
   size_t nbytes = element_size * size;
   if (!storage.defined()) {
@@ -359,7 +358,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     data = static_cast<uint8_t*>(storage->mutable_data());
   } else {
     cpu_data.resize(nbytes);
-    data = reinterpret_cast<uint8_t*>(cpu_data.data());
+    data = (uint8_t*)cpu_data.data();
   }
 
   // fast track for bytes and little endian
@@ -368,7 +367,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doRead(file, data, storage->nbytes());
   } else {
-    int64_t buffer_size = std::min(size, static_cast<int64_t>(5000));
+    int64_t buffer_size = std::min(size, (int64_t)5000);
     std::vector<uint8_t> le_buffer;
     le_buffer.resize(buffer_size * element_size);
 
@@ -379,22 +378,13 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
         torch::utils::THP_decodeBuffer(
-            reinterpret_cast<int16_t*>(data) + i,
-            le_buffer.data(),
-            true,
-            to_convert);
+            (int16_t*)data + i, le_buffer.data(), true, to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_decodeBuffer(
-            reinterpret_cast<int32_t*>(data) + i,
-            le_buffer.data(),
-            true,
-            to_convert);
+            (int32_t*)data + i, le_buffer.data(), true, to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_decodeBuffer(
-            reinterpret_cast<int64_t*>(data) + i,
-            le_buffer.data(),
-            true,
-            to_convert);
+            (int64_t*)data + i, le_buffer.data(), true, to_convert);
       }
     }
   }

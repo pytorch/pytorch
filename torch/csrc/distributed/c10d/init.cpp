@@ -443,8 +443,7 @@ PyTypeObject* GetReduceOpMetaclass() {
     spec.basicsize = base_metaclass->tp_basicsize;
     spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
     spec.slots = slots;
-    PyTypeObject* metaclass =
-        reinterpret_cast<PyTypeObject*>(PyType_FromSpec(&spec));
+    PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
     if (!metaclass)
       throw py::error_already_set();
     return metaclass;
@@ -813,10 +812,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(
-      module,
-      "ReduceOp",
-      py::metaclass(reinterpret_cast<PyObject*>(GetReduceOpMetaclass())),
-      R"(
+      module, "ReduceOp", py::metaclass((PyObject*)GetReduceOpMetaclass()), R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
