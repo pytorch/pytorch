@@ -324,8 +324,6 @@ def _preload_cuda_deps(err: _Union[ImportError, OSError]) -> builtins.bool:
     """Preloads cuda deps if they could not be found otherwise."""
     # Can only happen for wheel with cuda libs as PYPI deps
     # As PyTorch is not purelib, but nvidia-*-cu12 is
-    from torch.version import cuda as cuda_version
-
     cuda_libs: dict[str, str] = {
         "nvjitlink": "libnvJitLink.so.*[0-9]",
         "cublas": "libcublas.so.*[0-9]",
