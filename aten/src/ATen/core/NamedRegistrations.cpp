@@ -290,6 +290,8 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("logical_xor.out", CppFunction::makeFallthrough());
   m.impl("logical_xor_", CppFunction::makeFallthrough());
   m.impl("logsumexp", CppFunction::makeFallthrough());
+  m.impl("logsumexp.dim_IntList", CppFunction::makeFallthrough());
+  m.impl("logsumexp.IntList_out", CppFunction::makeFallthrough());
   m.impl("logsumexp.names", CppFunction::makeFallthrough());
   m.impl("logsumexp.names_out", CppFunction::makeFallthrough());
   m.impl("logsumexp.out", CppFunction::makeFallthrough());

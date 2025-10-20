@@ -68,6 +68,8 @@ full_codegen:
   - logdet
   - log_sigmoid_backward
   - log_sigmoid_forward
+  - logsumexp
+  - logsumexp.dim_IntList
   - lt.Scalar
   - lt.Tensor
   - masked_fill.Scalar
@@ -203,7 +205,6 @@ supported:
   - _trilinear
   - linalg_pinv.atol_rtol_tensor
   - svd
-  - logsumexp.out
 symint:
   - empty.memory_format
   - expand_copy
