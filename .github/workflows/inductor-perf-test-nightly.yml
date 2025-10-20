@@ -164,3 +164,89 @@ jobs:
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
     secrets: inherit
+
+  build-cuda13:
+    name: cuda13.0-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      # Every bit to make perf run faster helps
+      runner: linux.12xlarge.memory
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor_huggingface_perf", shard: 1, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 2, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 3, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 4, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_huggingface_perf", shard: 5, num_shards: 5, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 1, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 2, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 3, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 4, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 5, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf", shard: 6, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 1, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 2, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 3, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 4, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 5, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf", shard: 6, num_shards: 6, runner: "linux.aws.a100" },
+          { config: "cachebench", shard: 1, num_shards: 2, runner: "linux.aws.a100" },
+          { config: "cachebench", shard: 2, num_shards: 2, runner: "linux.aws.a100" },
+        ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
+      build-additional-packages: "vision audio torchao"
+    secrets: inherit
+
+  test-nightly-cuda13:
+    name: cuda13.0-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build-cuda13
+    if: github.event.schedule == '0 7 * * 1-6'
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm80
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
+      docker-image: ${{ needs.build-cuda13.outputs.docker-image }}
+      test-matrix: ${{ needs.build-cuda13.outputs.test-matrix }}
+      timeout-minutes: 720
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit
+
+  test-weekly-cuda13:
+    name: cuda13.0-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build-cuda13
+    if: github.event.schedule == '0 7 * * 0'
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm80
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
+      docker-image: ${{ needs.build-cuda13.outputs.docker-image }}
+      test-matrix: ${{ needs.build-cuda13.outputs.test-matrix }}
+      timeout-minutes: 1440
+      # disable monitor in perf tests, next step is to enable it
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit
+
+  test-cuda13:
+    name: cuda13.0-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build-cuda13
+    if: github.event_name == 'workflow_dispatch'
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm80
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
+      docker-image: ${{ needs.build-cuda13.outputs.docker-image }}
+      test-matrix: ${{ needs.build-cuda13.outputs.test-matrix }}
+      timeout-minutes: 720
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit
