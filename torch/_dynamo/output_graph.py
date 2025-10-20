@@ -67,6 +67,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     ShapeEnv,
     Specialization,
+    uninteresting_files,
 )
 from torch.fx.node import Target
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -1866,7 +1867,7 @@ class OutputGraph(OutputGraphCommon):
                 _get_source_debug_name(var.source) for var in potential_side_effects
             ]
 
-            if len(side_effect_refs):
+            if side_effect_refs:
                 warnings.warn(
                     f"While exporting, we found certain side effects happened in the model.forward. "
                     f"Here are the list of potential sources you can double check: {side_effect_refs}"
@@ -3170,11 +3171,18 @@ class SubgraphTracer(fx.Tracer):
                 if not tx.is_co_filename_from_nn_modules():
                     frame_summaries.append(tx.frame_summary())
                 tx = getattr(tx, "parent", None)
+
+            filtered_frame_summaries = [
+                frame
+                for frame in frame_summaries
+                if frame.filename not in uninteresting_files()
+            ]
+
             # Reverse the frame_summaries, such that the innermost frame is at the last
-            frame_summaries.reverse()
+            filtered_frame_summaries.reverse()
 
             # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(frame_summaries).format()
+            msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
         if (
@@ -3728,7 +3736,7 @@ class SubgraphTracer(fx.Tracer):
             if v1 != v2
         ]
 
-        if len(mutated_inputs):
+        if mutated_inputs:
             mutated_nodes = [input_nodes[i] for i in mutated_inputs]
             msg = f"Input mutation detected at {mutated_nodes}"
             return MutationInfo(True, msg)

@@ -299,7 +299,7 @@ class TestTrainingAwareCallback(TestCase):
         self._check_on_train_start(pl_module, callback, sparsifier_args, scheduler_args)
 
         num_epochs = 5
-        for _ in range(0, num_epochs):
+        for _ in range(num_epochs):
             self._check_on_train_epoch_start(pl_module, callback)
             self._simulate_update_param_model(pl_module)
             self._check_on_train_epoch_end(pl_module, callback)

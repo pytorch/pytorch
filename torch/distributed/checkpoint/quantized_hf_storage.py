@@ -107,9 +107,10 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
         target_tensor = planner.resolve_tensor(req).detach()
 
-        assert target_tensor.size() == tensor.size(), (
-            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-        )
+        if target_tensor.size() != tensor.size():
+            raise AssertionError(
+                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+            )
 
         target_tensor.copy_(tensor)
         planner.commit_tensor(req, target_tensor)
