@@ -20,6 +20,7 @@ from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1144,6 +1145,22 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         sharded_dt = self.redistribute(
             sharded_dt, mesh, tgt_placement, shard_order=None
         )
+
+    @with_comms
+    def test_shard_order_same_data_as_strided_shard(self):
+        device_mesh = init_device_mesh(self.device_type, (4, 2))
+        x = torch.randn(8, 4, device=self.device_type)
+        # specify right-to-left order use _StridedShard
+        strided_placement = [_StridedShard(-2, split_factor=2), Shard(-2)]
+        x_strided_dt = distribute_tensor(x, device_mesh, strided_placement)
+        # specify right-to-left order use ordered shard
+        x_ordered_dt = self.distribute_tensor(
+            x,
+            device_mesh,
+            placements=[Shard(0), Shard(0)],
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),),
+        )
+        self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
 
 
 if __name__ == "__main__":

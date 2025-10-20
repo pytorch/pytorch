@@ -33,11 +33,13 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_WINDOWS,
+    MI200_ARCH,
     NAVI_ARCH,
     getRocmVersion,
     isRocmArchAnyOf,
     parametrize,
     run_tests,
+    runOnRocmArch,
     skipIfRocm,
     TEST_CUDA,
     TEST_WITH_ROCM,
@@ -54,14 +56,15 @@ if TEST_CUDA:
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 
-def xfailIfSM100OrLaterAndCondition(condition_fn):
+def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
     """
-    Conditionally xfail tests on SM100+ based on a condition function.
+    Conditionally xfail tests on SM100+ datacenter SKUs based on a condition function.
     The condition function receives the test parameters dict and returns True to xfail.
     """
+    computeCapabilityCheck = SM100OrLater and torch.cuda.get_device_capability()[0] != 12
     return decorateIf(
         unittest.expectedFailure,
-        lambda params: SM100OrLater and condition_fn(params)
+        lambda params: computeCapabilityCheck and condition_fn(params)
     )
 
 
@@ -161,7 +164,7 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
-    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
+    @xfailIfSM100OrLaterNonRTXAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
@@ -228,7 +231,7 @@ class TestMatmulCuda(InductorTestCase):
     def test_cublas_addmm_alignment(self, dtype):
         device = 'cuda'
         # perturb X, A, or B alignment
-        for idx in range(0, 3):
+        for idx in range(3):
             for offset in range(1, 3):
                 offsets = [0, 0, 0]
                 offsets[idx] = offset
@@ -255,7 +258,6 @@ class TestMatmulCuda(InductorTestCase):
          (1, 10000, 10000, 10000)],
         name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
-    @skipIfRocm
     def test_cublas_baddbmm_large_input(self, device, batch_size, N, M, P, dtype):
         cpu_dtype = dtype
         if dtype == torch.float16 or dtype == torch.bfloat16:
@@ -277,7 +279,10 @@ class TestMatmulCuda(InductorTestCase):
         if N == M and M == P:
             M2_eye = torch.eye(N, device=device, dtype=dtype)
             out1_eye_gpu = torch.nn.functional.linear(M1, M2_eye.t(), torch.zeros_like(A))
-            self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu())
+            if runOnRocmArch(MI200_ARCH) and dtype == torch.float16:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu(), atol=1e-4, rtol=0.001)
+            else:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu())
 
         # baddbmm
         def _expand_to_batch(t: torch.Tensor):
@@ -292,7 +297,10 @@ class TestMatmulCuda(InductorTestCase):
         if N == M and M == P:
             M2_eye = torch.eye(N, device=device, dtype=dtype).expand(batch_size, N, N)
             out2_eye_gpu = torch.baddbmm(torch.zeros_like(A), M1, M2_eye, beta=beta, alpha=alpha)
-            self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu())
+            if runOnRocmArch(MI200_ARCH) and dtype == torch.float16:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu(), atol=1e-4, rtol=0.001)
+            else:
+                self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu())
 
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
