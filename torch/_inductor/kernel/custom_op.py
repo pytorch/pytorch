@@ -42,7 +42,8 @@ class CustomOpConfig:
         if self.params:
             param_suffix = "_".join(f"{k}_{v}" for k, v in sorted(self.params.items()))
             self.name = f"{decomposition.__name__}_{param_suffix}"
-        self.name = decomposition.__name__
+        else:
+            self.name = decomposition.__name__
 
     def create_variant(self) -> Callable[..., Any]:
         """Create callable with parameters pre-applied using functools.partial."""

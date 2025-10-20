@@ -257,52 +257,55 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_mlp_custom_op_autotune(self):
-        """Test MLP autotuning with multiple decomposition variants"""
+        """Test MLP autotuning with method parameter controlling different decomposition variants"""
         test_op_name = f"test_lib::mlp_{id(self)}"
 
-        # Define implementations with different approaches but no intentional inefficiencies
-        def mlp_decomposition1(input_tensor, gate_weight, up_weight, down_weight):
-            """Separate matmuls: standard implementation with torch.matmul."""
-            gate_proj = torch.matmul(input_tensor, gate_weight)
-            up_proj = torch.matmul(input_tensor, up_weight)
-            gated = torch.relu(gate_proj) * up_proj
-            return torch.matmul(gated, down_weight)
+        def mlp_variants(
+            input_tensor: torch.Tensor,
+            gate_weight: torch.Tensor,
+            up_weight: torch.Tensor,
+            down_weight: torch.Tensor,
+            method: int = 0,
+        ) -> torch.Tensor:
+            """MLP implementation with different computational approaches controlled by method parameter."""
 
-        def mlp_decomposition2(input_tensor, gate_weight, up_weight, down_weight):
-            """Batched approach: uses torch.mm with reshaped tensors."""
-            batch_shape = input_tensor.shape[:-1]
-            hidden_dim = input_tensor.shape[-1]
-            output_dim = down_weight.shape[-1]
+            if method == 0:
+                # Separate matmuls: standard implementation with torch.matmul
+                gate_proj = torch.matmul(input_tensor, gate_weight)
+                up_proj = torch.matmul(input_tensor, up_weight)
+                gated = torch.relu(gate_proj) * up_proj
+                return torch.matmul(gated, down_weight)
 
-            # Reshape for batched operations
-            input_2d = input_tensor.view(-1, hidden_dim)
+            elif method == 1:
+                # Batched approach: uses torch.mm with reshaped tensors
+                batch_shape = input_tensor.shape[:-1]
+                hidden_dim = input_tensor.shape[-1]
+                output_dim = down_weight.shape[-1]
 
-            # Use torch.mm for potentially better performance
-            gate_proj = torch.mm(input_2d, gate_weight)
-            up_proj = torch.mm(input_2d, up_weight)
+                input_2d = input_tensor.view(-1, hidden_dim)
 
-            # Activation and gating
-            gated = torch.relu(gate_proj) * up_proj
-            output_2d = torch.mm(gated, down_weight)
+                gate_proj = torch.mm(input_2d, gate_weight)
+                up_proj = torch.mm(input_2d, up_weight)
 
-            # Reshape back
-            return output_2d.view(*batch_shape, output_dim)
+                gated = torch.relu(gate_proj) * up_proj
+                output_2d = torch.mm(gated, down_weight)
 
-        def mlp_decomposition3(input_tensor, gate_weight, up_weight, down_weight):
-            """Fused weights approach: concatenate then split weights."""
-            # Concatenate gate and up weights for one matrix multiply
-            fused_weight = torch.cat([gate_weight, up_weight], dim=1)
-            fused_proj = torch.matmul(input_tensor, fused_weight)
+                return output_2d.view(*batch_shape, output_dim)
 
-            # Split the result
-            intermediate_dim = gate_weight.shape[1]
-            gate_proj, up_proj = fused_proj.split(
-                [intermediate_dim, intermediate_dim], dim=-1
-            )
+            elif method == 2:
+                # Fused weights approach: concatenate then split weights
+                # Concatenate gate and up weights for one matrix multiply
+                fused_weight = torch.cat([gate_weight, up_weight], dim=1)
+                fused_proj = torch.matmul(input_tensor, fused_weight)
 
-            # Apply activation and final projection
-            gated = torch.relu(gate_proj) * up_proj
-            return torch.matmul(gated, down_weight)
+                intermediate_dim = gate_weight.shape[1]
+                gate_proj, up_proj = fused_proj.split(
+                    [intermediate_dim, intermediate_dim], dim=-1
+                )
+
+                gated = torch.relu(gate_proj) * up_proj
+
+                return torch.matmul(gated, down_weight)
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_mlp_op(
@@ -311,33 +314,34 @@ class TestCustomOpAutoTune(TestCase):
             up_weight: torch.Tensor,
             down_weight: torch.Tensor,
         ) -> torch.Tensor:
-            return mlp_decomposition1(
-                input_tensor, gate_weight, up_weight, down_weight
-            )  # Use one of the defined implementations
+            return mlp_variants(
+                input_tensor, gate_weight, up_weight, down_weight, method=0
+            )
 
         @test_mlp_op.register_fake
-        def _(input_tensor, gate_weight, up_weight, down_weight):
-            batch_shape = input_tensor.shape[:-1]
-            output_dim = down_weight.shape[1]
+        def _(
+            input_tensor: torch.Tensor,
+            gate_weight: torch.Tensor,
+            up_weight: torch.Tensor,
+            down_weight: torch.Tensor,
+            method: int = 0,
+        ):
             return torch.empty(
-                *batch_shape,
-                output_dim,
-                dtype=input_tensor.dtype,
+                input_tensor.shape[:-1] + (down_weight.shape[-1],),
                 device=input_tensor.device,
+                dtype=input_tensor.dtype,
             )
 
         lib_name, op_name = test_op_name.split("::")
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
-        decompositions = [
-            mlp_decomposition1,
-            mlp_decomposition2,
-            mlp_decomposition3,
-        ]
-
+        # Use explicit configs with method parameter as tuning knob
         register_custom_op_autotuning(
             op_object.default,
-            configs=[CustomOpConfig(decomp) for decomp in decompositions],
+            configs=[
+                CustomOpConfig(mlp_variants, method=1),  # Batched approach
+                CustomOpConfig(mlp_variants, method=2),  # Fused weights
+            ],
             name="test_mlp_autotuned",
             input_gen_fns={
                 "input_tensor": lambda fake_tensor: torch.randn_like(
@@ -359,16 +363,27 @@ class TestCustomOpAutoTune(TestCase):
             },
         )
 
-        # Test inputs
+        # Create test inputs using the original helper method
         input_tensor, gate_weight, up_weight, down_weight = self._create_mlp_inputs()
 
-        # Test numerical equivalence for all decompositions
-        self._assert_implementations_equivalent(
-            decompositions, (input_tensor, gate_weight, up_weight, down_weight), "MLP"
+        # Test that all method variants produce numerically equivalent results
+        expected = mlp_variants(
+            input_tensor, gate_weight, up_weight, down_weight, method=0
         )
 
-        # Test autotuning
-        expected = mlp_decomposition1(input_tensor, gate_weight, up_weight, down_weight)
+        for method in [1, 2]:
+            result = mlp_variants(
+                input_tensor, gate_weight, up_weight, down_weight, method=method
+            )
+            torch.testing.assert_close(
+                result,
+                expected,
+                rtol=1e-5,
+                atol=1e-5,
+                msg=f"Method {method} not equivalent to method 0",
+            )
+
+        # Test autotuning - all should be mathematically equivalent
         self._run_autotune_test(
             op_object,
             (input_tensor, gate_weight, up_weight, down_weight),
@@ -448,113 +463,6 @@ class TestCustomOpAutoTune(TestCase):
         a, b = self._create_decompose_k_inputs()
         expected = a @ b
         self._run_autotune_test(op_object, (a, b), expected, "DecomposeK")
-
-    @skipIfXpu
-    def test_parametric_op_autotune_normalization_parameter_method(self):
-        """Test autotuning with different normalization algorithms using method parameter as tuning knob."""
-        op_name = f"test_lib::parametric_norm_{id(self)}"
-        eps = 1e-5
-
-        def normalization_variants(
-            x: torch.Tensor, weight: torch.Tensor, method: int = 0
-        ) -> torch.Tensor:
-            """Weighted normalization with different mathematical approaches controlled by method parameter."""
-            if method == 0:
-                # Layer normalization
-                mean = x.mean(dim=-1, keepdim=True)
-                var = x.var(dim=-1, keepdim=True, unbiased=False)
-                return (x - mean) / torch.sqrt(var + eps) * weight
-
-            elif method == 1:
-                # RMS normalization
-                rms = torch.sqrt(torch.mean(x * x, dim=-1, keepdim=True) + eps)
-                return x / rms * weight
-
-            elif method == 2:
-                # Reshaped layer normalization for different memory patterns
-                batch_size, seq_len, hidden_dim = x.shape
-                x_flat = x.reshape(batch_size * seq_len, hidden_dim)
-                weight_flat = weight.expand(batch_size * seq_len, -1)
-
-                mean = x_flat.mean(dim=-1, keepdim=True)
-                var = x_flat.var(dim=-1, keepdim=True, unbiased=False)
-                normalized = (x_flat - mean) / torch.sqrt(var + eps) * weight_flat
-
-                return normalized.reshape(batch_size, seq_len, hidden_dim)
-
-            elif method == 3:
-                # Einstein summation approach
-                mean = x.mean(dim=-1, keepdim=True)
-                centered = x - mean
-                var = torch.mean(centered * centered, dim=-1, keepdim=True)
-                normalized = centered / torch.sqrt(var + eps)
-                return torch.einsum("bsh,h->bsh", normalized, weight)
-
-            elif method == 4:
-                # Chunked processing
-                batch_size, seq_len, hidden_dim = x.shape
-                chunk_size = hidden_dim // 4
-
-                mean = x.mean(dim=-1, keepdim=True)
-                var = x.var(dim=-1, keepdim=True, unbiased=False)
-                normalized = (x - mean) / torch.sqrt(var + eps)
-
-                chunks = []
-                for start in range(0, hidden_dim, chunk_size):
-                    end = min(start + chunk_size, hidden_dim)
-                    chunk = normalized[:, :, start:end] * weight[start:end]
-                    chunks.append(chunk)
-
-                return torch.cat(chunks, dim=-1)
-            else:
-                raise ValueError(f"Invalid method: {method}")
-
-        @torch.library.custom_op(op_name, mutates_args=())
-        def parametric_norm_op(
-            x: torch.Tensor, weight: torch.Tensor, method: int = 0
-        ) -> torch.Tensor:
-            return normalization_variants(x, weight, method)
-
-        @parametric_norm_op.register_fake
-        def _(x: torch.Tensor, weight: torch.Tensor, method: int = 0):
-            return torch.empty_like(x)
-
-        lib_name, op_suffix = op_name.split("::")
-        op_object = getattr(getattr(torch.ops, lib_name), op_suffix)
-
-        register_custom_op_autotuning(
-            op_object.default,
-            configs=[
-                CustomOpConfig(normalization_variants, method=0),  # Layer norm
-                CustomOpConfig(normalization_variants, method=1),  # RMS norm
-                CustomOpConfig(normalization_variants, method=2),  # Reshaped layer norm
-                CustomOpConfig(normalization_variants, method=3),  # Einsum approach
-                CustomOpConfig(normalization_variants, method=4),  # Chunked processing
-            ],
-            name="parametric_norm_autotuned",
-            input_gen_fns={
-                "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
-                "weight": lambda t: torch.ones_like(t, device=self.device),
-            },
-        )
-
-        test_input = torch.randn(8, 512, 1024, device=self.device, dtype=self.dtype)
-        test_weight = torch.ones(1024, device=self.device, dtype=self.dtype)
-
-        for method in range(5):
-            result = normalization_variants(test_input, test_weight, method)
-            self.assertTrue(
-                torch.isfinite(result).all(),
-                f"Method {method} produced non-finite values",
-            )
-            self.assertEqual(
-                result.shape, test_input.shape, f"Method {method} changed tensor shape"
-            )
-
-        baseline_result = normalization_variants(test_input, test_weight, method=0)
-        self._run_autotune_test(
-            op_object, (test_input, test_weight), baseline_result, "ParametricNorm"
-        )
 
     @skipIfXpu
     def test_multi_parameter_tuning(self):
