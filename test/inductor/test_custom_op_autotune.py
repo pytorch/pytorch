@@ -13,7 +13,10 @@ Inductor automatically select the best performing variant. Key features tested:
 
 import torch
 from torch._inductor import config
-from torch._inductor.kernel.custom_op import register_custom_op_autotuning
+from torch._inductor.kernel.custom_op import (
+    CustomOpConfig,
+    register_custom_op_autotuning,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -215,7 +218,9 @@ class TestCustomOpAutoTune(TestCase):
 
         register_custom_op_autotuning(
             op_object.default,
-            decompositions=decompositions,
+            configs=[
+                CustomOpConfig(rmsnorm_decomposition1) for decomp in decompositions
+            ],
             name="test_rmsnorm_autotuned",
             input_gen_fns={
                 "x": lambda x: torch.randn_like(x, device=self.device) * 0.02,
@@ -332,7 +337,7 @@ class TestCustomOpAutoTune(TestCase):
 
         register_custom_op_autotuning(
             op_object.default,
-            decompositions=decompositions,
+            configs=[CustomOpConfig(decomp) for decomp in decompositions],
             name="test_mlp_autotuned",
             input_gen_fns={
                 "input_tensor": lambda fake_tensor: torch.randn_like(
@@ -419,9 +424,14 @@ class TestCustomOpAutoTune(TestCase):
 
         # Use parameter tuning to test different k_splits values
         register_custom_op_autotuning(
-            custom_op=op_object.default,
-            decompositions=[decompose_k_implementation],
-            tuning_knob={"k_splits": [32, 64, 128, 256]},
+            op_object.default,
+            configs=[
+                CustomOpConfig(decompose_k_implementation, k_splits=2),
+                CustomOpConfig(decompose_k_implementation, k_splits=32),
+                CustomOpConfig(decompose_k_implementation, k_splits=64),
+                CustomOpConfig(decompose_k_implementation, k_splits=128),
+                CustomOpConfig(decompose_k_implementation, k_splits=256),
+            ],
             name="test_decompose_k_autotuned",
             input_gen_fns={
                 "a": lambda fake_tensor: torch.randn_like(
@@ -440,15 +450,15 @@ class TestCustomOpAutoTune(TestCase):
         self._run_autotune_test(op_object, (a, b), expected, "DecomposeK")
 
     @skipIfXpu
-    def test_parametric_op_autotune_normalization(self):
-        """Test parametric autotuning with different normalization algorithms."""
+    def test_parametric_op_autotune_normalization_parameter_method(self):
+        """Test autotuning with different normalization algorithms using method parameter as tuning knob."""
         op_name = f"test_lib::parametric_norm_{id(self)}"
         eps = 1e-5
 
         def normalization_variants(
             x: torch.Tensor, weight: torch.Tensor, method: int = 0
         ) -> torch.Tensor:
-            """Weighted normalization with different mathematical approaches."""
+            """Weighted normalization with different mathematical approaches controlled by method parameter."""
             if method == 0:
                 # Layer normalization
                 mean = x.mean(dim=-1, keepdim=True)
@@ -513,9 +523,14 @@ class TestCustomOpAutoTune(TestCase):
         op_object = getattr(getattr(torch.ops, lib_name), op_suffix)
 
         register_custom_op_autotuning(
-            custom_op=op_object.default,
-            decompositions=[normalization_variants],
-            tuning_knob={"method": [0, 1, 2, 3, 4]},
+            op_object.default,
+            configs=[
+                CustomOpConfig(normalization_variants, method=0),  # Layer norm
+                CustomOpConfig(normalization_variants, method=1),  # RMS norm
+                CustomOpConfig(normalization_variants, method=2),  # Reshaped layer norm
+                CustomOpConfig(normalization_variants, method=3),  # Einsum approach
+                CustomOpConfig(normalization_variants, method=4),  # Chunked processing
+            ],
             name="parametric_norm_autotuned",
             input_gen_fns={
                 "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
@@ -543,7 +558,7 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_multi_parameter_tuning(self):
-        """Test autotuning with multiple parameters - demonstrates Cartesian product."""
+        """Test autotuning with multiple parameters using scale_mode and chunk_size."""
         op_name = f"test_lib::multi_param_{id(self)}"
 
         def multi_param_scaling(
@@ -552,23 +567,21 @@ class TestCustomOpAutoTune(TestCase):
             scale_mode: int = 1,
             chunk_size: int = 16,
         ) -> torch.Tensor:
-            """Simple scaling with two parameters - always mathematically equivalent."""
-            batch_size, seq_len = x.shape[:2]
-
-            # All modes produce the same result, just with different computational patterns
+            """Different scaling approaches controlled by scale_mode parameter."""
             if scale_mode == 1:
                 # Simple broadcasting
                 return x * factor
             elif scale_mode == 2:
-                # Process in chunks (chunk_size doesn't affect correctness)
+                # Process in chunks
+                batch_size, seq_len = x.shape[:2]
                 chunks = []
                 for start in range(0, seq_len, chunk_size):
                     end = min(start + chunk_size, seq_len)
                     chunk = x[:, start:end]
                     chunks.append(chunk * factor)
                 return torch.cat(chunks, dim=1)
-            else:  # scale_mode == 3
-                # Using einsum (chunk_size parameter ignored here)
+            elif scale_mode == 3:
+                # Using einsum for scaling
                 return torch.einsum("...i,i->...i", x, factor)
 
         @torch.library.custom_op(op_name, mutates_args=())
@@ -578,7 +591,7 @@ class TestCustomOpAutoTune(TestCase):
             scale_mode: int = 1,
             chunk_size: int = 16,
         ) -> torch.Tensor:
-            return x * factor  # Simple fallback
+            return multi_param_scaling(x, factor, scale_mode, chunk_size)
 
         @multi_param_op.register_fake
         def _(
@@ -592,11 +605,19 @@ class TestCustomOpAutoTune(TestCase):
         lib_name, op_suffix = op_name.split("::")
         op_object = getattr(getattr(torch.ops, lib_name), op_suffix)
 
-        # Test multi-parameter tuning: 1 algorithm × 3 scale_modes × 2 chunk_sizes = 6 variants
+        # Use explicit configs with scale_mode and chunk_size parameters as tuning knobs
         register_custom_op_autotuning(
-            custom_op=op_object.default,
-            decompositions=[multi_param_scaling],
-            tuning_knob={"scale_mode": [1, 2, 3], "chunk_size": [16, 32]},
+            op_object.default,
+            configs=[
+                CustomOpConfig(multi_param_scaling, scale_mode=1),  # Broadcast
+                CustomOpConfig(
+                    multi_param_scaling, scale_mode=2, chunk_size=16
+                ),  # Chunked 16
+                CustomOpConfig(
+                    multi_param_scaling, scale_mode=2, chunk_size=32
+                ),  # Chunked 32
+                CustomOpConfig(multi_param_scaling, scale_mode=3),  # Einsum
+            ],
             name="multi_param_autotuned",
             input_gen_fns={
                 "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
@@ -610,25 +631,32 @@ class TestCustomOpAutoTune(TestCase):
         test_x = torch.randn(4, 64, 128, device=self.device, dtype=self.dtype)
         test_factor = torch.ones(128, device=self.device, dtype=self.dtype) * 2.0
 
-        # Verify numerical equivalence across all parameter combinations
+        # Verify numerical equivalence across all approaches
         expected_result = test_x * test_factor
 
-        for scale_mode in [1, 2, 3]:
-            for chunk_size in [16, 32]:
-                result = multi_param_scaling(
-                    test_x, test_factor, scale_mode=scale_mode, chunk_size=chunk_size
-                )
-                torch.testing.assert_close(
-                    result,
-                    expected_result,
-                    rtol=1e-5,
-                    atol=1e-5,
-                    msg=f"scale_mode={scale_mode}, chunk_size={chunk_size} not equivalent to expected",
-                )
+        # Test each scale_mode variant
+        configs = [
+            (1, 16),  # broadcast, chunk_size ignored
+            (2, 16),  # chunked with size 16
+            (2, 32),  # chunked with size 32
+            (3, 16),  # einsum, chunk_size ignored
+        ]
 
-        # Test autotuning - benchmarks all 6 parameter combinations
+        for i, (scale_mode, chunk_size) in enumerate(configs):
+            result = multi_param_scaling(
+                test_x, test_factor, scale_mode=scale_mode, chunk_size=chunk_size
+            )
+            torch.testing.assert_close(
+                result,
+                expected_result,
+                rtol=1e-5,
+                atol=1e-5,
+                msg=f"scale_mode {scale_mode} with chunk_size {chunk_size} not equivalent to expected",
+            )
+
+        # Test autotuning
         self._run_autotune_test(
-            op_object, (test_x, test_factor), expected_result, "MultiParameter"
+            op_object, (test_x, test_factor), expected_result, "MultiParam"
         )
 
 

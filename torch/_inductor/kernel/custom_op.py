@@ -14,9 +14,56 @@ from torch._inductor.select_algorithm import (
 from torch._inductor.virtualized import V
 
 
+class CustomOpConfig:
+    """Config for custom op autotuning - similar to triton.Config.
+
+    Specifies decomposition function with parameter values.
+    Each config creates exactly one variant (no Cartesian product).
+
+    Args:
+        decomposition: Function to autotune
+        **params: Parameters passed to the function
+
+    Examples:
+        CustomOpConfig(attention_impl, head_dim=32, method='chunked')
+        CustomOpConfig(fallback_impl)
+    """
+
+    def __init__(self, decomposition: Callable[..., Any], **params: Any):
+        if not callable(decomposition):
+            raise TypeError(
+                f"decomposition must be callable, got {type(decomposition)}"
+            )
+
+        self.decomposition = decomposition
+        self.params = params
+
+        # Generate descriptive name
+        if self.params:
+            param_suffix = "_".join(f"{k}_{v}" for k, v in sorted(self.params.items()))
+            self.name = f"{decomposition.__name__}_{param_suffix}"
+        self.name = decomposition.__name__
+
+    def create_variant(self) -> Callable[..., Any]:
+        """Create callable with parameters pre-applied using functools.partial."""
+        if self.params:
+            variant = functools.partial(self.decomposition, **self.params)
+            variant.__name__ = self.name  # type: ignore[attr-defined]
+            return variant
+
+        return self.decomposition
+
+    def __repr__(self) -> str:
+        if self.params:
+            params_str = ", ".join(f"{k}={v}" for k, v in self.params.items())
+            return f"CustomOpConfig({self.decomposition.__name__}, {params_str})"
+        return f"CustomOpConfig({self.decomposition.__name__})"
+
+
 __all__ = [
     "autotune_custom_op",
     "register_custom_op_autotuning",
+    "CustomOpConfig",
 ]
 
 
@@ -274,61 +321,59 @@ def autotune_custom_op(
 
 def register_custom_op_autotuning(
     custom_op: torch._ops.OpOverload,
-    decompositions: list[Callable[..., Any]],
+    configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
-    tuning_knob: Optional[dict[str, list[Any]]] = None,
 ) -> None:
-    """Register custom operation for autotuning with multiple implementations.
+    """Register custom op for autotuning with explicit configs.
 
-    Supports multiple decompositions and optional parameter tuning.
-    When tuning_knob is provided, creates variants of each decomposition
-    with all combinations of parameter values (Cartesian product).
+    Uses config-based API where each config specifies a decomposition function
+    with its parameter values.
 
     Args:
-        custom_op: Custom operation to register (e.g., torch.ops.mylib.myop.default)
-        decompositions: Implementation functions to benchmark
-        name: Operation name for identification (default: "{op_name}_autotuned")
+        custom_op: Custom operation to register
+        configs: List of CustomOpConfig objects or callable functions
+        name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
-        tuning_knob: Optional parameter tuning dict. Supports multiple parameters.
-                    Creates all combinations of parameter values.
 
-    Raises:
-        TypeError: If decompositions is not a list/tuple
-        ValueError: If no decompositions provided
-
-    Example:
-        # Multiple decompositions with parameter tuning
+    Examples:
         register_custom_op_autotuning(
             torch.ops.mylib.attention.default,
-            decompositions=[standard_attention, flash_attention],
-            tuning_knob={
-                "head_dim": [32, 64, 128],
-                "method": ["chunked", "tiled"]
-            },
+            configs=[
+                CustomOpConfig(attention_impl, head_dim=32, method='chunked'),
+                CustomOpConfig(attention_impl, head_dim=64, method='tiled'),
+                CustomOpConfig(fallback_impl),  # No params
+            ],
             input_gen_fns={
-                0: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
-                1: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
-                2: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
+                "query": lambda fake: torch.randn_like(fake, device='cuda'),
+                "key": lambda fake: torch.randn_like(fake, device='cuda'),
+                "value": lambda fake: torch.randn_like(fake, device='cuda'),
             }
         )
     """
-    if not isinstance(decompositions, (list, tuple)):
-        raise TypeError(
-            f"decompositions must be a list or tuple, got {type(decompositions)}"
-        )
+    if not isinstance(configs, (list, tuple)):
+        raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
-    if not decompositions:
-        raise ValueError("At least one decomposition must be provided")
+    if not configs:
+        raise ValueError("At least one config must be provided")
+
+    # Convert configs to decomposition functions
+    final_decompositions = []
+    for config in configs:
+        if isinstance(config, CustomOpConfig):
+            # CustomOpConfig object
+            final_decompositions.append(config.create_variant())
+        elif callable(config):
+            # Direct callable function
+            final_decompositions.append(config)
+        else:
+            raise TypeError(
+                f"Each config must be a CustomOpConfig object or callable function, "
+                f"got {type(config)}"
+            )
 
     if name is None:
         name = f"{custom_op._name}_autotuned"
-
-    # Generate final decomposition list with optional parameter variants
-    if tuning_knob is None:
-        final_decompositions = list(decompositions)
-    else:
-        final_decompositions = _create_parameter_variants(decompositions, tuning_knob)
 
     @functools.wraps(custom_op)
     def autotuning_lowering(*args: Any, **kwargs: Any) -> Any:
