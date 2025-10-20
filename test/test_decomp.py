@@ -220,8 +220,6 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
         (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
         (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
-        (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
-        (torch.bfloat16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
@@ -297,7 +295,6 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
-
     test_case.assertEqual(
         orig,
         decomp,

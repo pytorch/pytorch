@@ -122,7 +122,6 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
-    SkipGuardSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,

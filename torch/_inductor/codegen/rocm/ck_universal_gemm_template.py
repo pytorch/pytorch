@@ -510,7 +510,7 @@ class CKGemmTemplate(CKTemplate):
                         torch.cuda.get_device_properties(X_meta.device).warp_size,
                     )
                 except Exception as e:
-                    log.debug(
+                    log.debug(  # noqa: G200
                         "Failed to prefetch_stages for %s with exception %s", op.name, e
                     )
                     # be conservative here and disable the op
