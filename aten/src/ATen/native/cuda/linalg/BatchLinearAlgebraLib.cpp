@@ -1699,9 +1699,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
 //    VR_tensor = at::empty(vectors.sizes(), vectors.options().dtype(
 //    	c10::CppTypeToScalarType<eig_t>::value));
 //  }
-  Tensor VR_tensor;
-  VR_tensor = at::empty_like(vectors);
-  scalar_t* VR = VR_tensor.data_ptr<scalar_t>();
+  scalar_t* VR = vectors.data_ptr<scalar_t>();
 
 
 
