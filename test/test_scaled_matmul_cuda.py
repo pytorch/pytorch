@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 
 
-from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
+from torch.nn.functional import scaled_mm, scaled_grouped_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
@@ -128,10 +128,10 @@ def infer_scale_swizzle(mat, scale):
     # deepgemm 1x128 / 128x1
     if len(scale.shape) > 1:
         if (
-            scale.shape[0] == mat.shape[0]
-            and scale.shape[1] == math.ceil(mat.shape[1] // 128)
-            or scale.shape[1] == mat.shape[1]
-            and scale.shape[0] == math.ceil(mat.shape[0] // 128)
+            (scale.shape[0] == mat.shape[0]
+                and scale.shape[1] == math.ceil(mat.shape[1] // 128))
+            or (scale.shape[1] == mat.shape[1]
+                and scale.shape[0] == math.ceil(mat.shape[0] // 128))
         ):
             return ScalingType.BlockWise1x128, SwizzleType.NO_SWIZZLE
 
@@ -143,24 +143,43 @@ def infer_scale_swizzle(mat, scale):
 
     # NVFP4
     if (
-        scale.numel()
-        == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
-        or scale.numel()
-        == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4)
+        (scale.numel()
+            == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
+            or scale.numel()
+            == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4))
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e4m3fn
     ):
         return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
-    # MX
+    # MXFP4 w/o swizzle
     if (
-        scale.numel()
-        == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
-        or scale.numel()
-        == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4)
+        (scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
+            or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0])
+        and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e8m0fnu
     ):
-        return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
+        return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
+
+    if not torch.version.hip:
+        # MXFP8 w/ swizzle
+        if (
+            (scale.numel()
+                == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
+                or scale.numel()
+                == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4))
+            and scale.dtype == torch.float8_e8m0fnu
+        ):
+            return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
+
+    else:
+        # MXFP8 w/o swizzle
+        if (
+            (scale.numel() == math.ceil(mat.shape[0] // 32) * mat.shape[1]
+                or scale.numel() == math.ceil(mat.shape[1] // 32) * mat.shape[0])
+            and scale.dtype == torch.float8_e8m0fnu
+        ):
+            return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
 
     return None, None
 
@@ -215,6 +234,49 @@ def scaled_mm_wrap(
         )
         return out
 
+def scaled_grouped_mm_wrap(
+    a,
+    b,
+    scale_a,
+    scale_b,
+    scale_recipe_a,
+    scale_recipe_b,
+    swizzle_a=SwizzleType.NO_SWIZZLE,
+    swizzle_b=SwizzleType.NO_SWIZZLE,
+    scale_result=None,
+    out_dtype=torch.bfloat16,
+    use_fast_accum=False,
+    offs=None,
+    bias=None,
+    wrap_v2=True,
+):
+    if not wrap_v2:
+        return torch._scaled_grouped_mm(
+            a,
+            b,
+            scale_a,
+            scale_b,
+            out_dtype=out_dtype,
+            bias=bias,
+            offs=offs,
+            use_fast_accum=use_fast_accum)
+    else:
+        return scaled_grouped_mm(
+            a,
+            b,
+            scale_a,
+            scale_recipe_a,
+            scale_b,
+            scale_recipe_b,
+            swizzle_a=swizzle_a,
+            swizzle_b=swizzle_b,
+            offs=offs,
+            bias=bias,
+            output_dtype=out_dtype,
+            use_fast_accum=use_fast_accum)
+
+
+
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
@@ -267,18 +329,6 @@ def addmm_float8_unwrapped(
         out_dtype=output_dtype,
     )
     return output
-
-def mm_float8(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    a_scale: torch.Tensor,
-    b_scale: torch.Tensor,
-    output_dtype: torch.dtype,  # output dtype
-    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
-) -> torch.Tensor:
-    return addmm_float8_unwrapped(
-        a, a_scale, b, b_scale, output_dtype, output_scale
-    )
 
 def to_fp8_saturated(
     x: torch.Tensor,
@@ -363,6 +413,42 @@ def data_to_nvfp4_scale(x, block_size):
     return scale
 
 
+def data_to_nvfp4_with_global_scale(x, block_size):
+    # Simple (slow) reference implementation of NVFP4 two-level-scaling
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+
+    # Per-block-amax
+    block_max = torch.amax(torch.abs(x), 1) + 1e-12
+
+    # Per-tensor max
+    global_max = x.abs().max()
+
+    # Contants
+    # Global encoding scale for block-scales
+    S_enc = FP4_MAX_VAL * F8E4M3_MAX_VAL / global_max
+    S_dec = 1. / S_enc
+
+    # Per-block decode-scale
+    S_dec_b = block_max / FP4_MAX_VAL
+
+    # Stored scaled-e4m3 per-block decode scales
+    S_dec_b_e4m3 = (S_dec_b * S_enc).to(torch.float8_e4m3fn)
+
+    # Actual per-block encoding scale
+    S_enc_b = S_enc / S_dec_b_e4m3.float()
+
+    # scale & reshape input, reshape scales
+    x = (S_enc_b.unsqueeze(1) * x).bfloat16().reshape(orig_shape)
+    S_dec_b_e4m3 = S_dec_b_e4m3.reshape(orig_shape[0], -1)
+
+    # cast input
+    x_fp4 = _bfloat16_to_float4_e2m1fn_x2(x)
+
+    # fp4x2, fp8_e4m3, float respectively
+    return x_fp4, S_dec_b_e4m3, S_dec.float()
+
+
 def down_size(size):
     assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
     return (*size[:-1], size[-1] // 2)
@@ -444,7 +530,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
-    def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K):
+    @parametrize("wrap_v2", [True, False])
+    def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K, wrap_v2):
         torch.manual_seed(42)
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
@@ -510,13 +597,18 @@ class TestFP8Matmul(TestCase):
         w_blocked_scales = w_blocked_scales.reshape(N_rounded, -1)
 
         # Compute mxfp8 grouped mm output
-        y_mxfp8 = torch._scaled_grouped_mm(
+        y_mxfp8 = scaled_grouped_mm_wrap(
             xq,  # (M, total_K)
             wq.transpose(-2, -1),  # (total_K, N)
             x_blocked_scales,  # to_blocked_per_group(M, total_K//32)
             w_blocked_scales,  # to_blocked_per_group(N, total_K//32)
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
             offs=input_group_end_offsets,  # (G,)
             out_dtype=torch.bfloat16,
+            wrap_v2=wrap_v2
         )
 
         # bf16 reference output
@@ -535,7 +627,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K):
+    @parametrize("wrap_v2", [True, False])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, wrap_v2):
         torch.manual_seed(42)
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
@@ -579,14 +672,19 @@ class TestFP8Matmul(TestCase):
         xq = xq.view(-1, xq.shape[-1])
 
         # Compute mxfp8 grouped gemm.
-        y_mxfp8 = torch._scaled_grouped_mm(
+        y_mxfp8 = scaled_grouped_mm_wrap(
             xq,
             wq.transpose(-2, -1),
             x_scale,
             w_scale,
             offs=input_group_end_offsets,
             out_dtype=torch.bfloat16,
-        )
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            wrap_v2=wrap_v2)
+
 
         # Compute reference bf16 grouped gemm.
         y_bf16 = torch._grouped_mm(
@@ -619,12 +717,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -671,12 +769,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -938,8 +1036,12 @@ class TestFP8Matmul(TestCase):
 
         def test():
             # Calculate actual F8 mm
-            out_scaled_mm = mm_float8(
-                x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+            out_scaled_mm = scaled_mm_wrap(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales.reciprocal(),
+                scale_b=y_scales.reciprocal(),
+                out_dtype=output_dtype
             )
 
             # Calculate emulated F8 mm
@@ -958,7 +1060,7 @@ class TestFP8Matmul(TestCase):
         # rowwise on SM 9.0
         if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "Only bf16 high precision output types are supported for row-wise scaling."
             ):
                 test()
@@ -1050,16 +1152,25 @@ class TestFP8Matmul(TestCase):
         # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.BlockWise1x128
+        else:
+            lhs_recipe = ScalingType.BlockWise128x128
+
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.BlockWise1x128
+        else:
+            rhs_recipe = ScalingType.BlockWise128x128
 
         # Verify that actual F8 mm doesn't error
-        mm_float8(
+        scaled_mm_wrap(
             x_fp8,
             y_fp8.t(),
-            a_scale=x_scales,
-            b_scale=y_scales.t(),
-            output_dtype=output_dtype,
+            scale_a=x_scales,
+            scale_recipe_a=lhs_recipe,
+            scale_b=y_scales.t(),
+            scale_recipe_b=rhs_recipe,
+            out_dtype=output_dtype,
         )
 
         # Verify that emulated F8 mm doesn't error
@@ -1129,7 +1240,7 @@ class TestFP8Matmul(TestCase):
                 events = sorted(events, key=lambda x: x['ts'])
                 # ROCm carveout is invisible except for kernels running slower on fewer CUs
                 no_carveout, carveout_0, carveout, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
-                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):
+                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):  # noqa: SIM222
                     # something went wrong, print more info to help debug flaky test
                     print("ROCm debug info for test_honor_sm_carveout")
                     print("cu_count", cu_count)
@@ -1155,7 +1266,7 @@ class TestFP8Matmul(TestCase):
 
                 self.assertEqual(no_carveout, no_carveout_again)
                 capability = torch.cuda.get_device_capability()
-                if capability == (10, 0):
+                if capability in {(10, 0), (10, 3), (12, 0), (12, 1)}:
                     # expected failure
                     # CUTLASS only supports SM carveout via green contexts on SM100
                     self.assertEqual(no_carveout, carveout_66)
@@ -1178,6 +1289,59 @@ class TestFP8Matmul(TestCase):
         lp_data_actual = pack_uint4(hp_data)
         lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
+
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @parametrize("mkn", [
+        # Nice shapes
+        (128, 128, 128),
+        (256, 256, 256),
+        (128, 256, 512),
+        (256, 512, 128),
+        (512, 128, 256),
+
+        # Very unbalanced
+        (1023, 64, 48),
+        (31, 1024, 64),
+        (45, 96, 1024),
+
+        # Mixed large and small
+        (2, 1024, 128),
+        (127, 96, 1024),
+        (1025, 128, 96)
+    ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
+    def test_blockwise_nvfp4_with_global_scale(self, mkn) -> None:
+        device = 'cuda'
+        M, K, N = mkn
+        BLOCK_SIZE = 16
+        # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
+        approx_match_sqnr_target = 15.8
+
+        A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
+        B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
+
+        A, A_scale, A_global_scale = data_to_nvfp4_with_global_scale(A_ref, BLOCK_SIZE)
+        B, B_scale, B_global_scale = data_to_nvfp4_with_global_scale(B_ref, BLOCK_SIZE)
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
+
+        C_ref = A_ref @ B_ref.t()
+
+        C = scaled_mm(
+            A,
+            B.t(),
+            scale_a=[A_scale, A_global_scale],
+            scale_recipe_a=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            scale_b=[B_scale, B_global_scale],
+            scale_recipe_b=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+            swizzle_b=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+            output_dtype=torch.bfloat16,
+        )
+
+        sqnr = compute_error(C_ref, C)
+        assert sqnr.item() > approx_match_sqnr_target
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
@@ -1433,7 +1597,7 @@ class TestFP8Matmul(TestCase):
             assert sqnr.item() > approx_match_sqnr_target
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
-    @parametrize("recipe", ["mxfp8", "nvfp4"])
+    @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
@@ -1447,7 +1611,7 @@ class TestFP8Matmul(TestCase):
         if recipe == "mxfp8":
             x_lowp = x.to(e4m3_type)
             y_lowp = y.to(e4m3_type).t()
-        else:  # nvfp4
+        else:  # nvfp4 #mxfp4
             x_lowp = _bfloat16_to_float4_e2m1fn_x2(x.bfloat16())
             y_lowp = _bfloat16_to_float4_e2m1fn_x2(y.bfloat16()).t()
 
@@ -1461,7 +1625,10 @@ class TestFP8Matmul(TestCase):
             if recipe == "nvfp4"
             else ScalingType.BlockWise1x32
         )
-        swizzle = SwizzleType.SWIZZLE_32_4_4
+        if torch.version.hip:
+            swizzle = SwizzleType.NO_SWIZZLE
+        else:
+            swizzle = SwizzleType.SWIZZLE_32_4_4
 
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(
@@ -1536,7 +1703,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2):
         device = "cuda"
         fp8_dtype = e4m3_type
         m, n, k, n_groups = 16, 32, 64, 4
@@ -1545,9 +1713,16 @@ class TestFP8Matmul(TestCase):
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-        f = torch._scaled_grouped_mm
-        out = f(a, b.t(), scale_a, scale_b, offs=offs,
-                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+        f = scaled_grouped_mm_wrap
+        out = f(a, b.t(),
+                scale_a,
+                scale_b,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
+                offs=offs,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=fast_accum,
+                wrap_v2=wrap_v2)
         offs_cpu = offs.cpu()
         alist, blist, ascalelist, bscalelist = [], [], [], []
         start = 0
@@ -1564,7 +1739,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2):
         device = "cuda"
         fp8_dtype = e4m3_type
         m, n, k, n_groups = 16, 32, 64, 4
@@ -1582,9 +1758,16 @@ class TestFP8Matmul(TestCase):
                 offs[0] = offs[1]
             scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32)
             scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
-            f = torch._scaled_grouped_mm
-            out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
-                    out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+            f = scaled_grouped_mm_wrap
+            out = f(a, b.transpose(-2, -1),
+                    scale_a,
+                    scale_b,
+                    scale_recipe_a=ScalingType.RowWise,
+                    scale_recipe_b=ScalingType.RowWise,
+                    offs=offs,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=fast_accum,
+                    wrap_v2=wrap_v2)
 
             offs_cpu = offs.cpu()
             alist, ascalelist, outlist = [], [], []
