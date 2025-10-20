@@ -507,7 +507,8 @@ std::vector<at::IValue> readWrappedPayload(
       " but additional payload size is ",
       additionalPayloadSize);
   auto wrappedPayloadBegin =
-      message.payload().data() + payload.size() - additionalPayloadSize;
+      static_cast<const char*>(message.payload().data()) + payload.size() -
+      additionalPayloadSize;
   std::vector<torch::Tensor> tensorTable;
   IValue tuple = jit::unpickle(
       wrappedPayloadBegin,

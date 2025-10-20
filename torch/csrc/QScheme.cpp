@@ -23,7 +23,7 @@ PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
 }
 
 static PyObject* THPQScheme_reduce(PyObject* _self, PyObject* noargs) {
-  auto self = reinterpret_cast<THPQScheme*>(_self);
+  auto self = (THPQScheme*)_self;
   return THPUtils_packString(self->name);
 }
 
@@ -48,7 +48,7 @@ PyTypeObject THPQSchemeType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    reinterpret_cast<reprfunc>(THPQScheme_repr), /* tp_repr */
+    (reprfunc)THPQScheme_repr, /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -84,9 +84,7 @@ void THPQScheme_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPQSchemeType);
-  if (PyModule_AddObject(
-          module, "qscheme", reinterpret_cast<PyObject*>(&THPQSchemeType)) !=
-      0) {
+  if (PyModule_AddObject(module, "qscheme", (PyObject*)&THPQSchemeType) != 0) {
     throw python_error();
   }
 }

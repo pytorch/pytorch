@@ -83,7 +83,7 @@ DEFINE_BINARY(max_slow_path, sym_max, SymInt)
 
 SymInt::operator SymFloat() const {
   if (auto ma = maybe_as_int()) {
-    return SymFloat(static_cast<double>(*ma));
+    return SymFloat(double(*ma));
   } else {
     return SymFloat(toSymNodeImplUnowned()->sym_float());
   }

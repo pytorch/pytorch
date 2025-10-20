@@ -69,14 +69,14 @@ static PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
    * For singletons, a string is returned. The string should be interpreted
    * as the name of a global variable.
    */
-  auto self = reinterpret_cast<THPDtype*>(_self);
+  auto self = (THPDtype*)_self;
   return THPUtils_packString(self->name);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto* self = reinterpret_cast<THPDtype*>(_self);
+  auto* self = (THPDtype*)_self;
   auto scalar_type = self->scalar_type;
   if (!at::isFloatingType(self->scalar_type)) {
     scalar_type = at::toRealValueType(self->scalar_type);
@@ -87,7 +87,7 @@ static PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto* self = reinterpret_cast<THPDtype*>(_self);
+  auto* self = (THPDtype*)_self;
   auto scalar_type = self->scalar_type;
   if (!at::isComplexType(self->scalar_type)) {
     scalar_type = at::toComplexType(self->scalar_type);
@@ -100,25 +100,13 @@ typedef PyObject* (*getter)(PyObject*, void*);
 
 static const std::initializer_list<PyGetSetDef> THPDtype_properties = {
     {"is_floating_point",
-     reinterpret_cast<getter>(THPDtype_is_floating_point),
+     (getter)THPDtype_is_floating_point,
      nullptr,
      nullptr,
      nullptr},
-    {"is_complex",
-     reinterpret_cast<getter>(THPDtype_is_complex),
-     nullptr,
-     nullptr,
-     nullptr},
-    {"is_signed",
-     reinterpret_cast<getter>(THPDtype_is_signed),
-     nullptr,
-     nullptr,
-     nullptr},
-    {"itemsize",
-     reinterpret_cast<getter>(THPDtype_itemsize),
-     nullptr,
-     nullptr,
-     nullptr},
+    {"is_complex", (getter)THPDtype_is_complex, nullptr, nullptr, nullptr},
+    {"is_signed", (getter)THPDtype_is_signed, nullptr, nullptr, nullptr},
+    {"itemsize", (getter)THPDtype_itemsize, nullptr, nullptr, nullptr},
     {nullptr}};
 
 static const std::initializer_list<PyMethodDef> THPDtype_methods = {
@@ -142,7 +130,7 @@ PyTypeObject THPDtypeType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    reinterpret_cast<reprfunc>(THPDtype_repr), /* tp_repr */
+    (reprfunc)THPDtype_repr, /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -202,8 +190,7 @@ void THPDtype_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPDtypeType);
-  if (PyModule_AddObject(
-          module, "dtype", reinterpret_cast<PyObject*>(&THPDtypeType)) != 0) {
+  if (PyModule_AddObject(module, "dtype", (PyObject*)&THPDtypeType) != 0) {
     throw python_error();
   }
 }
