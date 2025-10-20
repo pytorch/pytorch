@@ -296,6 +296,7 @@ def run_multi_process_fuzzer(
                 )
 
                 def write_func(msg):
+                    # pyrefly: ignore  # missing-attribute
                     pbar.write(msg)
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")

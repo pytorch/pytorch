@@ -2568,7 +2568,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # we shouldn't broadly catch all errors here;
                 # some come from real-kernel mutation/aliasing checks we want to run.
                 # add more exception types as needed.
-                log.debug(
+                log.debug(  # noqa: G200
                     "real-tensor fallback failed for %s: %s; silently ignoring",
                     func,
                     exc,
