@@ -1237,17 +1237,50 @@ class BuiltinVariable(VariableTracker):
 
             # Convert size-1 TensorVariable indices to SymIntVariable by calling .item()
             # This decomposes tensor[t] to u=t.item(); tensor[u] at the dynamo level
-            if (
-                fn is operator.getitem
-                and len(args) == 2
-                and isinstance(args[1], variables.TensorVariable)
-            ):
-                tensor_idx = args[1]
-                # Only convert if we know it's size-1 (not for advanced indexing)
-                if tensor_idx.size is not None and all(s == 1 for s in tensor_idx.size):
+            # Only convert if the tensor doesn't contain unbacked symints (data-dependent values)
+            if fn is operator.getitem and len(args) == 2:
+                from torch.fx.experimental.symbolic_shapes import has_free_symbols
+
+                def should_convert_to_item(tensor_idx):
+                    """Check if we should convert size-1 tensor to scalar."""
+                    if not isinstance(tensor_idx, variables.TensorVariable):
+                        return False
+                    # Only convert if size-1 or 0-d
+                    if tensor_idx._size is None or not all(
+                        s == 1 for s in tensor_idx._size
+                    ):
+                        return False
+                    # Don't convert if it has unbacked symints (data-dependent)
+                    example_value = tensor_idx.proxy.node.meta.get("example_value")
+                    return example_value is None or not has_free_symbols(example_value)
+
+                index_arg = args[1]
+                if isinstance(
+                    index_arg, variables.TensorVariable
+                ) and should_convert_to_item(index_arg):
                     args = list(args)
-                    args[1] = tensor_idx.call_method(tx, "item", [], {})
+                    args[1] = index_arg.call_method(tx, "item", [], {})
                     args = tuple(args)
+                elif isinstance(
+                    index_arg, (variables.TupleVariable, variables.ListVariable)
+                ):
+                    # Multi-dimensional indexing: tensor[:, idx] or tensor[idx1, idx2]
+                    new_items = []
+                    changed = False
+                    for item in index_arg.items:
+                        if should_convert_to_item(item):
+                            new_items.append(item.call_method(tx, "item", [], {}))
+                            changed = True
+                        else:
+                            new_items.append(item)
+                    if changed:
+                        args = list(args)
+                        args[1] = (
+                            variables.TupleVariable(new_items)
+                            if isinstance(index_arg, variables.TupleVariable)
+                            else variables.ListVariable(new_items)
+                        )
+                        args = tuple(args)
 
             if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                 # Standard indexing will force specialization due to
@@ -1261,6 +1294,83 @@ class BuiltinVariable(VariableTracker):
                         args[1],
                     ],
                 )
+            elif fn is operator.getitem and isinstance(
+                args[1], variables.TupleVariable
+            ):
+                # Handle tuple with SymNodeVariables: x[symint1, symint2] or x[:, symint]
+                # Decompose into sequential operations, tracking dimension changes
+                index_items = args[1].items
+                if any(isinstance(item, SymNodeVariable) for item in index_items):
+                    result = args[0]
+                    dims_removed = 0  # Track how many dimensions have been removed
+
+                    for original_dim, item in enumerate(index_items):
+                        # Current dimension in the result tensor
+                        current_dim = original_dim - dims_removed
+
+                        if isinstance(item, SymNodeVariable):
+                            # Apply torch.select at current_dim (removes this dimension)
+                            result = variables.TorchInGraphFunctionVariable(
+                                torch.select
+                            ).call_function(
+                                tx,
+                                [
+                                    result,
+                                    variables.ConstantVariable.create(current_dim),
+                                    item,
+                                ],
+                                {},
+                            )
+                            dims_removed += 1
+                        elif isinstance(item, variables.SliceVariable):
+                            # Slicing keeps the dimension
+                            result = variables.BuiltinVariable(
+                                operator.getitem
+                            ).call_function(tx, [result, item], {})
+                        else:
+                            # Regular scalar index (also removes dimension)
+                            result = variables.BuiltinVariable(
+                                operator.getitem
+                            ).call_function(tx, [result, item], {})
+                            dims_removed += 1
+                    return result
+
+            elif fn is operator.getitem and isinstance(
+                args[1], (variables.TupleVariable, variables.ListVariable)
+            ):
+                # Check if we have SymNodeVariable inside tuple: tensor[:, symnode]
+                # Rewrite as torch.select to avoid DDE
+                index_items = args[1].items
+                symnode_indices = [
+                    i
+                    for i, item in enumerate(index_items)
+                    if isinstance(item, SymNodeVariable)
+                ]
+
+                if len(symnode_indices) == 1:
+                    # Single SymNode in tuple - rewrite as torch.select
+                    symnode_idx = symnode_indices[0]
+                    symnode = index_items[symnode_idx]
+
+                    # Check that all other indices are slices or ellipsis
+                    non_symnode_indices = [
+                        i for i in range(len(index_items)) if i != symnode_idx
+                    ]
+                    if all(
+                        isinstance(
+                            index_items[i],
+                            (variables.SliceVariable, variables.ConstantVariable),
+                        )
+                        for i in non_symnode_indices
+                    ):
+                        fn, args = (
+                            torch.select,
+                            [
+                                args[0],
+                                variables.ConstantVariable.create(symnode_idx),
+                                symnode,
+                            ],
+                        )
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
