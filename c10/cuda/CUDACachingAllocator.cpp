@@ -512,7 +512,7 @@ struct ExpandableSegment {
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
 
-    buf.write(reinterpret_cast<const char*>(&header), sizeof(ShareHeader));
+    buf.write((const char*)&header, sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
@@ -528,9 +528,7 @@ struct ExpandableSegment {
         TORCH_CHECK(
             handle.shareable_handle != std::nullopt,
             "shareable_handle is null");
-        buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
-            sizeof(int));
+        buf.write((const char*)&*handle.shareable_handle, sizeof(int));
       } else {
         if (!handle.shareable_handle) {
           CUmemFabricHandle fabric_handle;
@@ -543,8 +541,7 @@ struct ExpandableSegment {
             handle.shareable_handle != std::nullopt,
             "shareable_handle is null");
         buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
-            sizeof(CUmemFabricHandle));
+            (const char*)&*handle.shareable_handle, sizeof(CUmemFabricHandle));
       }
     }
     return rangeFromHandles(begin, end);
@@ -555,7 +552,7 @@ struct ExpandableSegment {
       std::vector<c10::DeviceIndex> peers,
       std::istream& buf) {
     ShareHeader header{};
-    buf.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
+    buf.read((char*)&header, sizeof(ShareHeader));
     auto segment = std::make_unique<ExpandableSegment>(
         device, std::nullopt, header.segment_size, std::move(peers));
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
@@ -577,11 +574,11 @@ struct ExpandableSegment {
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
         int fd = 0;
-        buf.read(reinterpret_cast<char*>(&fd), sizeof(int));
+        buf.read((char*)&fd, sizeof(int));
         auto myfd = syscall(SYS_pidfd_getfd, pidfd, fd, 0);
         if (myfd == -1) {
           auto err = errno;
-          close(static_cast<int>(pidfd));
+          close((int)pidfd);
           for (auto& h : segment->handles_) {
             C10_CUDA_DRIVER_CHECK(
                 // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -601,16 +598,15 @@ struct ExpandableSegment {
             (void*)(uintptr_t)myfd,
             CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
         LOG(INFO) << "use posix fd to import expandable segments.";
-        close(static_cast<int>(myfd));
+        close((int)myfd);
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
-      close(static_cast<int>(pidfd));
+      close((int)pidfd);
     } else {
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
         CUmemFabricHandle fabric_handle;
-        buf.read(
-            reinterpret_cast<char*>(&fabric_handle), sizeof(CUmemFabricHandle));
+        buf.read((char*)&fabric_handle, sizeof(CUmemFabricHandle));
         CUmemGenericAllocationHandle handle = 0;
         C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
             &handle,
@@ -1063,7 +1059,7 @@ class RingBuffer {
 
   void setMaxEntries(size_t size) {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_max_entries_ = std::max(static_cast<size_t>(1), size);
+    alloc_trace_max_entries_ = std::max(size_t(1), size);
   }
 
   void insertEntries(const T& entry) {
@@ -1995,16 +1991,15 @@ class DeviceCachingAllocator {
       while (base_block->prev) {
         base_block = base_block->prev;
       }
-      offset = static_cast<const char*>(block->ptr) -
-          static_cast<const char*>(base_block->ptr);
+      offset = (char*)block->ptr - (char*)base_block->ptr;
       cudaIpcMemHandle_t handle;
       C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_block->ptr));
-      ss.write(reinterpret_cast<const char*>(&handle), CUDA_IPC_HANDLE_SIZE);
+      ss.write((char*)&handle, CUDA_IPC_HANDLE_SIZE);
     } else {
       ss.put(SHAREABLE_CUDA_EXPANDABLE_SEGMENT);
       auto full_range = block->expandable_segment_->share(
           SegmentRange(block->ptr, block->size), ss);
-      offset = static_cast<const char*>(block->ptr) - full_range.ptr;
+      offset = (char*)block->ptr - full_range.ptr;
     }
     return ShareableHandle{offset, ss.str()};
   }
@@ -3234,8 +3229,7 @@ class DeviceCachingAllocator {
     }
 
     total_allocated_memory += size;
-    p.block = new Block(
-        p.device(), p.stream(), size, p.pool, static_cast<char*>(ptr));
+    p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
@@ -3783,7 +3777,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       allocated_blocks;
 
   static size_t get_mutex_shard_id(void* ptr) {
-    return twang_mix64(reinterpret_cast<uintptr_t>(ptr)) % kNumMutexShard;
+    return twang_mix64((size_t)ptr) % kNumMutexShard;
   }
 
   void add_allocated_block(Block* block) {
@@ -3820,8 +3814,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::make_unique<DeviceCachingAllocator>(
-            static_cast<c10::DeviceIndex>(i));
+        device_allocator[i] =
+            std::make_unique<DeviceCachingAllocator>(c10::DeviceIndex(i));
       }
     }
   }
@@ -4350,7 +4344,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         // SHARABLE_CUDA_MALLOC
       if (type == SHAREABLE_CUDA_MALLOC) {
         cudaIpcMemHandle_t cuda_handle;
-        ss.read(reinterpret_cast<char*>(&cuda_handle), CUDA_IPC_HANDLE_SIZE);
+        ss.read((char*)&cuda_handle, CUDA_IPC_HANDLE_SIZE);
         C10_CUDA_CHECK(cudaIpcOpenMemHandle(
             &cuda_ipc_ptr_, cuda_handle, cudaIpcMemLazyEnablePeerAccess));
       } else if (type == SHAREABLE_CUDA_EXPANDABLE_SEGMENT) {

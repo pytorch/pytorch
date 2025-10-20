@@ -84,7 +84,7 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject* arg) {
   TORCH_CHECK(THPUtils_checkIntTuple(arg), "Couldn't unpack int tuple");
   std::vector<int> values(PyTuple_GET_SIZE(arg));
   for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
-    values[i] = THPUtils_unpackInt(PyTuple_GET_ITEM(arg, i));
+    values[i] = (int)THPUtils_unpackLong(PyTuple_GET_ITEM(arg, i));
   }
   return values;
 }
