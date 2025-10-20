@@ -1571,7 +1571,7 @@ class BuiltinVariable(VariableTracker):
                     return
 
                 # Inline the user function
-                return tx.inline_user_function_return(user_func_variable, [arg], {})
+                return user_func_variable.call_function(tx, [arg], {})
         elif isinstance(arg, (variables.ExceptionVariable,)):
             if len(arg.args) == 0:
                 value = f"{arg.exc_type}"
