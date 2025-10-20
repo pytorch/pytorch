@@ -1564,7 +1564,7 @@ class BuiltinVariable(VariableTracker):
 
                 try:
                     # Only supports certain function types
-                    user_func_variable = VariableTracker.build(tx, bound_method)
+                    user_func_variable = variables.UserFunctionVariable(bound_method)
                 except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
                     log.warning("Failed to create UserFunctionVariable", exc_info=True)

@@ -1969,7 +1969,7 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
             return variables.EnumVariable(self.value.key())
         elif name == "process":
             return tx.inline_user_function_return(
-                VariableTracker.build(tx, self.value.process.__func__),
+                variables.UserFunctionVariable(self.value.process.__func__),
                 [self] + args,
                 kwargs,
             )

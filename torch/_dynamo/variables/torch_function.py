@@ -59,7 +59,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
-from .functions import UserMethodVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
@@ -620,7 +620,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 elif isinstance(attr, property):
                     getter_source = AttrSource(attr_source, "fget")
                     getter = attr.fget
-                    getter_var = VariableTracker.build(tx, getter, source=getter_source)
+                    getter_var = UserFunctionVariable(getter, source=getter_source)
                     return getter_var.call_function(tx, [self], {})
 
                 elif isinstance(attr, classmethod):

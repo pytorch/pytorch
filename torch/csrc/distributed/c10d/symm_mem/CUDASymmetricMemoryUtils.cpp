@@ -178,7 +178,7 @@ std::vector<int> IpcChannel::all_gather_fds(
     int rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = static_cast<int>(pids.size());
+  int world_size = (int)pids.size();
   std::vector<int> fds(pids.size());
   fds[rank] = fd;
 
@@ -197,7 +197,7 @@ int IpcChannel::broadcast_fds(
     int src_rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = static_cast<int>(pids.size());
+  int world_size = (int)pids.size();
 
   if (rank == src_rank) {
     for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {

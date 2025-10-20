@@ -68,7 +68,7 @@ PyObject* THPStorage_NewWithStorage(
   PyObject* obj = type->tp_alloc(type, 0);
   TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
 
-  auto s = reinterpret_cast<THPStorage*>(obj);
+  auto s = (THPStorage*)obj;
 
   new (&s->cdata) c10::MaybeOwned<c10::Storage>();
 
@@ -128,7 +128,7 @@ static bool THPStorage_isPreservable(THPStorage* self) {
   }
 
   if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/true) != reinterpret_cast<PyObject*>(self)) {
+          /*ignore_hermetic_tls=*/true) != (PyObject*)self) {
     return false;
   }
   if (storage.use_count() <= 1) {
@@ -170,14 +170,14 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   storage_impl->pyobj_slot()->set_owns_pyobj(true);
   // When resurrecting, we MUST use _Py_NewReference and not Py_INCREF to
   // ensure the PyObject is in a valid state
-  _Py_NewReference(reinterpret_cast<PyObject*>(self));
+  _Py_NewReference((PyObject*)self);
 
   self->cdata = c10::MaybeOwned<c10::Storage>::borrowed(storage);
   return true;
 }
 
 static void THPStorage_subclass_dealloc(PyObject* self) {
-  THPStorage* _self = reinterpret_cast<THPStorage*>(self);
+  THPStorage* _self = (THPStorage*)self;
 
   if (THPStorage_tryPreserve(_self)) {
     return;
@@ -226,8 +226,8 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
        being finalized that has already been destroyed. */
     if (type->tp_weaklistoffset) {
       /* Modeled after GET_WEAKREFS_LISTPTR() */
-      PyWeakReference** list = reinterpret_cast<PyWeakReference**>(
-          PyObject_GET_WEAKREFS_LISTPTR(self));
+      PyWeakReference** list =
+          (PyWeakReference**)PyObject_GET_WEAKREFS_LISTPTR(self);
       while (*list)
         _PyWeakref_ClearRef(*list);
     }
@@ -549,9 +549,9 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
 }
 
 static PyMappingMethods THPStorage_mappingmethods = {
-    reinterpret_cast<lenfunc>(THPStorage_length),
-    reinterpret_cast<binaryfunc>(THPStorage_get),
-    reinterpret_cast<objobjargproc>(THPStorage_set)};
+    (lenfunc)THPStorage_length,
+    (binaryfunc)THPStorage_get,
+    (objobjargproc)THPStorage_set};
 
 struct THPStorageMeta {
   PyHeapTypeObject base;
@@ -653,8 +653,7 @@ int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
-  (reinterpret_cast<PyTypeObject*>(cls))->tp_dealloc =
-      static_cast<destructor>(THPStorage_subclass_dealloc);
+  ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPStorage_subclass_dealloc;
   return 0;
 }
 
@@ -675,16 +674,8 @@ typedef PyObject* (*getter)(PyObject*, void*);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStorage_properties[] = {
-    {"device",
-     reinterpret_cast<getter>(THPStorage_device),
-     nullptr,
-     nullptr,
-     nullptr},
-    {"_cdata",
-     reinterpret_cast<getter>(THPStorage_get_cdata),
-     nullptr,
-     nullptr,
-     nullptr},
+    {"device", (getter)THPStorage_device, nullptr, nullptr, nullptr},
+    {"_cdata", (getter)THPStorage_get_cdata, nullptr, nullptr, nullptr},
     {nullptr}};
 
 bool THPStorage_init(PyObject* module) {
@@ -696,22 +687,20 @@ bool THPStorage_init(PyObject* module) {
   if (PyType_Ready(&THPStorageMetaType) < 0)
     return false;
   Py_INCREF(&THPStorageMetaType);
-  PyModule_AddObject(
-      module, "_StorageMeta", reinterpret_cast<PyObject*>(&THPStorageMetaType));
+  PyModule_AddObject(module, "_StorageMeta", (PyObject*)&THPStorageMetaType);
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_getset = THPStorage_properties;
   if (PyType_Ready(&THPStorageType) < 0)
     return false;
   Py_INCREF(&THPStorageType);
-  PyModule_AddObject(
-      module, "StorageBase", reinterpret_cast<PyObject*>(&THPStorageType));
+  PyModule_AddObject(module, "StorageBase", (PyObject*)&THPStorageType);
   return true;
 }
 
 void THPStorage_postInit(PyObject* module) {
-  THPStorageClass = reinterpret_cast<PyTypeObject*>(
-      PyObject_GetAttrString(module, "UntypedStorage"));
+  THPStorageClass =
+      (PyTypeObject*)PyObject_GetAttrString(module, "UntypedStorage");
   if (!THPStorageClass)
     throw python_error();
 }
@@ -722,5 +711,5 @@ void THPStorage_assertNotNull(THPStorage* storage) {
 }
 
 void THPStorage_assertNotNull(PyObject* obj) {
-  THPStorage_assertNotNull(reinterpret_cast<THPStorage*>(obj));
+  THPStorage_assertNotNull((THPStorage*)obj);
 }

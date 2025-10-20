@@ -220,7 +220,7 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
   }
   // if we can't resolve the hostname, display the IP address
   if (addr->sa_family == AF_INET) {
-    struct sockaddr_in* psai = reinterpret_cast<struct sockaddr_in*>(&addr);
+    struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
     // NOLINTNEXTLINE(*array*)
     char ip[INET_ADDRSTRLEN];
     if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
@@ -228,7 +228,7 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
       return fmt::format("{}:{}", ip, psai->sin_port);
     }
   } else if (addr->sa_family == AF_INET6) {
-    struct sockaddr_in6* psai = reinterpret_cast<struct sockaddr_in6*>(&addr);
+    struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
     // NOLINTNEXTLINE(*array*)
     char ip[INET6_ADDRSTRLEN];
     if (inet_ntop(addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
