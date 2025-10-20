@@ -537,6 +537,8 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
         disk_compiled_graph = copy(self.result)
         disk_compiled_graph.prepare_for_serialization()
         self.result = disk_compiled_graph
+        # this will have faketensor which isn't serializable
+        self.example_inputs = None
         return
 
     def load(self, example_inputs) -> CompiledFxGraph:
@@ -561,7 +563,7 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
             payload_fn=lambda: json.dumps(cache_info),
         )
         # Run normal post compile
-        graph.post_compile(self.example_inputs, constants, fx_config)
+        graph.post_compile(self.example_inputs, constants, fx_config)  # type: ignore[arg-type]
         return graph
 
 
@@ -571,6 +573,8 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_guard_expr: Optional[str]
 
     def pre_save(self):
+        # this will have faketensor which isn't serializable
+        self.example_inputs = None
         return
 
     def _is_backward(self) -> bool:
@@ -647,7 +651,7 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         """
         Called after FXGraphCacheLoadable.load, mutates fx_config
         """
-        result.post_compile(self.example_inputs, self.constants, fx_config)
+        result.post_compile(self.example_inputs, self.constants, fx_config)  # type: ignore[arg-type]
         return result
 
 

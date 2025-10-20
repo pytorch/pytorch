@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
@@ -391,7 +391,7 @@ def standalone_compile(
         "from_example_inputs", "from_tracing_context", "from_graph"
     ] = "from_graph",
     options: Optional[dict[str, Any]] = None,
-) -> CompiledArtifact:
+) -> CompiledArtifact | Callable[..., Any]:
     """
     Precompilation API for inductor.
 
@@ -416,7 +416,8 @@ def standalone_compile(
         options: Inductor compilation options
 
     Returns:
-        CompiledArtifact that can be saved to disk or invoked directly.
+        CompiledArtifact that can be saved to disk or invoked directly,
+        or a callable if options["save_artifacts"] is set to false.
     """
     from .standalone_compile import standalone_compile
 

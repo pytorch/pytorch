@@ -240,6 +240,12 @@ def async_compile_pool_manager():
         AsyncCompile.quiesce()
 
 
+def reload_kernel_in_parent(load_fn):
+    # Benchmark how often this happens
+    with dynamo_timed("reload_kernel_in_parent"):
+        return load_fn()
+
+
 class AsyncCompile:
     """
     Utilities to compile in thread pools or subprocess pools (in the case of Triton).
@@ -383,11 +389,6 @@ class AsyncCompile:
             _load_triton_kernel_from_source, kernel_name, source_code
         )
 
-        def reload_kernel_in_parent():
-            # Benchmark how often this happens
-            with dynamo_timed("reload_kernel_in_parent"):
-                return load_kernel()
-
         counters["inductor"]["async_compile_cache_miss"] += 1
 
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
@@ -410,7 +411,9 @@ class AsyncCompile:
             if isinstance(future, StaticAutotunerFuture):
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
-                future.reload_kernel_from_src = reload_kernel_in_parent
+                future.reload_kernel_from_src = functools.partial(
+                    reload_kernel_in_parent, load_kernel
+                )
             if is_parallel:
                 return future
             else:
@@ -469,7 +472,9 @@ class AsyncCompile:
 
                 kernel.precompile(
                     warm_cache_only=False,
-                    reload_kernel=reload_kernel_in_parent,
+                    reload_kernel=functools.partial(
+                        reload_kernel_in_parent, load_kernel
+                    ),
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
                 info = kernel.autotune_cache_info or {}
