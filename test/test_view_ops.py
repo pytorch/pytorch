@@ -1559,7 +1559,7 @@ class TestOldViewOps(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
-        for ndims in range(0, 5):
+        for ndims in range(5):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
             for _ in range(ndims + 1):
                 for with_extremal in [False, True]:
