@@ -42,10 +42,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
 
   TORCH_CHECK(k >= 1 && k <= slicesize,
               "kthvalue(): selected number k out of range for dimension ", dim);
-  
+
   TORCH_CHECK(
       slicesize <= std::numeric_limits<int32_t>::max(),
-      "kthvalue(): dimension ", dim, " is too large (", slicesize, 
+      "kthvalue(): dimension ", dim, " is too large (", slicesize,
       "). The current CUDA implementation supports dimension sizes up to ",
       std::numeric_limits<int32_t>::max());
 

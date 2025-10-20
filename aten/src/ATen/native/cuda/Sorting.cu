@@ -77,11 +77,11 @@ __global__ void gatherKthValue(
       if (i >= minIndexFound) {
           break;
       }
-      
+
       scalar_t v = doLdg(&inputSliceStart[i * inputWithinSliceStride]);
-      bool isKValue = 
+      bool isKValue =
           ((v == kValue) || (at::_isnan(v) && at::_isnan(kValue)));
-      
+
       if (isKValue) {
           atomicMin(&minIndexFound, static_cast<int32_t>(i));
           break;
