@@ -105,6 +105,7 @@ class ExperimentConfig:
     calculate_bwd_time: bool
     cal_bandwidth: bool
     backends: list[str]
+    max_autotune: bool
 
     def __post_init__(self):
         assert len(self.shape) == 6, (
@@ -119,6 +120,7 @@ class ExperimentConfig:
         d.pop("cal_bandwidth", None)
         d["shape(B,Hq,M,Hkv,N,D)"] = d.pop("shape")
         d.pop("backends", None)
+        d.pop("max_autotune", False)
         return d
 
 
@@ -417,7 +419,6 @@ def run_single_backend_FA(
 def run_single_experiment(
     config: ExperimentConfig,
     dynamic=False,
-    max_autotune=False,
 ) -> dict[str, ExperimentResults]:
     device = torch.device("cuda")
     batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
@@ -437,7 +438,7 @@ def run_single_experiment(
     block_mask, mask_kwargs = generate_block_mask(config.attn_type, config.shape)
     kernel_options = get_kernel_options(config.attn_type, config.shape)
 
-    if max_autotune:
+    if config.max_autotune:
         compiled_sdpa = torch.compile(
             flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs"
         )
@@ -1090,6 +1091,7 @@ def generate_experiment_configs(
     kv_cache_size: list[int],
     cal_bandwidth: bool,
     backends: list[str],
+    max_autotune: bool,
 ) -> list[ExperimentConfig]:
     assert not (calculate_bwd and decoding), "Decoding does not support backward"
 
@@ -1133,6 +1135,7 @@ def generate_experiment_configs(
                 calculate_bwd_time=calculate_bwd,
                 cal_bandwidth=cal_bandwidth,
                 backends=backends,
+                max_autotune=max_autotune,
             )
         )
 
@@ -1142,12 +1145,17 @@ def generate_experiment_configs(
 def _output_json_for_dashboard(
     experiments,
     output_file,
-    benchmark_name="PyTorch attention benchmark",
+    benchmark_name="PyTorch operator microbenchmark",
 ):
     """
     Write the result into JSON format for PyTorch OSS dashboard.
     The JSON format is defined at
     https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+
+    Args:
+        experiments: List of experiment results
+        output_file: Path to output JSON file
+        benchmark_name: Name of the benchmark
     """
     if not experiments:
         return
@@ -1233,11 +1241,11 @@ def _output_json_for_dashboard(
                     "operator_name": backend,
                     "attn_type": config.attn_type,
                     "shape": str(config.shape),
-                    "max_autotune": True,  # We always use max_autotune
+                    "max_autotune": config.max_autotune,
                 },
             ),
             model=ModelInfo(
-                name=test_name,
+                name=test_name+str(config.shape),
                 type="attention-benchmark",
                 origins=["pytorch"],
                 extra_info={
@@ -1267,11 +1275,11 @@ def _output_json_for_dashboard(
                         "operator_name": backend,
                         "attn_type": config.attn_type,
                         "shape": str(config.shape),
-                        "max_autotune": True,
+                        "max_autotune": config.max_autotune,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="attention-benchmark", origins=["pytorch"],
+                    name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
                     extra_info={"operator_name": backend,}
                 ),
                 metric=MetricInfo(
@@ -1297,11 +1305,11 @@ def _output_json_for_dashboard(
                         "operator_name": backend,
                         "attn_type": config.attn_type,
                         "shape": str(config.shape),
-                        "max_autotune": True,
+                        "max_autotune": config.max_autotune,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name,
+                    name=test_name+str(config.shape),
                     type="attention-benchmark",
                     origins=["pytorch"],
                     extra_info={
@@ -1331,11 +1339,11 @@ def _output_json_for_dashboard(
                         "operator_name": backend,
                         "attn_type": config.attn_type,
                         "shape": str(config.shape),
-                        "max_autotune": True,
+                        "max_autotune": config.max_autotune,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="attention-benchmark", origins=["pytorch"],
+                    name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
                     extra_info={
                         "operator_name": backend,
                 },
@@ -1370,7 +1378,7 @@ def main(
     throughput: bool = True,
     save_path: Optional[str] = None,
     output_json_for_dashboard: Optional[str] = None,
-    benchmark_name: str = "PyTorch attention benchmark",
+    benchmark_name: str = "PyTorch operator microbenchmark",
 ) -> None:
     """Run sweep over sizes and score mods for flex attention.
 
@@ -1440,6 +1448,7 @@ def main(
             kv_size,
             throughput,
             backend,
+            max_autotune,
         )
     ):
         results.append(
@@ -1448,7 +1457,6 @@ def main(
                 run_single_experiment(
                     config,
                     dynamic=dynamic,
-                    max_autotune=max_autotune,
                 ),
             )
         )
@@ -1462,7 +1470,9 @@ def main(
 
     # Output JSON for dashboard if requested
     if output_json_for_dashboard:
-        _output_json_for_dashboard(results, output_json_for_dashboard, benchmark_name)
+        _output_json_for_dashboard(
+            results, output_json_for_dashboard, benchmark_name
+        )
 
 
 def heads_input_type(s: str) -> tuple[int, int]:
@@ -1563,7 +1573,7 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
         "--benchmark-name",
         type=str,
         help="Name of the benchmark for dashboard output",
-        default="PyTorch attention benchmark",
+        default="PyTorch operator microbenchmark",
     )
     # Parse arguments
     args = parser.parse_args()
