@@ -487,7 +487,7 @@ static Tensor _grid_sampler_2d_cpu_quantized(
   int64_t out_sC = output.stride(1);
   int64_t out_sH = output.stride(2);
   int64_t out_sW = output.stride(3);
-  const uint8_t* inp_ptr = reinterpret_cast<const uint8_t*>(input.data_ptr<quint8>());
+  const uint8_t* inp_ptr = input.const_data_ptr<uint8_t>());
   uint8_t* out_ptr = reinterpret_cast<uint8_t*>(output.data_ptr<quint8>());
   float* grid_ptr = grid.data_ptr<float>();
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
