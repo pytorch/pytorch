@@ -8177,6 +8177,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
 
+    @skipIfTorchDynamo("not a dynamo test")
     def test_scan_in_vmap_unbatched_init_error(self):
         # Test with various operations requiring shape reasoning
         x = torch.randn(4, 5, 3, 2)
