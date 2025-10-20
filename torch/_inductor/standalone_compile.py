@@ -5,6 +5,7 @@ import logging
 import os
 import pickle
 import shutil
+from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class CompiledArtifact:
+class CompiledArtifact(ABC):
     """
     CompiledArtifact class represents the inductor cache artifacts that
     can be invoked in order to avoid repeated compilation.
@@ -49,8 +50,33 @@ class CompiledArtifact:
     to execute the cached artifact.
     """
 
-    _compiled_fn: Callable[..., Any]
-    _artifacts: Optional[tuple[bytes, CacheInfo]]
+    def __init__(
+        self,
+        compiled_fn: Callable[..., Any],
+        artifacts: Optional[tuple[bytes, CacheInfo]],
+    ):
+        self._compiled_fn = compiled_fn
+        self._artifacts = artifacts
+
+    @abstractmethod
+    def __call__(self, *args: Any) -> Any: ...
+
+    @abstractmethod
+    def save(
+        self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> None: ...
+
+    @staticmethod
+    @abstractmethod
+    def load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> CompiledArtifact: ...
+
+
+class CacheCompiledArtifact(CompiledArtifact):
+    """
+    CompiledArtifact that depends on torch.compiler.save_cache_artifacts
+    """
 
     def __init__(
         self,
@@ -185,7 +211,7 @@ class CompiledArtifact:
                     compiled_fn = entry.wrap_post_compile(
                         [], entry.sanitized_aot_config, fx_config
                     )
-            return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+            return CacheCompiledArtifact(lambda *args: compiled_fn(list(args)), None)
 
 
 class AOTCompiledArtifact(CompiledArtifact):
@@ -342,4 +368,4 @@ def standalone_compile(
                 "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
-    return CompiledArtifact(compiled_fn, artifacts)
+    return CacheCompiledArtifact(compiled_fn, artifacts)

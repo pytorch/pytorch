@@ -8,7 +8,11 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
-from .standalone_compile import CompiledArtifact  # noqa: TC001
+from .standalone_compile import (  # noqa: TC001
+    AOTCompiledArtifact,
+    CacheCompiledArtifact,
+    CompiledArtifact,
+)
 
 
 if TYPE_CHECKING:
@@ -402,7 +406,7 @@ def standalone_compile(
         compiled_artifact.save(path=path, format="binary")
 
         # Later on a new process
-        loaded = torch._inductor.CompiledArtifact.load(path=path, format="binary")
+        loaded = torch._inductor.CacheCompiledArtifact.load(path=path, format="binary")
         compiled_out = loaded(*args)
 
     Args:
