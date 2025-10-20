@@ -11861,7 +11861,7 @@ class TestAutogradDeviceType(TestCase):
             def test_nonzero(tensor, value, expected):
                 tensor[0] = value
                 self.assertEqual(expected, bool(tensor))
-                self.assertEqual(expected, True if tensor else False)
+                self.assertEqual(expected, bool(tensor))
 
             test_nonzero(l, 0, False)
             test_nonzero(l, -2, True)
