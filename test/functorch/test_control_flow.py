@@ -2932,9 +2932,7 @@ class GraphModule(torch.nn.Module):
             if autograd:
                 result_flat = pytree.tree_leaves(result)
                 result_exp_flat = pytree.tree_leaves(result_exp)
-                exp_grad_mask = [
-                    True if r.requires_grad else False for r in result_exp_flat
-                ]
+                exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
                 self.check_autograd(
                     [r for r, m in zip(result_flat, exp_grad_mask) if m],
                     [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
@@ -3671,7 +3669,7 @@ class AssociativeScanModels:
                     # Check if val is a list and if it has the same length as combine_fn
                     # If so, then use the individual elements.
                     # If not, duplicate the first element.
-                    if type(val) == list and len(val) == chain_len:
+                    if type(val) is list and len(val) == chain_len:
                         kwargs_el[key] = val[ind]
                     else:
                         kwargs_el[key] = val
@@ -3741,9 +3739,7 @@ class AssociativeScanTests(TestCase):
         ):
             result_flat = pytree.tree_leaves(result)
             result_exp_flat = pytree.tree_leaves(result_exp)
-            exp_grad_mask = [
-                True if r.requires_grad else False for r in result_exp_flat
-            ]
+            exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
 
             self._check_autograd(
                 [r for r, m in zip(result_flat, exp_grad_mask) if m],
@@ -5710,10 +5706,9 @@ def forward(self, arg0_1):
     )
     def test_while_loop_tracing(self, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
-        allow_non_fake_inputs = (
-            False
-            if while_loop_test not in ("simple_with_linear", "nested_with_linear")
-            else True
+        allow_non_fake_inputs = while_loop_test in (
+            "simple_with_linear",
+            "nested_with_linear",
         )
         self._check_tracing(fn, inp, allow_non_fake_inputs)
 
@@ -9110,7 +9105,6 @@ class GraphModule(torch.nn.Module):
 
         getitem_5: "f32[u0, s94]" = cond[0]
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
-        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None

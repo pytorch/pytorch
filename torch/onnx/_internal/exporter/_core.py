@@ -160,10 +160,8 @@ class TorchTensor(ir.Tensor):
             return self.numpy()
         return self.numpy().__array__(dtype)
 
-    def tobytes(self) -> bytes:
-        # Implement tobytes to support native PyTorch types so we can use types like bloat16
-        # Reading from memory directly is also more efficient because
-        # it avoids copying to a NumPy array
+    def _get_cbytes(self):
+        """Get a ctypes byte array pointing to the tensor data."""
         import torch._subclasses.fake_tensor
 
         with torch._subclasses.fake_tensor.unset_fake_temporarily():
@@ -178,11 +176,21 @@ class TorchTensor(ir.Tensor):
                 "or save the model without initializers by setting include_initializers=False."
             )
 
-        return bytes(
-            (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
-                tensor.data_ptr()
-            )
-        )
+        # Return the tensor to ensure it is not garbage collected while the ctypes array is in use
+        return tensor, (
+            ctypes.c_ubyte * tensor.element_size() * tensor.numel()
+        ).from_address(tensor.data_ptr())
+
+    def tobytes(self) -> bytes:
+        # Implement tobytes to support native PyTorch types so we can use types like bloat16
+        # Reading from memory directly is also more efficient because
+        # it avoids copying to a NumPy array
+        _, data = self._get_cbytes()
+        return bytes(data)
+
+    def tofile(self, file) -> None:
+        _, data = self._get_cbytes()
+        return file.write(data)
 
 
 # https://github.com/pytorch/pytorch/blob/ee6cb6daa173896f8ea1876266a19775aaa4f610/torch/export/graph_signature.py#L56C1-L62C19
@@ -1240,9 +1248,6 @@ def _exported_program_to_onnx_program(
         )
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
-
-    # TODO(justinchuby): Remove the hack
-    _ir_passes.add_torchlib_common_imports(model)
 
     # Collect and add opset imports to the model
     _ir_passes.add_opset_imports(model)
