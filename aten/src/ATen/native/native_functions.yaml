@@ -1370,6 +1370,7 @@
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
+    SparseMPS: bmm_sparse_mps
     NestedTensorCPU: bmm_nested
     NestedTensorCUDA: bmm_nested_cuda
   tags: core
@@ -1385,6 +1386,7 @@
     MTIA: bmm_out_mtia
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
+    SparseMPS: bmm_out_sparse_mps
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
 
 - func: bmm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
@@ -4173,7 +4175,7 @@
   structured_delegate: mm.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: _sparse_mm
+    SparseCPU, SparseCUDA, SparseMPS: _sparse_mm
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm
   tags: core
 
@@ -7112,6 +7114,7 @@
     MTIA: addmm_out_mtia
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
+    SparseMPS: addmm_out_sparse_dense_mps
     SparseCsrCPU: addmm_out_sparse_compressed_cpu
     SparseCsrCUDA: addmm_out_sparse_compressed_cuda
 
@@ -7121,6 +7124,7 @@
   dispatch:
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
+    SparseMPS: addmm_sparse_dense_mps
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: addmm_sparse_compressed_dense
   tags: core
 

@@ -1480,6 +1480,7 @@ class CppGemmTemplate(CppTemplate):
             gemm_output_buffer = ir.Buffer(
                 # pyrefly: ignore  # missing-attribute
                 name=gemm_output_name,
+                # pyrefly: ignore  # missing-attribute
                 layout=template_buffer.layout,
             )
             current_input_buffer = gemm_output_buffer
@@ -1503,6 +1504,7 @@ class CppGemmTemplate(CppTemplate):
                     current_input_buffer = ir.Buffer(
                         # pyrefly: ignore  # missing-attribute
                         name=buffer_name,
+                        # pyrefly: ignore  # missing-attribute
                         layout=template_buffer.layout,
                     )
 

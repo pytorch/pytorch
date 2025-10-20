@@ -2959,13 +2959,15 @@ class InstructionTranslatorBase(
                 resume_inst = inst
             else:
                 resume_inst = cur_tx.next_instruction
-            if resume_inst.opname != "RETURN_VALUE":
-            if not (
-                config.debug_force_graph_break_on_leaf_return
-                and self.current_instruction.opname == "NOP"
-                and self.current_instruction.argval == "GRAPH_BREAK_IF_LEAF"
-                and cur_tx is self
-            ) and resume_inst.opname != "RETURN_VALUE":
+            if (
+                not (
+                    config.debug_force_graph_break_on_leaf_return
+                    and self.current_instruction.opname == "NOP"
+                    and self.current_instruction.argval == "GRAPH_BREAK_IF_LEAF"
+                    and cur_tx is self
+                )
+                and resume_inst.opname != "RETURN_VALUE"
+            ):
                 txes.append(cur_tx)
                 idxes.append(idx)
                 resume_insts.append(resume_inst)

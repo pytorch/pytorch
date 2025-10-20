@@ -1385,7 +1385,7 @@ class f(torch.nn.Module):
             self.assertEqual(x.storage_offset(), y.storage_offset())
 
     def test_tensor_factory_with_symint(self):
-        args = list(range(0, 3))
+        args = list(range(3))
         expected = torch.tensor(args)
 
         shape_env = ShapeEnv()
@@ -3398,7 +3398,7 @@ class TestUnbacked(TestCase):
         self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_div_unabacked_eq_input_tensors(self):
+    def test_div_unbacked_eq_input_tensors(self):
         @torch.compile(fullgraph=True)
         def func(a, b):
             x = a.size()[0]
@@ -3418,7 +3418,7 @@ class TestUnbacked(TestCase):
         func(a, b)
 
     @torch.compiler.config.patch(unbacked_sources="L['x'],L['y']")
-    def test_div_unabacked_eq_input_ints(self):
+    def test_div_unbacked_eq_input_ints(self):
         @torch.compile(fullgraph=True)
         def func(x, y):
             a = torch.rand(1)
@@ -3433,7 +3433,7 @@ class TestUnbacked(TestCase):
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     @torch.compiler.config.patch(unbacked_sources="L['y']")
-    def test_div_unabacked_eq_globals(self):
+    def test_div_unbacked_eq_globals(self):
         tensor = torch.rand(10, 44)
         y = 10
 
@@ -3452,7 +3452,7 @@ class TestUnbacked(TestCase):
         func()
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_div_unabacked_eq_item(self):
+    def test_div_unbacked_eq_item(self):
         @torch.compile(fullgraph=True)
         def func(a, b):
             x = a.item()
@@ -4269,6 +4269,65 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         compiled_program = torch.compile(func, fullgraph=True, dynamic=True)
         result_compiled = compiled_program()
         self.assertEqual(result_original, result_compiled)
+
+    def test_unbacked_item_set_item(self):
+        def my_arithmetic(a, b):
+            wrk = torch.zeros(a.size(0))
+            for i in range(a.size(0)):
+                idx = b[i].item()
+                wrk[idx] += 1
+
+            return wrk
+
+        compiled = torch.compile(my_arithmetic, fullgraph=True, disable=False)
+        a = torch.randn([9])
+        b = torch.ones(9, dtype=torch.int32)
+        compiled(a, b)
+        self.assertEqual(compiled(a, b), my_arithmetic(a, b))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item_set_item2(self):
+        def accumulate(X0, start):
+            start = start.item()
+            N = 3
+            result = X0[start]
+            for i in range(N):
+                result += X0[start + 1 + i]
+            return result
+
+        compiled = torch.compile(accumulate, fullgraph=True)
+        X0 = torch.randn(10, 10)
+        self.assertEqual(
+            accumulate(X0, torch.tensor([1])), compiled(X0, torch.tensor([1]))
+        )
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item_set_item3(self):
+        def func(x, y):
+            u0 = y.item()
+            x[u0] = 0
+            return x
+
+        compiled = torch.compile(func, fullgraph=True, disable=False)
+        b = torch.tensor([0])
+        a = torch.ones(9, dtype=torch.int32)
+
+        compiled(a, b)
+        self.assertEqual(compiled(a, b), func(a, b))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_select_scatter_unbacked_index(self):
+        def func(x, y):
+            u0 = y.item()
+            # Create a scalar tensor to scatter into the selected index
+            scalar_src = torch.tensor(42, dtype=x.dtype)
+            return x.select_scatter(scalar_src, 0, u0)
+
+        compiled = torch.compile(func, fullgraph=True, dynamic=True, backend="inductor")
+        b = torch.tensor([0])
+        a = torch.ones(9, dtype=torch.int32)
+
+        self.assertEqual(compiled(a, b), func(a, b))
 
 
 instantiate_parametrized_tests(TestUnbacked)
