@@ -17,3 +17,4 @@ psutil
 sympy>=1.13.3
 typing-extensions>=4.13.2
 wheel
+tabulate

@@ -13,6 +13,7 @@ requires = [
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
     "typing-extensions>=4.10.0",
+    "tabulate",
 ]
 build-backend = "setuptools.build_meta"
 
