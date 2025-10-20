@@ -1632,42 +1632,36 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
 #pragma message("Compiling with cuSOLVER >= 11.7.2 — Xgeev bindings enabled")
 
-
-
-
-
 template <typename scalar_t>
 void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
-  TORCH_WARN("apply_xgeev: creating temporary GPU copies for testing");
+  TORCH_WARN("values device: ", values.device());
+  TORCH_WARN("vectors device: ", vectors.device());
+  TORCH_WARN("input device: ", input.device());
+  TORCH_WARN("infos device: ", infos.device());
+
 
   auto device = input.device();  // sollte CUDA sein
 
-  // --- Lokale Kopien der Arbeitstensoren auf GPU ---
-  auto values_gpu  = values.is_cuda()    ? values    : values.to(device);
-  auto vectors_gpu = vectors.is_cuda()   ? vectors   : vectors.to(device);
-  auto infos_gpu   = infos.is_cuda()     ? infos     : infos.to(device);
 
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values_gpu.is_cuda());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors_gpu.is_cuda());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_gpu.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
   TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
   TORCH_WARN("vectors dtype: ", vectors.scalar_type());
-  TORCH_WARN("values dtype: ", values_gpu.scalar_type());
-  TORCH_WARN("values sizes: ", values_gpu.sizes());
-  TORCH_WARN("values numel: ", values_gpu.numel());
-  auto flat_vecs = vectors.flatten();
-  TORCH_WARN("vectors[0:3]: ", flat_vecs.slice(0, 3));
+  TORCH_WARN("values dtype: ", values.scalar_type());
+  TORCH_WARN("values sizes: ", values.sizes());
+  TORCH_WARN("values numel: ", values.numel());
 
 
 
-  using real_t = typename c10::scalar_value_type<scalar_t>::type;
-  using eig_t = typename std::conditional<
-    std::is_same<scalar_t, c10::complex<float>>::value ||
-    std::is_same<scalar_t, c10::complex<double>>::value,
-    scalar_t,                      // A ist bereits komplex
-    c10::complex<scalar_t>         // A ist reell -> EV/EVec komplex
-    >::type;
+  // using real_t = typename c10::scalar_value_type<scalar_t>::type;
+  // using eig_t = typename std::conditional<
+  //   std::is_same<scalar_t, c10::complex<float>>::value ||
+  //   std::is_same<scalar_t, c10::complex<double>>::value,
+  //   scalar_t,                      // A ist bereits komplex
+  //   c10::complex<scalar_t>         // A ist reell -> EV/EVec komplex
+  //   >::type;
 
   int64_t n = input.size(-1);
   int64_t lda = std::max<int64_t>(1, n);
@@ -1680,9 +1674,9 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
 
 
 
-  auto vectors_data = vectors_gpu.data_ptr<scalar_t>();
+  auto vectors_data = vectors.data_ptr<scalar_t>();
 
-  auto values_data = values_gpu.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<int>();
 
 
@@ -1695,7 +1689,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
 
 
 
-  scalar_t* W  = values_gpu.data_ptr<scalar_t>();
+  scalar_t* W  = values.data_ptr<scalar_t>();
   scalar_t*    VL = nullptr;
 
 
@@ -1706,7 +1700,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
 //    	c10::CppTypeToScalarType<eig_t>::value));
 //  }
   Tensor VR_tensor;
-  VR_tensor = at::empty_like(vectors_gpu);
+  VR_tensor = at::empty_like(vectors);
   scalar_t* VR = VR_tensor.data_ptr<scalar_t>();
 
 
@@ -1732,18 +1726,18 @@ at::cuda::solver::xgeev_bufferSize<scalar_t>(
   // allocate workspace storage on device and host
   auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_device_data = device_allocator.allocate(ws_dev);
-  auto& host_allocator = *at::getCPUAllocator();
+  auto& host_allocator = *at::getCPUAllocator();//TODO: use pinned allocator (CUDACachingHostAllocator)
   auto work_host_data = host_allocator.allocate(ws_host);
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_gpu.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
   TORCH_WARN("=== XGEEV DEBUG ===");
-  TORCH_WARN("vectors shape: ", vectors_gpu.sizes());
-  TORCH_WARN("values  shape: ", values_gpu.sizes());
+  TORCH_WARN("vectors shape: ", vectors.sizes());
+  TORCH_WARN("values  shape: ", values.sizes());
   TORCH_WARN("input   shape: ", input.sizes());
-  TORCH_WARN("vectors dtype: ", vectors_gpu.scalar_type());
-  TORCH_WARN("values  dtype: ", values_gpu.scalar_type());
-  TORCH_WARN("vectors numel: ", vectors_gpu.numel());
-  TORCH_WARN("values  numel: ", values_gpu.numel());
+  TORCH_WARN("vectors dtype: ", vectors.scalar_type());
+  TORCH_WARN("values  dtype: ", values.scalar_type());
+  TORCH_WARN("vectors numel: ", vectors.numel());
+  TORCH_WARN("values  numel: ", values.numel());
   TORCH_WARN("input   numel: ", input.numel());
   TORCH_WARN("===================");
 
@@ -1760,16 +1754,13 @@ at::cuda::solver::xgeev_bufferSize<scalar_t>(
     VR, ldvr,
     static_cast<scalar_t*>(work_device_data.get()), ws_dev,
     static_cast<scalar_t*>(work_host_data.get()),  ws_host,
-    infos_gpu.data_ptr<int>());
-
-  TORCH_WARN("eigvalues (first 5): ", values_gpu.flatten().slice(0, 0, 5));
-  TORCH_WARN("infos: ", infos_gpu);
+    infos.data_ptr<int>());
 
 
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
-  values.copy_(values_gpu.to(values.device()));
-  vectors.copy_(vectors_gpu.to(vectors.device()));
-  infos.copy_(infos_gpu.to(infos.device()));
+  values.copy_(values.to(values.device()));
+  vectors.copy_(vectors.to(vectors.device()));
+  infos.copy_(infos.to(infos.device()));
 
 
 }
