@@ -2,9 +2,6 @@ name: rocm-navi31
 
 on:
   push:
-    branches:
-      - main
-      - release/*
     tags:
       - ciflow/rocm-navi31/*
   workflow_dispatch:
