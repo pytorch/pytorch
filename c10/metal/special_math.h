@@ -1,6 +1,7 @@
 // Implementation of specal math functions for Metal
 #pragma once
 #include <c10/metal/expm1f.h>
+#include <c10/metal/igamma.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
@@ -45,6 +46,11 @@ inline float erf(T x) {
   r = ::metal::fma(r, s, 1.28379166e-1f); //  0x1.06eba8p-3
   r = ::metal::fma(r, a, a);
   return r;
+}
+
+template <typename T>
+float erfc(T x) {
+  return 1.0 - erf(x);
 }
 
 template <typename T>

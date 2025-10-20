@@ -27,6 +27,7 @@ import warnings
 
 from _codecs import encode
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from pickle import (
     APPEND,
     APPENDS,
@@ -68,7 +69,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Callable, Union
+from typing import Any, Union
 
 import torch
 from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
@@ -520,7 +521,7 @@ class Unpickler:
             elif key[0] == BINPERSID[0]:
                 pid = self.stack.pop()
                 # Only allow persistent load of storage
-                if type(pid) is not tuple and not type(pid) is not int:
+                if type(pid) is not tuple and type(pid) is not int:
                     raise UnpicklingError(
                         f"persistent_load id must be tuple or int, but got {type(pid)}"
                     )
