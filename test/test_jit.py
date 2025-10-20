@@ -3153,7 +3153,7 @@ class TestScript(JitTestCase):
             eplan = get_execution_plan(dstate)
             num_bailouts = eplan.code.num_bailouts()
 
-            for i in range(0, num_bailouts):
+            for i in range(num_bailouts):
                 eplan.code.request_bailout(i)
                 self.assertEqual(jitted(x), expected)
 
@@ -5950,7 +5950,7 @@ a")
             # type: (int) -> int
             prev = 1
             v = 1
-            for i in range(0, x):
+            for i in range(x):
                 save = v
                 v = v + prev
                 prev = save
@@ -10938,7 +10938,7 @@ dedent """
 
             # Test symbolic differentiation
             # Run Forward and Backward thrice to trigger autodiff graph
-            for i in range(0, 3):
+            for i in range(3):
                 y = jit_module(x)
                 y.backward(grad)
             x.grad.zero_()
@@ -11802,7 +11802,7 @@ dedent """
         def fn_zip_enumerate(x, y):
             # type: (List[int], List[int]) -> int
             sum = 0
-            for (i, (j, v), k) in zip(x, enumerate(y), range(0, 100)):
+            for (i, (j, v), k) in zip(x, enumerate(y), range(100)):
                 sum += i * j * v * k
 
             return sum
