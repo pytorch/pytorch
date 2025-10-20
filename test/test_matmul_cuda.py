@@ -19,7 +19,6 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
-    xfailIfSM120OrLater,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
