@@ -218,7 +218,7 @@ def _dump_DDP_relevant_env_vars():
     ]
     formatted_output = ""
     for var in relevant_env_vars:
-        value = os.environ[var] if var in os.environ else "N/A"
+        value = os.environ.get(var, "N/A")
         formatted_output += f"env:{var}={value}\n"
     print(formatted_output)
 
@@ -775,7 +775,7 @@ class DistributedDataParallel(Module, Joinable):
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",  # noqa: E201,E202
+                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",
                 )
 
             self.device_ids = None
