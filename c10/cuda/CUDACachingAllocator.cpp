@@ -3742,6 +3742,7 @@ static void uncached_delete(void* ptr) {
 
 static void local_raw_delete(void* ptr);
 thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
+thread_local std::string DeviceCachingAllocator::user_metadata;
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
