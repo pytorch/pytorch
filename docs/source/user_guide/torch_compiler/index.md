@@ -12,6 +12,10 @@ This guide provides comprehensive documentation for `torch.compile`, PyTorch's c
 
 **[Advanced](advanced)** - Deep dives into internals, custom backends, dynamic shapes, and transformations.
 
+**[Troubleshooting Guide](troubleshooting)** - Common issues, debugging techniques, and frequently asked questions.
+
+**[Reference/API](api_reference)** - Complete API documentation and configuration options.
+
 ```{toctree}
 :maxdepth: 1
 :hidden:
@@ -49,22 +53,15 @@ advanced
 
 ```{toctree}
 :maxdepth: 1
+:hidden:
 
 
-../../compile/programming_model.observability.md
-../../compile/programming_model.reporting_issues.md
-../../torch.compiler_troubleshooting.md
-../../torch.compiler_faq.md
-../../torch.compiler_aot_inductor_debugging_guide.md
-../../torch.compiler_aot_inductor_minifier.md
+troubleshooting
 ```
 
 ```{toctree}
 :maxdepth: 1
 :hidden:
 
-../../torch.compiler_api.md
-../../torch.compiler.config.md
-../../torch.compiler_fine_grain_apis.md
-../../export/api_reference.md
+api_reference
 ```
