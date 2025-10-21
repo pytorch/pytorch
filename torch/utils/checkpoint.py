@@ -1187,7 +1187,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # Checking that a functional mode is active should always do what we want
-    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
 
 class _VersionWrapper:
@@ -1292,7 +1292,7 @@ SAC_IGNORED_OPS = {
     # With subclasses involved, these metadata ops become dispatchable, this
     # can result in incorrectness if these ops are selected cached.
     torch.ops.prim.device.default,
-} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
