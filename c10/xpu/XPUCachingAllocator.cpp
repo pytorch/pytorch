@@ -550,7 +550,6 @@ class DeviceCachingAllocator {
   }
 
   std::pair<size_t, size_t> getMemoryInfo() {
-#if SYCL_COMPILER_VERSION >= 20250000
     const auto& device = c10::xpu::get_raw_device(device_index);
     const size_t total = device.get_info<sycl::info::device::global_mem_size>();
     TORCH_CHECK(
@@ -563,11 +562,6 @@ class DeviceCachingAllocator {
     const size_t free =
         device.get_info<sycl::ext::intel::info::device::free_memory>();
     return {free, total};
-#else
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "getMemoryInfo requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
-#endif
   }
 };
 
