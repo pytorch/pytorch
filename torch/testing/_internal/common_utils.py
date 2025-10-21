@@ -1836,7 +1836,7 @@ def make_dynamo_test(
     Decorator function to create a dynamo test case. A function annotate with
     this decorator takes as input a unittest object.
     """
-    from torch._dynamo.testing import CompileCounter, reset, optimize_assert
+    from torch._dynamo.testing import CompileCounter, reset, optimize
     if fn is None:
         return lambda fn: make_dynamo_test(fn)
 
@@ -1852,7 +1852,7 @@ def make_dynamo_test(
 
         dummy()
         reset()
-        opt_fn = optimize_assert(actual)(dummy)
+        opt_fn = optimize(actual, error_on_graph_break=True)(dummy)
         opt_fn()
         reset()
 

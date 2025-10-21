@@ -837,8 +837,12 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.debug_force_nested_calls:
+        if config.debug_force_nested_calls and filename not in DONT_WRAP_FILES:
             fn = external_utils.wrap_inline(fn)
+            # Create a new code object for `fn` so that functions have different
+            # recompilation caches.
+            # Copy hack since deepcopy doesn't actually give a new code object
+            fn.__code__ = fn.__code__.replace(co_varnames=fn.__code__.co_varnames)  # type: ignore[attr-defined]
         elif config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
