@@ -46,6 +46,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
+# Disable fbgemm for CUDA 13 builds as it's not compatible yet
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  export USE_FBGEMM=0
+fi
+
 if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
