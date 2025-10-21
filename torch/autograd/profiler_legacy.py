@@ -137,7 +137,8 @@ class profile:
         top_level_events_only=False,
     ):
         self._check_finish()
-        assert self.function_events is not None
+        if self.function_events is None:
+            raise AssertionError("Expected profiling results")
         return self.function_events.table(
             sort_by=sort_by,
             row_limit=row_limit,
@@ -152,27 +153,32 @@ class profile:
 
     def export_chrome_trace(self, path):
         self._check_finish()
-        assert self.function_events is not None
+        if self.function_events is None:
+            raise AssertionError("Expected profiling results")
         return self.function_events.export_chrome_trace(path)
 
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         self._check_finish()
-        assert self.function_events is not None, "Expected profiling results"
-        assert self.with_stack, "export_stacks() requires with_stack=True"
+        if self.function_events is None:
+            raise AssertionError("Expected profiling results")
+        if not self.with_stack:
+            raise AssertionError("export_stacks() requires with_stack=True")
         return self.function_events.export_stacks(path, metric)
 
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
-        assert self.function_events is not None, "Expected profiling results"
+        if self.function_events is None:
+            raise AssertionError("Expected profiling results")
         return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
 
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
-        assert self.function_events is not None, "Expected profiling results"
+        if self.function_events is None:
+            raise AssertionError("Expected profiling results")
         return self.function_events.total_average()
 
     total_average.__doc__ = EventList.total_average.__doc__
@@ -181,7 +187,8 @@ class profile:
     def self_cpu_time_total(self):
         """Return CPU time as the sum of self times across all events."""
         self._check_finish()
-        assert self.function_events is not None
+        if self.function_events is None:
+            raise AssertionError("Expected profiling results")
         return self.function_events.self_cpu_time_total
 
 
@@ -199,7 +206,8 @@ def _parse_legacy_records(thread_records):
         if start_record is None and name == "__start_profile":
             start_record = record
 
-    assert start_record is not None and not start_record.is_remote()
+    if start_record is None or start_record.is_remote():
+        raise AssertionError("Expected a valid local start_record")
 
     for thread_record_list in thread_records:
         # accumulated memory allocations per handle
@@ -233,10 +241,11 @@ def _parse_legacy_records(thread_records):
                 cpu_memory_allocs[record_key] = 0
                 cuda_memory_allocs[record_key] = 0
             elif record.kind() == "pop":
-                assert (
-                    record_key in range_starts
-                ), f"""Expected record with key {record_key} to exist in range_starts.
-                    This means that the pop event did not have a corresponding push."""
+                if record_key not in range_starts:
+                    raise AssertionError(
+                        f"Expected record with key {record_key} to exist in range_starts. "
+                        "This means that the pop event did not have a corresponding push."
+                    )
 
                 start = range_starts[record_key]
 
@@ -282,7 +291,11 @@ def _parse_legacy_records(thread_records):
             elif record.kind() == "memory_alloc":
                 num_open_handles_cpu = len(cpu_memory_allocs)
                 num_open_handles_cuda = len(cuda_memory_allocs)
-                assert num_open_handles_cpu == num_open_handles_cuda
+                if num_open_handles_cpu != num_open_handles_cuda:
+                    raise AssertionError(
+                        f"Expected CPU and CUDA memory allocation handles to match, "
+                        f"but got {num_open_handles_cpu} CPU and {num_open_handles_cuda} CUDA"
+                    )
                 for handle in cpu_memory_allocs.keys():
                     cpu_memory_allocs[handle] += record.cpu_memory_usage()
                 for handle in cuda_memory_allocs.keys():
