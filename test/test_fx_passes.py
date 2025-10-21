@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import operator
 import logging
 import sys
+import unittest
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -14,7 +15,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
-from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 
 logging.basicConfig(level=logging.WARNING)
@@ -401,14 +402,13 @@ class TestFXGraphPasses(JitTestCase):
                                                  allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
 
+    @unittest.skipIf(not TEST_CUDA, "Test needs GPUs")
     def test_fx_cudagraph_partition(self):
-        from torch.fx.passes.cudagraph_partition import cudagraph_partition_pass
+        from torch.fx.passes.backends.cudagraph_partition import cudagraph_partition_pass
 
         BATCH_SIZE = 16
         MLP_SIZE = 128
         HIDDEN_SIZE = 256
-        RANDOM_SEED = 0
-
 
         # Note: this custom op must be an out_variant op, which writes back to a pre-allocated output tensor.
         # This output tensor would be created within cudagraph memory pool to work with cudagraphs.
