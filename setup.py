@@ -67,6 +67,9 @@
 #   USE_NUMPY=0
 #     disables the NumPy build
 #
+#   USE_ZENDNN=0
+#     disables the ZenDNN build
+#
 #   BUILD_TEST=0
 #     disables the test build
 #
@@ -1190,6 +1193,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report("-- Not using CBLAS in MKLDNN")
         else:
             report("-- Not using MKLDNN")
+        if cmake_cache_vars["USE_ZENDNN"]:
+            report("-- Using ZENDNN")
+        else:
+            report("-- Not using ZENDNN")
         if cmake_cache_vars["USE_NCCL"] and cmake_cache_vars["USE_SYSTEM_NCCL"]:
             report(
                 "-- Using system provided NCCL library at "

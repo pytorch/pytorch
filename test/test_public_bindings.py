@@ -140,6 +140,7 @@ class TestPublicBindings(TestCase):
             "has_mps",
             "has_openmp",
             "has_spectral",
+            "has_zendnn",
             "iinfo",
             "import_ir_module_from_buffer",
             "import_ir_module",

@@ -147,6 +147,7 @@ class TORCH_API Context {
   static bool hasMKL();
   static bool hasKleidiAI();
   static bool hasLAPACK();
+  static bool hasZenDNN();
   static bool hasMKLDNN();
   static bool ckSupported();
   static bool hasEigenSparse();
@@ -624,6 +625,10 @@ inline bool hasLAPACK() {
 
 inline bool hasEigenSparse() {
   return globalContext().hasEigenSparse();
+}
+
+inline bool hasZenDNN() {
+  return globalContext().hasZenDNN();
 }
 
 inline bool hasMAGMA() {
