@@ -1,15 +1,15 @@
-name: rocm
+name: rocm-navi31
 
 on:
   push:
-    branches:
-      - main
-      - release/*
     tags:
-      - ciflow/rocm/*
+      - ciflow/rocm-navi31/*
   workflow_dispatch:
   schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
+    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
+    # Also run less frequently on weekends.
+    - cron: 45 */2 * * 1-5
+    - cron: 45 4,12 * * 0,6
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -36,12 +36,8 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
         ]}
     secrets: inherit
 
@@ -49,7 +45,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: linux-jammy-rocm-py3.10
+    name: linux-jammy-rocm-py3_10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-jammy-rocm-py3_10-build
@@ -58,4 +54,10 @@ jobs:
       build-environment: linux-jammy-rocm-py3.10
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+      tests-to-include: >-
+         ${{ github.event_name == 'schedule' && 'test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs
+         test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
+         inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
+         inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
+         inductor/test_flex_attention inductor/test_max_autotune' || '' }}
     secrets: inherit
