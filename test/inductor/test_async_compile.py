@@ -78,7 +78,7 @@ class TestAsyncCompile(TestCase):
         loop_header = (
             "for r0_offset in tl.range(0, r0_numel, R0_BLOCK, num_stages = 2):"
             if torch.version.hip
-            else "for r0_offset in range(0, r0_numel, R0_BLOCK):"
+            else "for r0_offset in tl.range(0, r0_numel, R0_BLOCK):"
         )
 
         func_def = f"""
