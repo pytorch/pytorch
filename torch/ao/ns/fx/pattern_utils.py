@@ -167,7 +167,8 @@ def end_node_matches_reversed_fusion(
         elif cur_node.op == "call_module":
             fusion_el_is_mod = isinstance(cur_fusion_el, type)
             if fusion_el_is_mod:
-                assert isinstance(cur_node.target, str)
+                if not isinstance(cur_node.target, str):
+                    raise AssertionError(f"Expected str, got {type(cur_node.target)}")
                 target_mod = getattr_from_fqn(gm, cur_node.target)
                 if not isinstance(cur_fusion_el, type):
                     return False
@@ -190,7 +191,10 @@ def end_node_matches_reversed_fusion(
                     if cur_node.target != cur_fusion_el:
                         return False
                 else:
-                    assert isinstance(cur_fusion_el, tuple)
+                    if not isinstance(cur_fusion_el, tuple):
+                        raise AssertionError(
+                            f"Expected tuple, got {type(cur_fusion_el)}"
+                        )
                     if cur_node.target != cur_fusion_el[0]:
                         return False
                     elif len(cur_node.args) < 2:

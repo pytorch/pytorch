@@ -10,7 +10,8 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
-from torch._dynamo.eval_frame import argument_names
+from torch._dynamo.eval_frame import argument_names, check_user_input_output
+from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
@@ -479,6 +480,7 @@ def _dynamo_graph_capture_for_export(
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
+            check_user_input_output(flat_inputs, UserErrorType.INVALID_INPUT)
             module_to_trace = ModuleToTrace(mod, in_spec)
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
 
