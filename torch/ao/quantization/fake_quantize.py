@@ -175,10 +175,9 @@ class FakeQuantize(FakeQuantizeBase):
         super().__init__()
         # Populate quant_min/quant_max to observer_kwargs if valid
         if quant_min is not None and quant_max is not None:
-            if quant_min > quant_max:
-                raise AssertionError(
-                    "quant_min must be less than or equal to quant_max"
-                )
+            assert quant_min <= quant_max, (
+                "quant_min must be less than or equal to quant_max"
+            )
             dtype = observer_kwargs.get("dtype", torch.quint8)
             if hasattr(observer, "p"):
                 # In case observer is _PartialWrapper, dtype can be stored in
@@ -187,11 +186,9 @@ class FakeQuantize(FakeQuantizeBase):
                     "dtype", dtype
                 )
             # pyrefly: ignore  # bad-argument-type
-            if torch.iinfo(dtype).min > quant_min:
-                raise AssertionError("quant_min out of bound")
+            assert torch.iinfo(dtype).min <= quant_min, "quant_min out of bound"
             # pyrefly: ignore  # bad-argument-type
-            if quant_max > torch.iinfo(dtype).max:
-                raise AssertionError("quant_max out of bound")
+            assert quant_max <= torch.iinfo(dtype).max, "quant_max out of bound"
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})
         observer_kwargs["is_dynamic"] = is_dynamic
         self.activation_post_process = observer(**observer_kwargs)
@@ -213,12 +210,11 @@ class FakeQuantize(FakeQuantizeBase):
             if hasattr(self.activation_post_process, "ch_axis")
             else -1
         )
-        if not (_is_per_channel(self.qscheme) or _is_per_tensor(self.qscheme)):
-            raise AssertionError(
-                "Only per channel and per tensor quantization are supported in fake quantize"
-                + " got qscheme: "
-                + str(self.qscheme)
-            )
+        assert _is_per_channel(self.qscheme) or _is_per_tensor(self.qscheme), (
+            "Only per channel and per tensor quantization are supported in fake quantize"
+            + " got qscheme: "
+            + str(self.qscheme)
+        )
         self.is_per_channel = _is_per_channel(self.qscheme)
 
     @torch.jit.export
@@ -299,10 +295,7 @@ class FakeQuantize(FakeQuantizeBase):
                 if name == "scale":
                     self.scale.resize_(val.shape)
                 else:
-                    if name != "zero_point":
-                        raise AssertionError(
-                            "Expected 'zero_point' but got different state key"
-                        )
+                    assert name == "zero_point"
                     self.zero_point.resize_(val.shape)
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
@@ -310,10 +303,7 @@ class FakeQuantize(FakeQuantizeBase):
                     if name == "scale":
                         self.scale.copy_(val)
                     else:
-                        if name != "zero_point":
-                            raise AssertionError(
-                                "Expected 'zero_point' but got different state key"
-                            )
+                        assert name == "zero_point"
                         self.zero_point.copy_(val)
             elif strict:
                 missing_keys.append(key)
@@ -339,19 +329,17 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
-        if type(self.activation_post_process) is not FixedQParamsObserver:
-            raise AssertionError(
-                f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
-            )
+        assert type(self.activation_post_process) is FixedQParamsObserver, (
+            f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
+        )
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
         self.zero_point = self.activation_post_process.zero_point
-        if not _is_per_tensor(self.qscheme):
-            raise AssertionError(
-                "Only per tensor quantization is supported"
-                + " FixedQParamsFakeQuantize module, got qscheme:"
-                + str(self.qscheme)
-            )
+        assert _is_per_tensor(self.qscheme), (
+            "Only per tensor quantization is supported"
+            + " FixedQParamsFakeQuantize module, got qscheme:"
+            + str(self.qscheme)
+        )
 
     @torch.jit.export
     def calculate_qparams(self):  # type: ignore[override]
@@ -394,13 +382,12 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         **observer_kwargs: Any,
     ) -> None:
         super().__init__(observer, quant_min, quant_max, **observer_kwargs)
-        if not isinstance(
+        assert isinstance(
             self.activation_post_process,
             (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver),
-        ):
-            raise AssertionError(
-                "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
-            )
+        ), (
+            "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
+        )
         self.register_buffer("fake_quant_enabled", torch.tensor([1], dtype=torch.long))
         self.register_buffer("observer_enabled", torch.tensor([1], dtype=torch.long))
         self.is_symmetric_quant = _is_symmetric_quant(

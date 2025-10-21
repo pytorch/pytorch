@@ -565,10 +565,9 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
                 torch.ao.quantization.MovingAveragePerChannelMinMaxObserver,
             ),
         )
-        if is_per_channel:
-            raise AssertionError(
-                "Per channel weight observer is not supported yet for ConvTranspose{n}d."
-            )
+        assert not is_per_channel, (
+            "Per channel weight observer is not supported yet for ConvTranspose{n}d."
+        )
 
 
 if sys.version_info < (3, 12):
@@ -600,8 +599,7 @@ def _add_module_to_qconfig_obs_ctr(
         return qconfig
 
     def get_factory_kwargs_based_on_module_device():
-        if not isinstance(module, torch.nn.Module):
-            raise AssertionError("module must be an instance of torch.nn.Module")
+        assert isinstance(module, torch.nn.Module)
         devices = {p.device for p in module.parameters()} | {
             p.device for p in module.buffers()
         }
@@ -673,10 +671,7 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     if q1 is None or q2 is None:
         return q1 == q2
     else:
-        if q1 is None or q2 is None:
-            raise AssertionError(
-                "Both q1 and q2 must be non-None for qconfig comparison"
-            )
+        assert q1 is not None and q2 is not None
         try:
             # Qconfig weight and activation can be either a partial wrapper,
             # or an observer class. Special handling is required (above) for
