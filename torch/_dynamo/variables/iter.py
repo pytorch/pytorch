@@ -189,8 +189,8 @@ class ItertoolsVariable(VariableTracker):
                     *args, mutation_type=ValueMutationNew()
                 )
 
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.repeat), args, kwargs
+            return VariableTracker.build(tx, polyfills.repeat).call_function(
+                tx, args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(

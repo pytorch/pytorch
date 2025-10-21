@@ -568,16 +568,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.accumulate_grad), args, kwargs
+            return VariableTracker.build(tx, polyfills.accumulate_grad).call_function(
+                tx, args, kwargs
             )
 
         @register(math.radians)
         def handle_radians(self, tx: "InstructionTranslator", *args, **kwargs):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
-                return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.radians), args, kwargs
+                return VariableTracker.build(tx, polyfills.radians).call_function(
+                    tx, args, kwargs
                 )
 
         @register(torch.is_inference_mode_enabled)
@@ -829,8 +829,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             _, tx: "InstructionTranslator", *args, **kwargs
         ):
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
-                return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
+                return VariableTracker.build(
+                    tx, polyfills.foreach_lerp_inplace
+                ).call_function(
+                    tx,
                     args,
                     kwargs,
                 )
@@ -840,8 +842,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
-                return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.foreach_pow_scalar),
+                return VariableTracker.build(
+                    tx, polyfills.foreach_pow_scalar
+                ).call_function(
+                    tx,
                     args,
                     kwargs,
                 )
@@ -1968,8 +1972,8 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
         if name == "key":
             return variables.EnumVariable(self.value.key())
         elif name == "process":
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, self.value.process.__func__),
+            return VariableTracker.build(tx, self.value.process.__func__).call_function(
+                tx,
                 [self] + args,
                 kwargs,
             )
