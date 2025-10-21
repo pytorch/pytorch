@@ -1000,6 +1000,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         )
         non_ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
         ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
+        # test pg caching when unflatten into same layout.
+        self.assertEqual(non_ep_mesh["dp"].get_group(), ep_mesh["dp"].get_group())
+        self.assertEqual(non_ep_mesh["tp"].get_group(), ep_mesh["ep_tp"].get_group())
         self.assertEqual(non_ep_mesh["cp"].mesh, ep_mesh["ep"].mesh)
         self.assertEqual(non_ep_mesh["tp"].mesh, ep_mesh["ep_tp"].mesh)
         mesh_3d = global_mesh._unflatten(0, (4, 2, 1), ("dp", "cp", "tp"))
