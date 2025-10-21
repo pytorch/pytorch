@@ -123,7 +123,8 @@ def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
 def _get_tensor_constant_from_node(node, m):
     if node is None:
         return None
-    assert node.op == "get_attr"
+    if node.op != "get_attr":
+        raise AssertionError(f"Expected node.op to be 'get_attr', got {node.op}")
     target_atoms = node.target.split(".")
     attr_itr = m
     for i, atom in enumerate(target_atoms):
@@ -248,7 +249,10 @@ def fold_bn_weights_into_conv_node(
 
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
-    assert isinstance(weight_attr_name, str)
+    if not isinstance(weight_attr_name, str):
+        raise AssertionError(
+            f"Expected conv_weight_node.target to be a string attribute name, got {type(weight_attr_name)}"
+        )
     _assign_attr(fused_weight, m, weight_attr_name, _AttrKind.PARAMETER)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
