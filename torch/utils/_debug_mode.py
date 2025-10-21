@@ -143,6 +143,7 @@ class _OpCall(_DebugCall):
         return f"{_op_to_str(self.op)}({args_str}{kwargs_str})"
 
     def __iter__(self):
+        # for BC; tuple(self) returns (op, args, kwargs, call_depth)
         yield from [self.op, self.args, self.kwargs, self.call_depth]
 
     def __repr__(self) -> str:
@@ -172,6 +173,7 @@ class _RedistributeCall(_DebugCall):
         return f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
 
     def __iter__(self):
+        # for BC; tuple(self) returns (op, placement info, kwargs, call_depth)
         yield REDISTRIBUTE_FUNC
         if self.transform_info_str:
             yield [self.arg, self.transform_info_str]
