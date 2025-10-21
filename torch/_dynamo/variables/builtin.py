@@ -745,9 +745,9 @@ class BuiltinVariable(VariableTracker):
                 )
 
                 def handler(tx, a, b):
-                    return tx.inline_user_function_return(
-                        VariableTracker.build(tx, polyfill_fn_mapping[op]), [a, b], {}
-                    )
+                    return VariableTracker.build(
+                        tx, polyfill_fn_mapping[op]
+                    ).call_function(tx, [a, b], {})
 
                 result.append(((VariableTracker, VariableTracker), handler))
                 return result
@@ -1559,7 +1559,6 @@ class BuiltinVariable(VariableTracker):
                 )
             else:
                 # Overrides for custom str method
-                # Pass method as function to call tx.inline_user_function_return
                 bound_method = str_method.__func__  # type: ignore[attr-defined]
 
                 try:
@@ -1925,8 +1924,8 @@ class BuiltinVariable(VariableTracker):
             # VT(foo.__dict__). This simplifies the construction of the new
             # dict.
             args[0] = args[0].get_forwarded_dict(tx)
-        return tx.inline_user_function_return(
-            VariableTracker.build(tx, polyfills.construct_dict),
+        return VariableTracker.build(tx, polyfills.construct_dict).call_function(
+            tx,
             [VariableTracker.build(tx, user_cls), *args],
             kwargs,
         )
@@ -2022,7 +2021,7 @@ class BuiltinVariable(VariableTracker):
         ):
             iter_fn = arg.var_getattr(tx, "__iter__")
             if isinstance(iter_fn, variables.UserMethodVariable):
-                out = tx.inline_user_function_return(iter_fn, args, kwargs)
+                out = iter_fn.call_function(tx, list(args), kwargs)
                 if isinstance(out, SetVariable):
                     return out
                 return BuiltinVariable(set).call_set(tx, out)

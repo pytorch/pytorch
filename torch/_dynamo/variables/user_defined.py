@@ -490,8 +490,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return NullContextVariable(*args, **kwargs)
         elif self.value is collections.OrderedDict:
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.construct_dict),
+            return VariableTracker.build(tx, polyfills.construct_dict).call_function(
+                tx,
                 [self, *args],
                 kwargs,
             )
@@ -823,10 +823,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.MappingProxyVariable(args[0])
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
             with do_not_convert_to_tracable_parameter():
-                return tx.inline_user_function_return(
-                    VariableTracker.build(
-                        tx, polyfills.instantiate_user_defined_class_object
-                    ),
+                return VariableTracker.build(
+                    tx, polyfills.instantiate_user_defined_class_object
+                ).call_function(
+                    tx,
                     [self, *args],
                     kwargs,
                 )
@@ -1803,8 +1803,8 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
-        return tx.inline_user_function_return(
-            fn_variable,
+        return fn_variable.call_function(
+            tx,
             args,
             kwargs,
         )

@@ -1085,8 +1085,8 @@ class TensorVariable(VariableTracker):
         if value is not None:
             from .. import polyfills
 
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.addcmul_inplace),
+            return VariableTracker.build(tx, polyfills.addcmul_inplace).call_function(
+                tx,
                 [self, tensor1, tensor2, value],
                 {},
             )

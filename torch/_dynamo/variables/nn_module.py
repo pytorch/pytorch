@@ -542,11 +542,9 @@ class NNModuleVariable(VariableTracker):
                     args = [self] + args
                 else:
                     assert istype(fn, types.FunctionType)
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=fn_source),
-                    args,
-                    kwargs,
-                )
+                return variables.UserFunctionVariable(
+                    fn, source=fn_source
+                ).call_function(tx, args, kwargs)
 
     def call_method(
         self,
@@ -773,8 +771,8 @@ class NNModuleVariable(VariableTracker):
                 assert isinstance(fn, types.FunctionType)
 
                 src = AttrSource(AttrSource(self.source, name), "__func__")
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=src),
+                return variables.UserFunctionVariable(fn, source=src).call_function(
+                    tx,
                     [self] + list(args),
                     kwargs,
                 )
@@ -851,8 +849,8 @@ class NNModuleVariable(VariableTracker):
             # Inline the function
             fn = getattr(module, name).__func__
             fn_source = AttrSource(AttrSource(self.source, name), "__func__")
-            return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=fn_source),
+            return variables.UserFunctionVariable(fn, source=fn_source).call_function(
+                tx,
                 [self] + args,
                 kwargs,
             )
@@ -951,13 +949,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             # The program can mutate the nn module object but the saved `value`
             # will not reflect the mutations. So, trace through the `__iter__`
             # function to reflect any tracked mutations.
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, fn),
-                [
-                    self,
-                ],
-                {},
-            ).unpack_var_sequence(tx)
+
+            return (
+                VariableTracker.build(tx, fn)
+                .call_function(
+                    tx,
+                    [
+                        self,
+                    ],
+                    {},
+                )
+                .unpack_var_sequence(tx)
+            )
 
         return super().unpack_var_sequence(tx)
 

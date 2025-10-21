@@ -181,11 +181,9 @@ class BaseListVariable(VariableTracker):
             if not len(args):
                 raise_args_mismatch(tx, name)
 
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.index),
-                [self] + list(args),
-                kwargs,
-            )
+                return VariableTracker.build(tx, polyfills.index).call_function(
+                    tx, [self] + list(args), kwargs
+                )
         elif name == "count":
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
