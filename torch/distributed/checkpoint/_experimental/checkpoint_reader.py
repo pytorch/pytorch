@@ -134,11 +134,12 @@ class CheckpointReader:
 
                 tensor_offset = source.untyped_storage()._checkpoint_offset
 
-                assert tensor_offset is not None, (
-                    "checkpoint_offset for tensor in torch serialized file is not set. This could"
-                    "happen if the checkpoint was saved with a older version of Pytorch."
-                    "Please make sure that the checkpoint was saved with Pytorch 2.7 or later."
-                )
+                if tensor_offset is None:
+                    raise AssertionError(
+                        "checkpoint_offset for tensor in torch serialized file is not set. This could "
+                        "happen if the checkpoint was saved with a older version of Pytorch. "
+                        "Please make sure that the checkpoint was saved with Pytorch 2.7 or later."
+                    )
 
                 tensor_len = source.nelement() * source.element_size()
                 file.seek(

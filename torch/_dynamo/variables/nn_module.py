@@ -26,6 +26,7 @@ of module state.
 import functools
 import inspect
 import itertools
+import re
 import types
 from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING
@@ -103,16 +104,26 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
         try:
             mod._infer_parameters(mod, fake_args, fake_kwargs)
-        except AttributeError:
+        except AttributeError as e:
+            # Re-raise with the original error message from the AttributeError
             raise_observed_exception(
                 AttributeError,
                 tx,
+                msg=str(e)
+                if str(e)
+                else "AttributeError during lazy module initialization",
             )
 
 
 @contextmanager
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
+    # Remove redundant namings
+    fully_qualified_name = re.sub(
+        r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]",
+        r".\2",
+        fully_qualified_name,
+    )
     num_calls = tx.num_calls.get(fully_qualified_name, 0)
     module_key = f"{module_key}@{num_calls}" if num_calls > 0 else module_key
     try:
@@ -363,6 +374,7 @@ class NNModuleVariable(VariableTracker):
                 raise_observed_exception(
                     AttributeError,
                     tx,
+                    msg=f"'{type(base).__name__}' object has no attribute '{name}'",
                 )
 
         if name == "forward":
@@ -1192,7 +1204,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
         if out is None:
-            raise_observed_exception(AttributeError, tx)
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+            )
         return out
 
 
