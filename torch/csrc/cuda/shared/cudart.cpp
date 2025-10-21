@@ -120,6 +120,14 @@ void initCudartBindings(PyObject* module) {
         C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
         return {device_free, device_total};
       });
+  cudart.def(
+      "cuda"
+      "GetLastError",
+      []() -> cudaError_t {
+        py::gil_scoped_release no_gil;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        return C10_CUDA_ERROR_HANDLED(cudaGetLastError());
+      });
 }
 
 } // namespace torch::cuda::shared
