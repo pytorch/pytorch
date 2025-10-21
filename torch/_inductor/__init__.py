@@ -8,11 +8,7 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
-from .standalone_compile import (  # noqa: TC001
-    AOTCompiledArtifact,
-    CacheCompiledArtifact,
-    CompiledArtifact,
-)
+from .standalone_compile import CompiledArtifact  # noqa: TC001
 
 
 if TYPE_CHECKING:
