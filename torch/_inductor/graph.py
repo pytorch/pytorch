@@ -60,6 +60,7 @@ from .codegen.common import (
     init_backend_registration,
     WorkspaceArg,
 )
+from .codegen.wrapper import DualWrapperCodegen
 from .exc import (
     CppWrapperCodegenError,
     LoweringException,
@@ -2123,9 +2124,6 @@ class GraphLowering(torch.fx.Interpreter):
                     partition_signatures,
                 )
 
-            # Create DualWrapperCodegen to handle both wrappers
-            from .codegen.wrapper import DualWrapperCodegen
-
             original_wrapper_code = self.wrapper_code
             dual_wrapper = DualWrapperCodegen(
                 original_wrapper_code, self.autotuning_wrapper_code
@@ -2133,20 +2131,15 @@ class GraphLowering(torch.fx.Interpreter):
             self.wrapper_code = dual_wrapper  # type: ignore[assignment]
 
         if self.const_module:
-            if hasattr(self.wrapper_code, "original_wrapper_code"):
+            wrapper = self.wrapper_code
+            if isinstance(wrapper, DualWrapperCodegen):
                 # DualWrapperCodegen case
                 start = next(self.const_module.wrapper_code._names_iter)
-                self.wrapper_code.original_wrapper_code._names_iter = itertools.count(
-                    start
-                )  # type: ignore[attr-defined]
-                self.wrapper_code.autotuning_wrapper_code._names_iter = itertools.count(
-                    start
-                )  # type: ignore[attr-defined]
+                wrapper.original_wrapper_code._names_iter = itertools.count(start)  # type: ignore[attr-defined]
+                wrapper.autotuning_wrapper_code._names_iter = itertools.count(start)  # type: ignore[attr-defined]
             else:
                 # Regular wrapper case
-                self.wrapper_code._names_iter = (
-                    self.const_module.wrapper_code._names_iter
-                )
+                wrapper._names_iter = self.const_module.wrapper_code._names_iter
 
     def extract_autotune_inputs(
         self, example_inputs: list[Union[int, float, torch.Tensor]]
@@ -2390,26 +2383,26 @@ class GraphLowering(torch.fx.Interpreter):
                 V.graph.all_codegen_kernel_names,
             )
 
-        if self.use_dual_wrapper:
-            # If we're doing full graph autotuning, we need to generate the autotuning wrapper code
-            # and the autotuning kernels
-            original_wrapper_code = self.wrapper_code.original_wrapper_code  # type: ignore[attr-defined]
-            autotuning_wrapper_code = self.wrapper_code.autotuning_wrapper_code  # type: ignore[attr-defined]
+            if self.use_dual_wrapper:
+                # If we're doing full graph autotuning, we need to generate the autotuning wrapper code
+                # and the autotuning kernels
+                original_wrapper_code = self.wrapper_code.original_wrapper_code  # type: ignore[attr-defined]
+                autotuning_wrapper_code = self.wrapper_code.autotuning_wrapper_code  # type: ignore[attr-defined]
 
-            original_cpp_wrapper = self.cpp_wrapper
-            self.wrapper_code = autotuning_wrapper_code
-            self.cpp_wrapper = False
-            autotuning_code, _ = self.wrapper_code.generate(self.is_inference)
-            autotuning_module = self._compile_to_module_lines(autotuning_code)
-            real_inputs = self.extract_real_inputs()
-            autotuning_module.call(real_inputs)
-            del real_inputs
-            self.cpp_wrapper = original_cpp_wrapper
-            self.wrapper_code = original_wrapper_code
+                original_cpp_wrapper = self.cpp_wrapper
+                self.wrapper_code = autotuning_wrapper_code
+                self.cpp_wrapper = False
+                autotuning_code, _ = self.wrapper_code.generate(self.is_inference)
+                autotuning_module = self._compile_to_module_lines(autotuning_code)
+                real_inputs = self.extract_real_inputs()
+                autotuning_module.call(real_inputs)
+                del real_inputs
+                self.cpp_wrapper = original_cpp_wrapper
+                self.wrapper_code = original_wrapper_code
 
-        result = self.wrapper_code.generate(self.is_inference)
-        self.wrapper_code.pop_codegened_graph()
-        return result
+            result = self.wrapper_code.generate(self.is_inference)
+            self.wrapper_code.pop_codegened_graph()
+            return result
 
     def codegen_subgraph(self, parent_graph: GraphLowering) -> None:
         """

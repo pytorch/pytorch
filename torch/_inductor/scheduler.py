@@ -5486,7 +5486,6 @@ class Scheduler:
 
             def wrap_codegen_node(w, *args, **kwargs):  # type: ignore[no-untyped-def]
                 self.enter_context(node)
-                self.current_node = node
 
                 curr_node = node
                 self.current_device = kwargs["current_device"]
@@ -5515,6 +5514,7 @@ class Scheduler:
                             )
                             w.codegen_device_guard_enter(device.index)
 
+                self.current_node = node
                 self.buffer_names_to_free.update(node.last_usage)
                 if node.is_template():
                     prologue, template_node, epilogue = (
