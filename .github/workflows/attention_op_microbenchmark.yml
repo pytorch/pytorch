@@ -18,35 +18,19 @@ permissions:
   contents: read
 
 jobs:
-  # H100 A100 runners
   attn-microbenchmark-build:
     if: github.repository_owner == 'pytorch'
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge.memory"
-    continue-on-error: true
-    steps:
-      - name: attn-microbenchmark-build
-        uses: ./.github/workflows/_linux-build.yml
-        with:
-          runner: linux.12xlarge.memory
-          build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
-          docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
-          cuda-arch-list: '8.0 9.0'
-          test-matrix: |
-            { include: [
-              { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
-              { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-            ]}
-      - name: Clone CodeLlama
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: meta-pytorch/attention-gym
-          ref: main
-          path: attention-gym
-      - name: Install attention-gym
-        shell: bash
-        run: |
-          cd "${GITHUB_WORKSPACE}/attention-gym"
-          python3 -m pip install .
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      runner: linux.12xlarge.memory
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '8.0 9.0'
+      test-matrix: |
+        { include: [
+          { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+        ]}
 
   attn-microbenchmark-test:
     name: attn-microbenchmark-test

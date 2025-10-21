@@ -1674,6 +1674,10 @@ test_attention_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  # Install attention-gym dependency
+  echo "Installing attention-gym..."
+  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@main
+
   cd "${TEST_DIR}"/benchmarks/transformer
 
   $TASKSET python score_mod.py --config configs/config_basic.yaml \
