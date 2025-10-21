@@ -489,11 +489,13 @@ class PContext(abc.ABC):
                     sig = getattr(signal, sig_name.strip())
                     signal.signal(sig, _terminate_process_handler)
                     logger.info("Registered signal handler for %s", sig_name)
-                except (AttributeError, ValueError) as e:
+                except (AttributeError, ValueError):
                     logger.warning(
-                        "Failed to register signal handler for %s: %s", sig_name, e
+                        "Failed to register signal handler for %s",
+                        sig_name,
+                        exc_info=True,
                     )
-                except RuntimeError as e:
+                except RuntimeError:
                     if IS_WINDOWS and sig_name.strip() in [
                         "SIGHUP",
                         "SIGQUIT",
@@ -505,7 +507,9 @@ class PContext(abc.ABC):
                         )
                     else:
                         logger.warning(
-                            "Failed to register signal handler for %s: %s", sig_name, e
+                            "Failed to register signal handler for %s",
+                            sig_name,
+                            exc_info=True,
                         )
         else:
             logger.warning(
