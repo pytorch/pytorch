@@ -374,11 +374,11 @@ def _single_tensor_adam(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         if not isinstance(lr, float):
-            raise AssertionError("Expected lr to be a float")
+            raise AssertionError(f"Expected lr to be a float, but got {type(lr)}")
         if not isinstance(beta1, float):
-            raise AssertionError("Expected beta1 to be a float")
+            raise AssertionError(f"Expected beta1 to be a float, but got {type(beta1)}")
         if not isinstance(beta2, float):
-            raise AssertionError("Expected beta2 to be a float")
+            raise AssertionError(f"Expected beta2 to be a float, but got {type(beta2)}")
     else:
         lr = _to_scalar(lr)
         beta1 = _to_scalar(beta1)

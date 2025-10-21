@@ -358,7 +358,8 @@ def _single_tensor_adafactor(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         if not isinstance(lr, float):
-            raise AssertionError("Expected lr to be a float")
+            raise AssertionError(f"Expected lr to be a float, but got {type(lr)}")
+
     else:
         lr = _to_scalar(lr)
 

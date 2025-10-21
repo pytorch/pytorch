@@ -333,7 +333,9 @@ class LBFGS(Optimizer):
                 and returns the loss.
         """
         if len(self.param_groups) != 1:
-            raise AssertionError("Expected exactly one param_group")
+            raise AssertionError(
+                f"Expected exactly one param_group, but got {len(self.param_groups)}"
+            )
 
         # Make sure the closure is always called with grad enabled
         closure = torch.enable_grad()(closure)
