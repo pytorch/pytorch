@@ -8,6 +8,7 @@ import os
 from model_registry import MultiMLP
 
 import torch
+from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     Schedule1F1B,
     ScheduleDualPipeV,
@@ -65,7 +66,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
-        self.group = kwargs.get("group", None)
+        self.group = kwargs.get("group")
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -202,7 +203,71 @@ class ScheduleTest(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    def test_zero_bubble_schedule_errors_with_compile(self):
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
+    def test_schedule_eval_then_train(self, ScheduleClass):
+        """
+        Test that simply runs evaluation followed by training.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        d_hid, batch_size = 512, 256
+        n_stages = 1
+        device = "cpu"
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(device)
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        target = torch.randn(batch_size, d_hid, device=device)
+
+        def loss_fn(y, target):
+            return torch.nn.functional.cross_entropy(y, target)
+
+        submod_name = "layers.0"
+        stage_module = full_mod.get_submodule(submod_name)
+
+        # Create a pipeline stage to wrap that submodule
+        num_microbatches = 2
+        stages = [PipelineStage(stage_module, 0, n_stages, device)]
+
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stages = stages[0]
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        # Run eval
+        for _ in range(2):
+            # Zero gradients
+            stage_module.zero_grad()
+            losses = []
+            schedule.eval(x, target=target, losses=losses)
+        # Run training
+        try:
+            for _ in range(2):
+                losses = []
+                schedule.step(x, target=target, losses=losses)
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_zero_bubble_schedule_errors_with_compile(self, ScheduleClass):
         """
         Test that zero bubble schedules raise an error when used with torch.compile.
         """
@@ -215,16 +280,18 @@ class ScheduleTest(TestCase):
         model = MultiMLP(8, n_layers=n_stages)
         # full_mod
         compiled_model = torch.compile(model)
+        self.assertTrue(isinstance(compiled_model, OptimizedModule))
         stage = PipelineStage(
             compiled_model,
             0,
             n_stages,
             device,
         )
-        with self.assertRaises(RuntimeError):
-            ScheduleInterleavedZeroBubble([stage], 2)
-
-        torch.distributed.destroy_process_group()
+        try:
+            with self.assertRaises(RuntimeError):
+                ScheduleClass([stage], 2)
+        finally:
+            torch.distributed.destroy_process_group()
 
 
 instantiate_parametrized_tests(ScheduleTest)
@@ -468,6 +535,23 @@ class TestScheduleLowering(TestCase):
             {
                 "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
                 "comms": ["0UNSHARD", "0F0", "0F1", "0B0", "0B1", "0RESHARD"],
+            },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0UNSHARD",
+                    "1UNSHARD",
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1F1",
+                    "1B0",
+                    "1B1",
+                    "1RESHARD",
+                    "0B0",
+                    "0B1",
+                    "0RESHARD",
+                ],
             },
         ],
     )
@@ -913,6 +997,7 @@ class TestScheduleLowering(TestCase):
             stages,
             num_microbatches,
             loss_fn=loss_fn,
+            scale_grads=False,
         )
         schedule._prepare_schedule_with_comms(
             {

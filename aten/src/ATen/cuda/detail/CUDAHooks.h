@@ -17,7 +17,7 @@ TORCH_CUDA_CPP_API void set_magma_init_fn(void (*magma_init_fn)());
 
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
-  CUDAHooks(at::CUDAHooksArgs) {}
+  CUDAHooks(at::CUDAHooksArgs /*unused*/) {}
   void init() const override;
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(const void* data) const override;
@@ -45,6 +45,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool supportsDilatedConvolutionWithCuDNN() const override;
   bool supportsDepthwiseConvolutionWithCuDNN() const override;
   bool supportsBFloat16ConvolutionWithCuDNNv8() const override;
+  bool supportsBFloat16RNNWithCuDNN() const override;
   bool hasCUDART() const override;
   long versionCUDART() const override;
   long versionCuDNN() const override;

@@ -277,7 +277,7 @@ def create_graph(objects, *, context=None, filter=None):
         references = annotated_references(obj)
         for referrent in gc.get_referents(obj):
             rid = id(referrent)
-            tidx = id_to_node.get(rid, None)
+            tidx = id_to_node.get(rid)
             if tidx is None:
                 continue
             labels = references.get(rid, ["?"])
@@ -461,6 +461,7 @@ def to_html(nodes):
         if n.context is None:
             continue
         s = _listener_template.format(id=str(i + 1), stack=escape(f'{n.label}:\n{n.context}'))
+        # pyrefly: ignore  # bad-argument-type
         listeners.append(s)
     dot = to_dot(nodes)
     return _template.replace('$DOT', repr(dot)).replace('$LISTENERS', '\n'.join(listeners))

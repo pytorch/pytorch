@@ -2,6 +2,7 @@
 import functools
 import operator
 import os
+import re
 import unittest.mock as mock
 from unittest.mock import patch
 
@@ -893,6 +894,29 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gn(inp), inp + 3)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_step_unsupported(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1 + 2
+            torch._dynamo.step_unsupported()
+            return x + 4
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_step_unsupported_empty_checkpoint(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            torch._dynamo.step_unsupported()
+            return x + 1
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp), inp + 1)
+
     @skipIfWindows(
         msg="TODO: (xuhancn), confirm if torch.compiler.disable work on Windows."
     )
@@ -1448,6 +1472,30 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(out1, inp + 2)
         self.assertEqual(out2, inp + 2)
+
+    def test_fail_on_recompile_shows_guard_details(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def f(x):
+            return x + 1
+
+        f(torch.ones(4))
+        f(torch.ones(5))
+
+        def post_munge(s):
+            return re.sub(r"line number: \d+", "line number: N", s)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            f(torch.ones(4))
+            self.assertExpectedInlineMunged(
+                RuntimeError,
+                lambda: f(torch.ones(7)),
+                """\
+Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: 'test_decorators.py', function name: 'f', line number: N
+    triggered by the following guard failure(s):
+    - 0/0: tensor 'x' size mismatch at index 0. expected 4, actual 7
+    - 0/1: tensor 'x' size mismatch at index 0. expected 5, actual 7""",  # noqa: B950
+                post_munge=post_munge,
+            )
 
     def test_set_stance_fail_on_recompile_with_disable(self):
         @torch.compiler.disable
