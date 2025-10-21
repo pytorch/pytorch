@@ -12,6 +12,9 @@ UnsafeAutoFunctionalizeKernel::UnsafeAutoFunctionalizeKernel(const Node* node)
       schema_(op_.schema()),
       arguments_(prefillStackWithStaticArgs(node, schema_)),
       numOutputs_(static_cast<int>(schema_.returns().size())) {
+  // Check if this is auto_functionalized_v2
+  isV2_ = node->target().find("auto_functionalized_v2") != std::string::npos;
+
   for (const auto& [idx, schemaArg] : c10::enumerate(schema_.arguments())) {
     if (schemaArg.alias_info() != nullptr &&
         schemaArg.alias_info()->isWrite()) {
@@ -46,18 +49,56 @@ void UnsafeAutoFunctionalizeKernel::computeInternal(
 
   const auto& outputValues = node_->outputs();
 
-  for (int i = 0; i < numOutputs_; ++i) {
-    executionFrame.setIValue(outputValues[i]->id(), std::move(stack.at(i)));
-  }
+  // For auto_functionalized_v2, the output structure is different
+  // v1: returns (actual_outputs, *mutated_inputs)
+  // v2: returns (actual_outputs, *all_bases) where all_bases are the mutated base tensors
+  if (isV2_) {
+    // For v2, the first numOutputs_ are the actual outputs from the operation
+    // The remaining outputs are the mutated base tensors that need to be
+    // mapped back to the corresponding output values in the graph
 
-  // Copy over mutating inputs to outputs
-  int mutatingArgStartIndex = (numOutputs_ == 0) ? 1 : numOutputs_;
-  for (size_t i = mutatingArgStartIndex; i < outputValues.size(); ++i) {
-    executionFrame.setIValue(
-        outputValues[i]->id(),
-        executionFrame.getIValue(
-            mutatingInputArgs_.at(i - mutatingArgStartIndex)->id(),
-            true /*  allowNone */));
+    // First, set the actual operation outputs
+    for (int i = 0; i < numOutputs_; ++i) {
+      executionFrame.setIValue(outputValues[i]->id(), std::move(stack.at(i)));
+    }
+
+    // Then handle the mutated base tensors
+    // In v2, after the regular outputs come all the base tensors that were mutated
+    // The graph's output values should get these base tensors
+    int baseStartIndex = numOutputs_;
+    int numBases = static_cast<int>(stack.size()) - numOutputs_;
+
+    // Map the returned base tensors to the output values
+    // Note: The graph's outputValues after numOutputs_ correspond to the mutated arguments
+    // and should receive the corresponding base tensors from the stack
+    for (int i = 0; i < numBases; ++i) {
+      int outputIdx = numOutputs_ + i;
+      if (outputIdx < static_cast<int>(outputValues.size())) {
+        executionFrame.setIValue(
+            outputValues[outputIdx]->id(),
+            std::move(stack.at(baseStartIndex + i)));
+      }
+    }
+  } else {
+    // Original auto_functionalized (v1) behavior
+    // v1 returns (actual_outputs, *mutated_inputs)
+
+    // First set the actual outputs
+    for (int i = 0; i < numOutputs_; ++i) {
+      executionFrame.setIValue(outputValues[i]->id(), std::move(stack.at(i)));
+    }
+
+    // Then set the mutated inputs
+    // v1 returns the mutated inputs directly after the outputs
+    int mutatedStartIndex = numOutputs_;
+    for (size_t i = 0; i < mutatingInputArgs_.size(); ++i) {
+      int outputIdx = numOutputs_ + i;
+      if (outputIdx < static_cast<int>(outputValues.size())) {
+        executionFrame.setIValue(
+            outputValues[outputIdx]->id(),
+            std::move(stack.at(mutatedStartIndex + i)));
+      }
+    }
   }
 }
 
