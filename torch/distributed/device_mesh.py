@@ -944,7 +944,7 @@ else:
             # will have larger span than the actual tensor. This is just internal implementation detail
             # and does not affect user facing behavior.
             mesh = (
-                mesh.detach().to(dtype=torch.int, device="cpu")
+                mesh.detach().clone().to(dtype=torch.int, device="cpu")
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
