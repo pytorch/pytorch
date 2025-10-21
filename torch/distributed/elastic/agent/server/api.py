@@ -721,7 +721,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)
+            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)

@@ -3494,7 +3494,7 @@ class TestIndividualWorkerQueue(TestCase):
             max_num_workers = 1
 
         for batch_size in (8, 16, 32, 64):
-            for num_workers in range(0, min(6, max_num_workers)):
+            for num_workers in range(min(6, max_num_workers)):
                 self._run_ind_worker_queue_test(
                     batch_size=batch_size, num_workers=num_workers + 1
                 )
