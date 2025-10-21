@@ -369,7 +369,7 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   // Parse the fixed arguments and the format string
   if (!PyArg_ParseTuple(
           args,
-          "KiiiiisOl",
+          "KiiiiisOK",
           &func_ptr,
           &gridX,
           &gridY,

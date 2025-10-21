@@ -86,8 +86,10 @@ class CompiledArtifact:
                 writer.write_bytes(torch_key())
                 writer.write_str(key)
                 writer.write_bytes(artifact_bytes)
-                with open(path, "wb") as file:
-                    file.write(writer.to_bytes())
+
+                from torch._inductor.codecache import write_atomic
+
+                write_atomic(path, writer.to_bytes())
             else:
                 assert format == "unpacked"
                 if os.path.exists(path):
@@ -156,7 +158,7 @@ class CompiledArtifact:
                         AOTAutogradCache,
                     )
 
-                    entry = AOTAutogradCache._lookup(
+                    result = AOTAutogradCache._lookup(
                         key,
                         local=True,
                         remote=False,
@@ -165,7 +167,8 @@ class CompiledArtifact:
                         aot_config=None,
                     )
 
-                assert entry is not None
+                assert result is not None
+                (entry, _) = result
 
                 from .compile_fx import _CompileFxKwargs
 

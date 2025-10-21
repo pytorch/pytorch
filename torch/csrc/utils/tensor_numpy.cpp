@@ -9,32 +9,32 @@
 
 namespace torch::utils {
 PyObject* tensor_to_numpy(const at::Tensor&, bool) {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
+  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_numpy(
     PyObject* obj,
     bool warn_if_not_writeable /*=true*/) {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
+  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
 }
 
 bool is_numpy_available() {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
+  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
 }
 
 bool is_numpy_int(PyObject* obj) {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
+  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
 }
 bool is_numpy_scalar(PyObject* obj) {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
+  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(
     PyObject* obj,
     std::optional<c10::Device> device_opt) {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
+  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
 }
 
 void warn_numpy_not_writeable() {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
+  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
 }
 
 // No-op stubs.
@@ -146,6 +146,10 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
         "copy the tensor to host memory first.");
 
     TORCH_CHECK(
+        !at::_is_zerotensor(tensor),
+        " Cannot convert a ZeroTensor to numpy. Set force=True if you need the zero array.");
+
+    TORCH_CHECK(
         !(at::GradMode::is_enabled() && tensor.requires_grad()),
         "Can't call numpy() on Tensor that requires grad. "
         "Use tensor.detach().numpy() instead.");
@@ -186,6 +190,9 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
   if (!array)
     return nullptr;
 
+  if (at::_is_zerotensor(tensor))
+    PyArray_FILLWBYTE(reinterpret_cast<PyArrayObject*>(array.get()), 0);
+
   // TODO: This attempts to keep the underlying memory alive by setting the base
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
@@ -215,9 +222,7 @@ void warn_numpy_not_writeable() {
 at::Tensor tensor_from_numpy(
     PyObject* obj,
     bool warn_if_not_writeable /*=true*/) {
-  if (!is_numpy_available()) {
-    throw std::runtime_error("Numpy is not available");
-  }
+  TORCH_CHECK(is_numpy_available(), "Numpy is not available");
   TORCH_CHECK_TYPE(
       PyArray_Check(obj),
       "expected np.ndarray (got ",
@@ -385,9 +390,7 @@ bool is_numpy_scalar(PyObject* obj) {
 at::Tensor tensor_from_cuda_array_interface(
     PyObject* obj,
     std::optional<c10::Device> device_opt) {
-  if (!is_numpy_available()) {
-    throw std::runtime_error("Numpy is not available");
-  }
+  TORCH_CHECK(is_numpy_available(), "Numpy is not available");
   auto cuda_dict =
       THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
