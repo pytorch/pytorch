@@ -21,7 +21,7 @@ from ..kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
     mm_template,
     persistent_tma_mm_template,
-    scaled_mm_device_tma_template,
+    scaled_mm_device_tma_epilogue_scaling_template,
 )
 from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
@@ -1847,7 +1847,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate scaled MM template configs with scaled MM-specific options.
-        Handles the remaining logic from mm_common including assertions and SCALING_ROWWISE.
+        Handles the remaining logic from mm_common, including assertions.
         """
         kernel_inputs = self.adjust_kernel_inputs(kernel_inputs, op_name)
         input_nodes = kernel_inputs.nodes()
@@ -1897,9 +1897,6 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
             template_kwargs["ACC_TYPE"] = "tl.float32"
-            # Add SCALING_ROWWISE attribute based on scale tensor shapes
-            both_scalar_like = is_scalar_like(size_a) and is_scalar_like(size_b)
-            template_kwargs["SCALING_ROWWISE"] = not both_scalar_like
 
             yield template_kwargs
 
@@ -2127,13 +2124,15 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
 
 
 @register_template_heuristic(
-    scaled_mm_device_tma_template.uid,
+    scaled_mm_device_tma_epilogue_scaling_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
 )
-class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuristic):
-    """Scaled TMA template heuristic for CUDA"""
+class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
+    ScaledTMAConfigMixin, CUDAConfigHeuristic
+):
+    """Scaled TMA template heuristic for CUDA: epilogue scaling variants (TensorWise, RowWise)"""
 
     def __init__(self) -> None:
         super().__init__()
