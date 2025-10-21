@@ -146,7 +146,7 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            not mode.export
+            not torch._export.config.enable_auto_functionalized_v2_for_export
             and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
