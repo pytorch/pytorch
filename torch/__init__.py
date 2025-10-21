@@ -1432,13 +1432,13 @@ def use_deterministic_algorithms(
     automatically. In deterministic mode, Inductor would avoid doing on device benchmarking
     that affect numerics. This includes:
 
-      - don't pad matmul input shapes. Without enabling deterministic mod, Inductor would do
+      - don't pad matmul input shapes. Without enabling deterministic mode, Inductor would do
         benchmarking to check if padding matmul shape is beneficial.
       - don't autotune templates. Inductor has templates for kernels like matmul/conv/attention.
         Without enabling deterministic mode, Inductor would do autotuning to
         pick the best configs for those templates and adopt it if it's faster
         than the kernel in eager mode. In deterministic mode, we pick the eager kernel.
-      - don't autotune triton configs for reduction. Reduction's numerics are
+      - don't autotune triton configs for reduction. Reduction numerics are
         very sensitive to triton configs. In deterministic mode, Inductor
         will use some heuristics to pick the most promising configs rather
         than do autotuning.
