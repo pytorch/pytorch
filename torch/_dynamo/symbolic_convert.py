@@ -74,6 +74,7 @@ from .bytecode_analysis import (
 from .bytecode_transformation import (
     cleaned_instructions,
     create_binary_slice,
+    create_binary_subscr,
     create_call_function,
     create_call_function_ex,
     create_copy,
@@ -2725,7 +2726,7 @@ class InstructionTranslatorBase(
             *create_copy(2),
             # frame_values, frame N stack, frame_values
             create_load_const(0),
-            create_instruction("BINARY_SUBSCR"),
+            create_binary_subscr(),
             *create_binary_slice(0, 0, True),
             # frame_values[0][0:0] = frame N stack
             # frame_values left on top of stack
