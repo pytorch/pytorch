@@ -31,6 +31,7 @@ jobs:
           { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
           { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
+    secrets: inherit
 
   attn-microbenchmark-test:
     name: attn-microbenchmark-test
