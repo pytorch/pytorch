@@ -140,6 +140,9 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
         c10::starts_with(
             node.target(),
             "torch.ops.higher_order.auto_functionalized") ||
+        c10::starts_with(
+            node.target(),
+            "torch.ops.higher_order.auto_functionalized_v2") ||
         c10::starts_with( // TODO Remove this condition once the old
                           // pt2 archives are expired.
             node.target(),

@@ -24,6 +24,7 @@ class UnsafeAutoFunctionalizeKernel : public OpKernel {
 
   std::vector<Value*> mutatingInputArgs_;
   int numOutputs_;
+  bool isV2_ = false;  // Flag to track if this is auto_functionalized_v2
 };
 
 } // namespace torch::nativert
