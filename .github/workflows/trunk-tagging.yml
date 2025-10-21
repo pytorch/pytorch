@@ -114,6 +114,24 @@ jobs:
             return 1
           }
 
+          # Counters for summary reporting
+          created_count=0
+          skipped_count=0
+          failed_count=0
+
+          # Always write outputs once on exit
+          finish() {
+            set +e
+            if [ -n "${GITHUB_OUTPUT:-}" ]; then
+              {
+                echo "created_count=${created_count}"
+                echo "skipped_count=${skipped_count}"
+                echo "failed_count=${failed_count}"
+              } >> "${GITHUB_OUTPUT}"
+            fi
+          }
+          trap finish EXIT
+
           # Retry configuration
           MAX_RETRIES=5
           BASE_DELAY=2
@@ -190,11 +208,6 @@ jobs:
           # New behavior for push events: enumerate commits in the push and tag each one.
           # For workflow_dispatch, retain existing single-SHA behavior.
 
-          # Counters for summary reporting
-          created_count=0
-          skipped_count=0
-          failed_count=0
-
           # Always fetch tags once up front to improve idempotency in loops
           git fetch origin --tags --quiet || true
 
@@ -208,12 +221,6 @@ jobs:
 
             if [ ! -s "${commits_file}" ]; then
               echo "No new commits found between ${BEFORE_SHA}..${AFTER_SHA}; nothing to tag."
-              {
-                echo "exists=true"
-                echo "created_count=0"
-                echo "skipped_count=0"
-                echo "failed_count=0"
-              } >> "${GITHUB_OUTPUT}"
               rm -f "${commits_file}"
               exit 0
             fi
@@ -247,21 +254,6 @@ jobs:
 
             rm -f "${commits_file}"
 
-            # Determine aggregate existence flag: true iff nothing was created and nothing failed
-            if [ "${created_count}" -eq 0 ] && [ "${failed_count}" -eq 0 ]; then
-              exists_flag=true
-            else
-              exists_flag=false
-            fi
-
-            # Expose summary outputs for downstream step in a single redirection
-            {
-              echo "exists=${exists_flag}"
-              echo "created_count=${created_count}"
-              echo "skipped_count=${skipped_count}"
-              echo "failed_count=${failed_count}"
-            } >> "${GITHUB_OUTPUT}"
-
             if [ "${failed_count}" -gt 0 ]; then
               exit 1
             fi
@@ -272,33 +264,18 @@ jobs:
             # Exit early if tag already exists
             if check_tag_exists; then
               echo "✅ Tag already exists - no action needed"
-              {
-                echo "exists=true"
-                echo "created_count=0"
-                echo "skipped_count=1"
-                echo "failed_count=0"
-              } >> "${GITHUB_OUTPUT}"
+              skipped_count=1
               exit 0
             fi
 
             echo "Tag ${TAG_NAME} does not exist, proceeding with creation"
 
             if retry_with_backoff "tag_with_retry" "Creating tag ${TAG_NAME} for commit ${COMMIT_SHA}"; then
-              {
-                echo "exists=false"
-                echo "created_count=1"
-                echo "skipped_count=0"
-                echo "failed_count=0"
-              } >> "${GITHUB_OUTPUT}"
+              created_count=1
               exit 0
             else
               echo "Tag creation failed after all retry attempts"
-              {
-                echo "exists=false"
-                echo "created_count=0"
-                echo "skipped_count=0"
-                echo "failed_count=1"
-              } >> "${GITHUB_OUTPUT}"
+              failed_count=1
               exit 1
             fi
           fi
@@ -317,10 +294,12 @@ jobs:
               echo "❌ Some tags failed to create for push range ${{ github.event.before }}..${{ github.sha }}"
             fi
           else
-            if [ "${{ steps.check_tag.outputs.exists }}" = "true" ]; then
-              echo "✅ Tag ${{ steps.commit.outputs.tag_name }} already existed - no action needed"
-            elif [ "${{ job.status }}" = "success" ]; then
-              echo "✅ Successfully created tag ${{ steps.commit.outputs.tag_name }} for commit ${{ steps.commit.outputs.sha }}"
+            if [ "${{ steps.check_tag.outputs.failed_count }}" = "0" ]; then
+              if [ "${{ steps.check_tag.outputs.created_count }}" = "0" ]; then
+                echo "✅ Tag ${{ steps.commit.outputs.tag_name }} already existed - no action needed"
+              else
+                echo "✅ Successfully created tag ${{ steps.commit.outputs.tag_name }} for commit ${{ steps.commit.outputs.sha }}"
+              fi
             else
               echo "❌ Failed to create tag ${{ steps.commit.outputs.tag_name }} for commit ${{ steps.commit.outputs.sha }}"
             fi
