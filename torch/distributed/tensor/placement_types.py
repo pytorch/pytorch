@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+from dataclasses import dataclass
 from typing import cast, Optional
 
 import torch
-import torch._C
 import torch.distributed._functional_collectives as funcol
-from torch._C._distributed import Placement
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
     fill_empty_tensor_to_shards,
@@ -21,11 +21,29 @@ from torch.distributed.tensor._collective_utils import (
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
-# Appease TestPublicBindings.test_correct_module_names
-Placement.__module__ = "torch.distributed.tensor.placement_types"
+class Placement:
+    """
+    The base class for the Placement type, where it describes how a DTensor is placed onto the
+    ``DeviceMesh``. ``Placement`` and ``DeviceMesh`` together could describe the DTensor Layout.
+    It is the base class of the three main DTensor Placement types: ``Shard``, ``Replicate``,
+    and ``Partial``.
+
+    This class is not meant to be used directly, mainly served as a typing stub.
+    """
+
+    # convenient utils to check for placement types
+    def is_shard(self, dim: Optional[int] = None) -> bool:
+        return False
+
+    def is_replicate(self) -> bool:
+        return False
+
+    def is_partial(self, reduce_op: Optional[str] = None) -> bool:
+        return False
 
 
-class Shard(torch._C._distributed.Shard):
+@dataclass(frozen=True)
+class Shard(Placement):
     """
     The ``Shard(dim)`` placement describes the DTensor sharding on tensor dimension
     ``dim`` over a corresponding ``DeviceMesh`` dimension, where each rank on the
@@ -42,6 +60,14 @@ class Shard(torch._C._distributed.Shard):
     .. warning:: sharding on a tensor dimension where the tensor dimension size is not
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
     """
+
+    dim: int
+
+    def is_shard(self, dim: Optional[int] = None) -> bool:
+        if dim is not None:
+            return self.dim == dim
+        else:
+            return True
 
     def _split_tensor(
         self,
@@ -86,6 +112,7 @@ class Shard(torch._C._distributed.Shard):
         return shard_list, pad_sizes
 
     @staticmethod
+    @maybe_run_for_local_tensor
     def local_shard_size_and_offset(
         curr_local_size: int,
         num_chunks: int,
@@ -128,6 +155,20 @@ class Shard(torch._C._distributed.Shard):
     ) -> tuple[int, Optional[int]]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _maybe_unpad_tensor_with_sizes(
+        dim, local_tensor, pad_sizes, mesh_dim_local_rank, make_contiguous
+    ) -> torch.Tensor:
+        # Only unpad if the local_tensor was padded on the dimension.
+        if pad_sizes[mesh_dim_local_rank] > 0:
+            local_tensor = unpad_tensor(
+                local_tensor, dim, pad_sizes[mesh_dim_local_rank]
+            )
+            if make_contiguous:
+                local_tensor = local_tensor.contiguous()
+        return local_tensor
+
     def _shard_tensor(
         self,
         tensor: torch.Tensor,
@@ -155,24 +196,40 @@ class Shard(torch._C._distributed.Shard):
                 tensor, num_chunks, with_padding=False, contiguous=True
             )
 
-            return scatter_list[mesh_dim_local_rank]
+            return self._select_shard(scatter_list, mesh_dim_local_rank)
 
         scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
-        output = torch.empty_like(scatter_list[mesh_dim_local_rank])
+
+        it = iter(scatter_list)
+        first = next(it)
+        # Tensors in the scatter list are expected to have the same shape because
+        # split is requested with padding.
+        assert all(first.shape == v.shape for v in it)
+
+        output = torch.empty_like(first)
 
         # perform scatter from the src_data_rank as data source when it is not None
         mesh_scatter(
             output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
         )
 
-        # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes[mesh_dim_local_rank] > 0:
-            output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
-            # Unpad might return a view, hence we need to remake it contiguous
-            output = output.contiguous()
-        return output
+        return Shard._maybe_unpad_tensor_with_sizes(
+            self.dim, output, pad_sizes, mesh_dim_local_rank, True
+        )
+
+    @classmethod
+    def _make_shard_tensor(
+        cls,
+        dim: int,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: Optional[int] = 0,
+    ) -> torch.Tensor:
+        shard_placement = cls(dim)
+        return shard_placement._shard_tensor(tensor, mesh, mesh_dim, src_data_rank)
 
     def _reduce_shard_tensor(
         self,
@@ -193,6 +250,7 @@ class Shard(torch._C._distributed.Shard):
             return tensor
 
         is_padded = tensor.size(self.dim) % num_chunks != 0
+        pad_sizes = None
         if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
                 tensor, num_chunks, with_padding=True, contiguous=True
@@ -206,8 +264,46 @@ class Shard(torch._C._distributed.Shard):
         )
 
         if is_padded:
-            output = unpad_tensor(output, self.dim, pad_sizes[my_coordinate[mesh_dim]])  # type: ignore[possibly-undefined]
+            assert pad_sizes is not None
+            output = Shard._maybe_unpad_tensor_with_sizes(
+                self.dim, output, pad_sizes, my_coordinate[mesh_dim], False
+            )
         return output
+
+    @maybe_run_for_local_tensor
+    def _maybe_pad_tensor(
+        self,
+        local_tensor: torch.Tensor,
+        logical_dim_size: int,
+        num_chunks: int,
+    ) -> torch.Tensor:
+        is_padded = logical_dim_size % num_chunks != 0
+
+        if is_padded:
+            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
+            pad_size = full_chunk_size - local_tensor.size(self.dim)
+            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
+
+        return local_tensor
+
+    @maybe_run_for_local_tensor
+    def _maybe_unpad_tensor(
+        self,
+        local_tensor: torch.Tensor,
+        logical_dim_size: int,
+        num_chunks: int,
+    ) -> torch.Tensor:
+        is_padded = logical_dim_size % num_chunks != 0
+
+        if is_padded:
+            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
+            local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
+
+        return local_tensor
 
     def _to_replicate_tensor(
         self,
@@ -221,27 +317,26 @@ class Shard(torch._C._distributed.Shard):
         is replicated on the previously sharded mesh dimension
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-
         logical_dim_size = current_logical_shape[self.dim]
-        is_padded = logical_dim_size % num_chunks != 0
 
-        if is_padded:
-            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            pad_size = full_chunk_size - local_tensor.size(self.dim)
-            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
-
-        if not local_tensor.is_contiguous():
-            local_tensor = local_tensor.contiguous()
+        local_tensor = self._maybe_pad_tensor(
+            local_tensor, logical_dim_size, num_chunks
+        )
 
         result = funcol.all_gather_tensor(
             local_tensor,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
         )
-        if is_padded:
-            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
-            result = unpad_tensor(result, self.dim, unpad_size)
+
+        result = self._maybe_unpad_tensor(result, logical_dim_size, num_chunks)
+
         return result
+
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
+        return shards[shard_index].clone()
 
     def _replicate_to_shard(
         self,
@@ -261,7 +356,18 @@ class Shard(torch._C._distributed.Shard):
             with_padding=False,
             contiguous=False,
         )
-        return shards[shard_index].clone()
+
+        return Shard._select_shard(shards, shard_index)
+
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _get_shard_pad_size(
+        full_size: int, local_tensor: torch.Tensor, dim: int
+    ) -> int:
+        """
+        Get the padding size of the local tensor on the shard dimension.
+        """
+        return full_size - local_tensor.size(dim)
 
     def _to_new_shard_dim(
         self,
@@ -291,14 +397,16 @@ class Shard(torch._C._distributed.Shard):
             old_dim_full_chunk_size = (
                 old_dim_logical_size + num_chunks - 1
             ) // num_chunks
-            old_dim_pad_size = old_dim_full_chunk_size - local_tensor.size(self.dim)
+            old_dim_pad_size = Shard._get_shard_pad_size(
+                old_dim_full_chunk_size, local_tensor, self.dim
+            )
             local_tensor = pad_tensor(local_tensor, self.dim, old_dim_pad_size)
         if new_dim_padding:
             new_dim_full_chunk_size = (
                 new_dim_logical_size + num_chunks - 1
             ) // num_chunks
-            new_dim_pad_size = new_dim_full_chunk_size * num_chunks - local_tensor.size(
-                new_shard_dim
+            new_dim_pad_size = Shard._get_shard_pad_size(
+                new_dim_full_chunk_size * num_chunks, local_tensor, new_shard_dim
             )
             local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
 
@@ -324,6 +432,11 @@ class Shard(torch._C._distributed.Shard):
 
         return new_tensor
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Shard):
+            return False
+        return self.dim == other.dim
+
     def __hash__(self) -> int:
         return hash(self.dim)
 
@@ -338,8 +451,8 @@ class Shard(torch._C._distributed.Shard):
         return f"S({self.dim})"
 
 
-# Need to inherit from Shard here so that isinstance(some_strided_shard, Shard) will work.
-class _StridedShard(torch._C._distributed.StridedShard, Shard):
+@dataclass(frozen=True, kw_only=True)
+class _StridedShard(Shard):
     """
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
@@ -397,6 +510,18 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
     TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
+    split_factor: int
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _StridedShard):
+            return self.dim == other.dim and self.split_factor == other.split_factor
+        elif isinstance(other, Shard):
+            # TODO: this is to avoid extra all-gather in dtensor op dispatch
+            # note that sharding prop would not produce _StridedShard and an
+            # placement inequality would introduce an all-gather for resharding
+            return self.dim == other.dim
+        return False
+
     def __hash__(self) -> int:
         return hash((self.dim, self.split_factor))
 
@@ -409,6 +534,21 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
     def __str__(self) -> str:
         """human readable representation of the _StridedShard placement"""
         return f"_S({self.dim}, {self.split_factor})"
+
+    @classmethod
+    def _make_shard_tensor(
+        cls,
+        dim: int,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: Optional[int] = 0,
+        split_factor: int = 1,
+    ) -> torch.Tensor:
+        strided_shard_placement = cls(dim=dim, split_factor=split_factor)
+        return strided_shard_placement._shard_tensor(
+            tensor, mesh, mesh_dim, src_data_rank
+        )
 
     def _split_tensor(
         self,
@@ -515,6 +655,11 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
 
         return replicate_tensor.contiguous()
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
+        return len(sharded_indices[rank])
+
     def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
@@ -537,19 +682,23 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         # squeeze back to 1D indices tensor
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
-        local_shard_size = len(sharded_indices[rank])
+        local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
 
         # offsets from _StridedShard is never used
         return local_shard_size, None
 
 
-class Replicate(torch._C._distributed.Replicate):
+@dataclass(frozen=True)
+class Replicate(Placement):
     """
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding
     ``DeviceMesh`` dimension, where each rank on the DeviceMesh dimension holds a
     replica of the global Tensor. The ``Replicate`` placement can be used by all
     DTensor APIs (i.e. ``distribute_tensor``, ``DTensor.from_local``, etc.)
     """
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Replicate)
 
     def __hash__(self) -> int:
         # every replicate placement is the same
@@ -567,8 +716,9 @@ class Replicate(torch._C._distributed.Replicate):
         """
         return "R"
 
-    def _replicate_tensor(
-        self,
+    @classmethod
+    def _make_replicate_tensor(
+        cls,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
@@ -590,8 +740,21 @@ class Replicate(torch._C._distributed.Replicate):
             mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim, group_src=src_data_rank)
         return tensor
 
+    def _replicate_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: Optional[int] = 0,
+    ) -> torch.Tensor:
+        return Replicate._make_replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
 
-class Partial(torch._C._distributed.Partial):
+    def is_replicate(self) -> bool:
+        return True
+
+
+@dataclass(frozen=True)
+class Partial(Placement):
     """
     The ``Partial(reduce_op)`` placement describes the DTensor that is pending
     reduction on a specified ``DeviceMesh`` dimension, where each rank on the
@@ -609,6 +772,8 @@ class Partial(torch._C._distributed.Partial):
     .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.
     """
+
+    reduce_op: str = "sum"
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -646,6 +811,11 @@ class Partial(torch._C._distributed.Partial):
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         return tensor / num_chunks
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Partial):
+            return False
+        return self.reduce_op == other.reduce_op
+
     def __hash__(self) -> int:
         return 1 + hash(self.reduce_op)
 
@@ -660,6 +830,11 @@ class Partial(torch._C._distributed.Partial):
         human readable representation of the Partial placement
         """
         return "P"
+
+    def is_partial(self, reduce_op: Optional[str] = None) -> bool:
+        if reduce_op is None:
+            return True
+        return self.reduce_op == reduce_op
 
 
 # We keep the old _Partial name for a while for BC reason
