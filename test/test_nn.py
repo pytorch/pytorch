@@ -8491,6 +8491,14 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(y_cuda_ch_last, y_cuda_contig)
 
     @onlyCUDA
+    def test_large_reflect_pad(self, device):
+        # https://github.com/pytorch/pytorch/issues/165861
+        x = torch.rand(2**16, 2, device="cuda")
+        c = F.pad(x, (1, 1), mode="reflect")
+        c_cpu = F.pad(x.cpu(), (1, 1), mode="reflect")
+        self.assertEqual(c, c_cpu)
+
+    @onlyCUDA
     @largeTensorTest("48GB", "cpu")
     @largeTensorTest("48GB", "cuda")
     def test_avg_pool_large_tensor2(self, device):
