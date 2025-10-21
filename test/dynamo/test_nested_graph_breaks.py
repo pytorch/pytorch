@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import sys
 
 import torch
 import torch._dynamo.test_case
@@ -628,6 +629,136 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         # all ops except + 4
         self.assertEqual(cnts.op_count, 4)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
+
+    def test_return_after_graph_break_nested(self):
+        # With improper implementation, returning immediately after a nested graph
+        # break may skip the rest of the top-level frame.
+        def f2(inner, x):
+            x += 2
+            return inner(x)
+
+        @torch.compile(backend="eager")
+        def f3(inner, x):
+            result = f2(inner, x)
+            x += 4
+            if result is not None:
+                x += result
+            return x
+
+        # test normal graph break
+        x = torch.zeros(3)
+
+        def inner1(x):
+            x += 1
+            return torch._dynamo.graph_break()
+
+        ref = f3(inner1, x)
+        self.assertEqual(ref, torch.zeros(3) + 7)
+
+        # test step graph break
+        x = torch.zeros(3)
+
+        def inner2(x):
+            x += 1
+            return torch._dynamo.step_unsupported()
+
+        ref = f3(inner2, x)
+        self.assertEqual(ref, torch.zeros(3) + 7)
+
+        # test store attr graph break
+        # NOTE: we do this manual bytecode generation hack since the only RETURN_*
+        # instruction that can follow STORE_ATTR is RETURN_CONST, which was removed in 3.14+.
+
+        # make sure inner3's code options are compatible with the instructions below
+        def inner3(x):
+            x.attr = 1000
+
+        new_inst = torch._dynamo.bytecode_transformation.create_instruction
+        insts = [
+            new_inst("LOAD_CONST", argval=1000),
+            new_inst("LOAD_CONST", argval=2000),
+            new_inst("LOAD_FAST", argval="x"),
+            new_inst("STORE_ATTR", argval="attr"),
+            new_inst("RETURN_VALUE"),
+        ]
+        if sys.version_info >= (3, 11):
+            insts = [new_inst("RESUME", arg=0)] + insts
+        code_keys = torch._dynamo.bytecode_transformation.get_code_keys()
+        code_options = {k: getattr(inner3.__code__, k) for k in code_keys}
+        _, inner3_code = (
+            torch._dynamo.bytecode_transformation.clean_and_assemble_instructions(
+                insts, code_keys, code_options
+            )
+        )
+        inner3.__code__ = inner3_code
+
+        x = torch.zeros(3)
+        ref = f3(inner3, x)
+        self.assertEqual(ref, torch.zeros(3) + 1006)
+
+        # dynamic branching is harder to test - the other tests should be enough cover
+
+        # test every function returning
+        @torch.compiler.disable
+        def inner5(x):
+            x += 8
+            return x
+
+        def inner4(x):
+            x += 1
+            return inner5(x)
+
+        @torch.compile(backend="eager")
+        def f4(x):
+            x += 4
+            return f2(inner4, x)
+
+        x = torch.zeros(3)
+        ref = f4(x)
+        self.assertEqual(ref, torch.zeros(3) + 15)
+
+    def test_return_after_graph_break_deep_nested(self):
+        @torch.compiler.disable
+        def f1(x):
+            return x + 1
+
+        def f2(x):
+            return f1(x + 2)
+
+        def f3(x):
+            return f2(x + 4)
+
+        def f4(x):
+            x = f3(x + 8)
+            return x + 16
+
+        def f5(x):
+            return f4(x + 32)
+
+        def f6(x):
+            return f5(x + 64)
+
+        def f7(x):
+            x = f6(x + 128)
+            return x + 256
+
+        @torch.compile(backend="eager")
+        def f8(x):
+            return f7(x + 512)
+
+        x = torch.zeros(3)
+        ref = f8(x)
+        self.assertEqual(ref, torch.zeros(3) + 1023)
+
+        # check that only 2 resume functions are created
+        self.assertEqual(len(torch._dynamo.utils.counters["resumes"]), 2)
+        for name in ("resume_in_f4", "resume_in_f7"):
+            self.assertTrue(
+                any(
+                    name in key
+                    for key in torch._dynamo.utils.counters["resumes"].keys()
+                )
+            )
 
 
 if __name__ == "__main__":
