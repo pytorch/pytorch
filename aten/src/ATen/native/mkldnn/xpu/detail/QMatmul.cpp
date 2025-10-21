@@ -8,7 +8,7 @@
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
-
+using at::native::onednn::ScalingType;
 at::Tensor broadcast_bias2D(
     at::Tensor& dst,
     at::Tensor& bias,
@@ -326,6 +326,154 @@ void quantized_matmul(
 
   if (!dst.is_same(result))
     result.copy_(dst);
+}
+
+sycl::event scaled_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Tensor& result,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    ScalingType scaling_choice_a,
+    ScalingType scaling_choice_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    bool use_fast_accum) {
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
+
+  // This function will do steps with following steps
+  // 1. create memory descriptor
+  // 2. call write_to_dnnl_memory() to actually write memory
+  // 3. execute
+
+  // 1.1 Create memory descriptor
+  // int64_t M = mat1.size(0);
+  // int64_t K = mat1.size(1);
+  // int64_t N = mat2.size(1);
+
+  // TODO: We also need to consider dnnl::memory::format_tag!
+  // Currently, the get_onednn_md() call does not consider the
+  // memory::format_tag. So by default, every md is memory::format_tag::any
+  dnnl::memory::desc src_md = get_onednn_md(mat1);
+  dnnl::memory::desc weights_md = get_onednn_md(mat2);
+  dnnl::memory::desc dst_md = get_onednn_md(result);
+
+  dnnl::memory::desc bias_md;
+  bool with_bias = bias.has_value();
+  at::Tensor possible_reshaped_bias = bias.value_or(at::Tensor());
+  if (with_bias) {
+    if (possible_reshaped_bias.dim() == 1) {
+      possible_reshaped_bias =
+          possible_reshaped_bias.reshape({1, possible_reshaped_bias.size(0)});
+      bias_md = get_onednn_md(possible_reshaped_bias);
+    } else {
+      bias_md = get_onednn_md(possible_reshaped_bias);
+    }
+  }
+
+  // 1.2 Create primitive descriptor and set scales mask
+  dnnl::primitive_attr op_attr = dnnl::primitive_attr();
+
+  // TODO: We need to set group_size for the future support like int4 / mx
+  // format. Currently use default_groups for fp8 related.
+  std::vector<int64_t> default_groups;
+  op_attr.set_scales(
+      DNNL_ARG_SRC,
+      get_onednn_mask_from_scaling_type(scaling_choice_a),
+      default_groups,
+      get_onednn_dtype(scale_a));
+  op_attr.set_scales(
+      DNNL_ARG_WEIGHTS,
+      get_onednn_mask_from_scaling_type(scaling_choice_b),
+      default_groups,
+      get_onednn_dtype(scale_b));
+  // scale_result tensor currently only supports scalar(TensorWise Scaling).
+  if (scale_result.has_value()) {
+    op_attr.set_scales(
+        DNNL_ARG_DST,
+        get_onednn_mask_from_scaling_type(ScalingType::TensorWise),
+        default_groups,
+        get_onednn_dtype(scale_result.value()));
+  }
+
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+  // 1.3 Set the primitive attr
+  dnnl::matmul::primitive_desc matmul_pd = with_bias
+      ? dnnl::matmul::primitive_desc(
+            engine, src_md, weights_md, bias_md, dst_md, op_attr)
+      : dnnl::matmul::primitive_desc(
+            engine, src_md, weights_md, dst_md, op_attr);
+
+  // 1.4 (Possible) Additional Checks
+  // TODO: In case there are memory desc does not align with the actual tensor,
+  // we might need to reorder weights similar to CPU's reorder_if_differ_in()
+  // call. For example, weights not the same as matmul_pd.weights_desc(),
+
+  // 2. Prepare memory
+
+  // Create memory
+  auto src_usr_m = make_onednn_memory(src_md, engine, mat1.data_ptr());
+  auto weights_usr_m = make_onednn_memory(weights_md, engine, mat2.data_ptr());
+  auto dst_usr_m = make_onednn_memory(dst_md, engine, result.data_ptr());
+  dnnl::memory b_usr_m;
+  if (with_bias) {
+    b_usr_m =
+        make_onednn_memory(bias_md, engine, possible_reshaped_bias.data_ptr());
+  }
+
+  auto scratchpad =
+      make_onednn_memory(matmul_pd.scratchpad_desc(), engine, nullptr);
+
+  // 3. Setup Args for exec
+  std::unordered_map<int, dnnl::memory> args;
+  args.insert({DNNL_ARG_SRC, src_usr_m});
+  args.insert({DNNL_ARG_WEIGHTS, weights_usr_m});
+  args.insert({DNNL_ARG_DST, dst_usr_m});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  if (with_bias) {
+    args.insert({DNNL_ARG_BIAS, b_usr_m});
+  }
+
+  // Set scales
+  // TODO: Set scale should be related to the scaling_choice_a and
+  // scaling_choice_b!
+  dnnl::memory src_scales_t = scale_a.numel() == 1
+      ? at::native::onednn::make_onednn_memory(
+            {{1}, dnnl::memory::data_type::f32, {1}},
+            engine,
+            scale_a.data_ptr())
+      : at::native::onednn::make_onednn_memory(
+            {{scale_a.numel(), 1},
+             dnnl::memory::data_type::f32,
+             dnnl::memory::format_tag::ab},
+            engine,
+            scale_a.data_ptr());
+
+  if (scale_a.numel() == 1)
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
+  else
+    args.insert(
+        {DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src_scales_t});
+
+  dnnl::memory wei_scales_t = scale_b.numel() == 1
+      ? at::native::onednn::make_onednn_memory(
+            {{1}, dnnl::memory::data_type::f32, {1}},
+            engine,
+            scale_b.data_ptr())
+      : at::native::onednn::make_onednn_memory(
+            {{scale_b.numel(), 1},
+             dnnl::memory::data_type::f32,
+             dnnl::memory::format_tag::ab},
+            engine,
+            scale_b.data_ptr());
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
+
+  dnnl::matmul matmul_p = dnnl::matmul(matmul_pd);
+  sycl::event matmul_fwd_event =
+      dnnl::sycl_interop::execute(matmul_p, stream, args);
+  return matmul_fwd_event;
 }
 
 } // namespace at::native::onednn
