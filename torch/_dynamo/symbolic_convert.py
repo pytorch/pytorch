@@ -5031,6 +5031,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
 
+    def should_compile_partial_graph(self) -> bool:
+        # resuming on graph break on inlined generator not supported
+        return False
+
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
         self.generated_items.append(top)

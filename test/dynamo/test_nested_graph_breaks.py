@@ -630,6 +630,43 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.op_count, 4)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
 
+    def test_generator_nested_graph_break(self):
+        def gen(x):
+            yield x + 1
+            torch._dynamo.graph_break()
+            yield x + 2
+
+        def fn(x):
+            x = x + 4
+            return list(gen(x))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.zeros(3)
+        res = fn(x)
+        # NOTE: if we enable nested graph breaks on inlined generators, we expect
+        # some sort of internal dynamo failure
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # fn should be skipped
+        self.assertEqual(cnts.frame_count, 0)
+
+        def outer(x):
+            x = x + 8
+            return fn(x)[0] + 16
+
+        cnts.clear()
+        torch.compiler.reset()
+
+        opt_fn = torch._dynamo.optimize(backend=cnts)(outer)
+        x = torch.zeros(3)
+        res = outer(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # only outer should be traced
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_return_after_graph_break_nested(self):
         # With improper implementation, returning immediately after a nested graph
         # break may skip the rest of the top-level frame.
