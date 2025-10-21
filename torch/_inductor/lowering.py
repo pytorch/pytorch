@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (
+from torch._prims_common import (  # pyrefly: ignore  # deprecated
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -1956,6 +1956,9 @@ def select(x, dim, idx):
             # Additionally, we want to avoid accidental unbacked unsqueeze semantics. To resolve this,
             # we use as_strided instead.
             # Removing this branch will cause test_unbacked_select_index_with_check to fail.
+
+            # before accessing size, stride, and offset we need to realize.
+            x.realize()
             new_size = x.get_size()
             new_stride = x.get_stride()
             new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
@@ -1979,6 +1982,8 @@ def select(x, dim, idx):
     assert len(unbacked_bindings) == 1, unbacked_bindings
     unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
 
+    # before accessing size, stride, and offset we need to realize.
+    x.realize()
     new_size = x.get_size()
     new_stride = x.get_stride()
     new_storage_offset = unbacked_offset_sym
@@ -2139,6 +2144,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if t.is_meta:
+        return True
+
+    if t.is_sparse:
         return True
 
     if t.dtype == torch.float8_e8m0fnu:
@@ -3156,8 +3164,14 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
+    if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
+    elif V.graph.sizevars.guard_or_false(sympy.Ge(index, 0)):
+        pass
+    else:
+        # unbacked index
+        return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
+
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
