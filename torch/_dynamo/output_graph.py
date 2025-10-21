@@ -2190,20 +2190,32 @@ class OutputGraph(OutputGraphCommon):
             old_fake_mode = self.tracing_context.fake_mode
             assert old_fake_mode is not None
             if not self.export:
-                # import torch._functorch.config as _config
-                #
-                # with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                #     # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                #     backend_fake_mode = torch._subclasses.FakeTensorMode(
-                #         shape_env=old_fake_mode.shape_env,
-                #     )
-                #     # import copy
-                #     # backend_fake_mode.fake_tensor_converter.meta_converter.tensor_memo = copy.copy(old_fake_mode.fake_tensor_converter.meta_converter.tensor_memo)
-                # # TODO(voz): Ostensibily, this should be scoped and
-                # # restore back to old_fake_mode, but doing so currently violates
-                # # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-                # self.tracing_context.fake_mode = backend_fake_mode
-                pass
+                import torch._functorch.config as _config
+
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+                    backend_fake_mode = torch._subclasses.FakeTensorMode(
+                        shape_env=old_fake_mode.shape_env,
+                    )
+
+                # T165177: We're swapping out the FakeTensorMode here but
+                # reusing the old ShapeEnv. We need to make sure that if we
+                # convert any already-known Tensors they get the same FakeTensor
+                # as before.
+                backend_fake_mode.fake_tensor_converter = old_fake_mode.fake_tensor_converter
+
+                # Also since we're swapping out our FakeTensorMode we need to
+                # tell our existing tracked FakeTensors that they now belong to
+                # the new mode (otherwise it gets confused when the cache
+                # returns old FakeTensors).
+                for t in self.tracked_fakes:
+                    if isinstance(t.fake, FakeTensor):
+                        t.fake.fake_mode = backend_fake_mode
+
+                # TODO(voz): Ostensibily, this should be scoped and
+                # restore back to old_fake_mode, but doing so currently violates
+                # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+                self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
