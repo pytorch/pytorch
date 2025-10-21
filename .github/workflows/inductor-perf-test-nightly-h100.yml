@@ -123,7 +123,7 @@ jobs:
           { config: "inductor_torchbench_perf_cuda_h100", shard: 9, num_shards: 9, runner: "linux.aws.h100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-      build-additional-packages: "vision audio fbgemm torchao"
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
   test-periodically:
