@@ -92,13 +92,8 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
           }
 
           // upcasting to float32 if needed to improve precision when multiplying by the scale factor
-          if ([maskedMM dataType] != MPSDataTypeFloat32) {
-            maskedMM = [mpsGraph castTensor:maskedMM toType:MPSDataTypeFloat32 name:nil];
-          }
+          maskedMM = castMPSTensor(mpsGraph, maskedMM, MPSDataTypeFloat32);
           maskedMM = [mpsGraph multiplicationWithPrimaryTensor:maskedMM secondaryTensor:scaleTensor name:nil];
-          if ([maskedMM dataType] != qTensor.dataType) {
-            maskedMM = [mpsGraph castTensor:maskedMM toType:qTensor.dataType name:nil];
-          }
 
           if (is_causal) {
             auto causalMask = [mpsGraph constantWithScalar:1.0f
@@ -130,6 +125,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                                        name:nil];
 
           auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:correctedSM secondaryTensor:vTensor name:nil];
+          output = castMPSTensor(mpsGraph, output, vTensor.dataType);
           graph->qTensor = qTensor;
           graph->kTensor = kTensor;
           graph->vTensor = vTensor;
