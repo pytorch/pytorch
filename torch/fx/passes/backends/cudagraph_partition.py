@@ -1,11 +1,11 @@
 import dataclasses
+from contextlib import ExitStack
+from typing import Any, Callable, Optional
+from unittest.mock import patch
+
 import torch
 from torch import fx
 from torch._library.utils import lookup_op
-import logging
-from typing import Callable, Optional, Any
-from contextlib import ExitStack
-from unittest.mock import patch
 
 
 # Part1: Split gm
@@ -33,7 +33,6 @@ def resolve_defined_ops(op_names: list[str]) -> list["torch._ops.OpOverload"]:
             resolved.append(lookup_op(op_name))
         except Exception:
             # Skip operators that don't exist (e.g., model-specific ops)
-            logging.warn("Failed to resolve operator for CUDAGraph partition: %s", op_name)
             continue
 
     return resolved
@@ -95,7 +94,9 @@ def split_graph(
 
         module = getattr(split_gm, name)
         graph_id = int(name.replace("submod_", ""))
-        split_items.append(SplitItem(name, graph_id, (graph_id in split_op_graphs), module))
+        split_items.append(
+            SplitItem(name, graph_id, (graph_id in split_op_graphs), module)
+        )
 
     # sort by integer graph_id, rather than string name
     split_items.sort(key=lambda x: x.graph_id)
@@ -105,6 +106,7 @@ def split_graph(
 
 # Part 2: CG Wrapper
 _global_graph_pool = torch.cuda.graph_pool_handle()
+
 
 class CUDAGraphWrapper:
     def __init__(
@@ -172,12 +174,19 @@ class PiecewiseCompileInterpreter(torch.fx.Interpreter):
             index = self.submod_names_to_cudagraph.index(target)
             is_first_graph = index == 0
             submod = self.fetch_attr(target)
-            self.module.__dict__[target] = CUDAGraphWrapper(submod, gc_disable=not is_first_graph)
+            self.module.__dict__[target] = CUDAGraphWrapper(
+                submod, gc_disable=not is_first_graph
+            )
 
         return output
 
 
-def cudagraph_partition_pass(gm: fx.GraphModule, example_inputs: list[torch.Tensor], input_clone_indices: list[int], split_ops: list[str]) -> fx.GraphModule:
+def cudagraph_partition_pass(
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+    input_clone_indices: list[int],
+    split_ops: list[str],
+) -> fx.GraphModule:
     """
     Partition the graph into subgraphs and wrap them with CUDAGraphWrapper.
 
@@ -194,16 +203,16 @@ def cudagraph_partition_pass(gm: fx.GraphModule, example_inputs: list[torch.Tens
     resolved_split_ops = resolve_defined_ops(split_ops)
     split_gm, split_items = split_graph(gm, resolved_split_ops)
     submod_names_to_cudagraph = [
-        item.submod_name
-        for item in split_items
-        if not item.is_cudagraph_unsafe
+        item.submod_name for item in split_items if not item.is_cudagraph_unsafe
     ]
 
     # split_gm.input_buffers refers to the tensors in the list, instead of the list itself
     split_gm.input_buffers = [t for t in example_inputs]
 
     # 2. Wrap submodules with CUDAGraphWrapper
-    PiecewiseCompileInterpreter(split_gm, submod_names_to_cudagraph).run(*example_inputs)
+    PiecewiseCompileInterpreter(split_gm, submod_names_to_cudagraph).run(
+        *example_inputs
+    )
 
     # 3. Copy inputs to static tensors
 
@@ -212,10 +221,12 @@ def cudagraph_partition_pass(gm: fx.GraphModule, example_inputs: list[torch.Tens
     # TODO: Add a config to say whether we copy for submods, if users do not want to write an out_variant.
 
     split_gm_forward = split_gm.forward
+
     def copy_and_call(*args):
         for i in input_clone_indices:
             split_gm.input_buffers[i].copy_(args[i])
-        return split_gm_forward(*split_gm.input_buffers) # <- why would this matter?
+        return split_gm_forward(*split_gm.input_buffers)
+
     split_gm.forward = copy_and_call
 
     return split_gm
