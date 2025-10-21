@@ -438,7 +438,6 @@ class DeviceCachingAllocator {
       size_t device_free = device_total -
           stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
-      auto& raw_device = c10::xpu::get_raw_device(device);
       // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
       // affected devices.
       if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
