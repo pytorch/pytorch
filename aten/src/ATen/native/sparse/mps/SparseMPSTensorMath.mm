@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
@@ -18,6 +19,8 @@
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/result_type.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/addmm_native.h>
 #include <ATen/ops/copy_sparse_to_sparse.h>
 #include <ATen/ops/mul.h>
 #endif
@@ -32,6 +35,305 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Mul_metallib.h>
 #endif
+
+static Tensor& s_addmm_out_sparse_dense_mps(
+    Tensor& r,
+    const Tensor& t,
+    const SparseTensor& sparse_,
+    const Tensor& dense,
+    const Scalar& beta,
+    const Scalar& alpha) {
+  TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: sparse_dim must be 2, got ", sparse_.sparse_dim());
+  TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: sparse values must be 0-dense-dim, got ", sparse_.dense_dim());
+  TORCH_CHECK(dense.dim() == 2, "addmm: 'dense' must be 2D, got ", dense.dim());
+  TORCH_CHECK(t.dim() == 2, "addmm: 't' must be 2D, got ", t.dim());
+
+  const int64_t I = sparse_.size(0);
+  const int64_t J = sparse_.size(1);
+  const int64_t K = dense.size(1);
+
+  TORCH_CHECK(dense.size(0) == J,
+      "addmm: dense (mat2) dim0 must be ", J, ", got ", dense.size(0));
+  TORCH_CHECK(t.size(0) == I && t.size(1) == K,
+      "addmm: 't' shape must be (", I, ", ", K, "), got (", t.size(0), ", ", t.size(1), ")");
+
+  r.resize_({I, K});
+
+  auto sparse = sparse_.coalesce();
+  const int64_t nnz = sparse._nnz();
+
+  if (nnz == 0 || I == 0 || K == 0) {
+    at::mul_out(r, t, beta);
+    return r;
+  }
+
+  const auto v_dtype = sparse._values().scalar_type();
+  const auto d_dtype = dense.scalar_type();
+  const auto t_dtype = t.scalar_type();
+  auto compute_dtype = c10::promoteTypes(c10::promoteTypes(v_dtype, d_dtype), t_dtype);
+
+  TORCH_CHECK(canCast(compute_dtype, r.scalar_type()),
+              "Can't convert computed type ", compute_dtype, " to output ", r.scalar_type());
+
+  auto indices2d = sparse._indices().contiguous();
+  auto values = sparse._values().to(compute_dtype);
+  auto dense_c = dense.to(compute_dtype).contiguous();
+  auto t_c = t.to(compute_dtype).contiguous();
+
+  const bool out_needs_cast = (r.scalar_type() != compute_dtype) || !r.is_contiguous();
+  Tensor out_buf = out_needs_cast
+      ? at::empty({I, K}, r.options().dtype(compute_dtype))
+      : r;
+  auto out_contig = out_buf.contiguous();
+
+  auto device = r.device();
+  auto stream = getCurrentMPSStream();
+
+  const float alpha_f = alpha.to<float>();
+  const float beta_f  = beta.to<float>();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      const std::string func = "spmm_addmm_coo_" + mps::scalarToMetalTypeString(values);
+      auto pso = lib.getPipelineStateForFunc(func);
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+
+      const uint32_t tew = pso.threadExecutionWidth;
+      const uint32_t gridX = static_cast<uint32_t>(K);
+      const uint32_t gridZ = static_cast<uint32_t>(I);
+      const uint32_t tgW = std::min<uint32_t>(gridX, tew);
+
+      MTLSize grid = MTLSizeMake(gridX, 1, gridZ);
+      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
+
+      mtl_setArgs(enc,
+                  indices2d,
+                  values,
+                  dense_c,
+                  t_c,
+                  out_contig,
+                  std::array<uint32_t, 3>{static_cast<uint32_t>(I),
+                                           static_cast<uint32_t>(J),
+                                           static_cast<uint32_t>(K)},
+                  std::array<float, 2>{alpha_f, beta_f},
+                  static_cast<uint32_t>(nnz));
+      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
+    }
+  });
+
+  if (out_needs_cast) {
+    r.copy_(out_contig.to(r.scalar_type()));
+  }
+
+  return r;
+}
+
+
+static void build_batch_ptr_mps(
+    const Tensor& indices_dim0,
+    int64_t B,
+    Tensor& batch_ptr
+) {
+  // Builds an array of pointers which point to each batches elements. Example:
+  // idx_b = [0, 0, 0, 1, 1, 2, 2, 2, 2]  // 9 non-zero elements
+  //          └─────┘  └──┘  └─────────┘
+  //          batch 0  batch 1  batch 2
+  // batch_ptr = [0, 3, 5, 9]
+  //              │  │  │  └─ end of batch 2 (total nnz)
+  //              │  │  └──── batch 2 starts at index 5
+  //              │  └─────── batch 1 starts at index 3
+  //              └────────── batch 0 starts at index 0
+  TORCH_CHECK(indices_dim0.is_mps() && batch_ptr.is_mps(), "MPS device expected");
+  auto device = indices_dim0.device();
+  auto stream = getCurrentMPSStream();
+
+  const int64_t nnz = indices_dim0.numel();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("build_batch_ptr_from_sorted_batches");
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+
+      const uint32_t tew = pso.threadExecutionWidth;
+      const uint32_t Q = static_cast<uint32_t>(B + 1);
+      const uint32_t tgW = std::min<uint32_t>(Q, tew);
+      MTLSize grid = MTLSizeMake(Q, 1, 1);
+      MTLSize tgs  = MTLSizeMake(tgW, 1, 1);
+
+      mtl_setArgs(enc,
+                  indices_dim0,
+                  batch_ptr,
+                  std::array<uint32_t, 2>{static_cast<uint32_t>(nnz),
+                                          static_cast<uint32_t>(B)});
+      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
+    }
+  });
+}
+
+static void build_row_ptr_per_batch_mps(
+    const Tensor& rows,
+    const Tensor& batch_ptr,
+    int64_t B,
+    int64_t I,
+    Tensor& row_ptr
+) {
+  // Build per-batch CSR-style row pointer arrays from row indices sorted by batch
+  // Given:
+  //   rows: 1-D array of length nnz with row ids in [0, I), sorted within each batch
+  //   batch_ptr: length B+1, where [batch_ptr[b], batch_ptr[b+1]) is the subrange for batch b
+  // Produces:
+  //   - row_ptr: shape [B, I+1]
+  //
+  // Example (B = 2, I = 4):
+  // rows       = [0,   0,   1,  3,  0,   2,    2]   // 7 non-zero elements
+  //               └─── batch 0 ──┘  └─ batch 1 ─┘
+  // batch_ptr  = [0, 4, 7]
+  //               │  │  └─ end of batch 1 (total nnz)
+  //               │  └──── end of batch 0/start of batch 1
+  //               └─────── start of batch 0
+  //
+  // per-batch row pointers (I+1 entries each):
+  //   row_ptr[0] = [0, 2, 3, 3, 4]
+  //   row_ptr[1] = [0, 1, 1, 3, 3]
+  // laid out in memory: [0, 2, 3, 3, 4,  0, 1, 1, 3, 3]
+  TORCH_CHECK(rows.is_mps() && batch_ptr.is_mps() && row_ptr.is_mps(), "MPS device expected");
+  auto stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("build_row_ptr_from_sorted_rows_by_batch");
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+
+      const uint32_t tew = pso.threadExecutionWidth;
+      const uint32_t Qx = static_cast<uint32_t>(I + 1);
+      const uint32_t Qy = static_cast<uint32_t>(B);
+      const uint32_t tgW = std::min<uint32_t>(Qx, tew);
+
+      MTLSize grid = MTLSizeMake(Qx, Qy, 1);
+      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
+
+      mtl_setArgs(enc,
+                  rows,
+                  batch_ptr,
+                  row_ptr,
+                  std::array<uint32_t, 2>{static_cast<uint32_t>(I),
+                                           static_cast<uint32_t>(B)});
+      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
+    }
+  });
+}
+
+Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tensor& result_) {
+  TORCH_CHECK(result_.is_mps(), "bmm_sparse: expected 'out' to be MPS, got ", result_.device());
+  TORCH_CHECK(self_.is_mps(),  "bmm_sparse: expected 'self' to be MPS, got ", self_.device());
+  TORCH_CHECK(mat2_.is_mps(),  "bmm_sparse: expected 'mat2' to be MPS, got ", mat2_.device());
+
+  TORCH_CHECK(self_.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self_.dense_dim());
+  TORCH_CHECK(self_.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self_.sparse_dim());
+  TORCH_CHECK(mat2_.dim() == 3, "bmm_sparse: Tensor 'mat2' must have 3 dims, but has ", mat2_.dim());
+
+  TORCH_CHECK(self_.size(0) == mat2_.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
+  TORCH_CHECK(self_.size(2) == mat2_.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
+
+  const int64_t B = self_.size(0);
+  const int64_t I = self_.size(1);
+  const int64_t J = self_.size(2);
+  const int64_t K = mat2_.size(2);
+
+  auto self = self_.coalesce();
+  const int64_t nnz = self._nnz();
+  if (nnz == 0) {
+    return result_.zero_();
+  }
+
+  const auto computeDtype = at::kFloat;
+
+  auto indices = self._indices();
+  auto values  = self._values();
+
+  auto values_c = values.scalar_type() == computeDtype ? values : values.to(computeDtype);
+  auto mat2_c = mat2_.scalar_type()   == computeDtype ? mat2_   : mat2_.to(computeDtype);
+  auto mat2_contig = mat2_c.contiguous();
+
+  auto idx_b = indices.select(0, 0).contiguous();
+  auto idx_i = indices.select(0, 1).contiguous();
+  auto idx_j = indices.select(0, 2).contiguous();
+
+  // builds an array of pointers of where the batch_idx's pointer starts and ends
+  // look in function for better explanation
+  auto batch_ptr = at::empty({B + 1}, at::device(result_.device()).dtype(kLong));
+  build_batch_ptr_mps(idx_b, B, batch_ptr);
+  // build row_ptr per batch: for each (b, i) get [start, end) into rows/cols/vals
+  auto row_ptr = at::empty({B * (I + 1)}, at::device(result_.device()).dtype(kLong));
+  build_row_ptr_per_batch_mps(idx_i, batch_ptr, B, I, row_ptr);
+
+  const bool out_needs_cast = (result_.scalar_type() != computeDtype) || !result_.is_contiguous();
+  Tensor out_buf = out_needs_cast
+      ? at::empty({B, I, K}, result_.options().dtype(computeDtype))
+      : result_;
+  auto out_contig = out_buf.contiguous();
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("spmm_bmm_coo_rows_grouped_" + mps::scalarToMetalTypeString(values));
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+
+      const uint32_t tew = pso.threadExecutionWidth;
+      const uint32_t tgW = std::min<uint32_t>((uint32_t)K, tew);
+
+      // One threadgroup per (row i, batch b), lanes cover K
+      MTLSize grid = MTLSizeMake(tgW, (uint32_t)I, (uint32_t)B);
+      MTLSize tgs  = MTLSizeMake(tgW, 1, 1);
+
+      mtl_setArgs(enc,
+                  idx_i,
+                  idx_j,
+                  values_c,
+                  mat2_contig,
+                  out_contig,
+                  row_ptr,
+                  std::array<uint32_t, 4>{(uint32_t)B, (uint32_t)I, (uint32_t)J, (uint32_t)K});
+      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
+    }
+  });
+  if (out_needs_cast) {
+    result_.copy_(out_contig.to(result_.scalar_type()));
+  }
+  return result_;
+}
+
+Tensor bmm_sparse_mps(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::zeros({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
+  return bmm_out_sparse_mps(self, mat2, result);
+}
+
+Tensor& addmm_out_sparse_dense_mps(
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Tensor& result) {
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_mps(result, *b_self, mat1, mat2, beta, alpha);
+}
+
+Tensor addmm_sparse_dense_mps(
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha
+) {
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  Tensor result = at::empty({0}, self.options());
+  return s_addmm_out_sparse_dense_mps(result, *b_self, mat1, mat2, beta, alpha);
+}
 
 static SparseTensor& mul_out_dense_sparse_mps(
     const Tensor& dense,

@@ -23,6 +23,7 @@ import operator
 import textwrap
 import traceback
 import types
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import sympy
@@ -1109,7 +1110,19 @@ class TensorVariable(VariableTracker):
             #   value.requires_grad is True => self.has_grad_fn becomes True
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
-            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+
+            # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
+            # that happen in code like t[idx] += 1 when idx is unbacked. Namely the selection
+            # during 'setitem'.
+            # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
+            # storage offset in select_meta, but the output of the operation 'setitem' does not depend
+            # on the selection.
+            with (
+                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                if tx.fake_mode and tx.fake_mode.shape_env
+                else nullcontext(),
+            ):
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
             vt = value

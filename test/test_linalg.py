@@ -9931,6 +9931,28 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         C = torch.matmul(A, B)
         self.assertEqual(C, B.sum().expand(B.shape))
 
+    @onlyCUDA
+    @largeTensorTest("40GB")
+    def test_triu_tril_large_matrix_64bit(self, device):
+        """
+        Test triu/tril with large matrices requiring 64-bit indexing.
+        Regression test for https://github.com/pytorch/pytorch/issues/136611
+        """
+        # 100k x 100k matrix with 10B elements requires 64-bit indexing
+        q_len = 100000
+        causal_mask = torch.full((q_len, q_len), float('-inf'), device=device, dtype=torch.float32)
+        causal_mask.triu_(1)
+
+        # Verify row 42950 is correct (previously failed due to int32 overflow at row*col)
+        row_42950 = causal_mask[42950]
+        num_zeros = (row_42950 == 0.0).sum().item()
+        expected_zeros = 42951
+        self.assertEqual(num_zeros, expected_zeros)
+
+        # Verify last row is correct
+        last_row = causal_mask[-1]
+        self.assertTrue((last_row == 0.0).all())
+
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_triu_tril_extreme_k_values(self, device, dtype):
         """

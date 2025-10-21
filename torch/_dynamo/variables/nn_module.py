@@ -26,6 +26,7 @@ of module state.
 import functools
 import inspect
 import itertools
+import re
 import types
 from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING
@@ -113,6 +114,12 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
 @contextmanager
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
+    # Remove redundant namings
+    fully_qualified_name = re.sub(
+        r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]",
+        r".\2",
+        fully_qualified_name,
+    )
     num_calls = tx.num_calls.get(fully_qualified_name, 0)
     module_key = f"{module_key}@{num_calls}" if num_calls > 0 else module_key
     try:
@@ -940,7 +947,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             # will not reflect the mutations. So, trace through the `__iter__`
             # function to reflect any tracked mutations.
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn),
+                VariableTracker.build(tx, fn),
                 [
                     self,
                 ],
@@ -1009,9 +1016,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else nullcontext()
         )
         with ctx:
-            return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
-            )
+            if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
+                fn_vt = VariableTracker.build(tx, fn, source=source)
+                return fn_vt.call_function(tx, [self] + list(args), kwargs)
+            else:
+                # Ideally we would have just used VariableTracker.build(tx, fn,
+                # source=source) but that introduces guard on the
+                # `forward.__code__` object. Given that we already guard on the
+                # forward not present in generic dict, we dont need this guard.
+                return variables.UserFunctionVariable(fn, source=source).call_function(
+                    tx, [self] + list(args), kwargs
+                )
 
     def call_method(
         self,
@@ -1027,9 +1042,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else:
                 source = None
 
-            return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
-            )
+            fn_vt = VariableTracker.build(tx, fn, source=source)
+            return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
             try:
@@ -1039,11 +1053,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if isinstance(method, staticmethod):
                 source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(method.__func__, source=source),
-                    args,
-                    kwargs,
-                )
+                fn_vt = VariableTracker.build(tx, method.__func__, source=source)
+                return fn_vt.call_function(tx, args, kwargs)
 
             if (
                 hasattr(method, "__code__")
@@ -1103,11 +1114,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             ) or method is torch.nn.Module.__delattr__:
                 # Trace through __delattr__ to track mutations on the module
                 # members like `_modules``.
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(torch.nn.Module.__delattr__),
-                    [self, args[0]],
-                    kwargs,
-                )
+                fn_vt = VariableTracker.build(tx, torch.nn.Module.__delattr__)
+                return fn_vt.call_function(tx, [self, args[0]], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
