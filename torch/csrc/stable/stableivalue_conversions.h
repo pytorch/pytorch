@@ -9,6 +9,8 @@
 
 #include <optional>
 
+namespace torch::stable::detail {
+
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
 template <typename T>
@@ -17,15 +19,8 @@ template <typename T>
 T to(StableIValue val);
 
 // =============================================================================
-//  helpers for converting between StableIValue and T
+//  Below are the helpers for converting between StableIValue and T
 // =============================================================================
-
-// note that the signatures for from and to are forward declared in
-// stable/stableivalue_conversions.h but defined below to avoid circular
-// dependencies where other headers (like tensor-inl.h) will need to/from.
-
-namespace detail {
-
 // =============================================================================
 // FROM CONVERSIONS (T -> StableIValue)
 // =============================================================================
@@ -314,7 +309,9 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
-} // namespace detail
+// =============================================================================
+//  end to helpers for converting between StableIValue and T
+// =============================================================================
 
 // Expose the partially templated class functions through single functions
 template <typename T>
@@ -338,6 +335,42 @@ inline T to(StableIValue val) {
   return detail::ToImpl<T>::call(val);
 }
 
-// =============================================================================
-//  end to helpers for converting between StableIValue and T
-// =============================================================================
+} // namespace torch::stable::detail
+
+// [global from/to deprecation note]
+// WARNING! the following APIs will be removed!! We deprecated global from/to
+// (in 2.10) in favor of torch::stable::detail from/to to not pollute the global
+// namespace. We are only including the following wrappers for backwards
+// compatibility.
+
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+template <typename T>
+[[deprecated("Use torch::stable::detail::from instead.")]]
+inline StableIValue from(T val) {
+  return torch::stable::detail::from(val);
+}
+
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+template <typename T>
+[[deprecated("Use torch::stable::detail::from instead.")]]
+inline StableIValue from(const std::optional<T>& val) {
+  return torch::stable::detail::from(val);
+}
+
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+[[deprecated(
+    "Use torch::stable::detail::from instead.")]] [[maybe_unused]] inline StableIValue
+from(const torch::stable::Tensor& val) {
+  return torch::stable::detail::from(val);
+}
+
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+template <typename T>
+[[deprecated("Use torch::stable::detail::to instead.")]]
+inline T to(StableIValue val) {
+  return torch::stable::detail::to<T>(val);
+}
