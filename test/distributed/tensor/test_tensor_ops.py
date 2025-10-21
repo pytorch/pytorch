@@ -929,6 +929,64 @@ class DistTensorOpsTest(DTensorTestBase):
                 ):
                     self.assertEqual(x.full_tensor(), y)
 
+    @with_comms
+    def test_einsum(self):
+        """
+        Test that einsum works correctly with DTensor.
+
+        This is a regression test for GitHub issue #157631 where einsum
+        would fail with AssertionError in inference_mode because the
+        operator was not properly registered in the DTensor sharding system.
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Test 1: Basic einsum with Replicate placement
+        torch.manual_seed(42)
+        X_local = torch.randn(3, 4, 5, device=self.device_type)
+        Y_local = torch.randn(3, 6, 7, 5, device=self.device_type)
+
+        X_replicate = distribute_tensor(X_local, device_mesh, [Replicate()])
+        Y_replicate = distribute_tensor(Y_local, device_mesh, [Replicate()])
+
+        # Test with inference_mode (regression test for #157631)
+        with torch.inference_mode():
+            self._test_op_on_dtensor(
+                lambda x, y: torch.einsum("abc,adec->bde", x, y),
+                X_replicate,
+                Y_replicate,
+            )
+
+        # Test 2: Shard on contracting dimension (dimension that gets reduced)
+        # Dimension 'a' appears in both inputs but not in output, so it's contracting
+        X_shard = distribute_tensor(X_local, device_mesh, [Shard(0)])
+        Y_shard = distribute_tensor(Y_local, device_mesh, [Shard(0)])
+
+        with torch.inference_mode():
+            r_dtensor = torch.einsum("abc,adec->bde", X_shard, Y_shard)
+
+        # Verify output is Partial since inputs are sharded on contracting dim
+        # The reduction happens across the sharded dimension
+        from torch.distributed.tensor.placement_types import Partial
+
+        r_local = torch.einsum("abc,adec->bde", X_local, Y_local)
+        self.assertEqual(r_dtensor.full_tensor(), r_local)
+        self.assertEqual(r_dtensor.placements, (Partial(),))
+
+        # Test 3: Free dimension sharding (dimension that appears in output)
+        A_local = torch.randn(4, 8, device=self.device_type)
+        B_local = torch.randn(8, 6, device=self.device_type)
+
+        A_shard = distribute_tensor(A_local, device_mesh, [Shard(0)])
+        B_replicate = distribute_tensor(B_local, device_mesh, [Replicate()])
+
+        with torch.inference_mode():
+            C_dtensor = torch.einsum("ij,jk->ik", A_shard, B_replicate)
+
+        C_local = torch.einsum("ij,jk->ik", A_local, B_local)
+        self.assertEqual(C_dtensor.full_tensor(), C_local)
+        # Output should be sharded on dim 0 since input A is sharded on free dim
+        self.assertEqual(C_dtensor.placements, (Shard(0),))
+
 
 class DistArgMaxArgMinTest(DTensorTestBase):
     _ops = [torch.argmax, torch.argmin]

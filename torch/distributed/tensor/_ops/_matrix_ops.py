@@ -3,6 +3,7 @@
 
 
 import copy
+from typing import cast
 
 import torch
 from torch._ops import OpOverload
@@ -16,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     OpStrategy,
     PlacementList,
     RuntimeSchemaInfo,
+    TupleStrategy,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -480,18 +482,38 @@ def einsum_strategy(op_schema: OpSchema) -> OpStrategy:
     See gen_einsum_strategies() in _einsum_strategy.py for details on supported
     sharding patterns.
     """
-    mesh = op_schema.get_mesh_from_args()
     # einsum signature: einsum(equation, *operands)
-    # args_schema: [equation_str, OpStrategy1, OpStrategy2, ...]
-    equation = op_schema.args_schema[0]
-    assert isinstance(equation, str), (
-        f"Expected einsum equation to be str, got {type(equation)}"
+    # args_schema: [equation_str, TupleStrategy(OpStrategy1, OpStrategy2, ...)]
+    equation = cast(str, op_schema.args_schema[0])
+    tensor_operands = cast(TupleStrategy, op_schema.args_schema[1])
+
+    # Validate number of operands (tensor inputs)
+    num_operands = len(tensor_operands.children)
+    assert num_operands <= 2, (
+        f"Currently only support einsum with up to 2 tensor operands, got {num_operands}. "
+        f"Multi-operand einsum (3+ tensors) is not yet supported."
     )
 
-    # Generate strategies using the einsum strategy generator
-    # This function handles all the complex logic for batch dims,
-    # contracting dims, and free dims
-    return gen_einsum_strategies(equation, mesh, linearity=False)
+    # Extract input strategies (following mm_strategy pattern)
+    input_strategies = [cast(OpStrategy, child) for child in tensor_operands.children]
+    mesh = input_strategies[0].mesh
+
+    # Generate all possible strategies for einsum
+    strategy = gen_einsum_strategies(equation, mesh, linearity=False)
+
+    # Associate costs for each strategy (following mm_strategy pattern)
+    for strtg in strategy.strategies:
+        if strtg.input_specs is None:
+            raise AssertionError(
+                f"Expected input_specs to be not None, got {strtg.input_specs}"
+            )
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategies[i], strtg.input_specs[i])
+            for i in range(num_operands)
+        ]
+        strtg.redistribute_cost = redistribute_cost
+
+    return strategy
 
 
 def _scaled_dot_product_flash_attention_base_strategies(
