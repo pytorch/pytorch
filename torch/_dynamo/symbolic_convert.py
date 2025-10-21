@@ -2204,6 +2204,7 @@ class InstructionTranslatorBase(
                     *graph_break_hints.USER_ERROR,
                     *graph_break_hints.SUPPORTABLE,
                 ],
+                from_exc=raised_exception,
             )
 
         if sys.version_info >= (3, 11):

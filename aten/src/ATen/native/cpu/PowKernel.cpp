@@ -120,7 +120,7 @@ static void pow_tensor_scalar_kernel(
   } else if (dtype == ScalarType::Half) {
     [&]() {
       using scalar_t =
-          c10::impl::ScalarTypeToCPPTypeT<ScalarType::Half>;
+          decltype(c10::impl::ScalarTypeToCPPType<ScalarType::Half>::t);
       const auto exp = exp_scalar.to<scalar_t>();
       using Vec = Vectorized<scalar_t>;
       cpu_kernel_vec(iter,
