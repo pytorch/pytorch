@@ -213,6 +213,7 @@ select = [
     "PLR0206", # property with params
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
+    "PLW0127", # Self-assignment of variable
     "PLW0129", # assert on string literal
     "PLW0131", # named expr without context
     "PLW0133", # useless exception statement
