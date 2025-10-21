@@ -402,7 +402,7 @@ def standalone_compile(
         compiled_artifact.save(path=path, format="binary")
 
         # Later on a new process
-        loaded = torch._inductor.CacheCompiledArtifact.load(path=path, format="binary")
+        loaded = torch._inductor.CompiledArtifact.load(path=path, format="binary")
         compiled_out = loaded(*args)
 
     Args:
