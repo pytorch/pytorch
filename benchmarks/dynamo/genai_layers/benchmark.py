@@ -58,6 +58,7 @@ def list_benchmarks():
 
 def run_benchmark(
     benchmark_name: str,
+    args,
     should_visualize: bool = False,
     compile_mode: str = "max-autotune-no-cudagraphs",
 ):
@@ -72,7 +73,7 @@ def run_benchmark(
     print("=" * 60)
 
     benchmark_class = BENCHMARK_REGISTRY[benchmark_name]
-    benchmark = benchmark_class(compile_mode)
+    benchmark = benchmark_class(args, compile_mode)
     benchmark.benchmark()
     if should_visualize:
         benchmark.visualize()
@@ -80,7 +81,9 @@ def run_benchmark(
     return True
 
 
-def run_all_benchmarks(should_visualize: bool = False, compile_mode: str = "default"):
+def run_all_benchmarks(
+    args, should_visualize: bool = False, compile_mode: str = "default"
+):
     """Run all available benchmarks."""
     print("Running all benchmarks...")
     print(f"Torch compile mode: {compile_mode}")
@@ -88,7 +91,7 @@ def run_all_benchmarks(should_visualize: bool = False, compile_mode: str = "defa
 
     for name, cls in BENCHMARK_REGISTRY.items():
         print(f"\n{'=' * 20} {name.upper()} {'=' * 20}")
-        benchmark = cls(compile_mode)
+        benchmark = cls(args, compile_mode)
         benchmark.benchmark()
         if should_visualize:
             benchmark.visualize()
@@ -137,6 +140,19 @@ Examples:
         help="Torch compile mode to use (default: default)",
     )
 
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=None,
+        help="Tolerance for the accuracy check",
+    )
+
+    parser.add_argument(
+        "--exit-on-accuracy-failure",
+        action="store_true",
+        help="Whether to exit with an error message for accuracy failure",
+    )
+
     args = parser.parse_args()
 
     # Handle list option
@@ -146,7 +162,7 @@ Examples:
 
     # Handle all option
     if args.all:
-        run_all_benchmarks(args.visualize, args.compile_mode)
+        run_all_benchmarks(args, args.visualize, args.compile_mode)
         return
 
     # Handle specific benchmarks
@@ -157,7 +173,7 @@ Examples:
         sys.exit(1)
 
     for benchmark_name in args.benchmarks:
-        run_benchmark(benchmark_name, args.visualize, args.compile_mode)
+        run_benchmark(benchmark_name, args, args.visualize, args.compile_mode)
         print()  # Add spacing between benchmarks
 
 
