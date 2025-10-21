@@ -30,7 +30,8 @@ inline void zendnn_linear_impl(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
-    at::Tensor& result) {
+    at::Tensor& result,
+    bool is_weight_prepacked) {
   // Get appropriately processed tensors (2D input, transposed weight, 2D
   // result)
   check_args_for_linear(input, weight);
@@ -44,7 +45,12 @@ inline void zendnn_linear_impl(
   matmul_context_t matmul_context;
   tensor_t input_tensor, weight_tensor, output_tensor, bias_tensor;
   create_zendnn_tensor(input_2d, input_tensor, "matmul_input", datatype);
-  create_zendnn_tensor(weight_transposed, weight_tensor, "weights", datatype);
+  create_zendnn_tensor(
+      weight_transposed,
+      weight_tensor,
+      "weights",
+      datatype,
+      is_weight_prepacked);
   create_zendnn_tensor(result_2d, output_tensor, "matmul_output", datatype);
   if (bias.defined()) {
     // adds dimension at dim=0 -> [1, n]
@@ -82,7 +88,7 @@ at::Tensor zendnn_linear_unary(
   // Create output tensor with appropriate size and strides
   at::Tensor result = create_linear_output_tensor(input, weight);
   // Perform ZENDNN linear operation
-  zendnn_linear_impl(input, weight, bias_t, result);
+  zendnn_linear_impl(input, weight, bias_t, result, is_weight_prepacked);
   return result;
 }
 } // namespace at::native

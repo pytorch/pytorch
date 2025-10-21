@@ -1179,6 +1179,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/zendnn/Matmul.cpp",
     "aten/src/ATen/native/zendnn/Linear.cpp",
+    "aten/src/ATen/native/zendnn/WeightPrepack.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Conv.cpp",
     "aten/src/ATen/native/mkldnn/ConvPrepack.cpp",
