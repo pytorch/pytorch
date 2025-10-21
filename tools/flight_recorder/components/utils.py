@@ -41,6 +41,7 @@ def format_frame(frame: dict[str, str]) -> str:
 def format_frames(frames: list[dict[str, str]]) -> str:
     formatted_frames = []
     for frame in frames:
+        # pyrefly: ignore  # bad-argument-type
         formatted_frames.append(format_frame(frame))
     return "\n".join(formatted_frames)
 
@@ -695,6 +696,7 @@ def check_version(version_by_ranks: dict[str, str], version: str) -> None:
 
 
 def get_version_detail(version: str) -> tuple[int, int]:
+    # pyrefly: ignore  # bad-assignment
     version = version.split(".")
     assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)
