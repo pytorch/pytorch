@@ -267,7 +267,7 @@ else:
                 )
 
             # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
 
@@ -494,12 +494,11 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        self._flatten_mesh_list,
+                        self._flatten_rank_map,
                         self._layout,
                         self._device_type,
                         self._mesh_dim_names,
                         self._thread_id,
-                        self._root_mesh,
                     )
                 )
             return self._hash
@@ -510,12 +509,11 @@ else:
             if not isinstance(other, DeviceMesh):
                 return False
             return (
-                self._flatten_mesh_list == other._flatten_mesh_list
+                self._flatten_rank_map == other._flatten_rank_map
                 and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
-                and self._root_mesh == other._root_mesh
             )
 
         def __getitem__(
