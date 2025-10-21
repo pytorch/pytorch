@@ -2898,9 +2898,9 @@ static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tens
 
 static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, const Tensor& complex_values, const Tensor& real_vectors) {
   // These asserts make explicit the requirements on tensors for 'linalg_eig_make_complex_eigenvectors_impl'
-  //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.device() == at::kCPU);
-  //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.device() == at::kCPU);
-  //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.device() == at::kCPU);
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.is_complex());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_complex());
@@ -2921,11 +2921,13 @@ DEFINE_DISPATCH(linalg_eig_stub);
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   // therefore we create all intermediate tensors on CPU
+  TORCH_WARN("Entered linalg_eig_out_info");
   auto options = input.options();
 
   TORCH_WARN("Type of 'options': ", typeid(options).name());
   TORCH_WARN("Device in options: ", options.device());
   TORCH_WARN("Dtype in options: ", options.dtype());
+  TORCH_WARN("Dtype vectors: ", vectors.dtype());
 
 
   // These internal asserts make explicit the assumptions in the implementation
@@ -3003,6 +3005,7 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
   //
   // }
 
+  //call to the device-specific linalg_eig_stub (LAPACK, MAGMA or cuSOLVER)
   linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
 
   // if input is not complex we need to do some post-processing
@@ -3028,17 +3031,55 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     }
     if (compute_eigenvectors) {
       if (vectors.is_complex()) {
-          vectors = linalg_eig_make_complex_eigenvectors(vectors, values, maybe_complex_vectors);
+        // move tensors to CPU if they are not already there for post-processing
+        auto vectors_cpu = vectors.device().is_cpu() ? vectors : vectors.cpu();
+        auto values_cpu  = values.device().is_cpu()  ? values  : values.cpu();
+        auto maybe_complex_vectors_cpu = maybe_complex_vectors.device().is_cpu()
+                                ? maybe_complex_vectors
+                                : maybe_complex_vectors.cpu();
+
+        vectors = linalg_eig_make_complex_eigenvectors(vectors_cpu, values_cpu, maybe_complex_vectors_cpu);
+
+
+        if (!vectors.device().is_cpu()) {//move tensors back to device if needed
+          vectors.copy_(vectors_cpu.to(vectors.device()));
+        }
+
+
       } else {
         TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
       }
     }
   }
+  TORCH_WARN("=== Debug native/BatchLinarAlgebra/linalg_eig_out_info ===");
+  TORCH_WARN("input dtype: ", input.dtype(), " device: ", input.device());
+  TORCH_WARN("real_imag_values: sizes=", real_imag_values.sizes(),
+             " dtype=", real_imag_values.dtype(),
+             " device=", real_imag_values.device());
+  TORCH_WARN("values (final): sizes=", values.sizes(),
+             " dtype=", values.dtype(),
+             " device=", values.device());
+  if (compute_eigenvectors) {
+    TORCH_WARN("maybe_complex_vectors: sizes=", maybe_complex_vectors.sizes(),
+               " dtype=", maybe_complex_vectors.dtype(),
+               " device=", maybe_complex_vectors.device());
+    TORCH_WARN("vectors (final): sizes=", vectors.sizes(),
+               " dtype=", vectors.dtype(),
+               " device=", vectors.device());
+  }
+
+  auto n = input.size(-1);
+  TORCH_CHECK(values.is_complex(), "values (complex_values) not complex");
+  TORCH_CHECK(values.numel() >= n, "values tensor too small: ", values.numel(), " < ", n);
+  TORCH_CHECK(values.is_contiguous(), "values tensor not contiguous");
+  TORCH_CHECK(real_imag_values.is_contiguous(), "real_imag_values not contiguous");
+
 
   return std::tuple<Tensor&, Tensor&>(values, vectors);
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
+  TORCH_WARN("Entered linalg_eig_out");
   TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eig: input tensor should not contain infs or NaNs.");
   squareCheckInputs(input, "linalg.eig");
 
@@ -3122,6 +3163,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 }
 
 std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
+  TORCH_WARN("Entered linalg_eig")
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
   Tensor vectors = at::empty({0}, input.options().dtype(complex_dtype));

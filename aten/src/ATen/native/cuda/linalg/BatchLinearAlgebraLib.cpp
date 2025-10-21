@@ -1634,50 +1634,33 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 
 template <typename scalar_t>
 void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
+  TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
   TORCH_WARN("values device: ", values.device());
   TORCH_WARN("vectors device: ", vectors.device());
   TORCH_WARN("input device: ", input.device());
   TORCH_WARN("infos device: ", infos.device());
 
-
-  auto device = input.device();  // sollte CUDA sein
-
-
-
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
-  TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
-  TORCH_WARN("vectors dtype: ", vectors.scalar_type());
-  TORCH_WARN("values dtype: ", values.scalar_type());
-  TORCH_WARN("values sizes: ", values.sizes());
-  TORCH_WARN("values numel: ", values.numel());
+
+  auto device = input.device();
 
 
-
-  // using real_t = typename c10::scalar_value_type<scalar_t>::type;
-  // using eig_t = typename std::conditional<
-  //   std::is_same<scalar_t, c10::complex<float>>::value ||
-  //   std::is_same<scalar_t, c10::complex<double>>::value,
-  //   scalar_t,                      // A ist bereits komplex
-  //   c10::complex<scalar_t>         // A ist reell -> EV/EVec komplex
-  //   >::type;
-
-  int64_t n = input.size(-1);
+  int64_t n = cuda_int_cast(vectors.size(-1), "n");
   int64_t lda = std::max<int64_t>(1, n);
-  Tensor A_fortran = input.mT().contiguous();
-  scalar_t* A = A_fortran.data_ptr<scalar_t>();
-
-
-
   auto batch_size = batchCount(vectors);
 
-
+  auto vectors_stride = matrixStride(vectors);
+  auto values_stride = values.size(-1);
 
   auto vectors_data = vectors.data_ptr<scalar_t>();
-
   auto values_data = values.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<int>();
+
+  Tensor A_fortran = input.mT().contiguous();
+  scalar_t* A = A_fortran.data_ptr<scalar_t>();
 
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -1685,34 +1668,36 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   cusolverDnParams_t params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
   const int64_t ldvl = 1; // ldvl >= 1 if jobvl = CUSOLVER_EIG_MODE_NOVECTOR
-  int64_t ldvr = n; // ldvr >= n if jobvr = CUSOLVER_EIG_MODE_VECTOR
+  cusolverEigMode_t jobvr;
+  int64_t ldvr;
+
+  if (compute_eigenvectors) {
+    ldvr = n; // ldvr >= n if jobvr = CUSOLVER_EIG_MODE_VECTOR
+    jobvr = CUSOLVER_EIG_MODE_VECTOR;
+  }
+  else {
+    ldvr = 1; // ldvr >= 1 if jobvr = CUSOLVER_EIG_MODE_NOVECTOR
+    jobvr = CUSOLVER_EIG_MODE_NOVECTOR;
+  }
+
 
 
 
   scalar_t* W  = values.data_ptr<scalar_t>();
   scalar_t*    VL = nullptr;
 
-
-//  if constexpr (std::is_same<eig_t, scalar_t>::value) {
-//    VR_tensor = at::empty_like(vectors);
-//  } else {
-//    VR_tensor = at::empty(vectors.sizes(), vectors.options().dtype(
-//    	c10::CppTypeToScalarType<eig_t>::value));
-//  }
   scalar_t* VR = vectors.data_ptr<scalar_t>();
 
 
+  const scalar_t*		A_const = A;
+  const scalar_t* 	W_const = W;
+  const scalar_t*    	VL_const = VL;
+  const scalar_t*    	VR_const = VR;
 
-
-const scalar_t*		A_const = A;
-const scalar_t* 	W_const = W;
-const scalar_t*    	VL_const = VL;
-const scalar_t*    	VR_const = VR;
-
-size_t ws_dev = 0, ws_host = 0;
-at::cuda::solver::xgeev_bufferSize<scalar_t>(
+  size_t ws_dev = 0, ws_host = 0;
+  at::cuda::solver::xgeev_bufferSize<scalar_t>(
     handle, params,
-    CUSOLVER_EIG_MODE_NOVECTOR, CUSOLVER_EIG_MODE_VECTOR,
+    CUSOLVER_EIG_MODE_NOVECTOR, jobvr,
     n,
     A_const, lda,
     W_const,
@@ -1720,14 +1705,11 @@ at::cuda::solver::xgeev_bufferSize<scalar_t>(
     VR_const, ldvr,
     &ws_dev, &ws_host);
 
-  TORCH_WARN("linalg_eig_cusolver_xgeev: bufferSize query complete (placeholder)");
-  // allocate workspace storage on device and host
   auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_device_data = device_allocator.allocate(ws_dev);
   auto& host_allocator = *at::cuda::getPinnedMemoryAllocator();
   auto work_host_data = host_allocator.allocate(ws_host);
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
   TORCH_WARN("=== XGEEV DEBUG ===");
   TORCH_WARN("vectors shape: ", vectors.sizes());
   TORCH_WARN("values  shape: ", values.sizes());

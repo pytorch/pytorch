@@ -2079,6 +2079,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
 }
 
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
+  TORCH_WARN("entered linalg_eig_kernel");
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
