@@ -1182,8 +1182,7 @@ else:
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
             concat_dim_group_name: list[str] = []
-            root_mesh = device_mesh_list[0]._get_root_mesh()
-            rank_map = root_mesh._rank_map
+            flatten_rank_map = device_mesh_list[0]._flatten_rank_map
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):
                     concat_sizes.append(dm._layout[i].sizes)
@@ -1192,22 +1191,21 @@ else:
                 concat_dim_group_name.extend(not_none(dm._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
                 # because the concatenated indices should be indexed by the same root mesh tensor.
-                if id(dm._rank_map) != id(rank_map):
+                if dm._flatten_rank_map != flatten_rank_map:
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes with different root mesh tensors"
                     )
             concat_mesh_layout = _MeshLayout(tuple(concat_sizes), tuple(concat_strides))
-            print(concat_mesh_layout)
             if not concat_mesh_layout.check_non_overlap():
                 raise RuntimeError(
                     f"Cannot concatenate overlapping meshes: {device_mesh_list}"
                 )
             res_mesh = DeviceMesh(
-                root_mesh.device_type,
+                device_mesh_list[0].device_type,
                 _layout=concat_mesh_layout,
-                _rank_map=rank_map,
+                _rank_map=device_mesh_list[0]._rank_map,
                 mesh_dim_names=tuple(concat_dim_names),
-                _root_mesh=root_mesh,
+                _root_mesh=device_mesh_list[0]._get_root_mesh(),
                 _init_backend=False,
             )
             res_mesh._dim_group_names = concat_dim_group_name
