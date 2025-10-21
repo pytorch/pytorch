@@ -289,6 +289,11 @@ class FSDPParam:
         if self.is_dtensor:
             self._tp_spec = cast(DTensor, param)._spec
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
+            if dp_mesh is None or tp_mesh is None:
+                raise AssertionError(
+                    "FSDP requires the DP and model parallel TP/EP mesh to be not None but got: \n"
+                    f"DP's mesh: {dp_mesh}\nTP/EP's mesh: {tp_mesh}"
+                )
             self._spmd_mesh = DeviceMesh._concatenate([dp_mesh, tp_mesh])
             if len(self._tp_spec.placements) > 2:
                 raise NotImplementedError(
