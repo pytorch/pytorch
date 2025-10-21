@@ -139,8 +139,7 @@ def benchmark_all_kernels(
                 )
         else:
             ms = benchmarker.benchmark(
-                # Shallow clone args since call clears args
-                lambda: kernel_mod.call(args.copy()),
+                lambda: kernel_mod.call(args),
                 device=device_type,
                 rep=40,
             )
