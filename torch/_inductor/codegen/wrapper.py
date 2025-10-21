@@ -2060,6 +2060,7 @@ class PythonWrapperCodegen(CodeGen):
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
             self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
+            raise ValueError("Whoops!")
             self.writeline(f"{node.sym}_undivided = {data}.item()")
             self.writeline(
                 f"assert {node.sym}_undivided % {node.keypath[0].divisor} == 0, "
