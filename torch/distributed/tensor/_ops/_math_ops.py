@@ -291,6 +291,14 @@ def common_reduction_strategy(
                     reduction_linear = False
                     break
 
+        # TODO: there are some combinations of local and global reductions that allow for
+        # delaying redistribute such as max, max
+
+        for p in op_spec.output_spec.placements:
+            if isinstance(p, Partial):
+                reduction_linear = False
+                break
+
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
