@@ -2801,6 +2801,7 @@ Tensor matrix_exp(const Tensor& a) {
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential
 //      in FunctionsManual.cpp
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
+  squareCheckInputs(self, "matrix_exp_backward");
   NoTF32Guard disable_tf32;
   return backward_analytic_function_of_a_matrix(
     self, grad,
@@ -3619,7 +3620,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
-    } catch (const std::exception& e) {
+    } catch ([[maybe_unused]] const std::exception& e) {
       TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
     }
   }

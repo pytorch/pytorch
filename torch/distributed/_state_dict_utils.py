@@ -3,8 +3,8 @@ import copy
 import io
 import math
 import weakref
-from collections.abc import Mapping, MutableMapping
-from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Mapping, MutableMapping
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.cuda._pin_memory_utils as pin_memory_utils
@@ -195,11 +195,13 @@ def _iterate_state_dict(
                             ret.local_shards()[idx].tensor, non_blocking=non_blocking
                         )
                 else:
+                    # pyrefly: ignore  # missing-attribute
                     companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
 
+    # pyrefly: ignore  # bad-return
     return ret
 
 
@@ -596,7 +598,7 @@ def _distribute_tensors(
     if pg is None:
         pg = dist.distributed_c10d._get_default_group()
     for key in keys:
-        _local_state = local_state_dict.get(key, None)
+        _local_state = local_state_dict.get(key)
         if _local_state is None or torch.is_tensor(_local_state):
             continue
 
@@ -706,7 +708,7 @@ def _distribute_state_dict(
             local_state_dict[key] = value.cpu()
         else:
             assert isinstance(value, torch.Tensor)
-            local_state = local_state_dict.get(key, None)
+            local_state = local_state_dict.get(key)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
@@ -790,20 +792,21 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) == str else []
+        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) is str else []
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
                 CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
             )
         else:
+            # pyrefly: ignore  # bad-argument-type
             extend_list(cur_container, prev_key)
             if cur_container[prev_key] is None:
                 cur_container[prev_key] = def_val
             cur_container = cur_container[prev_key]
 
     key = path[-1]
-    if type(key) == int:
+    if type(key) is int:
         extend_list(cast(list[Any], cur_container), key)
 
     cur_container[key] = value

@@ -66,7 +66,7 @@ if TEST_WITH_ROCM:
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if TEST_SCIPY:
     import scipy.signal
@@ -3522,7 +3522,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             nn.RNN(10, 20, batch_first=True)
         ]
         # ROCm RNN does not issue warning about single contig chunk of memory, so don't assert it
-        first_warn = False if torch.version.hip else True
+        first_warn = not torch.version.hip
         for rnn in rnns:
             rnn.cuda()
             input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
@@ -5244,7 +5244,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 return torch.contiguous_format
             if memory_format in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
                 return memory_format
-            raise ValueError("Unable to detect memory format for backend={backend} and memory_format={memory_format}")
+            raise ValueError(f"Unable to detect memory format for backend={backend} and memory_format={memory_format}")
 
         def _get_memory_format(t: torch.Tensor) -> torch.memory_format:
             if t.is_contiguous(memory_format=torch.contiguous_format):
@@ -7496,6 +7496,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
             res = arg_class(*arg_3)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @largeTensorTest("20GB", device="cuda")
+    def test_large_max_pool2d_ch_last(self):
+        # https://github.com/pytorch/pytorch/issues/165297
+        N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
+        device = torch.device("cuda")
+        x_cuda = torch.randn(N, C, H, W, device=device, dtype=torch.float16)
+        x_cuda = x_cuda.to(memory_format=torch.channels_last)
+        pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        y_cuda_ch_last = pool(x_cuda)
+        y_cuda_contig = pool(x_cuda.contiguous())
+        self.assertEqual(y_cuda_ch_last, y_cuda_contig)
+
     def test_max_pool1d_invalid_output_size(self):
         arg_1 = 3
         arg_2 = 255
@@ -8464,6 +8477,18 @@ class TestNNDeviceType(NNTestCase):
         o_cpu.sum().backward()
         # workaround for memory usage overhead of assertEqual
         self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
+
+    @onlyCUDA
+    @largeTensorTest("20GB", device="cuda")
+    def test_large_max_pool2d_ch_last(self, device):
+        # https://github.com/pytorch/pytorch/issues/165297
+        N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
+        x_cuda = torch.randn(N, C, H, W, device=device, dtype=torch.float16)
+        x_cuda = x_cuda.to(memory_format=torch.channels_last)
+        pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        y_cuda_ch_last = pool(x_cuda)
+        y_cuda_contig = pool(x_cuda.contiguous())
+        self.assertEqual(y_cuda_ch_last, y_cuda_contig)
 
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
@@ -11225,6 +11250,16 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_cudnn_rnn(self, dtype):
+        rnn = nn.RNN(10, 20, num_layers=2, device='cuda', dtype=dtype)
+        input = torch.randn(5, 4, 10, device='cuda', dtype=dtype)
+        hx = torch.randn(2, 4, 20, device='cuda', dtype=dtype)
+        output = rnn(input, hx)
+        output_ref = rnn.cpu()(input.cpu(), hx.cpu())
+        self.assertEqual(tuple([i.cuda() for i in output_ref]), output, atol=5e-3, rtol=1e-3)
+
+    @onlyCUDA
     @gcIfJetson
     def test_upsamplingNearest3d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)
@@ -12804,6 +12839,43 @@ if __name__ == '__main__':
         self.assertEqual(a_bf16.grad, expected_bf16)
 
     @onlyCPU
+    def test_rrelu_bounds_validation(self, device):
+        """Test RReLU bounds validation for finite and infinite values."""
+        x = torch.randn(5, 5, device=device)
+
+        # Test with finite bounds
+        result = F.rrelu(x, lower=0.1, upper=0.3)
+        self.assertEqual(result.shape, x.shape)
+
+        # Test with infinite lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got inf"):
+            F.rrelu(x, lower=float('inf'), upper=0.3)
+
+        # Test with infinite upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got inf"):
+            F.rrelu(x, lower=0.1, upper=float('inf'))
+
+        # Test with NaN lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got nan"):
+            F.rrelu(x, lower=float('nan'), upper=0.3)
+
+        # Test with NaN upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got nan"):
+            F.rrelu(x, lower=0.1, upper=float('nan'))
+
+        # Test with negative infinity lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got -inf"):
+            F.rrelu(x, lower=float('-inf'), upper=0.3)
+
+        # Test with negative infinity upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got -inf"):
+            F.rrelu(x, lower=0.1, upper=float('-inf'))
+
+        # Test with lower bound greater than upper bound
+        with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than or equal to the upper bound"):
+            F.rrelu(x, lower=0.5, upper=0.3)
+
+    @onlyCPU
     def test_softshrink(self, device):
         x = torch.tensor([[1.21, 0.56, 0.5001, 0.4999, 1.2357, -0.4999, -0.5001, -1.154,
                            0.254, -0.24, -0.225, 0.104, 0.002, -0.001, 0.0574, 1.2344,
@@ -13014,7 +13086,6 @@ if __name__ == '__main__':
         self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
-    @skipIfRocm(msg='Not our bug: TransformerEncoderLayer._sa_block still uses FA/ME and effectively takes fastpath')
     @skipIfMPS  # TODO(hvaara): Investigate as possible bug. macOS 13 passes, while 14 and 15 fails.
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)

@@ -4,7 +4,7 @@ import itertools
 import os
 import random
 from contextlib import nullcontext
-from unittest import skip, skipIf
+from unittest import skip, skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
@@ -25,6 +25,7 @@ from torch.distributed._symmetric_memory import (
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     SM100OrLater,
+    SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
 )
@@ -52,7 +53,6 @@ from torch.testing._internal.common_utils import (
 test_contexts = [nullcontext, _test_mode]
 
 # Set environment variable to disable multicast for all tests in this module
-# Workaround https://github.com/pytorch/pytorch/issues/162429
 os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
 
 # So that tests are written in device-agnostic way
@@ -297,7 +297,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @parametrize("gather_dim", [0, 1])
+    @parametrize("gather_dim", [0, 1, 2])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
         self._init_process()
 
@@ -309,7 +309,10 @@ class AsyncTPTest(MultiProcContinuousTest):
         rank = self.rank
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
+        A_shard_shape = [BATCH, M, K]
+        A_shard_shape[gather_dim] //= self.world_size
+
+        A_shard = torch.rand(A_shard_shape, device="cuda")
         Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
@@ -430,6 +433,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("gather_dim", [0, 1])
     @parametrize(
         "scale_mode", ["tensor-wise", "row-wise-replicated", "row-wise-sharded"]
@@ -525,7 +529,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         BATCH = 8
         M = 64
         N = 16
-        K = 32
+        K = 1024
         group = dist.group.WORLD
         rank = self.rank
 
@@ -545,8 +549,13 @@ class AsyncTPTest(MultiProcContinuousTest):
 
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
+    @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
+    @skipIf(
+        SM100OrLater,
+        "https://github.com/pytorch/pytorch/issues/162940",
+    )
     def test_fused_scaled_matmul_reduce_scatter(
         self, scatter_dim: int, rowwise: bool
     ) -> None:
@@ -917,6 +926,37 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
         )
+
+    @skip_if_lt_x_gpu(4)
+    @requires_multicast_support()
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    # https://github.com/pytorch/pytorch/issues/164015
+    @xfailIfSM100OrLater
+    def test_multimem_one_shot_reduce_out(
+        self, dtype: torch.dtype, size_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        inp = symm_mem.empty(
+            size_bytes // dtype.itemsize, dtype=dtype, device=self.device
+        ).normal_()
+        out = torch.empty_like(inp)
+        symm_mem.rendezvous(inp, group=group_name)
+
+        root = 0
+        torch.ops.symm_mem.multimem_one_shot_reduce_out(
+            inp, "sum", root, group_name, out
+        )
+
+        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        # Only verify that the results are close to the sum of inputs across
+        # ranks (see Note [multimem_one_shot_all_reduce]).
+        if self.rank == root:
+            torch.testing.assert_close(
+                gathered_inps.sum(dim=0), out, rtol=1e-03, atol=1e-05
+            )
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"

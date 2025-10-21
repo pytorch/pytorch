@@ -5,8 +5,9 @@ import itertools
 import math
 import operator
 import sys
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Union
+from typing import Optional, Union
 
 import torch
 import torch._custom_op
@@ -15,6 +16,7 @@ import torch._prims_common as utils
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
+    canonicalize_dim,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -156,8 +158,7 @@ def _is_op_registered_to_fake_rule(op):
 
 
 def _deregister_op_impl(op):
-    if op in op_implementations_dict:
-        del op_implementations_dict[op]
+    op_implementations_dict.pop(op, None)
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
@@ -592,6 +593,21 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     raise ValueError(msg)
 
 
+@register_op_impl(aten._reshape_copy.default)
+def _reshape_copy(fake_mode, func, a, *shape):
+    if a.is_sparse or a.is_mkldnn:
+        return NotImplemented
+
+    shape = utils.infer_size(*shape, a.numel())
+    if is_contiguous_or_false(a):
+        view = _view_meta(fake_mode, func, a, *shape)
+        return view.clone(memory_format=torch.contiguous_format)
+    else:
+        return _view_meta(
+            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+        )
+
+
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(fake_mode, func, a, *shape):
@@ -744,6 +760,89 @@ def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=No
 
     output_shape = (total_L, *padded.shape[2:])
     return padded.new_empty(output_shape)
+
+
+def _compute_slice_index(size, index):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    if guard_or_false(sym_and(index >= 0, index <= size)):
+        return index
+    elif guard_or_false(sym_and(index < 0, index >= -size)):
+        return index + size
+    elif guard_or_false(index < -size):
+        return 0
+    elif guard_or_false(index > size):
+        return size
+    return None
+
+
+@register_op_impl(torch.ops.aten.slice.Tensor)
+def slice_forward(
+    fake_mode,
+    func,
+    self,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
+
+    shape_env = fake_mode.shape_env
+
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = canonicalize_dim(self.dim(), dim)
+    sizes = list(self.size())
+    strides = list(self.stride())
+
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
+
+    # start, end
+    start_index = 0 if start is None else _compute_slice_index(sizes[dim], start)
+    end_index = (
+        sizes[dim]
+        if statically_known_true(end == sys.maxsize) or end is None
+        else _compute_slice_index(sizes[dim], end)
+    )
+
+    # size
+    new_size = None
+    if start_index is not None and end_index is not None:
+        if guard_or_false(end_index >= start_index):
+            new_size = (end_index - start_index + step - 1) // step
+        elif guard_or_false(start_index >= end_index):
+            new_size = 0
+
+    # create unbacked if case unknown
+    if new_size is None:
+        new_size = shape_env.create_unbacked_symint()
+        torch._check(new_size >= 0)
+        torch._check(new_size <= sizes[dim])
+
+    # stride
+    new_stride = strides[dim] * step
+
+    # storage offset
+    if start_index is not None:
+        storage_offset = self.storage_offset() + start_index * strides[dim]
+    else:
+        storage_offset = shape_env.create_unbacked_symint()
+        torch._check(storage_offset >= 0)
+
+    sizes[dim] = new_size
+    strides[dim] = new_stride
+    if self.is_quantized:
+        raise NotImplementedError(
+            "Slice decomposition for quantized tensors aren't implemented"
+        )
+    else:
+        return self.as_strided(sizes, strides, storage_offset)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -1237,7 +1336,7 @@ def make_fast_binary_impl(
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and not op.device.type == "cpu":
+            if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
             # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:

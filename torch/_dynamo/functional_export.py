@@ -50,7 +50,22 @@ def post_process_error_msg(
     return constraint_violation_error
 
 
-def clean_nn_module_stack(
+EXPORT_ROOT_REPLACEMENTS = [
+    ("__export_root_", "_"),
+    ("_export_root.", ""),
+    ("._export_root", ""),
+]
+
+
+def clean_export_root_string(text: str) -> str:
+    """Generic utility to clean export_root patterns from strings."""
+    result = text
+    for pattern, replacement in EXPORT_ROOT_REPLACEMENTS:
+        result = result.replace(pattern, replacement)
+    return result
+
+
+def clean_nn_module_stack_and_source_fn(
     graph_module: torch.fx.GraphModule, is_inline_builtin=False
 ) -> torch.fx.GraphModule:
     """
@@ -77,12 +92,8 @@ def clean_nn_module_stack(
     Returns:
         The cleaned GraphModule (modified in-place)
     """
-    for node in graph_module.graph.nodes:
-        if "nn_module_stack" not in node.meta:
-            continue
 
-        nn_module_stack = node.meta["nn_module_stack"].copy()
-
+    def _process_nn_module_stack(nn_module_stack):
         if "L__self____export_root" in nn_module_stack:
             del nn_module_stack["L__self____export_root"]
 
@@ -90,36 +101,60 @@ def clean_nn_module_stack(
         cleaned_stack = {}
         for key, (child_name, child_class) in nn_module_stack.items():
             # Clean key by removing export_root patterns
-            clean_key = key.replace("__modules['_export_root']_", "").replace(
-                "__export_root_", ""
-            )
+            clean_key = clean_export_root_string(key)
 
             # Clean child_name by removing export_root patterns
-            clean_name = child_name.replace("._modules['_export_root']", "").replace(
-                "._export_root", ""
-            )
+            clean_name = clean_export_root_string(child_name)
 
             # Skip self reference for inline builtin case
             if is_inline_builtin and clean_name == "L['self']":
                 continue
 
             cleaned_stack[clean_key] = (clean_name, child_class)
+        return cleaned_stack
 
-        node.meta["nn_module_stack"] = cleaned_stack
+    def _process_source_fn(source_fn_stack):
+        cleaned_stack = []
+        for item in source_fn_stack:
+            if isinstance(item, tuple) and len(item) == 2:
+                name, cls = item
+                if isinstance(name, str):
+                    clean_name = clean_export_root_string(name)
+                    cleaned_stack.append((clean_name, cls))
+                else:
+                    cleaned_stack.append(item)
+            else:
+                cleaned_stack.append(item)
+        return cleaned_stack
+
+    for node in graph_module.graph.nodes:
+        if "nn_module_stack" in node.meta:
+            node.meta["nn_module_stack"] = _process_nn_module_stack(
+                node.meta["nn_module_stack"].copy()
+            )
+        if "source_fn_stack" in node.meta:
+            node.meta["source_fn_stack"] = _process_source_fn(
+                node.meta["source_fn_stack"].copy()
+            )
+
+    if "dynamo_flat_name_to_original_fqn" in graph_module.meta:
+        # Clean up flat name to original fqn mapping
+        clean_name_to_original_fqn = {}
+        for flat_name, original_fqn in graph_module.meta[
+            "dynamo_flat_name_to_original_fqn"
+        ].items():
+            clean_name_to_original_fqn[clean_export_root_string(flat_name)] = (
+                clean_export_root_string(original_fqn)
+            )
+        graph_module.meta["dynamo_flat_name_to_original_fqn"] = (
+            clean_name_to_original_fqn
+        )
 
     return graph_module
 
 
 def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
     """Remove export_root artifacts from FX graph in-place"""
-
-    # Clean parameter names: L__self____export_root_param -> L__self___param
-    def clean_name(name) -> str:
-        if "____modules___export_root_" in name:
-            return name.replace("____modules___export_root_", "_")
-        if "__export_root_" in name:
-            return name.replace("__export_root_", "_")
-        return name
 
     # Unlike getattr node, call_module can be invoked multiple times
     # In those cases, we should fix all invocations of call_module
@@ -129,7 +164,7 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
     for node in graph_module.graph.nodes:
         if node.op == "get_attr":
             old_target = node.target
-            new_target = clean_name(old_target)
+            new_target = clean_export_root_string(old_target)
             if new_target != old_target:
                 node.target = new_target
                 assert hasattr(graph_module, old_target)
@@ -140,8 +175,10 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
         # Dynamo will only have one nested level
         if node.op == "call_module":
             old_target = node.target
-            new_target = clean_name(old_target)
-            new_name = clean_name(node.name)
+            assert isinstance(old_target, str)
+            new_target = clean_export_root_string(old_target)
+            assert isinstance(new_target, str)
+            new_name = clean_export_root_string(node.name)
             if new_target == old_target:
                 continue
 
@@ -150,8 +187,6 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
                 node.target = clean_named_module_map[old_target]
                 node.name = new_name
                 continue
-            assert isinstance(old_target, str)
-            assert isinstance(new_target, str)
             target = graph_module.get_submodule(old_target)
             graph_module.delete_submodule(old_target)
             graph_module.add_submodule(new_target, target)
@@ -250,6 +285,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             else:
                 placeholder.node.meta["val"] = self.flat_inputs[i]
 
+            # pyrefly: ignore  # unsupported-operation
             self.new_input_nodes[i] = placeholder
 
     def _create_placeholder_mapping(self) -> None:
@@ -324,12 +360,18 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Copy module metadata like the original implementation
         if hasattr(self.module, "meta"):
+            # pyrefly: ignore  # unsupported-operation
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
+                # pyrefly: ignore  # index-error
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
+                    # pyrefly: ignore  # index-error
                     "dynamo_flat_name_to_original_fqn"
                 ]
+            # pyrefly: ignore  # unsupported-operation
             if "dynamo_compile_id" in self.module.meta:
+                # pyrefly: ignore  # index-error
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
+                    # pyrefly: ignore  # index-error
                     "dynamo_compile_id"
                 ]
 
@@ -361,8 +403,11 @@ def _suggest_or_raise_constraint_violation(
             torch._ops.OpOverloadPacket | torch._ops.OpOverload,
         )
     ):
+        # pyrefly: ignore  # unbound-name
         dim_constraints.solve()
+        # pyrefly: ignore  # unbound-name
         forced_specializations = dim_constraints.forced_specializations()
+        # pyrefly: ignore  # unbound-name
         msg = dim_constraints.prettify_results(
             inspect.signature(orig_callable),  # type: ignore[attr-defined]
             dynamic_shapes,
@@ -383,9 +428,11 @@ def _suggest_or_raise_constraint_violation(
                 )
 
         # Error if we have any constraints on static values
+        # pyrefly: ignore  # unbound-name
         for k in shape_env.var_to_range.keys():
             if isinstance(k, sympy.Integer):
                 constraint_violation_error = ConstraintViolationError(
+                    # pyrefly: ignore  # unbound-name
                     f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                     "It appears that you're trying to set a constraint on a "
                     f"value which we evaluated to have a static value of {k}. "
@@ -451,7 +498,14 @@ def _dynamo_graph_capture_for_export(
                 automatic_dynamic_shapes=False,
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
+                constant_fold_autograd_profiler_enabled=True,
                 log_graph_in_out_metadata=True,
+                # install_free_tensors ensures that params and buffers are still
+                # added as graph attributes, and makes Dynamo emits graphs that
+                # follow export pytree-able input requirements In future, if we
+                # fully rely on bytecode for the runtime, we can turn this flag
+                # off.
+                install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
             )
 
             with (
@@ -540,12 +594,13 @@ def _dynamo_graph_capture_for_export(
             )
             transformed_graph.recompile()
 
-            clean_nn_module_stack(
+            clean_nn_module_stack_and_source_fn(
                 transformed_graph, torch._dynamo.config.inline_inbuilt_nn_modules
             )
             clean_export_root(transformed_graph)
 
             transformed_graph.meta["module_call_specs"] = module_call_spec
+            transformed_graph.meta["fake_mode"] = fake_mode
 
             return transformed_graph
 

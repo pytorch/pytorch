@@ -2,8 +2,8 @@ import logging
 import os
 import warnings
 import zipfile
-from collections.abc import Mapping
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Mapping
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -436,6 +436,7 @@ def load(
         print(ep(torch.randn(5)))
     """
     if isinstance(f, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
     extra_files = extra_files or {}
@@ -447,8 +448,8 @@ def load(
             f,
             expected_opset_version=expected_opset_version,
         )
-    except RuntimeError as e:
-        log.warning("Ran into the following error when deserializing: %s", e)
+    except RuntimeError:
+        log.warning("Ran into the following error when deserializing", exc_info=True)
         pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:

@@ -23,6 +23,7 @@ import operator
 import textwrap
 import traceback
 import types
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import sympy
@@ -201,6 +202,19 @@ class TensorVariable(VariableTracker):
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
 
+    def synchronize_attributes(self, tx, target_cls=None):
+        from .builder import get_specialized_props, infer_subclass_type
+
+        if target_cls is None:
+            target_cls = type(self)
+
+        example_value = self.proxy.node.meta.get("example_value")
+        specialized_props = get_specialized_props(
+            target_cls, tx, example_value, infer_subclass_type(example_value)
+        )
+        for k, v in specialized_props.items():
+            setattr(self, k, v)
+
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
         return repr(self.proxy.node.meta["example_value"])
@@ -233,7 +247,7 @@ class TensorVariable(VariableTracker):
 
         if is_sparse_any(value) and not has_free_symbols(value):
             props["_size"] = tuple(
-                [int(s) if is_symbolic(s) else s for s in value.size()]
+                int(s) if is_symbolic(s) else s for s in value.size()
             )
         elif not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -245,7 +259,8 @@ class TensorVariable(VariableTracker):
             props["_size"] = tuple(
                 # the non is_symbolic case applies to the jagged layout
                 # NestedTensor case as singleton ints are not symbolic
-                [int(s) if is_symbolic(s) else s for s in value.size()]
+                int(s) if is_symbolic(s) else s
+                for s in value.size()
             )
             props["stride"] = tuple(value.stride())
             if torch._C._functorch.is_batchedtensor(value):
@@ -254,11 +269,9 @@ class TensorVariable(VariableTracker):
                 props["is_contiguous"] = None
             else:
                 props["is_contiguous"] = tuple(
-                    [
-                        x
-                        for x in torch._prims_common._memory_formats
-                        if value.is_contiguous(memory_format=x)
-                    ]
+                    x
+                    for x in torch._prims_common._memory_formats
+                    if value.is_contiguous(memory_format=x)
                 )
         return props
 
@@ -504,7 +517,7 @@ class TensorVariable(VariableTracker):
                 # these attributes are implemented under tp_getset, which appear
                 # as `getset_descriptor`s, (compared to, say, methods which appear
                 # as `method_descriptor`s)
-                if type(static_attr) != types.GetSetDescriptorType:
+                if type(static_attr) is not types.GetSetDescriptorType:
                     return None
 
                 proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
@@ -1097,20 +1110,26 @@ class TensorVariable(VariableTracker):
             #   value.requires_grad is True => self.has_grad_fn becomes True
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
-            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+
+            # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
+            # that happen in code like t[idx] += 1 when idx is unbacked. Namely the selection
+            # during 'setitem'.
+            # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
+            # storage offset in select_meta, but the output of the operation 'setitem' does not depend
+            # on the selection.
+            with (
+                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                if tx.fake_mode and tx.fake_mode.shape_env
+                else nullcontext(),
+            ):
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
-            example_value = self.proxy.node.meta.get("example_value")
-            from .builder import get_specialized_props, infer_subclass_type
+            vt = value
+            if isinstance(vt, variables.lazy.LazyVariableTracker):
+                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
 
-            if isinstance(value, variables.lazy.LazyVariableTracker):
-                value = variables.lazy.LazyVariableTracker.realize_all(value)
-
-            specialized_props = get_specialized_props(
-                type(value), tx, example_value, infer_subclass_type(example_value)
-            )
-            for k, v in specialized_props.items():
-                setattr(self, k, v)
+            self.synchronize_attributes(tx, type(vt))
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
@@ -1355,7 +1374,7 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
+                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator
@@ -1537,7 +1556,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        elif name in ["__version__"]:
+        elif name == "__version__":
             unimplemented_v2(
                 gb_type="Unsupported ndarray.__version__ access",
                 context=f"var_getattr {self} {name}",

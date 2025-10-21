@@ -373,8 +373,9 @@ import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
+from collections.abc import Callable
 from importlib import metadata
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -839,6 +840,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
+    # pyrefly: ignore  # bad-instantiation
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
