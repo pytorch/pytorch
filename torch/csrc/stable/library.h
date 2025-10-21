@@ -4,15 +4,14 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/macros/Macros.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
 // but we need to include it here as the contents of stableivalue_conversions.h
 // used to live here and so we need to expose them for backwards compatibility.
 #include <torch/csrc/stable/stableivalue_conversions.h>
 
-// use anonymous namespace to avoid collisions between differing
-// versions of this file that may be included by different sources
-namespace {
+HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 
 class StableLibrary final {
  private:
@@ -111,7 +110,7 @@ class StableTorchLibraryInit final {
   }
 };
 
-} // namespace
+HIDDEN_NAMESPACE_END(torch, stable, detail)
 
 // macros copied from c10/macros/Macros.h
 #ifdef __COUNTER__
@@ -129,42 +128,45 @@ class StableTorchLibraryInit final {
 
 #define _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, uid)                             \
   static void STABLE_CONCATENATE(                                             \
-      STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(StableLibrary&);     \
+      STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_,                           \
+      uid)(torch::stable::detail::StableLibrary&);                            \
   static const StableTorchLibraryInit STABLE_CONCATENATE(                     \
       STABLE_TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(              \
-      StableLibrary::Kind::IMPL,                                              \
+      torch::stable::detail::StableLibrary::Kind::IMPL,                       \
       &STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid), \
       #ns,                                                                    \
       #k,                                                                     \
       __FILE__,                                                               \
       __LINE__);                                                              \
-  void STABLE_CONCATENATE(                                                    \
-      STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(StableLibrary & m)
+  void STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)( \
+      torch::stable::detail::StableLibrary & m)
 
 #define STABLE_TORCH_LIBRARY(ns, m)                                          \
-  static void STABLE_TORCH_LIBRARY_init_##ns(StableLibrary&);                \
+  static void STABLE_TORCH_LIBRARY_init_##ns(                                \
+      torch::stable::detail::StableLibrary&);                                \
   static const StableTorchLibraryInit STABLE_TORCH_LIBRARY_static_init_##ns( \
-      StableLibrary::Kind::DEF,                                              \
+      torch::stable::detail::StableLibrary::Kind::DEF,                       \
       &STABLE_TORCH_LIBRARY_init_##ns,                                       \
       #ns,                                                                   \
       nullptr,                                                               \
       __FILE__,                                                              \
       __LINE__);                                                             \
-  void STABLE_TORCH_LIBRARY_init_##ns(StableLibrary& m)
+  void STABLE_TORCH_LIBRARY_init_##ns(torch::stable::detail::StableLibrary& m)
 
 #define STABLE_TORCH_LIBRARY_FRAGMENT(ns, m) \
   _STABLE_TORCH_LIBRARY_FRAGMENT(ns, m, STABLE_UID)
 
 #define _STABLE_TORCH_LIBRARY_FRAGMENT(ns, m, uid)                          \
   static void STABLE_CONCATENATE(                                           \
-      STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid)(StableLibrary&);     \
+      STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_,                           \
+      uid)(torch::stable::detail::StableLibrary&);                          \
   static const StableTorchLibraryInit STABLE_CONCATENATE(                   \
       STABLE_TORCH_LIBRARY_FRAGMENT_static_init_##ns##_, uid)(              \
-      StableLibrary::Kind::FRAGMENT,                                        \
+      torch::stable::detail::StableLibrary::Kind::FRAGMENT,                 \
       &STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid), \
       #ns,                                                                  \
       nullptr,                                                              \
       __FILE__,                                                             \
       __LINE__);                                                            \
-  void STABLE_CONCATENATE(                                                  \
-      STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid)(StableLibrary & m)
+  void STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid)( \
+      torch::stable::detail::StableLibrary & m)
