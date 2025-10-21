@@ -460,4 +460,44 @@ static inline void construct_attr_by_post_op(
   }
 }
 
+enum class ScalingType : std::uint8_t {
+  TensorWise, // fp32 scales
+  RowWise, // fp32 scales
+  BlockWise1x16, // fp8_e4m3fn scales
+  BlockWise1x32, // fp8_e8m0fnu scales
+  BlockWise1x128, // fp32 scales
+  BlockWise128x128, // fp32 scales
+};
+
+static inline int get_onednn_mask_from_scaling_type(ScalingType scaling_type) {
+  // Set according to
+  // https://github.com/uxlfoundation/oneDNN/blob/main/tests/benchdnn/doc/knobs_attr.md#--attr-scales
+  switch (scaling_type) {
+    case ScalingType::TensorWise:
+      return 0;
+    case ScalingType::RowWise:
+      return 1 << 0;
+
+    // ChannelWise
+    // TODO: ScalingType for Blockwise 1x16, 1x32, and 1x128 is not currently
+    // supported. But they should be set as per_dim_1/per_oc for now.
+    case ScalingType::BlockWise1x16:
+    case ScalingType::BlockWise1x32:
+    case ScalingType::BlockWise1x128:
+      return 1 << 1;
+
+    // per_ocic or per_dim_01
+    // TODO: This does not consider the batch_size.
+    // For the batch, mask = (1 << batch_ndims) + (1 << batch_ndims + 1)
+    // TODO: Refer to
+    // https://github.com/uxlfoundation/oneDNN/blob/5365a85d641add53946d6b647dabad65d8e4d3ad/tests/gtests/test_iface_attr_quantization.cpp#L521
+    // To refactor this code. This might not correct!
+    case ScalingType::BlockWise128x128:
+      return (1 << 0) | (1 << 1);
+    default:
+      TORCH_CHECK(false, "Unsupported scaling type for oneDNN matmul");
+  }
+  return 0;
+}
+
 } // namespace at::native::onednn
