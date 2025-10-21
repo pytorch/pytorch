@@ -372,7 +372,7 @@ def _check_dependencies(m):
 
     if dependencies is not None:
         missing_deps = [pkg for pkg in dependencies if not _check_module_exists(pkg)]
-        if len(missing_deps):
+        if missing_deps:
             raise RuntimeError(f"Missing dependencies: {', '.join(missing_deps)}")
 
 
