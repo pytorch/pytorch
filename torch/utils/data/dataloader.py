@@ -111,10 +111,14 @@ def _get_distributed_settings():
 def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
-    assert info is not None
+    if info is None:
+        raise AssertionError("Worker info is None in sharding worker init function")
     total_workers = info.num_workers
     datapipe = info.dataset
-    assert isinstance(datapipe, (IterDataPipe, MapDataPipe))
+    if not isinstance(datapipe, (IterDataPipe, MapDataPipe)):
+        raise AssertionError(
+            "datapipe must be an instance of IterDataPipe or MapDataPipe"
+        )
     # To distribute elements across distributed process evenly, we should shard data on distributed
     # processes first then shard on worker processes
     total_workers *= world_size
@@ -766,8 +770,12 @@ class _BaseDataLoaderIter:
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
     def __init__(self, loader):
         super().__init__(loader)
-        assert self._timeout == 0
-        assert self._num_workers == 0
+        if self._timeout != 0:
+            raise AssertionError("_SingleProcessDataLoaderIter requires timeout == 0")
+        if self._num_workers != 0:
+            raise AssertionError(
+                "_SingleProcessDataLoaderIter requires num_workers == 0"
+            )
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   Taking care of distributed sharding
@@ -1109,8 +1117,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._prefetch_factor = loader.prefetch_factor
         self._in_order = loader.in_order
 
-        assert self._num_workers > 0
-        assert self._prefetch_factor > 0
+        if self._num_workers <= 0:
+            raise AssertionError(
+                "num_workers must be greater than 0 for MultiProcessingDataLoaderIter"
+            )
+        if self._prefetch_factor <= 0:
+            raise AssertionError(
+                "prefetch_factor must be greater than 0 for MultiProcessingDataLoaderIter"
+            )
 
         if loader.multiprocessing_context is None:
             multiprocessing_context = torch.multiprocessing
@@ -1255,7 +1269,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             while resume_iteration_cnt > 0:
                 return_idx, return_data = self._get_data()
                 if isinstance(return_idx, _utils.worker._ResumeIteration):
-                    assert return_data is None
+                    if return_data is not None:
+                        raise AssertionError(
+                            "Expected return_data to be None when resuming iteration"
+                        )
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
         for _ in range(self._prefetch_factor * self._num_workers):
@@ -1480,7 +1497,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._rcvd_idx += 1
                 return self._process_data(data, worker_id)
 
-            assert not self._shutdown and self._tasks_outstanding > 0
+            if self._shutdown or self._tasks_outstanding <= 0:
+                raise AssertionError(
+                    "Invalid iterator state: shutdown or no outstanding tasks when fetching next data"
+                )
             idx, data = self._get_data()
             self._tasks_outstanding -= 1
             if self._dataset_kind == _DatasetKind.Iterable:
@@ -1509,7 +1529,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def _try_put_index(self):
         max_tasks = self._prefetch_factor * self._num_workers
-        assert self._tasks_outstanding < max_tasks
+        if self._tasks_outstanding >= max_tasks:
+            raise AssertionError(
+                "Number of outstanding tasks exceeded maximum allowed tasks"
+            )
 
         try:
             index = self._next_index()
@@ -1548,9 +1571,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # exhausting an `IterableDataset`. This should be used only when this
         # `_MultiProcessingDataLoaderIter` is going to continue running.
 
-        assert self._workers_status[worker_id] or (
-            self._persistent_workers and shutdown
-        )
+        if (
+            not self._workers_status[worker_id]
+            and not self._persistent_workers
+            and not shutdown
+        ):
+            raise AssertionError(
+                "Worker status inconsistent when marking worker as unavailable"
+            )
 
         # Signal termination to that specific worker.
         q = self._index_queues[worker_id]
@@ -1569,7 +1597,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         self._workers_status[worker_id] = False
 
-        assert self._workers_done_event.is_set() == shutdown
+        if self._workers_done_event.is_set() != shutdown:
+            raise AssertionError(
+                "_workers_done_event state does not match shutdown flag"
+            )
 
     def _shutdown_workers(self):
         # Called when shutting down this `_MultiProcessingDataLoaderIter`.
