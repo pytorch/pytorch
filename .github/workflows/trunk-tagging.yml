@@ -203,9 +203,10 @@ jobs:
             AFTER_SHA="${{ github.sha }}"  # same as event.after
 
             # List commits introduced by this push (old..new), oldest first for stable ordering
-            mapfile -t COMMITS < <(git rev-list --reverse "${BEFORE_SHA}..${AFTER_SHA}")
+            commits_file="$(mktemp)"
+            git rev-list --reverse "${BEFORE_SHA}..${AFTER_SHA}" > "${commits_file}"
 
-            if [ ${#COMMITS[@]} -eq 0 ]; then
+            if [ ! -s "${commits_file}" ]; then
               echo "No new commits found between ${BEFORE_SHA}..${AFTER_SHA}; nothing to tag."
               {
                 echo "exists=true"
@@ -213,13 +214,17 @@ jobs:
                 echo "skipped_count=0"
                 echo "failed_count=0"
               } >> "${GITHUB_OUTPUT}"
+              rm -f "${commits_file}"
               exit 0
             fi
 
-            echo "Found ${#COMMITS[@]} commit(s) to tag for push:"
-            printf '  %s\n' "${COMMITS[@]}"
+            commit_count="$(wc -l < "${commits_file}" | tr -d ' ')"
+            echo "Found ${commit_count} commit(s) to tag for push:"
+            while IFS= read -r sha; do
+              printf '  %s\n' "${sha}"
+            done < "${commits_file}"
 
-            for sha in "${COMMITS[@]}"; do
+            while IFS= read -r sha; do
               TAG_NAME="trunk/${sha}"
               COMMIT_SHA="${sha}"
 
@@ -238,7 +243,9 @@ jobs:
                 echo "Tag creation failed after all retry attempts for ${TAG_NAME}"
                 failed_count=$((failed_count + 1))
               fi
-            done
+            done < "${commits_file}"
+
+            rm -f "${commits_file}"
 
             # Determine aggregate existence flag: true iff nothing was created and nothing failed
             if [ "${created_count}" -eq 0 ] && [ "${failed_count}" -eq 0 ]; then
