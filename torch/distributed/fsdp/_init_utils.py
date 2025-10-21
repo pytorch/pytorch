@@ -243,9 +243,10 @@ def _init_inter_node_process_group(
         if local_rank == my_local_rank:
             inter_node_pg = grp
 
-    assert inter_node_pg is not None, (
-        f"{my_local_rank} expected to assign inter-node pg, but did not"
-    )
+    if inter_node_pg is None:
+        raise AssertionError(
+            f"{my_local_rank} expected to assign inter-node pg, but did not"
+        )
     return inter_node_pg
 
 
@@ -548,7 +549,8 @@ def _verify_managed_params(module: nn.Module, params: list[nn.Parameter]) -> Non
                 if param is param_:
                     param_name = name
                     break
-            assert param_name
+            if not param_name:
+                raise AssertionError("Expected param_name to be set")
             raise ValueError(
                 "FSDP doesn't support scalar parameters. "
                 f"Change {param_name} to a 1D tensor with numel equal to 1."
@@ -646,7 +648,8 @@ def _init_param_handle_from_params(
         fsdp_extension=state._fsdp_extension,
     )
     handle.shard()
-    assert not state._handle
+    if state._handle:
+        raise AssertionError("Expected state._handle to be None")
     state.params.append(handle.flat_param)
     state._handle = handle
     state._fully_sharded_module_to_handle[handle._fully_sharded_module] = handle
@@ -707,7 +710,10 @@ def _get_ignored_modules(
     for submodule in root_module.modules():
         optional_fsdp_state = _get_module_fsdp_state(submodule)
         if optional_fsdp_state is not None:
-            assert hasattr(optional_fsdp_state, "_ignored_modules")
+            if not hasattr(optional_fsdp_state, "_ignored_modules"):
+                raise AssertionError(
+                    "Expected optional_fsdp_state to have _ignored_modules attribute"
+                )
             ignored_modules.update(optional_fsdp_state._ignored_modules)
     return ignored_modules
 
@@ -740,7 +746,10 @@ def _get_ignored_params(
     for submodule in root_module.modules():
         optional_fsdp_state = _get_module_fsdp_state(submodule)
         if optional_fsdp_state is not None:
-            assert hasattr(optional_fsdp_state, "_ignored_params")
+            if not hasattr(optional_fsdp_state, "_ignored_params"):
+                raise AssertionError(
+                    "Expected optional_fsdp_state to have _ignored_params attribute"
+                )
             all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
@@ -769,7 +778,10 @@ def _get_ignored_buffer_names(
     for submodule in root_module.modules():
         optional_fsdp_state = _get_module_fsdp_state(submodule)
         if optional_fsdp_state is not None:
-            assert hasattr(optional_fsdp_state, "_ignored_buffer_names")
+            if not hasattr(optional_fsdp_state, "_ignored_buffer_names"):
+                raise AssertionError(
+                    "Expected optional_fsdp_state to have _ignored_buffer_names attribute"
+                )
             all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
 
     return all_ignored_buffer_names

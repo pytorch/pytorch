@@ -214,7 +214,8 @@ class _ExecOrderData:
             # parameters
             # TODO (awgu): Since every module has at most one handle in the
             # current implementation, this should never raise the error.
-            assert self.world_size is not None  # mypy
+            if self.world_size is None:
+                raise AssertionError("Expected world_size to not be None")
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 # TODO(voz): Don't graph break on this - dynamo hates the n1 != n2
                 # tensor comparison control flow.
