@@ -2876,9 +2876,12 @@ class InstructionTranslatorBase(
         # so we should not count NullVariables
         stack_len = len(self.stack) - len(meta.stack_null_idxes)
 
+        assert self.current_instruction.offset is not None
+
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
+            self.current_instruction.offset,
             resume_inst.offset,
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
