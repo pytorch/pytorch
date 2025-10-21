@@ -72,15 +72,7 @@ del test
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
 
 
-class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.config.nested_graph_breaks = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.nested_graph_breaks = False
-
+class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
