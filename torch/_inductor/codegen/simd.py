@@ -677,7 +677,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         def add_range(i: int, expr: sympy.Expr) -> int:
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit
+                raise CantSplit(remaining[i], expr)
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -763,7 +763,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit
+                        raise CantSplit(size, remaining[current_group])
 
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
@@ -2361,12 +2361,16 @@ class SIMDScheduling(BaseScheduling):
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
 
+        # Sometimes dynamic shapes is unable to prove equality without hint
+        get_hint = functools.partial(
+            V.graph.sizevars.size_hint, fallback=config.unbacked_symint_fallback
+        )
         torch._check(
-            sympy_product(pw_ranges) == pointwise_numel,
+            get_hint(sympy_product(pw_ranges)) == get_hint(pointwise_numel),
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
         )
         torch._check(
-            sympy_product(red_ranges) == reduction_numel,
+            get_hint(sympy_product(red_ranges)) == get_hint(reduction_numel),
             lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
         )
 
@@ -2792,4 +2796,7 @@ class CandidateTiling:
 
 
 class CantSplit(Exception):
-    pass
+    def __init__(self, expr, remaining):
+        super().__init__()
+        self.expr = expr
+        self.remaining = remaining

@@ -18,7 +18,16 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Literal,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -2921,12 +2930,19 @@ def _reduction_configs(
 
 
 def match_target_block_product(
-    size_hints, tiling_scores, target_block_product, min_block_size=1
+    size_hints,
+    tiling_scores,
+    target_block_product,
+    min_block_size=1,
+    min_red_block: Optional[int] = 4,
 ):
     """
     Distribute block sizes across dimensions according to tiling scores,
     aiming to match a target product of block sizes.
     """
+    min_red_block = (
+        min_block_size if min_red_block is None else max(min_red_block, min_block_size)
+    )
     total_score = sum(tiling_scores.values())
     if total_score == 0:
         # just assume even score with no minimum block size
@@ -2939,12 +2955,13 @@ def match_target_block_product(
     curr_block_product = 1
 
     for dim, score in tiling_scores.items():
-        if score == 0:
+        if score == 0 and "r" not in dim:
             block_sizes[dim] = 1
             continue
 
-        block_sizes[dim] = min_block_size
-        curr_block_product *= min_block_size
+        size = min_block_size if "r" not in dim else min_red_block
+        block_sizes[dim] = size
+        curr_block_product *= size
         relative_scores[dim] = score / total_score
 
     # Scale up dimensions by their relative scores until we reach the target
