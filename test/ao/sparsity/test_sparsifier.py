@@ -472,8 +472,8 @@ class TestNearlyDiagonalSparsifier(TestCase):
         else:
             height, width = mask.shape
             dist_to_diagonal = nearliness // 2
-            for row in range(0, height):
-                for col in range(0, width):
+            for row in range(height):
+                for col in range(width):
                     if abs(row - col) <= dist_to_diagonal:
                         assert mask[row, col] == 1
                     else:

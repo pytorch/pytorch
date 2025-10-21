@@ -78,7 +78,7 @@ class TwoTensor(torch.Tensor):
         # our two inner tensors return the same value
         out_flat = [
             cls(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
-            for o_a, o_b in zip(out_a_flat, out_b_flat)
+            for o_a, o_b in zip(out_a_flat, out_b_flat, strict=True)
         ]
         out = pytree.tree_unflatten(out_flat, spec)
         from torch._higher_order_ops.cond import cond_op
