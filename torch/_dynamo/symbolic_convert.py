@@ -3213,6 +3213,8 @@ class InstructionTranslatorBase(
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
+            # Do not allow nested graph breaks in HOPs
+            and self.output.current_tracer.parent is None
         )
 
     @break_graph_if_unsupported(push=0)
