@@ -15,6 +15,7 @@ import math
 import sys
 import warnings
 from typing import TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -839,7 +840,7 @@ def t(g: jit_utils.GraphContext, self):
 def numpy_T(g: jit_utils.GraphContext, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     assert ndim is not None
-    perm = list(reversed(range(0, ndim)))
+    perm = list(reversed(range(ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
 
@@ -989,7 +990,7 @@ def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
 @_onnx_symbolic("aten::permute")
 @symbolic_helper.parse_args("v", "is")
 def permute(g: jit_utils.GraphContext, self, dims):
-    if dims == list(range(0, len(dims))):
+    if dims == list(range(len(dims))):
         return self
     return g.op("Transpose", self, perm_i=dims)
 
@@ -1367,7 +1368,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
         )
     ceiled_output_dim = [
         math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
-        for i in range(0, len(padding))
+        for i in range(len(padding))
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
@@ -1376,7 +1377,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
             else ceiled_output_dim[i]
         )
-        for i in range(0, len(ceiled_output_dim))
+        for i in range(len(ceiled_output_dim))
     ]
     padding_ceil = [
         (
@@ -1391,7 +1392,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
                 )
             )
         )
-        for i in range(0, len(padding))
+        for i in range(len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
@@ -1404,7 +1405,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
             else int(padding_ceil[i])
         )
-        for i in range(0, len(padding_ceil))
+        for i in range(len(padding_ceil))
     ]
     return padding_ceil
 
@@ -1696,14 +1697,14 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
                 name, "input size not accessible", input
             )
         # verify if output size % input size = 0 for all dim
-        mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
+        mod = [dim[i] % output_size[i] for i in range(len(dim))]
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return symbolic_helper._unimplemented(
                 name, "output size that are not factor of input size", output_size_value
             )
-        k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
+        k = [int(dim[i] / output_size[i]) for i in range(len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
             # pyrefly: ignore  # not-callable
@@ -1965,8 +1966,8 @@ def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         @functools.wraps(fn)
         def wrap_with_cast(g, input, other):
-            to_i = symbolic_helper.cast_pytorch_to_onnx[to_type]
-            return fn(g, g.op("Cast", input, to_i=to_i), g.op("Cast", other, to_i=to_i))
+            to_cast_func = globals()[f"_cast_{to_type}"]
+            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
 
         return wrap_with_cast
 
@@ -2905,7 +2906,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
             for low, hi in zip(low_indices, hi_indices)
         ]
         ndim = len(sizes)
-        perm = list(range(0, ndim))
+        perm = list(range(ndim))
         perm.append(perm.pop(dimension))
         unsqueeze = [
             symbolic_helper._unsqueeze_helper(
@@ -3328,6 +3329,60 @@ def _unique(g: jit_utils.GraphContext, input, sorted, return_inverse):
 @symbolic_helper.parse_args("v", "i", "i", "i")
 def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts):
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
+
+
+@_onnx_symbolic("aten::_cast_Byte")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.UINT8)
+
+
+@_onnx_symbolic("aten::_cast_Char")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT8)
+
+
+@_onnx_symbolic("aten::_cast_Short")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT16)
+
+
+@_onnx_symbolic("aten::_cast_Int")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
+
+
+@_onnx_symbolic("aten::_cast_Long")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
+
+
+@_onnx_symbolic("aten::_cast_Half")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
+
+
+@_onnx_symbolic("aten::_cast_Float")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+
+
+@_onnx_symbolic("aten::_cast_Double")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
+
+
+@_onnx_symbolic("aten::_cast_Bool")
+@deprecated("Avoid using this function and create a Cast node instead")
+def _cast_Bool(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL)
 
 
 @_onnx_symbolic("aten::empty")

@@ -332,6 +332,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
+    # pyrefly: ignore  # bad-override
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
@@ -435,6 +436,7 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
+        # pyrefly: ignore  # invalid-type-var
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[dict[str, object]] = None
@@ -552,6 +554,7 @@ class TritonTemplateKernel(TritonKernel):
         context = (
             contextlib.nullcontext
             if not self.ops_handler
+            # pyrefly: ignore  # not-callable
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
         with context():  # type: ignore[operator]
@@ -990,6 +993,7 @@ class TritonTemplateKernel(TritonKernel):
                             f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
                         )
 
+            # pyrefly: ignore  # bad-assignment
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
@@ -1193,6 +1197,7 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(index_order),
+                                # pyrefly: ignore  # missing-argument
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1206,6 +1211,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
+                        # pyrefly: ignore  # missing-argument
                         val_shape_copy[i] = range_tree.symt.name
                     # Reverse the index symbols because TMA is indexed
                     # as (x, y) whereas the variables will naturally be indexed
@@ -1283,6 +1289,7 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
+            # pyrefly: ignore  # bad-assignment
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -1695,7 +1702,7 @@ class TritonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -1899,6 +1906,7 @@ class TritonTemplate(KernelTemplate):
             extra,
             input_call_args,
             prologue_supported_inputs,
+            # pyrefly: ignore  # bad-argument-type
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -2089,8 +2097,8 @@ class TritonTemplate(KernelTemplate):
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "GROUP_M": kwargs.get("GROUP_M", -1),
-                "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
-                "acc_type": str(kwargs.get("ACC_TYPE", None)),
+                "allow_tf32": str(kwargs.get("ALLOW_TF32")),
+                "acc_type": str(kwargs.get("ACC_TYPE")),
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
@@ -2462,6 +2470,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
+        # pyrefly: ignore  # not-callable
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2633,6 +2642,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
+            # pyrefly: ignore  # bad-return
             return externs[0]
         else:
             return choices[0]
@@ -3130,7 +3140,9 @@ class AlgorithmSelectorCache(PersistentCache):
         # de-duplicate args
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(
-                i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override)
+                i,
+                lambda x: cls.benchmark_example_value(x, hint_override=hint_override),
+                # pyrefly: ignore  # bad-argument-type
             )(x)
             for i, x in enumerate(input_nodes)
         }
@@ -3211,17 +3223,16 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in choices:
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
-            except CUDACompileError as e:
+            except CUDACompileError:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 if not isinstance(choice, CUDATemplateCaller):
-                    log.error(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        e,
+                    log.exception(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
                     )
                 timing = float("inf")
-            except NotImplementedError as e:
-                log.warning("Not yet implemented: %s", e)
+            except NotImplementedError:
+                log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -3254,7 +3265,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     from triton.runtime.autotuner import OutOfResources
 
                     if isinstance(e, OutOfResources):
-                        log.warning(e)
+                        log.warning(e)  # noqa: G200
                         timing = float("inf")
                     else:
                         raise e
@@ -3610,15 +3621,20 @@ class AlgorithmSelectorCache(PersistentCache):
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                for stride in node.get_stride()
             ),
             node.get_device(),
             node.get_dtype(),
+            # pyrefly: ignore  # missing-attribute
             node.layout.offset,
             V.graph.sizevars.size_hints(
+                # pyrefly: ignore  # bad-argument-type
                 V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
@@ -3663,9 +3679,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
             ),
-            *sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
+            *tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for stride in node.get_stride()
             ),
             sizevars.size_hint(
                 node.get_layout().offset,
