@@ -2055,6 +2055,7 @@ class test_configs:
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
+    runtime_triton_nan_assert = False
     static_cpp_dtype_assert = False
 
     # regex to control the set of considered autotuning
