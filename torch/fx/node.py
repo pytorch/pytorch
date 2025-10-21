@@ -4,9 +4,9 @@ import inspect
 import logging
 import operator
 import types
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import ParamSpec, TypeAlias, TypeVar
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
@@ -59,6 +59,7 @@ Argument = Optional[
         BaseArgumentTypes,
     ]
 ]
+# pyrefly: ignore  # invalid-annotation
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -151,9 +152,13 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
     # torch.Tensor.{fn}
-    if isinstance(
-        func, (types.MethodDescriptorType, types.WrapperDescriptorType)
-    ) and func is getattr(torch.Tensor, func.__name__, None):
+    if (
+        isinstance(func, (types.MethodDescriptorType, types.WrapperDescriptorType))
+        and func is getattr(torch.Tensor, func.__name__, None)
+    ) or (
+        func.__module__ == torch._tensor.__name__
+        and func.__qualname__ == f"Tensor.{func.__name__}"
+    ):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
     if name == "<lambda>":

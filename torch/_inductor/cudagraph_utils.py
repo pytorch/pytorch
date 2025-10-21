@@ -6,7 +6,6 @@ from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch.utils._ordered_set import OrderedSet
@@ -207,7 +206,7 @@ def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
     counters["inductor"]["cudagraph_skips"] += 1
 
     if torch._inductor.config.triton.cudagraph_or_error:
-        raise Unsupported(msg)
+        raise RuntimeError(msg)
 
     metrics_context = get_metrics_context()
     if metrics_context.in_progress():

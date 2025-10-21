@@ -34,6 +34,7 @@ C10_DECLARE_REGISTRY(
 // Get the global PyInterpreter hooks instance
 C10_API const PyInterpreterHooksInterface& getPyInterpreterHooks();
 
+// Helper function to get the global interpreter
 C10_API PyInterpreter* getGlobalPyInterpreter();
 
 } // namespace c10::impl

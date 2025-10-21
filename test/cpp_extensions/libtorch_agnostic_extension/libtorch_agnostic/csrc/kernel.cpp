@@ -311,10 +311,9 @@ void boxed_fill_infinity(
 }
 
 Tensor my_pad(Tensor t) {
-  std::vector<int64_t> padding = {1, 2, 2, 1};
   std::string mode = "constant";
   double value = 0.0;
-  return pad(t, padding, mode, value);
+  return pad(t, {1, 2, 2, 1}, mode, value);
 }
 
 void boxed_my_pad(
@@ -342,6 +341,9 @@ void boxed_my_narrow(
 }
 
 Tensor my_new_empty_dtype_variant(Tensor t) {
+  // Still using a std::vector below even though people can just pass in an
+  // initializer list (which will be implicitly converted to an HeaderOnlyArrayRef)
+  // directly.
   std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(torch::headeronly::ScalarType::BFloat16);
   return new_empty(t, sizes, dtype);
@@ -353,15 +355,33 @@ void boxed_my_new_empty_dtype_variant(StableIValue* stack, uint64_t num_args, ui
 }
 
 Tensor my_new_zeros_dtype_variant(Tensor t) {
-  std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(at::ScalarType::Float);
-  return new_zeros(t, sizes, dtype);
+  return new_zeros(t, {2, 5}, dtype);
 }
 
 void boxed_my_new_zeros_dtype_variant(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   auto res = my_new_zeros_dtype_variant(to<Tensor>(stack[0]));
   stack[0] = from(res);
 }
+
+Tensor my_copy_(Tensor dst, Tensor src, bool non_blocking) {
+  return copy_(dst, src, non_blocking);
+}
+
+void boxed_my_copy_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  Tensor tensor_res = my_copy_(to<Tensor>(stack[0]), to<Tensor>(stack[1]), to<bool>(stack[2]));
+  stack[0] = from(tensor_res);
+}
+
+Tensor my_clone(Tensor t) {
+  return clone(t);
+}
+
+void boxed_my_clone(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  Tensor tensor_res = my_clone(to<Tensor>(stack[0]));
+  stack[0] = from(tensor_res);
+}
+
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
@@ -371,6 +391,8 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_narrow(Tensor t, int dim, int start, int length) -> Tensor");
   m.def("my_new_empty_dtype_variant(Tensor t) -> Tensor");
   m.def("my_new_zeros_dtype_variant(Tensor t) -> Tensor");
+  m.def("my_copy_(Tensor dst, Tensor src, bool non_blocking) -> Tensor");
+  m.def("my_clone(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
@@ -380,6 +402,8 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_is_cpu", &boxed_my_is_cpu);
   m.impl("my_new_empty_dtype_variant", &boxed_my_new_empty_dtype_variant);
   m.impl("my_new_zeros_dtype_variant", &boxed_my_new_zeros_dtype_variant);
+  m.impl("my_copy_", &boxed_my_copy_);
+  m.impl("my_clone", &boxed_my_clone);
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
@@ -406,15 +430,13 @@ void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs)
 }
 
 Tensor my_amax_vec(Tensor t) {
-  std::vector<int64_t> v = {0,1};
-  return amax(t, v, false);
+  return amax(t, {0,1}, false);
 }
 
 void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   auto res = my_amax_vec(to<Tensor>(stack[0]));
   stack[0] = from(res);
 }
-
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
