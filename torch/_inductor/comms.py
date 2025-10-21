@@ -834,7 +834,7 @@ def _schedule_for_comm(
             collective_cost -= snode_to_cost[candidate.snode]
         heapq.heapify(ready)
 
-    while len(ready):
+    while ready:
         snode = heapq.heappop(ready).snode
         if reorder_for_overlap and contains_collective(snode):
             schedule_collective_for_overlap(snode)
