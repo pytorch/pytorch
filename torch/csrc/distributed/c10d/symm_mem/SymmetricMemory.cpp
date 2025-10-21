@@ -125,7 +125,7 @@ static at::Tensor empty_strided_p2p_persistent(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
+      static_cast<size_t>(1),
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
@@ -152,8 +152,7 @@ static at::Tensor empty_strided_p2p_persistent(
   auto allocated = at::from_blob(dev_ptr, size, stride, options);
 
   // Track the allocation's activeness
-  alloc_id_to_storage.erase(alloc_id);
-  alloc_id_to_storage.emplace(
+  alloc_id_to_storage.insert_or_assign(
       alloc_id, allocated.storage().getWeakStorageImpl());
   return allocated;
 }
@@ -231,7 +230,7 @@ at::Tensor empty_strided_p2p(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
+      static_cast<size_t>(1),
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);

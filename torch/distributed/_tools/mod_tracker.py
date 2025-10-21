@@ -178,6 +178,7 @@ class ModTracker:
                 def custom_formatwarning(msg, category, filename, lineno, line=None):
                     return f"{filename}:{lineno}: {category.__name__}: {msg} \n"
 
+                # pyrefly: ignore  # bad-assignment
                 warnings.formatwarning = custom_formatwarning
                 warnings.warn(
                     "The module hierarchy tracking maybe be messed up."

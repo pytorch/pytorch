@@ -548,7 +548,8 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
     """
     # At the moment, some PyTorch source files are HIPified in place.  The predicate
     # is_out_of_place tells us if this is the case or not.
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if not is_pytorch_extension and not is_out_of_place(rel_filepath):
         return rel_filepath
 
@@ -615,7 +616,8 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
 
 
 def is_out_of_place(rel_filepath):
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("torch/"):
         return False
     if rel_filepath.startswith("third_party/nvfuser/"):
@@ -627,7 +629,8 @@ def is_out_of_place(rel_filepath):
 
 # Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(rel_filepath):
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("aten/"):
         if rel_filepath.startswith("aten/src/ATen/core/"):
             return False
@@ -658,7 +661,8 @@ def is_special_file(rel_filepath):
     return False
 
 def is_caffe2_gpu_file(rel_filepath):
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("c10/cuda"):
         return True
     filename = os.path.basename(rel_filepath)
@@ -784,7 +788,8 @@ PYTORCH_MAP: dict[str, object] = {}
 PYTORCH_SPECIAL_MAP = {}
 
 for mapping in CUDA_TO_HIP_MAPPINGS:
-    assert isinstance(mapping, Mapping)
+    if not isinstance(mapping, Mapping):
+        raise TypeError("Expected each mapping in CUDA_TO_HIP_MAPPINGS to be a Mapping")
     for src, value in mapping.items():
         dst = value[0]
         meta_data = value[1:]

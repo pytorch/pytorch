@@ -482,15 +482,11 @@ def get_wrapper_codegen_for_device(
 
 
 def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModulePass]:
-    return custom_backend_passes[device] if device in custom_backend_passes else None
+    return custom_backend_passes.get(device)
 
 
 def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
-    return (
-        custom_backend_codegen_configs[device]
-        if device in custom_backend_codegen_configs
-        else None
-    )
+    return custom_backend_codegen_configs.get(device)
 
 
 @functools.cache
@@ -954,6 +950,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             or _all_in_parens(string)
         ):
             # don't put extra parens for strings that are already wrapped in parens
+            # pyrefly: ignore  # bad-return
             return string
         return f"({string})"
 
@@ -1090,6 +1087,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: halide_clamp only implemented for Halide backend"
+        )
+
+    def dot(self, x: OpVarT, y: OpVarT) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: dot only implemented for Triton backend"
         )
 
     def inline_asm_elementwise(
@@ -1735,7 +1737,10 @@ class KernelArgs:
                 )
             )
         for outer, inner in chain(
-            self.input_buffers.items(), self.output_buffers.items()
+            # pyrefly: ignore  # bad-argument-type
+            self.input_buffers.items(),
+            # pyrefly: ignore  # bad-argument-type
+            self.output_buffers.items(),
         ):
             if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
@@ -2046,6 +2051,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         super().__init__()
         if increase_kernel_count:
+            # pyrefly: ignore  # bad-assignment
             metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
@@ -2112,6 +2118,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             self.compute = compute
             self.stores = stores
             self.cse = cse
+            # pyrefly: ignore  # unbound-name
             if disallow_stores:
                 assert not sb, "unexpected store inside swap_buffers"
 
@@ -2383,6 +2390,7 @@ class KernelTemplate:
             class DetailedTemplateSyntaxError(TemplateSyntaxError):
                 def __init__(self, original_error: TemplateSyntaxError) -> None:
                     super().__init__(
+                        # pyrefly: ignore  # bad-argument-type
                         original_error.message,
                         original_error.lineno,
                         original_error.name,
@@ -2394,6 +2402,7 @@ class KernelTemplate:
                     error_info = f"Error in template at line {self.lineno}\n"
                     error_info += f"Error message: {self.message}\n"
                     if hasattr(self.original_error, "source"):
+                        # pyrefly: ignore  # missing-attribute
                         lines = self.original_error.source.split("\n")
                         error_info += "Context:\n"
                         start = max(0, self.lineno - 2)
@@ -2484,7 +2493,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
