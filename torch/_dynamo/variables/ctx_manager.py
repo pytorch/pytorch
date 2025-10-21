@@ -1295,6 +1295,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
     def fn_name(self):
         return "annotate"
 
+    def reconstruct_type(self, codegen: "PyCodegen"):
+        unimplemented_v2(
+            gb_type="torch.fx.traceback.annotate escaped from compiled region",
+            context=str(self),
+            explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
 
 class DynamoConfigPatchVariable(ContextWrappingVariable):
     """represents torch._dynamo.patch_dynamo_config"""

@@ -63,7 +63,6 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
-    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -421,6 +420,7 @@ def get_proxy_slot(
             else:
                 # Attempt to build it from first principles.
                 _build_proxy_for_sym_expr(tracer, obj.node.expr, obj)
+                # pyrefly: ignore  # no-matching-overload
                 value = tracker.get(obj)
 
     if value is None:
@@ -1032,16 +1032,11 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if (
-        not pre_dispatch
-        and func
-        not in [
-            torch.ops.aten.size.default,
-            torch.ops.aten.stride.default,
-            torch.ops.aten.storage_offset.default,
-        ]
-        and autograd_would_have_decomposed(func, flat_args_kwargs)
-    ):
+    if not pre_dispatch and func not in [
+        torch.ops.aten.size.default,
+        torch.ops.aten.stride.default,
+        torch.ops.aten.storage_offset.default,
+    ]:
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:

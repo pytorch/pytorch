@@ -902,7 +902,7 @@ class TestIndexing(TestCase):
         # Set window size
         W = 10
         # Generate a list of lists, containing overlapping window indices
-        indices = [range(i, i + W) for i in range(0, N - W)]
+        indices = [range(i, i + W) for i in range(N - W)]
 
         for i in [len(indices), 100, 32]:
             windowed_data = t[indices[:i]]
