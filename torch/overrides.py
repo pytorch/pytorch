@@ -316,6 +316,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.cond,
         torch.frombuffer,
         torch.asarray,
+        torch.zendnn_linear_binary_binary,
         torch.zendnn_linear_unary,
         torch.zendnn_linear_unary_binary,
         torch.zendnn_weight_prepack_for_linear,

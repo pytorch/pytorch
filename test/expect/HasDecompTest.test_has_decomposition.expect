@@ -1362,6 +1362,7 @@ aten::view_as_complex_copy.out
 aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
+aten::zendnn_linear_binary_binary
 aten::zendnn_linear_unary
 aten::zendnn_linear_unary_binary
 aten::zendnn_weight_prepack_for_linear

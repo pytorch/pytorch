@@ -5,6 +5,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/zendnn_linear_binary_binary_native.h>
 #include <ATen/ops/zendnn_linear_unary_binary_native.h>
 #include <ATen/ops/zendnn_linear_unary_native.h>
 #endif
@@ -31,7 +32,21 @@ at::Tensor zendnn_linear_unary_binary(
     std::string_view post_op_2) {
   TORCH_CHECK(
       false,
-      "zendnn_linear_unary_binary: ATen not compiled with ZenDNN support");
+      "zendnn_linear_unary_binary: ATen is not compiled with ZenDNN support");
+}
+
+at::Tensor zendnn_linear_binary_binary(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& binary_input_1,
+    const at::Tensor& binary_input_2,
+    const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
+    std::string_view post_op_1,
+    std::string_view post_op_2) {
+  TORCH_CHECK(
+      false,
+      "zendnn_linear_binary_binary: ATen is not compiled with ZenDNN support");
 }
 
 } // namespace at::native
@@ -178,6 +193,40 @@ at::Tensor zendnn_linear_unary_binary(
       is_weight_prepacked);
   return result;
 }
+
+at::Tensor zendnn_linear_binary_binary(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& binary_input_1,
+    const at::Tensor& binary_input_2,
+    const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
+    std::string_view post_op_1,
+    std::string_view post_op_2) {
+  c10::MaybeOwned<at::Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias);
+  const at::Tensor& bias_t = *bias_maybe_owned;
+
+  at::Tensor result = create_linear_output_tensor(input, weight);
+  // Initialize post-operation containers
+  std::vector<std::string_view> post_op_ids =
+      std::vector<std::string_view>{post_op_1, post_op_2};
+  std::vector<at::Tensor> post_op_buffers = std::vector<at::Tensor>{
+      get_2d_view(binary_input_1), get_2d_view(binary_input_2)};
+
+  // Perform ZENDNN linear operation
+  zendnn_linear_impl(
+      input,
+      weight,
+      bias_t,
+      result,
+      post_op_ids,
+      post_op_buffers,
+      is_weight_prepacked);
+
+  return result;
+}
+
 } // namespace at::native
 
 #endif // !AT_ZENDNN_ENABLED()
