@@ -7,12 +7,14 @@ from pprint import pformat
 from typing import NamedTuple
 
 import torch
+import torch.distributed as dist
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
+    Partial,
     Replicate,
     Shard,
 )
@@ -907,6 +909,64 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertEqual(comm_mode.get_total_counts(), 0)
                     self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
                 self.assertEqual(output_dtensor.full_tensor(), output)
+
+    @with_comms
+    def test_partial_reduction_ops(self):
+        mesh = self.build_device_mesh()
+        rank = dist.get_rank()
+
+        torch.manual_seed(rank)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+        out_without_redistribute = torch.norm(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.norm(dt)
+
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+        out_without_redistribute = torch.max(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.max(dt)
+
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+        out_without_redistribute = torch.min(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.min(dt)
+
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+    @with_comms
+    def test_matching_partial_reduction_ops(self):
+        mesh = self.build_device_mesh()
+        rank = dist.get_rank()
+
+        torch.manual_seed(rank)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("max")]
+        )
+        out_without_redistribute = torch.max(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.max(dt)
+
+        self.assertTrue(out_without_redistribute.placements[0].is_partial())
+        self.assertTrue(out_with_redistribute.placements[0].is_replicate())
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
 
 
 if __name__ == "__main__":
