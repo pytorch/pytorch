@@ -45,6 +45,10 @@ import sympy
 import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.graph_bytecode_inputs import (
+    get_user_object_by_index,
+    register_user_object,
+)
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -60,6 +64,7 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
+from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
@@ -101,6 +106,7 @@ from ..source import (
     ConvertIntSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
+    DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -170,11 +176,9 @@ from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
-    EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
     StreamContextVariable,
-    StreamVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -206,7 +210,10 @@ from .functions import (
     UserMethodVariable,
     WrapperUserFunctionVariable,
 )
-from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .higher_order_ops import (
+    LocalMapWrappedHigherOrderVariable,
+    TorchHigherOrderOperatorVariable,
+)
 from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -252,6 +259,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
+from .streams import EventVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
@@ -437,6 +445,18 @@ class VariableBuilder:
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
             if dup_guard:
                 self.install_guards(dup_guard)
+
+            if isinstance(value, torch.nn.Module) and isinstance(
+                side_effect_result, UnspecializedNNModuleVariable
+            ):
+                # This means that two nn module instances with different sources
+                # have the same id. NN modules are somewhat special objects,
+                # because we have to track their nn_module_stack for ease of
+                # use. But if we don't do anything, we will just return the
+                # older variable tracker with the older nn_module_stack. So,
+                # lets return the old variable tracker but update its
+                # nn_module_stack
+                side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
@@ -453,7 +473,9 @@ class VariableBuilder:
             # should NOT track them. If we use a single SymNodeVariable instance to track them
             # across multiple uses, then guards created for one usage will incorrectly apply to
             # all other usages of that constant, leading to unnecessary recompilations.
-            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+            return (
+                is_torch_sym(value) or isinstance(value, _DynamicScalar)
+            ) and isinstance(vt, SymNodeVariable)
 
         if (
             (
@@ -850,6 +872,8 @@ class VariableBuilder:
             return build_checkpoint_variable(source=self.source)
         elif is_invoke_subgraph(value):
             return build_invoke_subgraph_variable(source=self.source)
+        elif LocalMapWrappedHigherOrderVariable.should_wrap_in_hop(value):
+            return LocalMapWrappedHigherOrderVariable.build(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -1015,24 +1039,19 @@ class VariableBuilder:
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
-                "call_function",
-                type(value),
-                (),
-                {
-                    "stream_id": value.stream_id,
-                    "device_index": value.device_index,
-                    "device_type": value.device_type,
-                },
+                "call_function", get_user_object_by_index, (index,), {}
             )
             set_example_value(stream_proxy.node, value)
-            return StreamVariable(
+            var = StreamVariable(
                 stream_proxy,
                 value,
                 value.device,
                 source=self.source,
             )
+            return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
@@ -1040,12 +1059,12 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             return FuncTorchInterpreterVariable(value)
         elif isinstance(value, torch.Event):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            torch._dynamo.utils.store_user_object_weakref(value)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
             event_proxy = self.tx.output.create_proxy(
                 "call_function",
-                torch._dynamo.utils.get_user_object_from_id,
-                (id(value),),
+                get_user_object_by_index,
+                (index,),
                 {},
             )
             set_example_value(event_proxy.node, value)
@@ -1098,6 +1117,46 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
+        elif isinstance(value, _DynamicScalar):
+            is_int = isinstance(value, DynamicInt)
+            source = DynamicScalarSource(self.source, is_int)
+            if id(value) in self.tx.output.root_tracer.dynamic_scalar_nodes:
+                # If we've already seen this dynamic scalar, reuse the existing
+                # SymInt/SymFloat node.
+                node = self.tx.output.root_tracer.dynamic_scalar_nodes[id(value)]
+            else:
+                sym = self.tx.output.shape_env.create_unspecified_symbol(
+                    value.real,
+                    source=source,
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                )
+                node = self.tx.output.shape_env.create_symintnode(
+                    sym,
+                    hint=value.real,
+                    source=source,
+                )
+
+            # Bind to graph input
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(node),
+                node,
+                source=source,
+            )
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                source,
+                node,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=node,
+            )
+            sym_expr = node.node.expr
+            assert isinstance(sym_expr, sympy.Symbol), (
+                f"{sym_expr} is not a basic Symbol."
+            )
+            self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
+            return SymNodeVariable(sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
@@ -1893,6 +1952,8 @@ class VariableBuilder:
                     new_source = UnspecializedNNModuleSource(self.source)
                 result = UnspecializedNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
+
+            self.tx.output.add_fqn_info_for_inlined_modules(value, self.source)
 
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
@@ -2820,6 +2881,17 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._utils
 
     if isinstance(example_value, torch.Tensor):
+        # Check if the result is a sparse tensor -
+        # We generally don't support sparse tensor so better to graph break here
+        if is_sparse_any(example_value) and (
+            not tx.export or not config.capture_sparse_compute
+        ):
+            unimplemented_v2(
+                gb_type="Attempted to wrap sparse Tensor with VariableTracker",
+                context=str(example_value),
+                explanation="torch.compile does not support sparse Tensors with VariableTracker",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
         )
@@ -2966,7 +3038,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         ]
         or (
             # TODO: this is a little sus, because we didn't check what the self is
-            proxy.node.op == "call_method" and proxy.node.target in ["bit_length"]
+            proxy.node.op == "call_method" and proxy.node.target == "bit_length"
         )
     ):
         set_example_value(proxy.node, example_value)
@@ -2984,6 +3056,11 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             torch.backends.cuda.is_flash_attention_available,
             torch.backends.cuda.can_use_flash_attention,
             torch.backends.cuda.can_use_efficient_attention,
+            torch._C._get_cudnn_sdp_enabled,
+            torch._C._get_flash_sdp_enabled,
+            torch._C._get_mem_efficient_sdp_enabled,
+            torch._C._get_math_sdp_enabled,
+            torch._C._get_overrideable_sdp_enabled,
             "is_integer",
         ]
         + list(supported_const_comparison_op_values.keys())

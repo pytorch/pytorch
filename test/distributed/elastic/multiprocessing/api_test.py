@@ -15,8 +15,9 @@ import signal
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from itertools import product
-from typing import Callable, Union
+from typing import Union
 from unittest import mock
 
 import torch
@@ -145,7 +146,7 @@ def echo_large(size: int) -> dict[int, str]:
     returns a large output ({0: test0", 1: "test1", ..., (size-1):f"test{size-1}"})
     """
     out = {}
-    for idx in range(0, size):
+    for idx in range(size):
         out[idx] = f"test{idx}"
     return out
 
@@ -558,7 +559,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             FAIL = 138
             pc = start_processes(
                 name="echo",
-                entrypoint=bin("echo1.py"),
+                entrypoint=bin("echo4.py"),
                 args={0: ("--exitcode", FAIL, "foo"), 1: ("--exitcode", 0, "bar")},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                 logs_specs=DefaultLogsSpecs(
@@ -568,9 +569,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             )
 
             results = pc.wait(period=0.1)
-
             self.assertTrue(results.is_failed())
-            self.assertEqual(1, len(results.failures))
+            self.assertEqual(2, len(results.failures))
 
             failure = results.failures[0]
             self.assertEqual(138, failure.exitcode)
@@ -582,6 +582,13 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assertFalse(results.stdouts[1])
             self.assertTrue(pc._stderr_tail.stopped())
             self.assertTrue(pc._stdout_tail.stopped())
+
+            failure = results.failures[1]
+            self.assertEqual(-15, failure.exitcode)
+            self.assertEqual("SIGTERM", failure.signal_name())
+            self.assertEqual("<NONE>", failure.error_file_data["message"])
+            # Assert that the failure message contains expected substrings
+            self.assertIn("Signal 15 (SIGTERM) received by PID", failure.message)
 
         def test_binary_raises(self):
             pc = start_processes(

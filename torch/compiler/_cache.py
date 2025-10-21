@@ -48,9 +48,6 @@ class CacheArtifact(ABC):
     def populate_cache(self) -> None:
         pass
 
-    def precompile_compatible(self) -> bool:
-        return False
-
     @staticmethod
     def type() -> str:
         """
@@ -93,6 +90,7 @@ class CacheArtifactFactory:
     @classmethod
     def create(cls, artifact_type_key: str, key: str, content: bytes) -> CacheArtifact:
         artifact_cls = cls._get_artifact_type(artifact_type_key)
+        # pyrefly: ignore  # bad-instantiation
         return artifact_cls(key, content)
 
     @classmethod
@@ -100,6 +98,7 @@ class CacheArtifactFactory:
         cls, artifact_type_key: str, key: str, content: Any
     ) -> CacheArtifact:
         artifact_cls = cls._get_artifact_type(artifact_type_key)
+        # pyrefly: ignore  # bad-instantiation
         return artifact_cls(key, artifact_cls.encode(content))
 
 
@@ -132,11 +131,7 @@ class CacheInfo:
         ...
 
     @property
-    def precompile_aot_autograd_artifacts(self) -> list[str]:  # type: ignore[empty-body]
-        ...
-
-    @property
-    def precompile_dynamo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+    def precompile_artifacts(self) -> list[str]:  # type: ignore[empty-body]
         ...
 
     def add(self, artifact: CacheArtifact) -> None:
@@ -316,6 +311,7 @@ class CacheArtifactManager:
         cache artifacts are registered in the cache registry. This is done by
         simply importing all the cache artifacts already wrapped with register call.
         """
+        from torch._dynamo.package import PrecompileCacheArtifact  # noqa: F401
         from torch._dynamo.pgo import PGOCacheArtifact  # noqa: F401
         from torch._functorch._aot_autograd.autograd_cache import (  # noqa: F401
             AOTAutogradCacheArtifact,

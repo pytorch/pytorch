@@ -1,7 +1,6 @@
 #include <c10/util/ApproximateClock.h>
-#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <fmt/format.h>
 
 namespace c10 {
 

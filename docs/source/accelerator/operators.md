@@ -169,7 +169,7 @@ Of course, global fallbacks can also be combined with a blacklist of fallbacks, 
 
 ### PyTorch STUB
 
-PyTorch also provides another approach for built-in operators: `STUB`. This method is essentially based on the `Step 1<step-one>` approach, but adds secondary scheduling capabilities (for example, scheduling based on CPU characteristics).
+PyTorch also provides another approach for built-in operators: `STUB`. This method is essentially based on the {ref}`Step 1<step-one>` approach, but adds secondary scheduling capabilities (for example, scheduling based on CPU characteristics).
 
 ```{note}
 The `STUB` method currently supports only a limited set of operators. For new accelerator devices, the advantage of the `STUB` method is that it significantly reduces the cost of development at the cost of a small performance overhead. PyTorch currently does not clearly list the set of operators that can be registered through `STUB`. Due to the large number of related operators, only the query method for the supported operator list is provided here.

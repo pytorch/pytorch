@@ -6,9 +6,7 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
-// For MTLLanguageVersion_3_1
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,6 +20,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
@@ -195,6 +194,28 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
        other.size(0) > max_stride_size || other.size(1) > max_stride_size);
+}
+
+void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
+  const auto& status_flat = status.view(-1);
+
+  for (const auto i : c10::irange(status_flat.size(0))) {
+    int code = status_flat[i].item<int>();
+    switch (code) {
+      case MPSMatrixDecompositionStatusSuccess:
+        status_flat[i] = 0;
+        break;
+      case MPSMatrixDecompositionStatusNonPositiveDefinite:
+      case MPSMatrixDecompositionStatusSingular:
+        status_flat[i] = 2;
+        break;
+      case MPSMatrixDecompositionStatusFailure:
+        status_flat[i] = -1;
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unknown MPSMatrixDecompositionStatus enum value: ", code);
+    }
+  }
 }
 
 } // anonymous namespace
@@ -488,6 +509,9 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
                   "mpsmatrixdecompositionstatus for details.");
     }
   }
+
+  map_mps_decomposition_error_code_to_blas(info);
+
   if (!left) {
     // If this was a right solve, transpose the result back
     result.copy_(result_t.transpose(-2, -1).contiguous());
@@ -498,26 +522,24 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
   TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
-  using CachedGraph = MPSUnaryCachedGraph;
 
-  MPSStream* stream = getCurrentMPSStream();
   info.zero_();
-
   if (A.numel() == 0) {
     return;
   }
 
-  if (!result.is_contiguous()) {
-    result.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
-  }
   auto A_sizes = A.sizes();
   int ndim = A.dim();
 
-  Tensor LU = empty_like(A);
-  Tensor identity = zeros_like(A);
+  Tensor LU = empty_like(A, MemoryFormat::Contiguous);
+  Tensor identity = eye(A.size(-2), A.size(-1), A.scalar_type(), A.options().layout(), A.device()).expand_as(A);
   Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
-  (ndim == 2 ? identity.diagonal() : identity.diagonal(0, -2, -1)).fill_(1);
-  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
+  // need to do this to keep the strides of the result tensor
+  // mps's solve expects row major layout, while inductor
+  // expects result to be column major
+  Tensor tmp = empty_like(A, MemoryFormat::Contiguous);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, tmp, LU, pivots, info);
+  result.copy_(tmp);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {

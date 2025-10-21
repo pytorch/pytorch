@@ -689,6 +689,21 @@ class TestTensorCreation(TestCase):
         self.assertTrue(res1.is_contiguous(memory_format=torch.channels_last))
 
     @onlyCUDA
+    def test_cat_channels_last_large_inputs(self, device):
+        num_tensors = 130
+        inputs_cuda = [
+            torch.randn((2, 3, 4, 4), device=device).contiguous(memory_format=torch.channels_last)
+            for _ in range(num_tensors)
+        ]
+        inputs_cpu = [t.cpu() for t in inputs_cuda]
+
+        result = torch.cat(inputs_cuda, dim=1)
+        expected = torch.cat(inputs_cpu, dim=1)
+
+        self.assertEqual(result.cpu(), expected)
+        self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+    @onlyCUDA
     def test_cat_out_memory_format(self, device):
         inp_size = (4, 4, 4, 4)
         expected_size = (8, 4, 4, 4)
@@ -1150,6 +1165,50 @@ class TestTensorCreation(TestCase):
         y = torch.randint(low=-100, high=100, size=(1, SIZE, SIZE), device=device).to(dtype)
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
+
+    @dtypes(torch.float)
+    def test_cat_size1(self, device, dtype):
+        # create a tensor that has aligned stride along dim - 1 dimension
+        # but catted slice size is not aligned
+        x1 = torch.randn(16, 16, device=device, dtype=dtype)[:1, :1]
+        xref = x1.clone().view(-1).view(x1.shape)
+        # make sure output size is aligned, need at least 4 elements for this
+        res = torch.cat([x1, x1, x1, x1], dim=-1)
+        ref = torch.cat([xref, xref, xref, xref], dim=-1)
+        self.assertEqual(res, ref)
+
+    @dtypes(torch.float)
+    def test_cat_trailing_dim(self, device, dtype):
+        x1 = torch.randn(16, 16, 23, device=device, dtype=dtype)
+        x2 = torch.rand_like(x1)
+        res = torch.cat([x1, x2], dim=1)
+        ref = torch.cat([x1.cpu(), x2.cpu()], dim=1)
+        self.assertEqual(res, ref)
+
+    @dtypes(torch.float)
+    def test_cat_misaligned(self, device, dtype):
+        x1 = torch.randn(14, device=device, dtype=dtype)[2:]
+        x2 = torch.rand_like(x1)
+        res = torch.cat([x1, x2], dim=-1)
+        ref = torch.cat([x1.cpu(), x2.cpu()], dim=-1)
+        self.assertEqual(res, ref)
+
+    @dtypes(torch.float)
+    def test_cat_multi_batch(self, device, dtype):
+        xs = [torch.randn(16, 16, device=device, dtype=dtype) for _ in range(130)]
+        xs_cpu = [x.cpu() for x in xs]
+        res = torch.cat(xs, dim=-1)
+        ref = torch.cat(xs_cpu, dim=-1)
+        self.assertEqual(res, ref)
+
+    @dtypes(torch.float)
+    @largeTensorTest("16GB")
+    def test_cat_large_tensor(self, device, dtype):
+        N = 2 ** 32 // dtype.itemsize
+        inps = [torch.randn(N, device=device, dtype=dtype), torch.randn(N // 128, device=device, dtype=dtype)]
+        res = torch.cat(inps, dim=0)
+        ref = torch.cat([x.cpu() for x in inps])
+        self.assertEqual(res, ref)
 
     # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
     #   creation methods and verify all dtypes and layouts
@@ -3439,7 +3498,7 @@ class TestRandomTensorCreation(TestCase):
                 else:
                     t.uniform_(from_, to_)
                     range_ = to_ - from_
-                    if not (dtype == torch.bfloat16) and not (
+                    if dtype != torch.bfloat16 and not (
                             dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
                         delta = alpha * range_
                         double_t = t.to(torch.double)
