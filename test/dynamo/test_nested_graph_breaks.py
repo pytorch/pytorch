@@ -10,15 +10,7 @@ import torch._dynamo.testing
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
 
 
-class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.config.nested_graph_breaks = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.nested_graph_breaks = False
-
+class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
@@ -148,6 +140,31 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 14)
+
+    def test_counters(self):
+        global f1, f2, f3, f4
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        def f3(x):
+            x = x + 16
+            for _ in range(1):
+                x = f2(x)
+            return x + 32
+
+        @torch.compile(backend="eager")
+        def f4(x):
+            return f3(x + 64) + 128
+
+        self.assertEqual(f4(torch.zeros(3)), torch.zeros(3) + 255)
+        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 2)
+        breakpoint()
 
     def test_supported_ctx_manager(self):
         global check, check_disabled, f1, f2, f3
@@ -708,18 +725,14 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, torch.zeros(3) + 1023)
 
         # check that only 2 resume functions are created
-        resume_fns = []
-        for val in globals().values():
-            try:
-                name = repr(val)
-                if "resume_in" in name:
-                    resume_fns.append(name)
-            except Exception:
-                pass
-
-        self.assertEqual(len(resume_fns), 2)
-        self.assertTrue(any("resume_in_f4" in name for name in resume_fns))
-        self.assertTrue(any("resume_in_f7" in name for name in resume_fns))
+        self.assertEqual(len(torch._dynamo.utils.counters["resumes"]), 2)
+        for name in ("resume_in_f4", "resume_in_f7"):
+            self.assertTrue(
+                any(
+                    name in key
+                    for key in torch._dynamo.utils.counters["resumes"].keys()
+                )
+            )
 
 
 if __name__ == "__main__":
