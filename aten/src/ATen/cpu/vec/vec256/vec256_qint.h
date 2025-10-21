@@ -1377,7 +1377,7 @@ Vectorized<c10::quint8> inline maximum(
 #if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
     at::vec::Vectorized<int8_t> src) {
-  auto s8x8 = vld1_s8(src.operator const int8_t*());
+  auto s8x8 = vget_low_s8(src);
   auto s16x8 = vmovl_s8(s8x8);
 
   auto s32x4_hi = vmovl_s16(vget_high_s16(s16x8));
@@ -1402,7 +1402,7 @@ std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
 
 Vectorized<float> inline convert_int8_half_register_to_float(
     at::vec::Vectorized<int8_t> src) {
-  auto s8x8 = vld1_s8(src.operator const int8_t*());
+  auto s8x8 = vget_low_s8(src);
   auto s16x8 = vmovl_s8(s8x8);
 
   auto s32x4_lo = vmovl_s16(vget_low_s16(s16x8));

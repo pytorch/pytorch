@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -106,7 +106,7 @@ from .gen_trace_type import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 # We don't set or modify grad_fn on these methods. Generally, they return
@@ -1495,6 +1495,7 @@ def emit_body(
                 else:
                     expr = f"SavedVariable({var}, {str(is_output).lower()})"
                     if foreacharg is not None and "original_selfs" not in expr:
+                        # pyrefly: ignore  # unbound-name
                         expr = expr.replace(src_name, name_in_expr)
             elif (
                 type == BaseCType(tensorListT)
@@ -1844,12 +1845,14 @@ def emit_body(
                                 )
                             )
                         cur_derivative_conditions.append(
+                            # pyrefly: ignore  # bad-argument-type
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
                                 req_inp=inp_name + "[i]"
                             )
                         )
                     else:
                         cur_derivative_conditions.append(
+                            # pyrefly: ignore  # bad-argument-type
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp_name)
                         )
 
@@ -1920,6 +1923,7 @@ def emit_body(
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
                     inp_name="original_self",
                     inp="original_self" + input_suffix,
+                    # pyrefly: ignore  # unbound-name
                     zeros_fn=zeros_fn,
                 )
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(

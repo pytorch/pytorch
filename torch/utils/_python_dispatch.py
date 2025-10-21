@@ -88,7 +88,8 @@ class TorchDispatchMode:
 
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
-            assert isinstance(_dispatch_key, torch._C.DispatchKey)
+            if not isinstance(_dispatch_key, torch._C.DispatchKey):
+                raise AssertionError("_dispatch_key must be a torch._C.DispatchKey")
             self.__dict__["_dispatch_key"] = _dispatch_key
 
         self.old_dispatch_mode_flags: deque[bool] = deque()
@@ -217,16 +218,24 @@ def _get_current_dispatch_mode() -> Optional[TorchDispatchMode]:
 
 
 def _detect_infra_mode(key):
-    assert key in [
+    if key not in (
         torch._C._TorchDispatchModeKey.FUNCTIONAL,
         torch._C._TorchDispatchModeKey.PROXY,
-    ]
+    ):
+        raise AssertionError(
+            f"key must be either FUNCTIONAL ({torch._C._TorchDispatchModeKey.FUNCTIONAL}) \
+                or PROXY ({torch._C._TorchDispatchModeKey.PROXY}) _TorchDispatchModeKey, \
+                    got {key}"
+        )
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
     pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(key)
     post_dispatch_mode = torch._C._get_dispatch_mode(key)
 
-    assert (pre_dispatch_mode is None) or (post_dispatch_mode is None)
+    if pre_dispatch_mode is not None and post_dispatch_mode is not None:
+        raise AssertionError(
+            "At most one of pre_dispatch_mode and post_dispatch_mode may be active"
+        )
 
     if pre_dispatch_mode is None:
         return post_dispatch_mode
@@ -252,10 +261,13 @@ def _unset_infra_mode(key):
 
 
 def _disable_infra_mode(key):
-    assert key in (
+    if key not in (
         torch._C._TorchDispatchModeKey.FUNCTIONAL,
         torch._C._TorchDispatchModeKey.PROXY,
-    )
+    ):
+        raise AssertionError(
+            "key must be either FUNCTIONAL or PROXY _TorchDispatchModeKey"
+        )
     mode_unset = _unset_infra_mode(key)
     try:
         yield mode_unset
@@ -276,7 +288,10 @@ def _get_current_dispatch_mode_stack() -> list[TorchDispatchMode]:
 
 def _push_mode(mode: TorchDispatchMode):
     k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
-    assert k is None or k == torch._C.DispatchKey.PreDispatch
+    if k is not None and k != torch._C.DispatchKey.PreDispatch:
+        raise AssertionError(
+            "mode._dispatch_key must be None or DispatchKey.PreDispatch"
+        )
     if k is None:
         _push_on_torch_dispatch_stack(mode)
         return
@@ -514,14 +529,16 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     # NB: Purposefully guard here to simplify the inner / outer symbols.
     # Using sym_eq() for symbolic comparison can result in an expression that's too
     # difficult to guard on, so we use == here.
-    assert sub.shape == outer_size, (
-        f"Expected return value from {type(t)}__tensor_unflatten__() to have "
-        f"shape equal to {outer_size}, but got: {sub.shape}"
-    )
-    assert sub.stride() == outer_stride, (
-        f"Expected return value from {type(t)}__tensor_unflatten__() to have "
-        f"stride equal to {outer_stride}, but got: {sub.stride()}"
-    )
+    if sub.shape != outer_size:
+        raise AssertionError(
+            f"Expected return value from {type(t)}__tensor_unflatten__() to have "
+            f"shape equal to {outer_size}, but got: {sub.shape}"
+        )
+    if sub.stride() != outer_stride:
+        raise AssertionError(
+            f"Expected return value from {type(t)}__tensor_unflatten__() to have "
+            f"stride equal to {outer_stride}, but got: {sub.stride()}"
+        )
 
     return sub
 
@@ -538,9 +555,12 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     It does this by unsafely overwriting the storage field of the output tensor
     to be the same storage as the input.
     """
-    assert isinstance(func, torch._ops.OpOverload)
-    assert isinstance(args, tuple)
-    assert isinstance(outs, (list, tuple))
+    if not isinstance(func, torch._ops.OpOverload):
+        raise AssertionError(f"func must be an OpOverload, got {type(args)}")
+    if not isinstance(args, tuple):
+        raise AssertionError(f"args must be a tuple, got {type(args)}")
+    if not isinstance(outs, (list, tuple)):
+        raise AssertionError(f"outs must be a list or tuple, got {type(args)}")
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:
@@ -561,10 +581,11 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                assert type(arg) is type(
-                    r
-                ), f"""Called {str(func)} with input of type {type(arg)}
-and output of type {type(ret)}. But expected types to match."""
+                if type(arg) is not type(r):
+                    raise AssertionError(
+                        f"Called {str(func)} with input of type {type(arg)}\n"
+                        f"and output of type {type(ret)}. But expected types to match."
+                    )
         # Need to call a non-dispatcher helper, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
         # instead, our subclass should directly have its storage swapped out.
@@ -580,7 +601,8 @@ and output of type {type(ret)}. But expected types to match."""
             for r in ret:
                 torch._functionalize_unsafe_set(r, arg)
         else:
-            assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
+            if not isinstance(ret, torch.Tensor):
+                raise AssertionError(f"expected torch.Tensor, got {type(ret)}")
             torch._functionalize_unsafe_set(ret, arg)
 
     for arg_idx, schema_arg in enumerate(schema_info.args):
@@ -624,7 +646,10 @@ def get_alias_info(func) -> SchemaInfo:
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
         torchgen_schema_str = str(func._schema)
-        assert torchgen_schema_str.startswith("aten::")
+        if not torchgen_schema_str.startswith("aten::"):
+            raise AssertionError(
+                "Expected torchgen schema string to start with 'aten::'"
+            )
         # remove the aten:: namespace, which is added by the torchscript parser,
         # and torchgen doesn't know how to handle
         torchgen_schema_str = torchgen_schema_str[6:]
@@ -727,7 +752,10 @@ def autograd_would_have_decomposed(
             backend_key = torch._C._parse_dispatch_key(
                 torch._C._dispatch_key_for_device(a.device.type)
             )
-            assert backend_key is not None
+            if backend_key is None:
+                raise AssertionError(
+                    "Failed to infer backend dispatch key from tensor device"
+                )
             # TODO: use func.has_kernel_for_dispatch_key(backend_key)
             # but this one checks py_impl and CompositeImplicitAutograd
             # incorrectly shows up as has backend reg here
@@ -771,7 +799,8 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         if not alias_set or not x.is_write:
             return None
         # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
-        assert len(alias_set) == 1
+        if len(alias_set) != 1:
+            raise AssertionError("Expected alias_set to contain exactly one element")
         # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
         # set of size 1 on Python 3.13.
         return next(iter(alias_set))
@@ -785,7 +814,10 @@ def return_and_correct_aliasing(func, args, kwargs, out):
             i for i, a in enumerate(schema_info.args) if output_alias in a.alias_set
         ]
         # For any dispatcher op with an output alias, we expect it to map to exactly one alias in the schema's input arguments.
-        assert len(arg_indices) == 1
+        if len(arg_indices) != 1:
+            raise AssertionError(
+                "Expected exactly one argument index for the given output alias"
+            )
         idx = arg_indices[0]
         arg_info = schema_info.args[idx]
         if arg_info.name is not None and arg_info.name in new_kwargs:
@@ -811,7 +843,10 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         ]
         # Assumption: we have a very small number of inplace_view ops that follow a strict schema:
         # there is only a single argument that gets its metadata mutated.
-        assert len(mutated_args) == 1
+        if len(mutated_args) != 1:
+            raise AssertionError(
+                "expected exactly one mutated arg for inplace_view ops"
+            )
         # This check exists because we generally *do* want to update the metadata of any wrapper subclasses,
         # but FunctionalTensor is special: it overrides all size/stride calls to plumb to the inner tensor.
         # so we don't actually need to update the metadata (and attempting to do so causes errors)

@@ -113,7 +113,8 @@ def _make_grads(
             # circular import
             from torch.nested._internal.nested_tensor import NestedTensor
 
-            assert isinstance(out, torch.Tensor)
+            if not isinstance(out, torch.Tensor):
+                raise AssertionError("Expected output to be a torch.Tensor")
             out_dtype = out.dtype
             out_is_nested = out.is_nested
             out_is_cpp_nested = out_is_nested and not isinstance(out, NestedTensor)
@@ -129,13 +130,15 @@ def _make_grads(
             # singleton int to represent jagged dimension, so that size() call
             # on nested tensor works.
             if out_is_cpp_nested:
-                assert isinstance(out, torch.Tensor)
+                if not isinstance(out, torch.Tensor):
+                    raise AssertionError("Expected output to be a torch.Tensor.")
                 shape_matches = torch.is_same_size(out, first_grad)
             else:
                 # We need to do a regular size check, without going through
                 # the operator, to be able to handle unbacked symints
                 # (expect_true ensures we can deal with unbacked)
-                assert out_size is not None
+                if out_size is None:
+                    raise AssertionError("Expected out_size to be set.")
                 shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
 
             if not shape_matches:
@@ -191,10 +194,12 @@ def _make_grads(
         elif grad is None:
             if isinstance(out, graph.GradientEdge) or out.requires_grad:  # type: ignore[attr-defined]
                 if isinstance(out, graph.GradientEdge):
-                    assert out_size is not None
+                    if out_size is None:
+                        raise AssertionError("Expected out_size to be set.")
                     out_numel_is_1 = all(o == 1 for o in out_size)
                 else:
-                    assert isinstance(out, torch.Tensor)
+                    if not isinstance(out, torch.Tensor):
+                        raise AssertionError("Expected output to be a torch.Tensor")
                     out_numel_is_1 = out.numel() == 1
                 if not out_numel_is_1:
                     raise RuntimeError(
@@ -207,8 +212,10 @@ def _make_grads(
                     )
                     raise RuntimeError(msg)
                 if isinstance(out, graph.GradientEdge):
-                    assert out_size is not None
-                    assert out_device is not None
+                    if out_size is None:
+                        raise AssertionError("Expected out_size to be set.")
+                    if out_device is None:
+                        raise AssertionError("Expected out_device to be set.")
                     new_grads.append(
                         torch.ones(
                             out_size,
@@ -217,7 +224,8 @@ def _make_grads(
                         )
                     )
                 else:
-                    assert isinstance(out, torch.Tensor)
+                    if not isinstance(out, torch.Tensor):
+                        raise AssertionError("Expected output to be a torch.Tensor")
                     new_grads.append(
                         torch.ones_like(out, memory_format=torch.preserve_format)
                     )
