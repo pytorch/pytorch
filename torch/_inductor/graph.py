@@ -2135,12 +2135,9 @@ class GraphLowering(torch.fx.Interpreter):
         if self.const_module:
             if hasattr(self.wrapper_code, "original_wrapper_code"):
                 # DualWrapperCodegen case
-                self.wrapper_code.original_wrapper_code._names_iter = (  # type: ignore[attr-defined]
-                    self.const_module.wrapper_code._names_iter
-                )
-                self.wrapper_code.autotuning_wrapper_code._names_iter = (  # type: ignore[attr-defined]
-                    self.const_module.wrapper_code._names_iter
-                )
+                start = next(self.const_module.wrapper_code._names_iter)
+                self.wrapper_code.original_wrapper_code._names_iter = itertools.count(start)
+                self.wrapper_code.autotuning_wrapper_code._names_iter = itertools.count(start)
             else:
                 # Regular wrapper case
                 self.wrapper_code._names_iter = (
