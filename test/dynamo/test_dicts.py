@@ -2,6 +2,7 @@
 
 # ruff: noqa: TRY002
 
+import enum
 import itertools
 import operator
 import types
@@ -55,6 +56,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_contains_enum(self):
+        class TensorDim(str, enum.Enum):
+            DDP = "ddp"
+            FSDP = "fsdp"
+            CP = "cp"
+            TP = "tp"
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                val = x.sin()
+                if TensorDim.DDP in {"ddp"}:
+                    val += x.cos()
+                if "ddp" in {TensorDim.DDP}:
+                    val += x.cos()
+                return val
+
+        inp = torch.randn(4, 4)
+        mod = Foo()
+        opt_f = torch.compile(mod)
+        self.assertEqual(mod(inp), opt_f(inp))
 
     def test_dict_subclass_local_with_non_dict_method(self):
         # Checks that add_1 method is inlined

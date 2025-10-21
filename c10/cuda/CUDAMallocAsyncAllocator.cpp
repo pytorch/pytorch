@@ -4,7 +4,6 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
-#include <c10/util/irange.h>
 
 #include <unordered_set>
 #include <vector>
@@ -517,7 +516,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
-  void enable(bool) override {
+  void enable(bool /*value*/) override {
     // cannot disable
   }
 
@@ -799,7 +798,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)>) override {
+      std::function<bool(cudaStream_t)> /*filter*/) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());

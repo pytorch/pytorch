@@ -57,6 +57,7 @@ def _interleave(a, b, dim=0):
 
     stacked = torch.stack([a, b], dim=dim + 1)
     interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
+    # pyrefly: ignore  # unbound-name
     if b_trunc:
         # TODO: find torch alternative for slice_along dim for torch.jit.script to work
         interleaved = aten.slice(interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1)

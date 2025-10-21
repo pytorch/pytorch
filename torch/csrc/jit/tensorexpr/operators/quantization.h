@@ -145,5 +145,5 @@ TORCH_API Tensor computeQuantizedSigmoidExternalCall(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device);
+    at::Device /*unused*/);
 } // namespace torch::jit::tensorexpr

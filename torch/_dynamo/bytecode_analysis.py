@@ -15,6 +15,7 @@ for better performance while maintaining correct semantics.
 import bisect
 import dataclasses
 import dis
+import itertools
 import sys
 from typing import Any, TYPE_CHECKING, Union
 
@@ -36,6 +37,7 @@ if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
+# pyrefly: ignore  # unsupported-operation
 if (3, 12) <= sys.version_info < (3, 14):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
 if sys.version_info >= (3, 13):
@@ -110,7 +112,7 @@ def remove_pointless_jumps(instructions: list["Instruction"]) -> list["Instructi
     """Eliminate jumps to the next instruction"""
     pointless_jumps = {
         id(a)
-        for a, b in zip(instructions, instructions[1:])
+        for a, b in itertools.pairwise(instructions)
         if a.opname == "JUMP_ABSOLUTE" and a.target is b
     }
     return [inst for inst in instructions if id(inst) not in pointless_jumps]

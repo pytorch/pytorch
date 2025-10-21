@@ -8424,7 +8424,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_Size_iter(self):
         for sizes in [iter([1, 2, 3, 4, 5]), range(1, 6)]:
             x = torch.Size(sizes)
-            for i in range(0, 5):
+            for i in range(5):
                 self.assertEqual(x[i], i + 1)
 
     def test_t_not_2d_error(self):
@@ -10495,7 +10495,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda
         # is not available.
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+        with self.assertRaisesRegex(RuntimeError, "torch.cuda.Stream requires CUDA support"):
             torch.cuda.Stream()
 
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
