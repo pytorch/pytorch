@@ -6,6 +6,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import gc
 import functools
 import inspect
 import io
@@ -19,6 +20,7 @@ import traceback
 import types
 import typing
 import unittest
+import weakref
 import warnings
 from math import sqrt
 from torch.multiprocessing import Process
@@ -1623,6 +1625,25 @@ class TestFX(JitTestCase):
         g.erase_node(neg)
 
         self.assertTrue(neg not in relu.users)
+
+    @skipIfTorchDynamo("Dynamo does not free right away")
+    def test_prepend_does_not_leak(self):
+        g = Graph()
+        x = g.placeholder("x")
+        relu = g.call_function(torch.relu, (x,))
+        neg = g.call_function(torch.neg, (x,))
+
+        relu.prepend(neg)
+
+        ref = weakref.ref(neg)
+        g.erase_node(neg)
+        del g
+        del x
+        del relu
+        del neg
+        gc.collect()
+
+        self.assertIsNone(ref())
 
     def test_remove_uses_with_custom_filter(self):
         g: torch.fx.Graph = Graph()
