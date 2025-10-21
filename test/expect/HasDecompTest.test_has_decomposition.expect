@@ -1363,6 +1363,7 @@ aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
 aten::zendnn_linear_unary
+aten::zendnn_linear_unary_binary
 aten::zendnn_weight_prepack_for_linear
 aten::zeros.names
 aten::zeros.names_out

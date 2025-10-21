@@ -3399,6 +3399,10 @@
   dispatch:
     CPU: zendnn_linear_unary
 
+- func: zendnn_linear_unary_binary(Tensor input, Tensor weight, Tensor binary_input, Tensor? bias=None, *, bool is_weight_prepacked=False, str post_op_1='none', str post_op_2='none') -> Tensor
+  dispatch:
+    CPU: zendnn_linear_unary_binary
+
 - func: zendnn_weight_prepack_for_linear(Tensor weight) -> Tensor
   dispatch:
     CPU: zendnn_weight_prepack_for_linear

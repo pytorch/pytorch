@@ -5,6 +5,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/zendnn_linear_unary_binary_native.h>
 #include <ATen/ops/zendnn_linear_unary_native.h>
 #endif
 
@@ -19,6 +20,20 @@ at::Tensor zendnn_linear_unary(
   TORCH_CHECK(
       false, "zendnn_linear_unary: ATen is not compiled with ZenDNN support");
 }
+
+at::Tensor zendnn_linear_unary_binary(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& binary_input,
+    const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
+    std::string_view post_op_1,
+    std::string_view post_op_2) {
+  TORCH_CHECK(
+      false,
+      "zendnn_linear_unary_binary: ATen not compiled with ZenDNN support");
+}
+
 } // namespace at::native
 
 #else // !AT_ZENDNN_ENABLED()
@@ -31,7 +46,8 @@ inline void zendnn_linear_impl(
     const at::Tensor& weight,
     const at::Tensor& bias,
     at::Tensor& result,
-    const std::string_view& post_op_id,
+    const std::vector<std::string_view>& post_op_ids,
+    const std::vector<at::Tensor>& post_op_buffers,
     bool is_weight_prepacked) {
   // Get appropriately processed tensors (2D input, transposed weight, 2D
   // result)
@@ -40,8 +56,10 @@ inline void zendnn_linear_impl(
   auto input_2d = get_2d_view(input);
   auto weight_transposed = weight.t();
   auto result_2d = result.view(get_2d_size_for_tensor(result));
-  check_tensor_dtypes_for_linear(input_2d, weight_transposed, bias, result_2d);
-  check_tensor_sizes_for_linear(input_2d, weight_transposed, bias, result_2d);
+  check_tensor_dtypes_for_linear(
+      input_2d, weight_transposed, bias, result_2d, post_op_buffers);
+  check_tensor_sizes_for_linear(
+      input_2d, weight_transposed, bias, result_2d, post_op_buffers);
   // declare linear tensors
   matmul_context_t matmul_context;
   tensor_t input_tensor, weight_tensor, output_tensor, bias_tensor;
@@ -58,9 +76,9 @@ inline void zendnn_linear_impl(
     auto bias_unsqueezed = bias.unsqueeze(0);
     create_zendnn_tensor(bias_unsqueezed, bias_tensor, "bias", datatype);
     set_linear_context_attributes(
-        matmul_context, weight_tensor, post_op_id, bias_tensor);
+        matmul_context, weight_tensor, post_op_ids, bias_tensor);
   } else {
-    set_linear_context_attributes(matmul_context, weight_tensor, post_op_id);
+    set_linear_context_attributes(matmul_context, weight_tensor, post_op_ids);
   }
   matmul_context.create();
   // define matmul operator
@@ -75,6 +93,31 @@ inline void zendnn_linear_impl(
       " creation failed.");
   matmul_operator.set_input("matmul_input", input_tensor)
       .set_output("matmul_output", output_tensor);
+  int empty_post_op_id = 0;
+  for (size_t idx = 0; idx < post_op_buffers.size(); idx++) {
+    if (post_op_ids[idx] == "none") {
+      empty_post_op_id++;
+      continue;
+    }
+    tensor_t binary_tensor;
+    if (post_op_ids[idx] == "mul") {
+      set_zendnn_tensor_attributes(
+          post_op_buffers[idx], binary_tensor, "binary_input", datatype);
+      binary_tensor.create();
+      matmul_operator.set_input(
+          matmul_context.get_post_op(idx - empty_post_op_id)
+              .binary_mul_params.tensor_name,
+          binary_tensor);
+    } else if (post_op_ids[idx] == "add") {
+      set_zendnn_tensor_attributes(
+          post_op_buffers[idx], binary_tensor, "binary_input", datatype);
+      binary_tensor.create();
+      matmul_operator.set_input(
+          matmul_context.get_post_op(idx - empty_post_op_id)
+              .binary_add_params.tensor_name,
+          binary_tensor);
+    }
+  }
   matmul_operator.execute();
 }
 
@@ -89,9 +132,50 @@ at::Tensor zendnn_linear_unary(
   const at::Tensor& bias_t = *bias_maybe_owned;
   // Create output tensor with appropriate size and strides
   at::Tensor result = create_linear_output_tensor(input, weight);
+  std::vector<std::string_view> post_op_ids =
+      std::vector<std::string_view>{post_op};
   // Perform ZENDNN linear operation
   zendnn_linear_impl(
-      input, weight, bias_t, result, post_op, is_weight_prepacked);
+      input,
+      weight,
+      bias_t,
+      result,
+      post_op_ids,
+      {} /* post_op_buffers */,
+      is_weight_prepacked);
+  return result;
+}
+
+at::Tensor zendnn_linear_unary_binary(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& binary_input,
+    const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
+    std::string_view post_op_1,
+    std::string_view post_op_2) {
+  c10::MaybeOwned<at::Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias);
+  const at::Tensor& bias_t = *bias_maybe_owned;
+  // Create output tensor with appropriate size and strides
+  at::Tensor result = create_linear_output_tensor(input, weight);
+  // Initialize post-operation containers
+  std::vector<std::string_view> post_op_ids =
+      std::vector<std::string_view>{post_op_1, post_op_2};
+  std::vector<at::Tensor> post_op_buffers;
+  // Push an empty tensor for first post_op id as its always unary
+  const at::Tensor empty_tensor;
+  post_op_buffers.emplace_back(empty_tensor);
+  post_op_buffers.emplace_back(get_2d_view(binary_input));
+  // Perform ZENDNN linear operation
+  zendnn_linear_impl(
+      input,
+      weight,
+      bias_t,
+      result,
+      post_op_ids,
+      post_op_buffers,
+      is_weight_prepacked);
   return result;
 }
 } // namespace at::native
