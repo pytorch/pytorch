@@ -193,6 +193,8 @@ class MixOrderReduction:
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         if not config.triton.mix_order_reduction:
             return False
+        if not node1.is_gpu() or not node2.is_gpu():
+            return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
 
@@ -1526,15 +1528,13 @@ class SchedulerNode(BaseSchedulerNode):
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
             f"{type(self.node)=}"
         )
-        assert self._body
 
         # self._body containing partial accumulate means the reduction is
         # converted to a pointwise node.  Need this extra check since
         # we change self._body but didn't change self.node (IRNode)
         # when converting a reduction to a pointwise
-        return (
-            bool(self.node.get_reduction_type())
-            and not self._body.has_partial_accumulate
+        return bool(self.node.get_reduction_type()) and (
+            self._body is None or not self._body.has_partial_accumulate
         )
 
     def is_native_matmul(self) -> bool:
