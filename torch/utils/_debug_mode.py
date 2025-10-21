@@ -119,6 +119,13 @@ class _OpCall(_DebugCall):
 
         return f"{op_name}({args_str}{kwargs_str})"
 
+    def __iter__(self):
+        for arg in [self.op, self.args, self.kwargs, self.call_depth]:
+            yield arg
+
+    def __repr__(self) -> str:
+        return self.render([])
+
 
 class _RedistributeCall(_DebugCall):
     """Redistribute call from DTensor dispatch"""
@@ -141,6 +148,18 @@ class _RedistributeCall(_DebugCall):
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
         return f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
+
+    def __iter__(self):
+        yield REDISTRIBUTE_FUNC
+        if self.transform_info_str:
+            yield [self.arg, self.transform_info_str]
+        else:
+            yield [self.arg, self.src_placement, self.dst_placement]
+        yield {}
+        yield self.call_depth
+
+    def __repr__(self) -> str:
+        return self.render([])
 
 
 class _NNModuleCall(_DebugCall):
