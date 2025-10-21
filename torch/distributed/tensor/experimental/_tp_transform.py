@@ -6,6 +6,7 @@ from typing import Any, cast, Optional
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.distributed.distributed_c10d import get_rank
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -235,6 +236,7 @@ def _mark_sharding(
                 else:
                     output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(  # type: ignore[assignment]
                         op_schema,
+                        get_rank(),
                     )
                 placement_strategies[node] = OpSpec(
                     # pyrefly: ignore  # bad-argument-type

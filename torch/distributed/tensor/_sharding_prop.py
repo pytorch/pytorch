@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
@@ -9,6 +8,7 @@ import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.distributed_c10d import get_rank
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -38,20 +38,6 @@ def _length(obj) -> int:
     return len(obj)
 
 
-class LocalLRUCache(threading.local):
-    def __init__(self, user_function: Callable) -> None:
-        self.cache = lru_cache(None)(user_function)
-
-    def __call__(self, *args, **kwargs) -> object:
-        return self.cache(*args, **kwargs)
-
-    def cache_info(self):
-        return self.cache.cache_info()
-
-    def cache_clear(self):
-        return self.cache.cache_clear()
-
-
 class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
@@ -62,7 +48,7 @@ class ShardingPropagator:
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
         self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = LocalLRUCache(
+        self.propagate_op_sharding = lru_cache(None)(
             self.propagate_op_sharding_non_cached
         )
         # op map to save indices of shape (and stride) args which may need to be
@@ -337,17 +323,22 @@ class ShardingPropagator:
         # This is generally ok because this only happens during tracing in torch.compile,
         # and tracing does not need to be as fast as eagermode DTensor usages.
         if _are_we_tracing():
-            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
-        else:
-            output_sharding = cast(
-                OutputSharding, self.propagate_op_sharding(op_info.schema)
+            output_sharding = self.propagate_op_sharding_non_cached(
+                op_info.schema, get_rank()
             )
+        else:
+            output_sharding = self.propagate_op_sharding(op_info.schema, get_rank())
         op_info.output_sharding = output_sharding
 
-    def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
+    def propagate_op_sharding_non_cached(
+        self, op_schema: OpSchema, global_rank: int
+    ) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         """
+        # We need the global rank to be in the cache key for MTPG. See
+        # https://github.com/pytorch/pytorch/pull/134294.
+
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
