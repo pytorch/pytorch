@@ -20,6 +20,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/zendnn/Matmul.h>
 #include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
@@ -1396,6 +1397,28 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 #endif
+
+#if AT_ZENDNN_ENABLED()
+static inline bool apply_zendnn_matmul_heur(const Tensor& batch1, const Tensor& batch2, const Tensor& out) {
+
+  // Check if either batch has zero strides - return false if so
+  auto batch1_strides = batch1.strides();
+  auto batch2_strides = batch2.strides();
+  auto out_strides    = out.strides();
+
+  for (int64_t stride : batch1_strides) {
+    if (stride == 0) return false;
+  }
+  for (int64_t stride : batch2_strides) {
+    if (stride == 0) return false;
+  }
+  for (int64_t stride : out_strides) {
+    if (stride == 0) return false;
+  }
+  return true;
+}
+#endif
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1771,6 +1794,22 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
+
+#if AT_ZENDNN_ENABLED()
+  const auto value = c10::utils::get_env("TORCHINDUCTOR_ENABLE_ZENDNN");
+  if((!value.has_value() || value.value() == "1") && at::cpu::is_amd_cpu()
+      && at::cpu::is_avx512_supported()
+      && self_or_result.scalar_type() == kBFloat16)
+  {
+    bool apply_heur_zen = apply_zendnn_matmul_heur(batch1, batch2, self_or_result);
+    if(apply_heur_zen)
+    {
+      zendnn_baddbmm(self_or_result, batch1, batch2, beta.to<float>(), alpha.to<float>());
+      return;
+    }
+  }
+#endif
+
 #if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
   // Always apply mkldnn heuristic on x86 platform, but on ARM only if compiled with ACL
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
