@@ -2190,17 +2190,20 @@ class OutputGraph(OutputGraphCommon):
             old_fake_mode = self.tracing_context.fake_mode
             assert old_fake_mode is not None
             if not self.export:
-                import torch._functorch.config as _config
-
-                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
-                # TODO(voz): Ostensibily, this should be scoped and
-                # restore back to old_fake_mode, but doing so currently violates
-                # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-                self.tracing_context.fake_mode = backend_fake_mode
+                # import torch._functorch.config as _config
+                #
+                # with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                #     # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+                #     backend_fake_mode = torch._subclasses.FakeTensorMode(
+                #         shape_env=old_fake_mode.shape_env,
+                #     )
+                #     # import copy
+                #     # backend_fake_mode.fake_tensor_converter.meta_converter.tensor_memo = copy.copy(old_fake_mode.fake_tensor_converter.meta_converter.tensor_memo)
+                # # TODO(voz): Ostensibily, this should be scoped and
+                # # restore back to old_fake_mode, but doing so currently violates
+                # # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+                # self.tracing_context.fake_mode = backend_fake_mode
+                pass
 
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
