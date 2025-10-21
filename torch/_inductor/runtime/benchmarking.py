@@ -144,7 +144,7 @@ class Benchmarker:
         parameter.
 
         WARNING: if `fn` mutates `fn_args` or `fn_kwargs`, benchmarking may fail unexpectedly.
-        For example, if `fn` cleares a mutable object, subsequent invocations of `fn` during
+        For example, if `fn` clears a mutable object, subsequent invocations of `fn` during
         benchmarking will fail. In such cases, `fn` should handle cloning its arguments internally.
         If device inference is required, `Benchmarker.infer_device` can be used prior to calling
         this method without any arguments for `fn_args` and `fn_kwargs`.
