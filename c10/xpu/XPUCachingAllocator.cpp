@@ -20,8 +20,6 @@ constexpr size_t kMinBlockSize = 512;
 constexpr size_t kSmallSize = 1048576;
 // "small" allocations are packed in 2 MiB blocks
 constexpr size_t kSmallBuffer = 2097152;
-// "large" allocations may be packed in 20 MiB blocks
-constexpr size_t kLargeBuffer = 20971520;
 // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kMinLargeAlloc = 10485760;
 // round up large allocations to 2 MiB
@@ -432,7 +430,21 @@ class DeviceCachingAllocator {
           (release_cached_blocks() && alloc_block(params, true));
     }
     if (!block_found) {
-      const auto [device_free, device_total] = getMemoryInfo();
+      const auto& raw_device = c10::xpu::get_raw_device(device);
+      const auto device_total =
+          raw_device.get_info<sycl::info::device::global_mem_size>();
+      // Estimate the available device memory when the SYCL runtime does not
+      // support the corresponding aspect (ext_intel_free_memory).
+      size_t device_free = device_total -
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto& raw_device = c10::xpu::get_raw_device(device);
+      // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
+      // affected devices.
+      if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
+        device_free =
+            raw_device.get_info<sycl::ext::intel::info::device::free_memory>();
+      }
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
