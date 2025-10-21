@@ -692,7 +692,7 @@ class parametrize(_TestParametrizer):
             return f"{name}{idx}"
 
     def _default_subtest_name(self, idx, values):
-        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values)])
+        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values, strict=True)])
 
     def _get_subtest_name(self, idx, values, explicit_name=None):
         if explicit_name:
@@ -736,7 +736,7 @@ class parametrize(_TestParametrizer):
                     raise RuntimeError(f'Expected # values == # arg names, but got: {len(values)} '
                                        f'values and {len(self.arg_names)} names for test "{test.__name__}"')
 
-                param_kwargs = dict(zip(self.arg_names, values))
+                param_kwargs = dict(zip(self.arg_names, values, strict=True))
 
                 test_name = self._get_subtest_name(idx, values, explicit_name=maybe_name)
 
@@ -2094,6 +2094,21 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if IS_WINDOWS:  # noqa: F821
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
+def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
+    def dec_fn(fn):
+        reason = f"skipIfWindowsXPU: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS and torch.xpu.is_available():  # noqa: F821
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -3681,7 +3696,7 @@ class TestCase(expecttest.TestCase):
             n_compressed_dims, n_plain_dims = size[-1 - dense_dims] // blocksize1, size[-2 - dense_dims] // blocksize0
         blocknnz = nnz // (blocksize0 * blocksize1)
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
-        sparse_tensors_it = map(list, zip(*sparse_tensors))
+        sparse_tensors_it = map(list, zip(*sparse_tensors, strict=True))
 
         values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize, *dense_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)

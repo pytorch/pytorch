@@ -445,7 +445,7 @@ class _SerializedFxCompile(FxCompile):
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
-            log.debug("Skipping %s compile: %s", type(self), e)
+            log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
             return None
 
         context = torch._guards.TracingContext.try_get()
