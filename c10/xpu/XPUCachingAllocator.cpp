@@ -554,7 +554,7 @@ static void local_raw_delete(void* ptr);
 
 class XPUAllocator : public DeviceAllocator {
  private:
-  std::mutex mutex;
+  alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
 
   void add_allocated_block(Block* block) {
