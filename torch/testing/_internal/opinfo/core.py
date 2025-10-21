@@ -166,7 +166,7 @@ class SampleInput:
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
 explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
-        elif len(var_args) or len(var_kwargs):
+        elif var_args or var_kwargs:
             assert (
                 output_process_fn_grad is None
                 and broadcasts_input is None
