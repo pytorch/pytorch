@@ -47,15 +47,13 @@ void upsample_bilinear2d_out_frame(
     bool align_corners,
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
-  auto* idata = static_cast<const scalar_t*>(input.const_data_ptr());
-  auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
   if (channels == 0 || output_height == 0 || output_width == 0) {
     return;
   }
-  auto* i_p = reinterpret_cast<const typename scalar_t::underlying*>(idata);
-  auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
+  auto* i_p = input.const_data_ptr<typename scalar_t::underlying>();
+  auto* o_p = output.mutable_data_ptr<typename scalar_t::underlying>();
 
   // special case: just copy
   if (input_height == output_height && input_width == output_width) {
@@ -73,8 +71,7 @@ void upsample_bilinear2d_out_frame(
   const auto rwidth = area_pixel_compute_scale<float>(
       input_width, output_width, align_corners, scales_w);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  float output_scale = output.q_scale() / input.q_scale();
+  double output_scale = output.q_scale() / input.q_scale();
 
   const int64_t input_q_zero_point = input.q_zero_point();
   const int64_t output_q_zero_point = output.q_zero_point();

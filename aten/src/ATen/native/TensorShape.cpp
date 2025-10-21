@@ -732,7 +732,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       if (cat_should_skip_tensor(tensor)) {
         continue;
       }
-      auto source_data = static_cast<const char*>(tensor.const_data_ptr());
+      auto source_data = tensor.const_data_ptr<char>();
       auto result_data =
           static_cast<char*>(result_slice_data) + offset * result_stride_bytes;
       iter.unsafe_replace_operand(0, result_data);
@@ -1635,8 +1635,7 @@ Tensor& narrow_copy_dense_cpu_out(
     return output;
   }
 
-  const char* src_bytes =
-      static_cast<const char*>(self_contig->const_data_ptr());
+  const char* src_bytes = self_contig->const_data_ptr<char>();
   char* dst_bytes = static_cast<char*>(output.data_ptr());
 
   size_t src_block_size_bytes = itemsize * src_block_size;

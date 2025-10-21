@@ -26,7 +26,6 @@
 
 #include <c10/util/irange.h>
 
-#include <cstring>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -130,7 +129,7 @@ Tensor embedding_dense_backward_cpu(
     .build();
 
   const auto gW_data = reinterpret_cast<char*>(grad_weight.data_ptr());
-  const auto gO_data = reinterpret_cast<const char*>(grad.const_data_ptr());
+  const auto gO_data = grad.const_data_ptr<char>();
   const auto gW_stride = grad_weight.strides()[0] * grad_weight.element_size();
   const auto gO_stride = grad.strides()[0] * grad.element_size();
 
