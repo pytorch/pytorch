@@ -518,9 +518,11 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef
-            if config.aot_inductor.allow_stack_allocation
-            else CppWrapperCpu,
+            (
+                CppWrapperCpuArrayRef
+                if config.aot_inductor.allow_stack_allocation
+                else CppWrapperCpu
+            ),
             WrapperFxCodegen,
         )
 
