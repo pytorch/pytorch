@@ -46,7 +46,7 @@ bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
 
 struct UsageStreamHash {
   size_t operator()(const UsageStream& us) const noexcept {
-    return std::hash<void*>{}(us.stream) + size_t(us.device);
+    return std::hash<void*>{}(us.stream) + static_cast<size_t>(us.device);
   }
 };
 
