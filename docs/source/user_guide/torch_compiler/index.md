@@ -56,7 +56,7 @@ advanced
 :hidden:
 
 
-troubleshooting
+troubleshooting_faqs
 ```
 
 ```{toctree}
