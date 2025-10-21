@@ -1016,8 +1016,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else nullcontext()
         )
         with ctx:
-            fn_vt = VariableTracker.build(tx, fn, source=source)
-            return fn_vt.call_function(tx, [self] + list(args), kwargs)
+            if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
+                fn_vt = VariableTracker.build(tx, fn, source=source)
+                return fn_vt.call_function(tx, [self] + list(args), kwargs)
+            else:
+                # Ideally we would have just used VariableTracker.build(tx, fn,
+                # source=source) but that introduces guard on the
+                # `forward.__code__` object. Given that we already guard on the
+                # forward not present in generic dict, we dont need this guard.
+                return variables.UserFunctionVariable(fn, source=source).call_function(
+                    tx, [self] + list(args), kwargs
+                )
 
     def call_method(
         self,
