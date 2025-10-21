@@ -692,13 +692,13 @@ class CodeGen:
                 # output is handled specially
 
             if include_meta and hasattr(node, "meta") and node.meta:
-                body.append(f'"""\n')
+                body.append('"""\n')
                 for k, v in node.meta.items():
                     # use str over repr since repr is susceptible to sympy
                     # errors such as "cannot determine truth value of Relational"
                     # Pretty print the high-level dict with str() for values
                     body.append(f"{k}: {pprint.pformat(str(v), width=80, compact=True)}\n")
-                body.append(f'"""\n')
+                body.append('"""\n')
 
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
