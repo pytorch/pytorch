@@ -710,6 +710,10 @@ class XPUAllocator : public DeviceAllocator {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
   }
+
+  std::pair<size_t, size_t> getMemoryInfo(DeviceIndex device) override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented yet.");
+  }
 };
 
 static XPUAllocator allocator;

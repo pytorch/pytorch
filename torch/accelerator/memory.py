@@ -8,6 +8,7 @@ from ._utils import _device_t, _get_device_index
 
 __all__ = [
     "empty_cache",
+    "get_memory_info",
     "max_memory_allocated",
     "max_memory_reserved",
     "memory_allocated",
@@ -199,3 +200,19 @@ def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
     """
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_resetPeakStats(device_index)
+
+
+def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
+    r"""Return the current device memory information for a given device index.
+
+    This function returns a tuple of two integers: the first is the amount of
+    free memory in bytes, and the second is the total memory in bytes.
+
+    Args:
+        device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
+            If not given, use :func:`torch.accelerator.current_device_index` by default.
+            If a :class:`torch.device` or str is provided, its type must match the current
+            :ref:`accelerator<accelerators>` device type.
+    """
+    device_index = _get_device_index(device_index, optional=True)
+    return torch._C._accelerator_getMemoryInfo(device_index)
