@@ -1054,15 +1054,26 @@ def deserialize_bundled_cache_entry(entry: BundledAOTAutogradCacheEntry) -> Call
     # We need to make a clean copy of the cache entry
     # in case it needs to be serialized again
     serializable_copy = deepcopy(entry)
-    compiled_fn = entry.wrap_post_compile(
-        [],
-        entry.sanitized_aot_config,
-        {
-            "cudagraphs": cudagraphs,
-            "boxed_forward_device_index": boxed_forward_device_index,
-        },
-    )
+
+    from torch._subclasses import FakeTensorMode
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    context = torch._guards.TracingContext.try_get()
+    if context is None:
+        # Create a clean environment when running fx graph post compile
+        # if one is not available
+        context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+    with torch._guards.tracing(context):
+        compiled_fn = entry.wrap_post_compile(
+            [],
+            entry.sanitized_aot_config,
+            {
+                "cudagraphs": cudagraphs,
+                "boxed_forward_device_index": boxed_forward_device_index,
+            },
+        )
     # Ensure the deserialized cache entry is still serializable
+
     compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: serializable_copy)
 
     # TODO: this ignores flat_params, which can exist
