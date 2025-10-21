@@ -158,10 +158,9 @@ def _observer_forward_pre_hook(self, input):
 
 
 def _register_activation_post_process_hook(module, pre_hook=False):
-    if not hasattr(module, "activation_post_process"):
-        raise AssertionError(
-            "Expect activation_post_process attribute already attached to the module"
-        )
+    assert hasattr(module, "activation_post_process"), (
+        "Expect activation_post_process attribute already attached to the module"
+    )
     if pre_hook:
         module.register_forward_pre_hook(_observer_forward_pre_hook, prepend=True)
     else:
@@ -199,10 +198,9 @@ def _add_observer_(
     # respect device affinity when adding observers
     if device is None:
         devices = _get_unique_devices_(module)
-        if len(devices) > 1:
-            raise AssertionError(
-                f"_add_observer_ only works with cpu or single-device CUDA modules, but got devices {devices}"
-            )
+        assert len(devices) <= 1, (
+            f"_add_observer_ only works with cpu or single-device CUDA modules, but got devices {devices}"
+        )
         device = next(iter(devices)) if len(devices) > 0 else None
 
     def get_activation_post_process(qconfig, device, special_act_post_process=None):
@@ -245,10 +243,9 @@ def _add_observer_(
             type_before_parametrizations(child), (nnq.FloatFunctional, nnq.QFunctional)
         ):
             if needs_observation(child):
-                if not hasattr(child, "activation_post_process"):
-                    raise AssertionError(
-                        f"functional class {type_before_parametrizations(child)} has no pre-defined `activation_post_process`"
-                    )
+                assert hasattr(child, "activation_post_process"), (
+                    f"functional class {type_before_parametrizations(child)} has no pre-defined `activation_post_process`"
+                )
                 child.activation_post_process = get_activation_post_process(
                     child.qconfig, device
                 )
@@ -587,8 +584,7 @@ def prepare_qat(model, mapping=None, inplace=False):
                  is mutated
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
-    if not model.training:
-        raise AssertionError("prepare_qat only works on models in training mode")
+    assert model.training, "prepare_qat only works on models in training mode"
     if mapping is None:
         mapping = get_default_qat_module_mappings()
 
@@ -764,10 +760,7 @@ def swap_module(
         elif type_before_parametrizations(mod) in mapping:
             qmod = mapping[type_before_parametrizations(mod)]
             if hasattr(qmod, "_IS_REFERENCE") and qmod._IS_REFERENCE:
-                if mod.qconfig is None:
-                    raise AssertionError(
-                        "module qconfig must not be None when swapping to reference module"
-                    )
+                assert mod.qconfig is not None
                 weight_post_process = mod.qconfig.weight()
                 weight_post_process(mod.weight)
                 weight_qparams = get_qparam_dict(weight_post_process)
@@ -794,13 +787,11 @@ def swap_module(
 
             # respect device affinity when swapping modules
             devices = _get_unique_devices_(mod)
-            if not (
-                len(devices) <= 1
-                or (len(devices) == 2 and torch.device("meta") in devices)
-            ):
-                raise AssertionError(
-                    f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
-                )
+            assert len(devices) <= 1 or (
+                len(devices) == 2 and torch.device("meta") in devices
+            ), (
+                f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+            )
             device = next(iter(devices)) if len(devices) > 0 else None
             if device:
                 new_mod.to(device)
