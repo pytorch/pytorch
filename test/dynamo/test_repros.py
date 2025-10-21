@@ -7284,6 +7284,22 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         flag = False
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    def test_store_attr_graph_break_key_error(self):
+        # STORE_ATTR on dummy should result in graph break
+        def dummy():
+            pass
+
+        def fn(x):
+            x = x + 2
+            with torch.no_grad():
+                dummy.attr1 = x
+            return x + 4
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        self.assertGreater(len(torch._dynamo.utils.counters["graph_break"]), 0)
+
     def test_cells_unsupported_step_exception(self):
         # This error happened because:
         #  - we were generating cells into a list on the stack
