@@ -66,7 +66,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, raise_type_error_exc, VariableTracker
+from .base import AttributeMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 from .user_defined import UserDefinedClassVariable
@@ -1766,7 +1766,8 @@ class UntypedStorageVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             result = self.example_value.size()
             if not has_free_symbols(result):
@@ -1787,9 +1788,7 @@ class UntypedStorageVariable(VariableTracker):
                 )
         if name == "resize_" and len(args) == 1:
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.inductor.resize_storage_bytes_,

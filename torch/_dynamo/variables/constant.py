@@ -159,7 +159,8 @@ its type to `common_constant_types`.
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             arg_unpacked = args[0].force_unpack_var_sequence(tx)
             try:

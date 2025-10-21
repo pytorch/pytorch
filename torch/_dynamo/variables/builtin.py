@@ -1952,14 +1952,16 @@ class BuiltinVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     f"{user_cls.__name__}.fromkeys",
-                    f"Expect: 1 args and 1 kwargs (`value`), Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 1 kwargs (`value`)",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
             raise_args_mismatch(
                 tx,
                 f"{user_cls.__name__}.fromkeys",
-                f"Expect: at least 1 args, Actual: {len(args)} args",
+                "at least 1 args",
+                f"{len(args)} args",
             )
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
@@ -1967,7 +1969,8 @@ class BuiltinVariable(VariableTracker):
             raise_args_mismatch(
                 tx,
                 f"{user_cls.__name__}.fromkeys",
-                f"Expect: 2 args, Actual: {len(args)} args",
+                "2 args",
+                f"{len(args)} args",
             )
         arg, value = args
         DictVariableType = (
@@ -2068,7 +2071,8 @@ class BuiltinVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     "zip",
-                    f"Expect: 1 kwargs (`strict`), Actual: {len(kwargs)} kwargs",
+                    "1 kwargs (`strict`)",
+                    f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", False)
         args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]

@@ -593,7 +593,8 @@ class ComptimeVariable(VariableTracker):
             raise_args_mismatch(
                 tx,
                 "comptime()",
-                f"Expect: at most 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                "at most 2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
             )
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
@@ -948,9 +949,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return super().call_method(tx, name, args, kwargs)
         elif name == "mark_non_differentiable":
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
 

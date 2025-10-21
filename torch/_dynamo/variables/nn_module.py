@@ -462,7 +462,8 @@ class NNModuleVariable(VariableTracker):
                     raise_args_mismatch(
                         tx,
                         "torch.nn.Module.Sequential",
-                        f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs",
+                        "0 kwargs",
+                        f"{len(kwargs)} kwargs",
                     )
                 (arg,) = args
                 # TODO: Use named_children when it supports remove_duplicate=False.
@@ -698,7 +699,8 @@ class NNModuleVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             result = []
             for name, submod in module.named_children():
@@ -734,7 +736,8 @@ class NNModuleVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return wrap_values(module.named_children())
         elif name == "modules":
@@ -751,7 +754,8 @@ class NNModuleVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             result = []
             for name in module.keys():
@@ -762,7 +766,8 @@ class NNModuleVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return wrap_values(module.items())
         elif name == "items":
@@ -770,7 +775,8 @@ class NNModuleVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             result = []
             for name, submod in module.items():
@@ -781,7 +787,8 @@ class NNModuleVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return ConstantVariable.create(len(module))
         elif (
@@ -798,7 +805,8 @@ class NNModuleVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             builtin_supported = (
                 torch.nn.ModuleDict.__getitem__,

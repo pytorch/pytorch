@@ -466,16 +466,15 @@ class ConstDictVariable(VariableTracker):
         elif name == "__getitem__":
             # Key guarding - Nothing to do. LazyVT for value will take care.
             if len(args) != 1:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
             if args or kwargs:
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.install_dict_keys_match_guard()
             if self.source:
@@ -483,9 +482,7 @@ class ConstDictVariable(VariableTracker):
             return DictItemsVariable(self)
         elif name == "keys":
             if len(args):
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
@@ -495,7 +492,8 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.install_dict_keys_match_guard()
             if self.source:
@@ -509,7 +507,8 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
@@ -519,7 +518,8 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
@@ -532,7 +532,8 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
@@ -545,9 +546,7 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "get":
             if len(args) not in (1, 2):
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 or 2 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
             if not arg_hashable:
                 raise_unhashable(args[0])
@@ -562,9 +561,7 @@ class ConstDictVariable(VariableTracker):
             return self.getitem_const(tx, args[0])
         elif name == "pop" and self.is_mutable():
             if len(args) not in (1, 2):
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 or 2 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
             if not arg_hashable:
                 raise_unhashable(args[0])
@@ -614,7 +611,8 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
@@ -652,7 +650,8 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: more than 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "more than 1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             if not arg_hashable:
@@ -666,18 +665,20 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 or 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 or 2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             if not arg_hashable:
                 raise_unhashable(args[0])
 
             self.install_dict_keys_match_guard()
-            if kwargs and len(args) > 2:
+            if kwargs or len(args) > 2:
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: at most 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "at most 2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             value = self.maybe_getitem_const(args[0])
             if value is not None:
@@ -714,9 +715,7 @@ class ConstDictVariable(VariableTracker):
             self, ConstDictVariable
         ):  # don't let Set use this function
             if len(args) != 1:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
 
             return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
                 tx, [self, args[0]], {}
@@ -727,9 +726,7 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "__or__":
             if len(args) != 1:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             other = args[0]
 
             # Method resolution for binops works as follow (using __or__ as example):
@@ -926,9 +923,7 @@ class DefaultDictVariable(ConstDictVariable):
     ) -> "VariableTracker":
         if name == "__getitem__":
             if len(args) != 1:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
 
             if args[0] in self:
                 return self.getitem_const(tx, args[0])
@@ -1051,7 +1046,8 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             name = "__setitem__"
             args = (args[0], SetVariable._default_value())
@@ -1060,7 +1056,8 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             # Choose an item at random and pop it via the Dict.pop method
             try:
@@ -1076,32 +1073,27 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return variables.UserFunctionVariable(
                 polyfills.set_isdisjoint
             ).call_function(tx, [self, args[0]], {})
         elif name == "intersection":
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(
                 polyfills.set_intersection
             ).call_function(tx, [self, *args], {})
         elif name == "intersection_update":
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(
                 polyfills.set_intersection_update
             ).call_function(tx, [self, *args], {})
         elif name == "union":
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
                 tx, [self, *args], {}
             )
@@ -1115,9 +1107,7 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, *args], {})
         elif name == "difference_update":
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(
                 polyfills.set_difference_update
             ).call_function(tx, [self, *args], {})
@@ -1126,7 +1116,8 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return variables.UserFunctionVariable(
                 polyfills.set_symmetric_difference
@@ -1136,16 +1127,15 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return variables.UserFunctionVariable(
                 polyfills.set_symmetric_difference_update
             ).call_function(tx, [self, *args], {})
         elif name == "update" and self.is_mutable():
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(polyfills.set_update).call_function(
                 tx, [self, *args], {}
             )
@@ -1154,7 +1144,8 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             if args[0] not in self:
                 raise_observed_exception(KeyError, tx, args=args)
@@ -1164,7 +1155,8 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             if args[0] in self:
                 return super().call_method(tx, "pop", args, kwargs)
@@ -1172,9 +1164,7 @@ class SetVariable(ConstDictVariable):
                 return ConstantVariable.create(value=None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
 
             op = {
                 "issubset": operator.le,
@@ -1476,9 +1466,7 @@ class DictItemsVariable(DictViewVariable):
         # implements the mapping protocol.
         if name == "__eq__":
             if len(args) != 1:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 1 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             if isinstance(args[0], DictItemsVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
             return ConstantVariable.create(False)

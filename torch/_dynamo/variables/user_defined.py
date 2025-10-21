@@ -441,7 +441,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
@@ -700,7 +701,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     raise_args_mismatch(
                         tx,
                         "torch.return_types",
-                        f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                        "1 args and 0 kwargs",
+                        f"{len(args)} args and {len(kwargs)} kwargs",
                     )
                 items = args[0].force_unpack_var_sequence(tx)
             else:

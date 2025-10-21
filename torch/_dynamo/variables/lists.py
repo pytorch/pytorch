@@ -151,7 +151,8 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             if isinstance(args[0], TensorVariable):
@@ -180,7 +181,8 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
@@ -188,7 +190,8 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             return tx.inline_user_function_return(
@@ -201,7 +204,8 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return VariableTracker.build(tx, operator.countOf).call_function(
                 tx,
@@ -213,7 +217,8 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             if type(self) is not type(args[0]):
@@ -234,7 +239,8 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             if not (args[0].is_python_constant() and args[0].python_type() is int):
@@ -255,7 +261,8 @@ class BaseListVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             left = self
@@ -571,7 +578,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             (arg,) = args
             tx.output.side_effects.mutation(self)
@@ -582,7 +590,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             if not args[0].has_force_unpack_var_sequence(tx):
@@ -599,7 +608,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             idx, value = args
             if isinstance(idx, SymNodeVariable):
@@ -614,7 +624,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: at most 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "at most 1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             if len(self.items) == 0:
@@ -633,7 +644,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             tx.output.side_effects.mutation(self)
             self.items.clear()
@@ -655,9 +667,7 @@ class CommonListMethodsVariable(BaseListVariable):
             )
         ):
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SymNodeVariable):
@@ -685,7 +695,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             tx.output.side_effects.mutation(self)
@@ -717,7 +728,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             items = list(self.items)
             return self.modified(items, mutation_type=ValueMutationNew())
@@ -726,7 +738,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.items.reverse()
             tx.output.side_effects.mutation(self)
@@ -736,7 +749,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
             idx = self.call_method(tx, "index", args, kwargs)
@@ -774,7 +788,8 @@ class ListVariable(CommonListMethodsVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             key, value = args
 
@@ -818,17 +833,13 @@ class ListVariable(CommonListMethodsVariable):
 
         if name == "sort" and self.is_mutable():
             if len(args) != 0:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
             key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
             ).as_python_constant()
             if len(kwargs) != 0:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
             if (
                 key_fn_var.is_python_constant()
@@ -880,9 +891,7 @@ class ListVariable(CommonListMethodsVariable):
 
         if name == "__init__" and self.is_mutable():
             if kwargs:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
-                )
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
                 return ConstantVariable.create(None)
             elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
@@ -973,7 +982,8 @@ class DequeVariable(CommonListMethodsVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             key, value = args
             assert key.is_python_constant()
@@ -998,7 +1008,8 @@ class DequeVariable(CommonListMethodsVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             # NOTE this is inefficient, but the alternative is to represent self.items
             # as a deque, which is a more intrusive change.
@@ -1012,7 +1023,8 @@ class DequeVariable(CommonListMethodsVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             tx.output.side_effects.mutation(self)
             result, *self.items[:] = self.items
@@ -1021,7 +1033,8 @@ class DequeVariable(CommonListMethodsVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             tx.output.side_effects.mutation(self)
             self.items[:] = [args[0], *self.items]
@@ -1032,7 +1045,8 @@ class DequeVariable(CommonListMethodsVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             if maxlen is not None and len(self.items) == maxlen:
                 raise_observed_exception(
@@ -1213,7 +1227,8 @@ class SizeVariable(TupleVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 1 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             out = self.get_item_dyn(tx, args[0])
             return out
@@ -1222,7 +1237,8 @@ class SizeVariable(TupleVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 0 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return self.numel(tx)
 
@@ -1369,7 +1385,8 @@ class NamedTupleVariable(TupleVariable):
                 raise_args_mismatch(
                     tx,
                     name,
-                    f"Expect: 2 args and 0 kwargs, Actual: {len(args)} args and {len(kwargs)} kwargs",
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             attr, value = args
             attr = attr.as_python_constant()
@@ -1391,9 +1408,7 @@ class NamedTupleVariable(TupleVariable):
         elif name == "_replace":
             # NamedTuple._replace should create a new instance with replaced fields
             if args:
-                raise_args_mismatch(
-                    tx, name, f"Expect: 0 args, Actual: {len(args)} args"
-                )
+                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
 
             # Get the field names for validation
             fields = self.fields()
