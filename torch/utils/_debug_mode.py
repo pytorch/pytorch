@@ -120,8 +120,7 @@ class _OpCall(_DebugCall):
         return f"{op_name}({args_str}{kwargs_str})"
 
     def __iter__(self):
-        for arg in [self.op, self.args, self.kwargs, self.call_depth]:
-            yield arg
+        yield from [self.op, self.args, self.kwargs, self.call_depth]
 
     def __repr__(self) -> str:
         return self.render([])
