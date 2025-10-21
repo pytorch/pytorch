@@ -2768,14 +2768,23 @@ def slice_length(s: slice, seq_len: int) -> int:
     return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
 
 
-def raise_args_mismatch(tx: InstructionTranslatorBase, name: str) -> None:
+def raise_args_mismatch(
+    tx: InstructionTranslatorBase, name: str, expect: str = ""
+) -> None:
     from torch._dynamo.exc import raise_observed_exception
     from torch._dynamo.variables import ConstantVariable
+
+    msg = [
+        ConstantVariable(
+            f"wrong number of arguments or keyword arguments for {name}() call. "
+            + expect
+        )
+    ]
 
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+        args=msg,
     )
 
 
