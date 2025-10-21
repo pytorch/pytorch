@@ -990,7 +990,7 @@ def sym_ite(b, t, f):
     """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    assert isinstance(b, (SymBool, builtins.bool)) and type(t) is type(f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
@@ -1119,11 +1119,6 @@ def typename(obj: _Any, /) -> str:
 
 def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     r"""Returns True if `obj` is a PyTorch tensor.
-
-    Note that this function is simply doing ``isinstance(obj, Tensor)``.
-    Using that ``isinstance`` check is better for type checking with mypy,
-    and more explicit - so it's recommended to use that instead of
-    ``is_tensor``.
 
     Args:
         obj (object): Object to test
@@ -2503,7 +2498,7 @@ def compile(
     to compile it and cache the compiled result on the code object for future
     use.  A single frame may be compiled multiple times if previous compiled
     results are not applicable for subsequent calls (this is called a "guard
-    failure), you can use TORCH_LOGS=guards to debug these situations.
+    failure"), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
     ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
