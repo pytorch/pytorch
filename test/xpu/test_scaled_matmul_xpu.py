@@ -9,8 +9,10 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     E5M2_MAX_POS,
     e5m2_type,
+    instantiate_device_type_tests,
+    onlyXPU,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
 f8_msg = "FP8 is not supported on this device"
@@ -161,6 +163,32 @@ def addmm_float8_unwrapped(
     return output
 
 
+def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype):
+    if fp8_dtype == e4m3_type:
+        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+    elif fp8_dtype == e5m2_type:
+        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+    else:
+        raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
+
+    return x.to(fp8_dtype)
+
+
+def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """Computes the error between two tensors in dB.
+
+    For more details see:
+        https://en.wikipedia.org/wiki/Signal-to-noise_ratio
+
+    Args:
+        x: The original tensor.
+        y: The tensor to compare to the original tensor.
+    """
+    Ps = torch.norm(x)
+    Pn = torch.norm(x - y)
+    return 20 * torch.log10(Ps / Pn)
+
+
 class TestFP8Matmul(TestCase):
     def _test_tautological_mm(
         self,
@@ -198,8 +226,7 @@ class TestFP8Matmul(TestCase):
     def test_float8_scale(self, device="xpu") -> None:
         size = (16, 16)
         x = torch.full(size, 0.5, device=device, dtype=e4m3_type)
-        # hipblaslt does not yet support mixed e4m3_type input
-        y_type = e4m3_type if torch.version.hip else e5m2_type
+        y_type = e5m2_type
         y = torch.full(size, 0.5, device=device, dtype=y_type).t()
         scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
@@ -208,3 +235,157 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4.0, device=device))
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
+
+    @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_scaled_mm_vs_emulated(self, base_dtype):
+        torch.manual_seed(42)
+        input_dtype = e4m3_type
+        output_dtype = base_dtype
+        compare_type = torch.float32
+
+        x = torch.randn(16, 16, device="xpu", dtype=base_dtype)
+        y = torch.randn(32, 16, device="xpu", dtype=base_dtype).t()
+
+        x_scale = tensor_to_scale(x, input_dtype).float()
+        y_scale = tensor_to_scale(y, input_dtype).float()
+
+        x_fp8 = to_fp8_saturated(x * x_scale, input_dtype)
+        y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
+
+        # Calculate actual F8 mm
+        out_scaled_mm = scaled_mm_wrap(
+            x_fp8,
+            y_fp8,
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype,
+        )
+
+        # Calculate emulated F8 mm
+        out_emulated = mm_float8_emulated(x_fp8, x_scale, y_fp8, y_scale, output_dtype)
+
+        if output_dtype != base_dtype:
+            out_scaled_mm = out_scaled_mm.to(compare_type)
+            out_scaled_mm = out_scaled_mm / tensor_to_scale(out_scaled_mm, input_dtype)
+
+            out_emulated = out_emulated.to(compare_type)
+            out_emulated = out_emulated / tensor_to_scale(out_emulated, input_dtype)
+
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 3e-3, 3e-3
+
+        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_scaled_mm_change_stride(self, base_dtype):
+        torch.manual_seed(42)
+        input_dtype = e4m3_type
+        output_dtype = base_dtype
+        compare_type = torch.float32
+
+        x = torch.empty_strided((16, 16), (16, 1), device="xpu", dtype=base_dtype)
+        y = torch.empty_strided((16, 32), (1, 64), device="xpu", dtype=base_dtype)
+
+        x.normal_()
+        y.normal_()
+
+        x_scale = tensor_to_scale(x, input_dtype).float()
+        y_scale = tensor_to_scale(y, input_dtype).float()
+
+        x_fp8 = to_fp8_saturated(x * x_scale, input_dtype)
+        y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
+
+        # Calculate actual F8 mm
+        out_scaled_mm = scaled_mm_wrap(
+            x_fp8,
+            y_fp8,
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype,
+        )
+
+        # Calculate emulated F8 mm
+        out_emulated = mm_float8_emulated(x_fp8, x_scale, y_fp8, y_scale, output_dtype)
+
+        if output_dtype != base_dtype:
+            out_scaled_mm = out_scaled_mm.to(compare_type)
+            out_scaled_mm = out_scaled_mm / tensor_to_scale(out_scaled_mm, input_dtype)
+
+            out_emulated = out_emulated.to(compare_type)
+            out_emulated = out_emulated / tensor_to_scale(out_emulated, input_dtype)
+
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 3e-3, 3e-3
+
+        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    @onlyXPU
+    def test_float8_bias(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.ones((k, l), device=device).to(e4m3_type)
+        y = torch.full((m, l), 0.25, device=device, dtype=e4m3_type).t()
+        bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        out_fp8 = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
+        outb_fp8 = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, bias=bias)
+        # this fails on ROCm currently because hipblaslt doesn't have amax op
+        out_fp32 = out_fp8.to(torch.float32)
+        outb_fp32 = outb_fp8.to(torch.float32)
+        difference = torch.abs(out_fp32 - outb_fp32)
+        self.assertEqual(
+            difference, torch.tensor(4.0, device=device).expand_as(out_fp32)
+        )
+
+    @onlyXPU
+    @parametrize("bias", [True, False])
+    def test_non_divisible_leading_dim(self, device, bias: bool) -> None:
+        x = torch.rand((17, 16), device=device).to(e4m3_type)
+        y = torch.rand((16, 16), device=device).to(e4m3_type).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        input_bias = None
+        if bias:
+            input_bias = torch.rand((16,), device=device).to(torch.bfloat16)
+        _ = scaled_mm_wrap(x, y, scale_a, scale_b, bias=input_bias)
+
+    @onlyXPU
+    def test_float8_bias_relu_edgecase(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.full((k, l), 0.0, device=device).to(e4m3_type)
+        y = torch.full((m, l), 1.0, device=device, dtype=e4m3_type).t()
+        bias = torch.full((m,), -3.0, device=device, dtype=torch.bfloat16)
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        outb_fp8 = scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias)
+        outb_fp32 = outb_fp8.to(torch.float32)
+        self.assertEqual(
+            outb_fp32, torch.tensor(-3.0, device=device).expand_as(outb_fp32)
+        )
+
+    @onlyXPU
+    def test_float32_output_errors_with_bias(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.rand((k, l), device=device).to(e4m3_type)
+        y = torch.full((m, l), 0.25, device=device, dtype=e4m3_type).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Bias is not supported when out_dtype is set to Float32",
+            lambda: scaled_mm_wrap(
+                x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32
+            ),
+        )
+
+
+instantiate_device_type_tests(TestFP8Matmul, globals(), only_for="xpu", allow_xpu=True)
+
+if __name__ == "__main__":
+    TestCase._default_dtype_check_enabled = True
+    run_tests()
