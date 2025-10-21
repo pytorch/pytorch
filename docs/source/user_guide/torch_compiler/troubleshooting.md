@@ -1,4 +1,4 @@
-# Troubleshooting/FAQs
+# Debugging Guides
 
 Find solutions to common issues, debugging guides, and answers to frequently asked questions.
 

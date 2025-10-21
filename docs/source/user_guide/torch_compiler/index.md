@@ -12,7 +12,7 @@ This guide provides comprehensive documentation for `torch.compile`, PyTorch's c
 
 **[Advanced](advanced)** - Deep dives into internals, custom backends, dynamic shapes, and transformations.
 
-**[Troubleshooting/FAQs](troubleshooting)** - Common issues, debugging techniques, and frequently asked questions.
+**[Debugging Guides](troubleshooting)** - Common issues, debugging techniques, and frequently asked questions.
 
 **[Reference/API](api_reference)** - Complete API documentation and configuration options.
 
