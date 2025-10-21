@@ -129,10 +129,12 @@ else:
         """
 
         _rank_map: torch.Tensor
-        _root_mesh: "DeviceMesh"
+        _root_mesh: Optional["DeviceMesh"]
         _backend_cache: dict[_MeshLayout, str]
 
-        def __init__(self, rank_map: torch.Tensor, root_mesh: "DeviceMesh") -> None:
+        def __init__(
+            self, rank_map: torch.Tensor, root_mesh: Optional["DeviceMesh"] = None
+        ) -> None:
             self._rank_map = rank_map
             self._root_mesh = root_mesh
             self._backend_cache: dict[_MeshLayout, str] = {}
@@ -142,7 +144,7 @@ else:
             with self._lock:
                 return self._rank_map
 
-        def get_root_mesh(self) -> "DeviceMesh":
+        def get_root_mesh(self) -> Optional["DeviceMesh"]:
             with self._lock:
                 return self._root_mesh
 
@@ -515,14 +517,15 @@ else:
                                     f"Each device mesh dimension should get only one process group, but got {get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
-                            backend_cache = shared_state.update_backend_cache(
-                                layout[dim], dim_group.group_name
+                            shared_state.update_backend_cache(
+                                layout[dim],
+                                dim_group.group_name,  # type: ignore[union-attr]
                             )
                             dim_group_names.append(dim_group.group_name)  # type: ignore[union-attr]
             return dim_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
-            return self._shared_state.get_root_mesh()
+            return not_none(self._shared_state.get_root_mesh())
 
         def __enter__(self) -> "DeviceMesh":
             # set this mesh as the current mesh in mesh env
@@ -1389,7 +1392,7 @@ else:
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
             rank_map = torch.arange(layout.numel(), dtype=torch.int)
-        shared_state = _SharedState(rank_map, None)
+        shared_state = _SharedState(rank_map)
         device_mesh = DeviceMesh(
             device_type=device_type,
             _layout=layout,
