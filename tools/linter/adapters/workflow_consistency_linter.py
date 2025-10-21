@@ -69,6 +69,7 @@ def print_lint_message(path: Path, job: dict[str, Any], sync_tag: str) -> None:
 
     lint_message = LintMessage(
         path=str(path),
+        # pyrefly: ignore  # unbound-name
         line=line_number,
         char=None,
         code="WORKFLOWSYNC",
