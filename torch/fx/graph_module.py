@@ -848,6 +848,17 @@ class {module_name}(torch.nn.Module):
 
         return python_code
 
+    def recompile_submodules(self) -> list[tuple[str, PythonCode]]:
+        """
+        Recompile all submodules of this graph module, returning their respective PythonCodes
+        in a similar format to named_children()
+        """
+        results: list[tuple[str, PythonCode]] = []
+        for name, mod in self.named_children():
+            assert isinstance(mod, GraphModule)
+            results.append((name, mod.recompile()))
+        return results
+
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).
 
