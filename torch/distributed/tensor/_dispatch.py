@@ -319,14 +319,22 @@ class OpDispatcher:
                 output_spec = output_sharding.output_spec
                 assert isinstance(output_spec, DTensorSpec)
                 assert isinstance(args[0], dtensor.DTensor)
+
+                # Inplace operations that require redistribution are not supported
+                # because they break aliasing semantics. If there are views into
+                # the tensor, simply overwriting _local_tensor won't update the views.
+                if output_sharding.needs_redistribute:
+                    raise RuntimeError(
+                        f"{op_call}: in-place operations that require redistribution "
+                        f"are not supported. The operation would change placement from "
+                        f"{args[0]._spec.placements} to {output_spec.placements}, "
+                        f"which requires redistribution and breaks aliasing semantics. "
+                        f"Please use the out-of-place version of this operation instead."
+                    )
+
                 # update the spec for all inplace ops to handle placement changes
-                # (e.g., Partial -> Replicate conversion)
+                # that don't require redistribution
                 args[0]._spec = output_spec
-                # for in-place ops, we also need to ensure the local tensor is updated
-                # if redistribution occurred. The local_results contains the modified
-                # local tensor after the in-place operation.
-                if participating and output_sharding.needs_redistribute:
-                    args[0]._local_tensor = local_results  # type: ignore[possibly-undefined]
                 # NOTE: aten.squeeze_.dim is an inplace op but it also may change
                 # the inplace argument's tensor meta. Here we choose to special case
                 # this op because as far as I know this is the only inplace op that

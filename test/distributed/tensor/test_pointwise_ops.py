@@ -332,8 +332,8 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.to_local(), input)
 
     def test_inplace_op_partial_to_replicate(self):
-        # test that in-place operations correctly update the spec when converting
-        # from Partial to Replicate placement (issue #163374)
+        # test that in-place operations that require redistribution raise an error
+        # to preserve aliasing semantics (issue #163374)
         device_mesh = self.build_device_mesh()
 
         input_tensor = torch.tensor(64.0, device=self.device_type)
@@ -342,13 +342,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
         self.assertTrue(partial_dt.placements[0].is_partial())
-        out = partial_dt.clamp_(max=10)
-        self.assertEqual(out.placements, (Replicate(),))
-        self.assertEqual(partial_dt.placements, (Replicate(),))
 
-        full = out.full_tensor()
-        self.assertEqual(full.item(), 10.0)
-        self.assertEqual(out.to_local().item(), 10.0)
+        # Inplace ops that require redistribution (Partial -> Replicate) should error
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "in-place operations that require redistribution are not supported"
+        ):
+            partial_dt.clamp_(max=10)
 
 
 if __name__ == "__main__":
