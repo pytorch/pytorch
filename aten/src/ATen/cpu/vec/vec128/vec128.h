@@ -9,6 +9,7 @@
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_half_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_int_aarch64.h>
+#include <ATen/cpu/vec/vec128/vec128_uint_aarch64.h>
 #endif
 
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
