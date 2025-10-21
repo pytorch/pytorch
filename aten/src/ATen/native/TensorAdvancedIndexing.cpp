@@ -1244,11 +1244,12 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
             "index out of range in self");
         auto self_data = static_cast<char*>(selfSlice.data_ptr()) +
             self_i * self_stride_bytes;
-        auto source_data = static_cast<char*>(sourceSlice.data_ptr()) +
+        auto source_data =
+            static_cast<const char*>(sourceSlice.const_data_ptr()) +
             i * source_stride_bytes;
         iter.unsafe_replace_operand(0, self_data);
         iter.unsafe_replace_operand(1, self_data);
-        iter.unsafe_replace_operand(2, source_data);
+        iter.unsafe_replace_operand(2, const_cast<char*>(source_data));
         add_stub(iter.device_type(), iter, alpha);
       }
     });
@@ -1379,11 +1380,12 @@ static void index_reduce_func_impl(
             "index out of range in self");
         auto self_data = static_cast<char*>(selfSlice.data_ptr()) +
             self_i * self_stride_bytes;
-        auto source_data = static_cast<char*>(sourceSlice.data_ptr()) +
+        auto source_data =
+            static_cast<const char*>(sourceSlice.const_data_ptr()) +
             i * source_stride_bytes;
         iter.unsafe_replace_operand(0, self_data);
         iter.unsafe_replace_operand(1, self_data);
-        iter.unsafe_replace_operand(2, source_data);
+        iter.unsafe_replace_operand(2, const_cast<char*>(source_data));
 
         switch (op) {
           case ReductionType::PROD:
