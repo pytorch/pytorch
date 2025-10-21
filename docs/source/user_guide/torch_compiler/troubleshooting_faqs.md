@@ -1,4 +1,4 @@
-# Debugging Guides
+# Troubleshooting FAQs
 
 Find solutions to common issues, debugging guides, and answers to frequently asked questions.
 
@@ -11,4 +11,5 @@ Find solutions to common issues, debugging guides, and answers to frequently ask
 ../../torch.compiler_faq.md
 ../../torch.compiler_aot_inductor_debugging_guide.md
 ../../torch.compiler_aot_inductor_minifier.md
+
 ```
