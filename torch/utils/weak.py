@@ -309,7 +309,7 @@ class WeakIdKeyDictionary(MutableMapping):
                 dict = type({})(dict)
             for key, value in dict.items():
                 d[self.ref_type(key, self._remove)] = value  # CHANGED
-        if len(kwargs):
+        if kwargs:
             self.update(kwargs)
 
     def __ior__(self, other):
@@ -351,14 +351,16 @@ class TensorWeakRef:
     ref: WeakRef[Tensor]
 
     def __init__(self, tensor: Tensor):
-        assert isinstance(tensor, Tensor)
+        if not isinstance(tensor, Tensor):
+            raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
         self.ref = weakref.ref(tensor)
 
     def __call__(self):
         out = self.ref()
         if out is None:
             return out
-        assert isinstance(out, Tensor)
+        if not isinstance(out, Tensor):
+            raise AssertionError(f"expected torch.Tensor, got {type(out)}.")
         # TODO, add _fix_weakref type binding
         out._fix_weakref()  # type: ignore[attr-defined]
         return out
