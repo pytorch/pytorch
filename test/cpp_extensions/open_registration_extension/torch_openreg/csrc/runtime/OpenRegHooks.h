@@ -8,15 +8,51 @@
 
 #include <include/openreg.h>
 
+#include "OpenRegFunctions.h"
 #include "OpenRegGenerator.h"
 
 namespace c10::openreg {
-struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
+struct OPENREG_EXPORT OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   OpenRegHooksInterface() {};
   ~OpenRegHooksInterface() override = default;
 
-  bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     return true;
+  }
+
+  bool isBuilt() const override {
+    // This extension is compiled as part of the OpenReg test extension.
+    return true;
+  }
+
+  bool isAvailable() const override {
+    // Consider OpenReg available if there's at least one device reported.
+    return device_count() > 0;
+  }
+
+  DeviceIndex deviceCount() const override {
+    return device_count();
+  }
+
+  void setCurrentDevice(DeviceIndex device) const override {
+    set_device(device);
+  }
+
+  DeviceIndex getCurrentDevice() const override {
+    return current_device();
+  }
+
+  DeviceIndex exchangeDevice(DeviceIndex device) const override {
+    return ExchangeDevice(device);
+  }
+
+  DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
+    // Only exchange if the requested device is valid; otherwise, no-op and return current
+    auto count = device_count();
+    if (device < 0 || device >= count) {
+      return getCurrentDevice();
+    }
+    return exchangeDevice(device);
   }
 
   at::Allocator* getPinnedMemoryAllocator() const override {
@@ -30,14 +66,24 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
     return attr.type == orMemoryTypeHost;
   }
 
-  const at::Generator& getDefaultGenerator(
-      c10::DeviceIndex device_index) const override {
+  at::Device getDeviceFromPtr(void* data) const override {
+    orPointerAttributes attr{};
+    auto err = orPointerGetAttributes(&attr, data);
+    if (err == orSuccess && attr.type == orMemoryTypeDevice) {
+      return at::Device(at::DeviceType::PrivateUse1, static_cast<int>(attr.device));
+    }
+    // Fallback to CPU device for host/unmanaged pointers
+    return at::Device(at::DeviceType::CPU, 0);
+  }
+  // LITERALINCLUDE START: OPENREG HOOK EXAMPLES
+  const at::Generator& getDefaultGenerator(DeviceIndex device_index) const override {
     return getDefaultOpenRegGenerator(device_index);
   }
 
-  at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
+  at::Generator getNewGenerator(DeviceIndex device_index) const override {
     return at::make_generator<OpenRegGeneratorImpl>(device_index);
   }
+  // LITERALINCLUDE END: OPENREG HOOK EXAMPLES
 };
 
 } // namespace c10::openreg

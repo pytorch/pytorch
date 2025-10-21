@@ -43,6 +43,7 @@ Next, we will delve into each chapter of this guide. Each chapter focuses on a k
 :maxdepth: 1
 
 autoload
+hooks
 operators
 amp
 ```
