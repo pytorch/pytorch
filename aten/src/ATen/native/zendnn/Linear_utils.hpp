@@ -11,6 +11,7 @@
 #include <functional> // For std::reference_wrapper, std::ref, std::cref
 #include <iostream>
 #include <optional> // For std::optional, std::nullopt
+#include <string>
 #include <unordered_map>
 
 #if AT_ZENDNN_ENABLED()
@@ -45,6 +46,7 @@ inline std::vector<int64_t> compute_linear_output_sizes(
   output_size.emplace_back(weights_last_dim_size);
   return output_size;
 }
+
 // Returns output strides for linear (input @ weights) and linear operations
 inline std::vector<int64_t> compute_linear_output_strides(
     const std::vector<int64_t>& output_size) {
@@ -124,6 +126,7 @@ inline void check_tensor_dtypes_for_linear(
 inline void set_linear_context_attributes(
     matmul_context_t& matmul_context,
     tensor_t& weights,
+    const std::string_view& post_op_id,
     std::optional<std::reference_wrapper<tensor_t>> bias_opt_ref =
         std::nullopt) {
   matmul_context.set_param("weights", weights);
@@ -131,6 +134,32 @@ inline void set_linear_context_attributes(
     tensor_t& bias = bias_opt_ref->get();
     matmul_context.set_param("bias", bias);
   }
+  if (post_op_id == "none")
+    return;
+  static const std::unordered_map<std::string_view, post_op_type_t>
+      post_op_map = {
+          {"relu", post_op_type_t::relu},
+          {"gelu_tanh", post_op_type_t::gelu_tanh},
+          {"gelu_erf", post_op_type_t::gelu_erf},
+          {"silu", post_op_type_t::swish},
+          {"sigmoid", post_op_type_t::sigmoid},
+          {"tanh", post_op_type_t::tanh}};
+  auto it = post_op_map.find(post_op_id);
+  if (it == post_op_map.end()) {
+    static std::string supported_ops;
+    for (const auto& kv : post_op_map) {
+      if (!supported_ops.empty())
+        supported_ops += ", ";
+      supported_ops += std::string(kv.first);
+    }
+    TORCH_CHECK(
+        false,
+        "Unsupported post operation. Supported ops: ",
+        supported_ops,
+        " for ZenDNN_linear");
+  }
+  auto post_op = post_op_t{it->second};
+  matmul_context.set_post_op(post_op);
 }
 } // namespace at::native
 #endif // AT_ZENDNN_ENABLED()
