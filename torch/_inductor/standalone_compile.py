@@ -67,16 +67,48 @@ class CompiledArtifact(ABC):
     ) -> None: ...
 
     @staticmethod
-    @abstractmethod
     def load(
         *, path: str, format: Literal["binary", "unpacked"] = "binary"
-    ) -> CompiledArtifact: ...
+    ) -> CompiledArtifact:
+        if format == "unpacked":
+            # If format is unpacked, it must be a CacheCompiledArtifact
+            return CacheCompiledArtifact.load(path=path, format=format)
+
+        assert format == "binary"
+        with open(path, "rb") as file:
+            from torch.utils._appending_byte_serializer import BytesReader
+
+            from .codecache import torch_key
+
+            result_bytes = file.read()
+            reader = BytesReader(result_bytes)
+            header = reader.read_bytes()
+            if header == AOTCompiledArtifact.AOT_HEADER:
+                assert reader.read_bytes() == torch_key()
+                artifact = reader.read_bytes()
+                assert reader.is_finished()
+                return AOTCompiledArtifact.deserialize(artifact)
+            # Otherwise, it's in the CacheCompiledArtifact format
+            elif header == CacheCompiledArtifact.CACHE_HEADER:
+                assert reader.read_bytes() == torch_key()
+                key = reader.read_str()
+                artifact_bytes = reader.read_bytes()
+                assert reader.is_finished()
+                torch.compiler.load_cache_artifacts(artifact_bytes)
+                return CacheCompiledArtifact._load_impl(nullcontext(), key)
+            else:
+                raise RuntimeError(
+                    "Invalid header, expected CacheCompiledArtifact or AOTCompiledArtifact, got: "
+                    + header.decode("utf-8")
+                )
 
 
 class CacheCompiledArtifact(CompiledArtifact):
     """
     CompiledArtifact that depends on torch.compiler.save_cache_artifacts
     """
+
+    CACHE_HEADER = bytes("CacheCompiledArtifact", "utf-8")
 
     def __init__(
         self,
@@ -110,6 +142,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                 from .codecache import torch_key
 
                 writer = BytesWriter()
+                writer.write_bytes(CacheCompiledArtifact.CACHE_HEADER)
                 writer.write_bytes(torch_key())
                 writer.write_str(key)
                 writer.write_bytes(artifact_bytes)
@@ -143,9 +176,51 @@ class CacheCompiledArtifact(CompiledArtifact):
                             log.info("Output code written to: %s", output_file)
 
     @staticmethod
-    def load(
-        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    def _load_impl(
+        cache_dir_ctx: AbstractContextManager[Any], key: str
     ) -> CompiledArtifact:
+        with (
+            cache_dir_ctx,
+            config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
+        ):
+            with torch._functorch.config.patch(strict_autograd_cache=True):
+                from torch._functorch._aot_autograd.autograd_cache import (
+                    AOTAutogradCache,
+                )
+
+                result = AOTAutogradCache._lookup(
+                    key,
+                    local=True,
+                    remote=False,
+                    args=[],
+                    cache_info={},
+                    aot_config=None,
+                )
+
+            assert result is not None
+            (entry, _) = result
+
+            from .compile_fx import _CompileFxKwargs
+
+            fx_config = _CompileFxKwargs(
+                cudagraphs=BoxedBool(False),
+                boxed_forward_device_index=BoxedDeviceIndex(0),
+            )
+
+            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+            with torch._guards.tracing(context):
+                compiled_fn = entry.wrap_post_compile(
+                    [], entry.sanitized_aot_config, fx_config
+                )
+        return CacheCompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+
+    @staticmethod
+    def _prepare_load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> tuple[str, AbstractContextManager[Any]]:
+        """
+        Do format specific prep and loads, return a context manager and key
+        """
         path = normalize_path_separator(path)
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
@@ -164,8 +239,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                 assert reader.is_finished()
 
                 torch.compiler.load_cache_artifacts(artifact_bytes)
-
-                cache_dir_ctx: AbstractContextManager[None] = nullcontext()
+                return key, nullcontext()
             else:
                 assert format == "unpacked"
                 assert os.path.isdir(path)
@@ -175,43 +249,16 @@ class CacheCompiledArtifact(CompiledArtifact):
                 assert len(files) == 1
                 key = files[0]
                 cache_dir_ctx = temporary_cache_dir(path)
+                return key, cache_dir_ctx
 
-            with (
-                cache_dir_ctx,
-                config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
-            ):
-                with torch._functorch.config.patch(strict_autograd_cache=True):
-                    from torch._functorch._aot_autograd.autograd_cache import (
-                        AOTAutogradCache,
-                    )
-
-                    result = AOTAutogradCache._lookup(
-                        key,
-                        local=True,
-                        remote=False,
-                        args=[],
-                        cache_info={},
-                        aot_config=None,
-                    )
-
-                assert result is not None
-                (entry, _) = result
-
-                from .compile_fx import _CompileFxKwargs
-
-                fx_config = _CompileFxKwargs(
-                    cudagraphs=BoxedBool(False),
-                    boxed_forward_device_index=BoxedDeviceIndex(0),
-                )
-
-                context = torch._guards.TracingContext(
-                    FakeTensorMode(shape_env=ShapeEnv())
-                )
-                with torch._guards.tracing(context):
-                    compiled_fn = entry.wrap_post_compile(
-                        [], entry.sanitized_aot_config, fx_config
-                    )
-            return CacheCompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+    @staticmethod
+    def load(
+        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+    ) -> CompiledArtifact:
+        key, cache_dir_ctx = CacheCompiledArtifact._prepare_load(
+            path=path, format=format
+        )
+        return CacheCompiledArtifact._load_impl(cache_dir_ctx, key)
 
 
 class AOTCompiledArtifact(CompiledArtifact):
@@ -222,6 +269,8 @@ class AOTCompiledArtifact(CompiledArtifact):
     This object is essentially a wrapper for BundledAOTAutogradSerializableCallable, which
     is used by torch._dynamo.aot_compile for AOT Precompilation.
     """
+
+    AOT_HEADER = bytes("AOTCompiledArtifact", "utf-8")
 
     def __init__(
         self,
@@ -249,9 +298,19 @@ class AOTCompiledArtifact(CompiledArtifact):
                 "AOTCompiledArtifact does not support unpacked format yet"
             )
         result_bytes = self.serialize()
+        from torch.utils._appending_byte_serializer import BytesWriter
+
+        from .codecache import torch_key
+
+        writer = BytesWriter()
+        writer.write_bytes(AOTCompiledArtifact.AOT_HEADER)
+        writer.write_bytes(torch_key())
+        writer.write_bytes(result_bytes)
+
         from torch._inductor.codecache import write_atomic
 
-        write_atomic(path, result_bytes)
+        # Save a sentinel file to indicate that this is AOT
+        write_atomic(path, writer.to_bytes())
 
     def serialize(self) -> bytes:
         return BundledAOTAutogradSerializableCallable.serialize_compile_artifacts(
@@ -277,8 +336,18 @@ class AOTCompiledArtifact(CompiledArtifact):
                 "AOTCompiledArtifact does not support unpacked format yet"
             )
         with open(path, "rb") as file:
+            from torch.utils._appending_byte_serializer import BytesReader
+
+            from .codecache import torch_key
+
             result_bytes = file.read()
-            return AOTCompiledArtifact.deserialize(result_bytes)
+            reader = BytesReader(result_bytes)
+            header = reader.read_bytes()
+            assert header == AOTCompiledArtifact.AOT_HEADER
+            assert reader.read_bytes() == torch_key()
+            artifact = reader.read_bytes()
+            assert reader.is_finished()
+            return AOTCompiledArtifact.deserialize(artifact)
 
 
 def standalone_compile(
