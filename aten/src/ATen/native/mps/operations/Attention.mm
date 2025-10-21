@@ -107,7 +107,9 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                       name:nil];
           } else if (attn_mask) {
             graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
-            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
+            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM
+                                           secondaryTensor:castMPSTensor(mpsGraph, graph->maskTensor, maskedMM.dataType)
+                                                      name:nil];
           }
 
           // Account for case where all values were masked causing division by 0 in softmax (issue:#156707)
@@ -125,12 +127,11 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                                        name:nil];
 
           auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:correctedSM secondaryTensor:vTensor name:nil];
-          output = castMPSTensor(mpsGraph, output, vTensor.dataType);
           graph->qTensor = qTensor;
           graph->kTensor = kTensor;
           graph->vTensor = vTensor;
-          graph->outputTensor = output;
-          graph->attnTensor = sm;
+          graph->outputTensor = castMPSTensor(mpsGraph, output, qTensor.dataType);
+          graph->attnTensor = castMPSTensor(mpsGraph, sm, qTensor.dataType);
         });
     auto qPlaceholder = Placeholder(cachedGraph->qTensor, query);
     auto kPlaceholder = Placeholder(cachedGraph->kTensor, key);
