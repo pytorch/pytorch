@@ -3204,6 +3204,37 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    @skipIfTorchDynamo("Attempt to trace generator")
+    @torch.fx.experimental._config.patch("use_duck_shape", False)
+    def test_size_comparison_no_recompile(self):
+        """
+        Test that size comparisons don't cause recompilation.
+        When comparing x.size() == b.size() with different sizes,
+        the compiled function should only compile once.
+        We should not guard in sizes of the inner elements.
+        """
+        cnt = CompileCounter()
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def f(x, b):
+            if x.size() == b.size():
+                return x
+            return x * 2
+
+        # First call: shapes differ (1, 2) vs (2, 4, 9), so if branch is False
+        f(torch.rand(10, 2), torch.rand(20, 4, 9))
+
+        # Second call: shapes differ again (1, 2) vs (1, 4, 9), so if branch is False
+        f(torch.rand(10, 2), torch.rand(10, 4, 9))
+
+        # Should only compile once despite different input shapes
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            f"Expected 1 compilation, got {cnt.frame_count}. "
+            f"Size comparison should not cause recompilation.",
+        )
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 

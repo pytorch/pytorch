@@ -35,7 +35,10 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
     """
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert _is_supported_device(master_tensor)
+        if not _is_supported_device(master_tensor):
+            raise AssertionError(
+                f"Expected supported device, got {master_tensor.device}"
+            )
         self.master = master_tensor
         self._per_device_tensors: dict[torch.device, torch.Tensor] = {}
 
@@ -130,10 +133,12 @@ class ShardedGradScaler(GradScaler):
             return outputs
 
         if isinstance(outputs, torch.Tensor):
-            assert _is_supported_device(outputs)
+            if not _is_supported_device(outputs):
+                raise AssertionError(f"Expected supported device, got {outputs.device}")
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
-            assert self._scale is not None
+            if self._scale is None:
+                raise AssertionError("Expected _scale to be initialized, got None")
             scaled_output = outputs * self._scale.to(
                 device=outputs.device, non_blocking=True
             )
@@ -146,11 +151,15 @@ class ShardedGradScaler(GradScaler):
 
         def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
             if isinstance(val, torch.Tensor):
-                assert _is_supported_device(val)
+                if not _is_supported_device(val):
+                    raise AssertionError(f"Expected supported device, got {val.device}")
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
-                    assert self._scale is not None
+                    if self._scale is None:
+                        raise AssertionError(
+                            "Expected _scale to be initialized, got None"
+                        )
                     stash.append(_GeneralMultiDeviceReplicator(self._scale))
                 scaled_val = val * stash[0].get(val.device)
                 # Here we ensure the return dtype is the same as the outputs dtype.
@@ -218,7 +227,8 @@ class ShardedGradScaler(GradScaler):
         # ranks may have no (non-zero sized) parameter shards, necessitating the
         # initialization of `per_device_found_inf._per_device_tensors` here
         if not per_device_found_inf._per_device_tensors:
-            assert self._scale is not None
+            if self._scale is None:
+                raise AssertionError("Expected _scale to be initialized, got None")
             per_device_found_inf.get(self._scale.device)
         return per_device_found_inf._per_device_tensors
 
@@ -238,7 +248,8 @@ class ShardedGradScaler(GradScaler):
             raise RuntimeError("unscale_() is being called after step().")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
-        assert self._scale is not None
+        if self._scale is None:
+            raise AssertionError("Expected _scale to be initialized, got None")
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full(
             (1,), 0.0, dtype=torch.float32, device=self._scale.device
@@ -279,7 +290,10 @@ class ShardedGradScaler(GradScaler):
         If found_inf is 1.0 (True), then scale is multiplied by backoff_factor and growth_tracker is set to zero.
         Otherwise, scale is multiplied by the growth factor when the growth interval is reached.
         """
-        assert self._scale is not None and self._growth_tracker is not None
+        if self._scale is None or self._growth_tracker is None:
+            raise AssertionError(
+                "Expected _scale and _growth_tracker to be initialized, got None"
+            )
 
         if found_inf.item() >= 1.0:
             self._scale *= self._backoff_factor
@@ -323,9 +337,12 @@ class ShardedGradScaler(GradScaler):
                     "new_scale should be a float or a 1-element torch.cuda.FloatTensor or "
                     "torch.FloatTensor with requires_grad=False."
                 )
-                assert new_scale.device.type == self._device, reason
-                assert new_scale.numel() == 1, reason
-                assert new_scale.requires_grad is False, reason
+                if new_scale.device.type != self._device:
+                    raise AssertionError(reason)
+                if new_scale.numel() != 1:
+                    raise AssertionError(reason)
+                if new_scale.requires_grad is not False:
+                    raise AssertionError(reason)
                 self._scale.copy_(new_scale)  # type: ignore[union-attr]
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale.
@@ -336,7 +353,8 @@ class ShardedGradScaler(GradScaler):
                 for found_inf in state["found_inf_per_device"].values()
             ]
 
-            assert len(found_infs) > 0, "No inf checks were recorded prior to update."
+            if len(found_infs) == 0:
+                raise AssertionError("No inf checks were recorded prior to update.")
 
             found_inf_combined = found_infs[0]
             if len(found_infs) > 1:

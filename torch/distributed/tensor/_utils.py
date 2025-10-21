@@ -149,7 +149,7 @@ def _compute_local_shape_and_global_offset(
     ordered_placements = _explicit_order_placements(mesh_shape, placements)
 
     local_shape = list(global_shape)
-    # We'll compute the data for where the shard beings on a per-dim basis.
+    # We'll compute the data for where the shard begins on a per-dim basis.
     # However, a single dim can be sharded multiple times, so we will end up
     # doing a Sum(size*stride) like computation to determine the location of our
     # shard for each of the shardings on that dim.
@@ -170,6 +170,14 @@ def _compute_local_shape_and_global_offset(
 
             local_shape[shard_dim] = shard_size
 
+            shard_global_offset = global_offset[shard_dim] + not_none(shard_offset)
+
+            zero_global_offset = global_shape[shard_dim]
+            if isinstance(shard_global_offset, torch.SymInt) and not isinstance(
+                zero_global_offset, torch.SymInt
+            ):
+                zero_global_offset = torch.SymInt(zero_global_offset)
+
             global_offset[shard_dim] = torch.sym_ite(
                 shard_size == 0,
                 # Special case to fill in a standardized non-garbage value for
@@ -179,11 +187,11 @@ def _compute_local_shape_and_global_offset(
                 # Note that you can end up with zero-size shards that are
                 # still otherwise in bounds for the tensor (TODO: give an
                 # example).
-                global_shape[shard_dim],
+                zero_global_offset,
                 # As we successively shard the same dimension, we keep
                 # advancing our pointer beyond our original offset until we
                 # get to the final chunk start.
-                global_offset[shard_dim] + not_none(shard_offset),
+                shard_global_offset,
             )
 
     # NOTE: the offset compute relies on the local shard index and it has no

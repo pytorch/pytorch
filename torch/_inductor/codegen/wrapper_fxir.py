@@ -186,6 +186,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
+        # pyrefly: ignore  # missing-argument
         if V.aot_compilation and not self.is_subgraph:
             # AOT graphs must match the signature of the input module.
             return {
@@ -210,6 +211,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             graph_inputs=self.get_fx_graph_inputs(),
             graph_outputs=self.get_graph_outputs(),
             subgms=self.subgms,
+            # pyrefly: ignore  # missing-argument
             is_subgraph=self.is_subgraph,
         ).generate()
 
@@ -992,13 +994,17 @@ class FxConverter:
             call_kwargs = {
                 key: val
                 for key, val in zip(signature, call_args)
+                # pyrefly: ignore  # missing-attribute
                 if key not in constants and key not in cfg.kwargs
             }
 
             # Add constants stored as Triton metadata, in signature order.
             call_kwargs |= constants
             new_call_args = [
-                call_kwargs[key] for key in signature if key not in cfg.kwargs
+                # pyrefly: ignore  # missing-attribute
+                call_kwargs[key]
+                for key in signature
+                if key not in cfg.kwargs
             ]
 
             # Add Inductor's extra launcher args to the end.
@@ -1014,9 +1020,11 @@ class FxConverter:
         call_args = add_constants_to_call_args(call_args, kernel_config)
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(signature, call_args))
+        # pyrefly: ignore  # missing-attribute
         assert not any(kwarg in kernel_config.kwargs for kwarg in call_kwargs), (
             f"kwargs overlap config: {call_kwargs}"
         )
+        # pyrefly: ignore  # missing-attribute
         call_kwargs.update(kernel_config.kwargs)
 
         # Replace sympy.floor with FloorDiv, to make the expression traceable.
