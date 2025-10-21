@@ -80,6 +80,9 @@ if not torch.backends.mps.is_available():
 
 total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
 
+MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
+MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
+
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
 
@@ -1897,7 +1900,7 @@ class TestMPS(TestCaseMPS):
         res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
         self.assertEqual(res_mps, res_cpu)
 
-        for dim in range(0, B_mps.dim()):
+        for dim in range(B_mps.dim()):
             res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
             res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
             self.assertEqual(res_mps, res_cpu)
@@ -1974,6 +1977,16 @@ class TestMPS(TestCaseMPS):
         # test >3D matrices
         run_linalg_solve_test(32, 10, 10)
         run_linalg_solve_test(32, 2, 2, 2, 2, 10, 10)
+
+    def test_linalg_solve_singular(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/163962
+
+        # Explicit singular matrix
+        A = torch.tensor([[1.0, 2.0], [2.0, 4.0]], device="mps")
+        b = torch.rand_like(A)
+
+        with self.assertRaisesRegex(RuntimeError, "input matrix is singular"):
+            torch.linalg.solve(A, b)
 
     def test_linalg_solve_with_broadcasting(self):
         from functools import partial
@@ -2858,8 +2871,8 @@ class TestMPS(TestCaseMPS):
 
     def test_contiguous_slice_2d(self):
         def helper(shape):
-            for i in range(0, shape[0]):
-                for j in range(0, shape[1]):
+            for i in range(shape[0]):
+                for j in range(shape[1]):
                     t_mps = torch.randn(shape, device="mps")
                     t_cpu = t_mps.detach().clone().cpu()
 
@@ -3419,12 +3432,12 @@ class TestMPS(TestCaseMPS):
         elems = torch.arange(n_tensors * n_tensor_elems, dtype=torch.float32)
 
         tensor_list = []
-        for i in range(0, n_tensors - 1):
+        for i in range(n_tensors - 1):
             # create a list of contiguous view tensors (view tensor created by the slice op)
             t = elems[n_tensor_elems * i : n_tensor_elems * (i + 1)]
             tensor_list.append(t)
 
-        for i in range(0, n_tensors - 1):
+        for i in range(n_tensors - 1):
             t = tensor_list[i].view(1, n_tensor_elems)
             t_mps = t.to("mps")
             self.assertEqual(t, t_mps.cpu(), f"i={i}")
@@ -3636,6 +3649,70 @@ class TestMPS(TestCaseMPS):
                 self.assertEqual(cpu_result, mps_result.to("cpu"))
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
+
+    # Skip if a test needs more memory than the system has.
+    def _skip_if_exceeds_total_memory(self, required_memory):
+        if total_memory < required_memory:
+            self.skipTest(
+                f"Needs {required_memory / (1024**3):0.01f} GiB RAM, "
+                f"but only {total_memory / (1024**3):0.01f} GiB is available.")
+
+    @parametrize("dtype", MPS_DTYPES)
+    def test_cat_large_tensor(self, dtype):
+        a_shape = (1, 11 + (1 << 31), 1)
+        b_shape = (1, 100, 1)
+
+        # Assume up to 1% extra overhead memory might be required.
+        required_memory = 1.01 * (math.prod(a_shape) + math.prod(a_shape)) * dtype.itemsize
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        a_cpu = make_tensor((1,), dtype=dtype, device='cpu').expand(a_shape)
+        b_cpu = make_tensor(b_shape, dtype=dtype, device='cpu')
+        r_cpu = torch.cat([a_cpu, b_cpu], dim=1)
+
+        # Pick a subset of output elements to compare, because comparing all of
+        # them takes too long.
+        rand_indices = torch.randint(0, a_cpu.shape[1] + b_cpu.shape[1], (10_000,))
+        r_cpu_part0 = r_cpu[:, rand_indices, :].clone()
+        r_cpu_part1 = r_cpu[:, -200:, :].clone()
+        r_cpu_part2 = r_cpu[:, :200, :].clone()
+
+        # Delete the CPU result to free up memory for the MPS run.
+        del r_cpu
+
+        a_mps = (
+            torch.empty(0, dtype=dtype, device='mps')
+            .set_(a_cpu.untyped_storage().mps())
+            .as_strided(size=a_cpu.size(), stride=a_cpu.stride())
+        )
+        b_mps = b_cpu.to('mps')
+
+        try:
+            r_mps = torch.cat([a_mps, b_mps], dim=1)
+
+        except RuntimeError as e:
+            if "Invalid buffer size" in str(e):
+                self.skipTest(f"Exceeds max buffer size for MPS: {str(e)}.")
+            raise e
+
+        self.assertEqual(r_mps[:, rand_indices, :], r_cpu_part0)
+        self.assertEqual(r_mps[:, -200:, :], r_cpu_part1)
+        self.assertEqual(r_mps[:, :200, :], r_cpu_part2)
+
+    def test_large_tensor_to_string(self):
+        shape = (2, 1 << 31)
+
+        # Assume up to 1% extra overhead memory might be required.
+        required_memory = 1.01 * 2 * math.prod(shape)
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        self.assertEqual(
+            str(torch.ones(shape, dtype=torch.int8, device='mps')),
+            (
+                "tensor([[1, 1, 1,  ..., 1, 1, 1],\n"
+                "        [1, 1, 1,  ..., 1, 1, 1]], device='mps:0', dtype=torch.int8)"
+            ),
+        )
 
     # See https://github.com/pytorch/pytorch/issues/152701
     def test_jacfwd_cat(self):
@@ -4865,7 +4942,7 @@ class TestMPS(TestCaseMPS):
             x_mps = fn(torch.zeros(shape, device="mps"), dim=dim)
             self.assertEqual(x_cpu, x_mps.cpu())
         for fn in [torch.any, torch.all]:
-            for dim in range(0, 4):
+            for dim in range(4):
                 helper(fn, dim)
 
         # 6D tensor reductions
@@ -8058,6 +8135,12 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(out_pos.numel(), 0)
         self.assertEqual(out_neg.numel(), 0)
 
+    def test_empty_dot(self):
+        # just to check that it doesnt crash
+        a = torch.rand((0), device="mps")
+        b = torch.rand((0), device="mps")
+        self.assertEqual(a.dot(b), a.cpu().dot(b.cpu()))
+
 
 class TestLargeTensors(TestCaseMPS):
     @serialTest()
@@ -9667,7 +9750,7 @@ class TestGatherScatter(TestCaseMPS):
         self.assertEqual(x_cpu, x_mps)
 
     def test_cast_gather_scatter(self):
-        for _ in range(0, 50):
+        for _ in range(50):
             input = np.random.randint(0, 255, size=(5, 5, 4), dtype=np.uint8)
             with torch.no_grad():
                 s = torch.tensor(input, dtype=torch.uint8, device="mps").unsqueeze(0)
@@ -10055,7 +10138,7 @@ class TestViewOpsMPS(TestCaseMPS):
         assert_is_nonview(t, nv)
 
         # flatten returns the original object if start_dim=end_dim
-        t = t = torch.ones(2, 2, device=device)
+        t = torch.ones(2, 2, device=device)
         nv = t.flatten(1, 1)
         self.assertIs(t, nv)
 
@@ -12166,9 +12249,6 @@ class TestNoRegression(TestCase):
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "mps")
 
-
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 

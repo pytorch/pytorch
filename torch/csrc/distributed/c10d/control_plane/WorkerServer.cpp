@@ -5,7 +5,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>
-#include <caffe2/utils/threadpool/WorkersPool.h>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
@@ -145,19 +144,16 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   if (port == -1) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
-
     TORCH_CHECK(
         !c10::filesystem::exists(hostOrFile),
         fmt::format("{} already exists", hostOrFile));
 
     C10D_WARNING("Server listening to UNIX {}", hostOrFile);
-
     TORCH_CHECK(
         server_.bind_to_port(hostOrFile, 80),
         fmt::format("Error binding to {}", hostOrFile));
   } else {
     C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
-
     TORCH_CHECK(
         server_.bind_to_port(hostOrFile, port),
         fmt::format("Error binding to {}:{}", hostOrFile, port));

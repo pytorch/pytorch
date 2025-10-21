@@ -18,7 +18,7 @@ RegisterHandler tracebackHandler{
       auto tmpfile = c10::make_tempfile("torch-dump_traceback");
 
       auto cfile = ::fopen(tmpfile.name.c_str(), "w");
-      TORCH_CHECK(cfile != nullptr, "failed to open file for writing");
+      TORCH_CHECK(cfile, "failed to open file for writing");
 
       {
         py::gil_scoped_acquire guard{};
