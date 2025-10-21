@@ -15192,6 +15192,25 @@ graph():
                 filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
             )
 
+    def test_invalid_pytree_dynamo_graph_capture(self):
+        class Block:
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        class Foo(torch.nn.Module):
+            def forward(self, block):
+                return block.a + block.b
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "It looks like one of the inputs with type"
+        ):
+            _dynamo_graph_capture_for_export(Foo())(
+                Block(torch.randn(4, 4), torch.randn(4, 4))
+            )
+
     def test_enum_str(self):
         class TensorDim(str, enum.Enum):
             DDP = "ddp"
