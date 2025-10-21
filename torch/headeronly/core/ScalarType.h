@@ -299,6 +299,25 @@ using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
 
 } // namespace impl
 
+inline const char* toString(ScalarType t) {
+#define DEFINE_CASE(_, name) \
+  case ScalarType::name:     \
+    return #name;
+
+  switch (t) {
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
+    default:
+      return "UNKNOWN_SCALAR";
+  }
+#undef DEFINE_CASE
+}
+
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    c10::ScalarType scalar_type) {
+  return stream << toString(scalar_type);
+}
+
 } // namespace c10
 
 namespace torch::headeronly {
@@ -309,4 +328,6 @@ using c10::ScalarType;
 namespace impl {
 using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
+using c10::toString;
+using c10::operator<<;
 } // namespace torch::headeronly
