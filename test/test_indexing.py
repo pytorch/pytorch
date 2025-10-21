@@ -601,9 +601,8 @@ class TestIndexing(TestCase):
 
         # test invalid index fails
         reference = torch.empty(10, dtype=dtype, device=device)
-        print(reference.device.type, flush=True)
         # can't test cuda/xpu because it is a device assert
-        if not reference.is_cuda and not reference.device.type == "xpu":
+        if reference.device.type == "cpu":
             for err_idx in (10, -11):
                 with self.assertRaisesRegex(IndexError, r"out of"):
                     reference[err_idx]
@@ -2377,7 +2376,7 @@ class NumpyTests(TestCase):
     def test_trivial_fancy_out_of_bounds(self, device):
         a = torch.zeros(5, device=device)
         ind = torch.ones(20, dtype=torch.int64, device=device)
-        if a.is_cuda or a.device.type == "xpu":
+        if a.device.type in ["cuda", "xpu"]:
             raise unittest.SkipTest("CUDA/XPU asserts instead of raising an exception")
         ind[-1] = 10
         self.assertRaises(IndexError, a.__getitem__, ind)

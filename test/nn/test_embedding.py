@@ -357,13 +357,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
-    @dtypesIfXPU(
-        *(
-            (torch.float, torch.double, torch.bfloat16, torch.half)
-            if TEST_WITH_ROCM
-            else (torch.float, torch.double, torch.half)
-        )
-    )
+    @dtypesIfXPU(torch.float, torch.double, torch.half)
     @dtypes(torch.float32)
     def test_embedding_max_norm_backward(self, device, dtype):
         # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
@@ -388,13 +382,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
-    @dtypesIfXPU(
-        *(
-            (torch.float, torch.double, torch.bfloat16, torch.half)
-            if TEST_WITH_ROCM
-            else (torch.float, torch.double, torch.half)
-        )
-    )
+    @dtypesIfXPU(torch.float, torch.double, torch.half)
     @dtypes(torch.float32)
     def test_embedding_max_norm_fwd_AD(self, device, dtype):
         if torch.device(device).type == "xla":
@@ -419,13 +407,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
-    @dtypesIfXPU(
-        *(
-            (torch.float, torch.double, torch.bfloat16, torch.half)
-            if TEST_WITH_ROCM
-            else (torch.float, torch.double, torch.half)
-        )
-    )
+    @dtypesIfXPU(torch.float, torch.double, torch.half)
     @dtypes(torch.float32)
     def test_embedding_padding_idx(self, device, dtype):
         embedding = nn.Embedding(10, 20, padding_idx=0).to(device, dtype)
@@ -1450,8 +1432,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         ):
             run_tests(mode, sparse, trainable_per_sample_weights)
 
-        # Test CUDA Dense on half precision
-        if device == "cuda" or device == "xpu":
+        # Test CUDA/XPU Dense on half precision
+        if device != "cpu":
             modes = ("sum",)
             sparsity = (False,)
             trainable_scale = (True, False)
@@ -1649,10 +1631,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
 
             test_backward = False
-            if self.device_type == "cuda" or self.device_type == "xpu":
+            if self.device_type != "cpu":
                 # see 'todo' in test_embedding_bag.
                 test_backward = dtypes[2] is not torch.float16
-            elif self.device_type == "cpu":
+            else:
                 # TODO: figure out why precision on sparse embeddings isn't the
                 # same as for dense.
                 test_backward = (
