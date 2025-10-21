@@ -949,6 +949,25 @@ class DistMathOpsTest(DTensorTestBase):
 
         self.assertEqual(out_without_redistribute, out_with_redistribute)
 
+    @with_comms
+    def test_matching_partial_reduction_ops(self):
+        mesh = self.build_device_mesh()
+        rank = dist.get_rank()
+
+        torch.manual_seed(rank)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("max")]
+        )
+        out_without_redistribute = torch.max(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.max(dt)
+
+        self.assertTrue(out_without_redistribute.placements[0].is_partial())
+        self.assertTrue(out_with_redistribute.placements[0].is_replicate())
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
 
 if __name__ == "__main__":
     run_tests()

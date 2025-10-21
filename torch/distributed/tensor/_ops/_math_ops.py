@@ -291,11 +291,10 @@ def common_reduction_strategy(
                     reduction_linear = False
                     break
 
-        # TODO: there are some combinations of local and global reductions that allow for
-        # delaying redistribute such as max, max
-
         for p in op_spec.output_spec.placements:
-            if isinstance(p, Partial):
+            # when the partial reduction op matches the global reduction op,
+            # we can delay redistribution (i.e max, max)
+            if isinstance(p, Partial) and p.reduce_op != reduction_op:
                 reduction_linear = False
                 break
 
