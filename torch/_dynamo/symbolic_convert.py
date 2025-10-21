@@ -47,7 +47,6 @@ from collections import deque
 from traceback import StackSummary
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias, TypeIs
-from unittest.mock import patch
 
 import torch
 import torch._logging
@@ -2906,6 +2905,8 @@ class InstructionTranslatorBase(
                 new_code, self.f_globals["__name__"], package_name
             )
 
+        counters["resumes"][new_code.co_name] += 1
+
         return new_code, resume_name
 
     def create_call_resume_at(
@@ -3025,7 +3026,7 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # filter out cells/frame values of skipped tx'es
+        # filter out frame values of skipped tx'es
         filter_insts = []
         for idx in idxes:
             filter_insts.extend(
@@ -3046,7 +3047,8 @@ class InstructionTranslatorBase(
         # TOS: cells, filtered frame_values
 
         cg.extend_output(filter_insts)
-        # do the same with cells
+        # filter out cells of skipped tx'es using the same instructions in filter_insts,
+        # but with cells as TOS instead of frame values
         cg.extend_output(
             [
                 *create_swap(2),
@@ -4568,9 +4570,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @classmethod
     def inline_call(cls, parent: Any, func: Any, args: Any, kwargs: Any) -> Any:
-        with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-            return tracer.inline_call_()
+        tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+        return tracer.inline_call_()
 
     @staticmethod
     def check_inlineable(func: Any) -> trace_rules.SkipResult:

@@ -114,6 +114,17 @@ class TestCase(TorchTestCase):
     # graph break tests
 
 
+class TestCaseWithNestedGraphBreaks(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
+        torch._dynamo.config.nested_graph_breaks = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
+
+
 class CPythonTestCase(TestCase):
     """
     Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
