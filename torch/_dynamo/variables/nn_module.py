@@ -104,10 +104,14 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
         try:
             mod._infer_parameters(mod, fake_args, fake_kwargs)
-        except AttributeError:
+        except AttributeError as e:
+            # Re-raise with the original error message from the AttributeError
             raise_observed_exception(
                 AttributeError,
                 tx,
+                msg=str(e)
+                if str(e)
+                else "AttributeError during lazy module initialization",
             )
 
 
@@ -370,6 +374,7 @@ class NNModuleVariable(VariableTracker):
                 raise_observed_exception(
                     AttributeError,
                     tx,
+                    msg=f"'{type(base).__name__}' object has no attribute '{name}'",
                 )
 
         if name == "forward":
@@ -1199,7 +1204,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
         if out is None:
-            raise_observed_exception(AttributeError, tx)
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+            )
         return out
 
 

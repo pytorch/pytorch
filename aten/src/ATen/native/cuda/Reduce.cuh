@@ -655,8 +655,8 @@ struct ReduceOp {
     __syncthreads();
     // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
     // matching Triton, etc.
-    // todo for AMD
-    #ifdef USE_ROCM
+    // TODO(PaulZhang12): AMD and internal
+    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
     for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
