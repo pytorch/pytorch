@@ -150,6 +150,9 @@ def user_defined_kernel_grid_fn_code(
     wrapper: Optional[PythonWrapperCodegen] = None,
     original_fxnode_name: Optional[str] = None,
 ) -> tuple[str, str]:
+    """
+    This function returns the grid wrapper for an user defined kernel.
+    """
     output = IndentedBuffer()
 
     def _convert_to_sympy_expr(item: Union[int, sympy.Expr]) -> sympy.Expr:
