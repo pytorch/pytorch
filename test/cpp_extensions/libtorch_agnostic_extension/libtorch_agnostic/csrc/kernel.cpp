@@ -311,9 +311,10 @@ void boxed_fill_infinity(
 }
 
 Tensor my_pad(Tensor t) {
+  std::vector<int64_t> padding = {1, 2, 2, 1};
   std::string mode = "constant";
   double value = 0.0;
-  return pad(t, {1, 2, 2, 1}, mode, value);
+  return pad(t, padding, mode, value);
 }
 
 void boxed_my_pad(
@@ -341,9 +342,6 @@ void boxed_my_narrow(
 }
 
 Tensor my_new_empty_dtype_variant(Tensor t) {
-  // Still using a std::vector below even though people can just pass in an
-  // initializer list (which will be implicitly converted to an HeaderOnlyArrayRef)
-  // directly.
   std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(torch::headeronly::ScalarType::BFloat16);
   return new_empty(t, sizes, dtype);
@@ -355,8 +353,9 @@ void boxed_my_new_empty_dtype_variant(StableIValue* stack, uint64_t num_args, ui
 }
 
 Tensor my_new_zeros_dtype_variant(Tensor t) {
+  std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(at::ScalarType::Float);
-  return new_zeros(t, {2, 5}, dtype);
+  return new_zeros(t, sizes, dtype);
 }
 
 void boxed_my_new_zeros_dtype_variant(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
@@ -430,7 +429,8 @@ void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs)
 }
 
 Tensor my_amax_vec(Tensor t) {
-  return amax(t, {0,1}, false);
+  std::vector<int64_t> v = {0,1};
+  return amax(t, v, false);
 }
 
 void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {

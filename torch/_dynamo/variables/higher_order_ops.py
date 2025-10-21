@@ -1183,7 +1183,7 @@ def speculate_subgraph(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)
+        log.info(ex)  # noqa: G200
         raise ex
 
 
@@ -2835,8 +2835,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
-
-        tx: InstructionTranslator = tx
 
         def create_scalar():
             return query.call_method(

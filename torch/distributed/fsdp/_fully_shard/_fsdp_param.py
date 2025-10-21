@@ -289,8 +289,8 @@ class FSDPParam:
         if self.is_dtensor:
             self._tp_spec = cast(DTensor, param)._spec
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
-            dp_global_mesh = _mesh_resources.get_root_mesh(dp_mesh)
-            tp_global_mesh = _mesh_resources.get_root_mesh(tp_mesh)
+            dp_global_mesh = dp_mesh._get_root_mesh() if dp_mesh is not None else None
+            tp_global_mesh = tp_mesh._get_root_mesh() if tp_mesh is not None else None
             if dp_global_mesh != tp_global_mesh or (
                 dp_global_mesh is None or tp_global_mesh is None
             ):
