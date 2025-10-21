@@ -9408,8 +9408,6 @@ C10_MAPPINGS = collections.OrderedDict(
         ("CUDA_LAUNCH_BLOCKING", ("AMD_SERIALIZE_KERNEL", API_C10)),
         ("cuda::compat::", ("hip::compat::", API_C10)),
         ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
-        ("c10/cuda/CUDADeviceAssertion.h", ("c10/hip/HIPDeviceAssertion.h", API_C10)),
-        ("c10/cuda/CUDADeviceAssertionHost.h", ("c10/hip/HIPDeviceAssertionHost.h", API_C10)),
         ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
         ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
@@ -9459,7 +9457,6 @@ C10_MAPPINGS = collections.OrderedDict(
         ("cuda::CUDAStreamCaptureModeGuard", ("cuda::HIPStreamCaptureModeGuard", API_C10)),
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10)),
-        ("CUDAKernelLaunchRegistry", ("HIPKernelLaunchRegistry", API_C10)),
         ("c10::cuda::get_cuda_check_suffix", ("c10::hip::get_hip_check_suffix", API_C10)),
         ("c10::cuda::get_cuda_error_help", ("c10::hip::get_hip_error_help", API_C10)),
     ]

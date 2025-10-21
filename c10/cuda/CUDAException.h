@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/cuda/CUDADeviceAssertionHost.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/macros/Macros.h>
@@ -32,8 +31,7 @@ class C10_CUDA_API CUDAError : public c10::Error {
         __FILE__,                                                   \
         __func__, /* Line number data type not well-defined between \
                       compilers, so we perform an explicit cast */  \
-        static_cast<uint32_t>(__LINE__),                            \
-        true);                                                      \
+        static_cast<uint32_t>(__LINE__));                           \
   } while (0)
 
 #define C10_CUDA_CHECK_WARN(EXPR)                              \
@@ -68,30 +66,14 @@ class C10_CUDA_API CUDAError : public c10::Error {
 // diagnostic if it didn't.
 #define C10_CUDA_KERNEL_LAUNCH_CHECK() C10_CUDA_CHECK(cudaGetLastError())
 
-/// Launches a CUDA kernel appending to it all the information need to handle
-/// device-side assertion failures. Checks that the launch was successful.
-#define TORCH_DSA_KERNEL_LAUNCH(                                      \
-    kernel, blocks, threads, shared_mem, stream, ...)                 \
-  do {                                                                \
-    auto& launch_registry =                                           \
-        c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref();     \
-    kernel<<<blocks, threads, shared_mem, stream>>>(                  \
-        __VA_ARGS__,                                                  \
-        launch_registry.get_uvm_assertions_ptr_for_current_device(),  \
-        launch_registry.insert(                                       \
-            __FILE__, __FUNCTION__, __LINE__, #kernel, stream.id())); \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
-  } while (0)
-
 namespace c10::cuda {
 
 /// In the event of a CUDA failure, formats a nice error message about that
-/// failure and also checks for device-side assertion failures
+/// failure
 C10_CUDA_API void c10_cuda_check_implementation(
     const int32_t err,
     const char* filename,
     const char* function_name,
-    const uint32_t line_number,
-    const bool include_device_assertions);
+    const uint32_t line_number);
 
 } // namespace c10::cuda
