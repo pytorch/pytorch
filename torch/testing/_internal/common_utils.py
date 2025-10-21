@@ -48,7 +48,6 @@ from pathlib import Path
 from statistics import mean
 from typing import (
     Any,
-    Dict,
     Optional,
     TypeVar,
     Union,
@@ -5858,7 +5857,7 @@ def skipIfPythonVersionMismatch(predicate):
     return dec_fn
 
 # Decorator to patch multiple test class members for the duration of the subtest
-def patch_test_members(updates: Dict[str, Any]):
+def patch_test_members(updates: dict[str, Any]):
     def decorator(test_func):
         @wraps(test_func)
         def wrapper(self, *args, **kwargs):
