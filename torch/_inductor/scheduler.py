@@ -896,11 +896,11 @@ class BaseSchedulerNode:
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
-                log.info(e)
+                log.info(e)  # noqa: G200
                 return 0
             except TypeError as e:
                 # this happens when the collective is not of type ir._CollectiveKernel
-                log.info(e)
+                log.info(e)  # noqa: G200
                 return 0
 
         elif is_wait(self.node):
@@ -3366,7 +3366,7 @@ class Scheduler:
                             future.result()
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
+                            fusion_log.debug(  # noqa: G200
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
                                 str(e),
@@ -3442,7 +3442,7 @@ class Scheduler:
                     # triton  will unpredictably error with valid prologue fusions
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
+                            fusion_log.debug(  # noqa: G200
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
                                 str(e),
@@ -5013,6 +5013,16 @@ class Scheduler:
             buffer_names_to_free: OrderedSet[str] = OrderedSet()
             for node in partition:
                 buffer_names_to_free.update(node.last_usage)
+
+            # buffer_names_to_free may contain buffers allocated in previous
+            # graph partitions. These buffers should also be a partition
+            # input.
+            extra_input_names = [
+                name
+                for name in (buffer_names_to_free - output_names)
+                if name in name_to_node
+            ]
+            partition_input_names.update(extra_input_names)
 
             input_nodes = {
                 name: name_to_node[name]
