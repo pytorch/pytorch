@@ -972,7 +972,7 @@ def _store_based_barrier(
         except RuntimeError as e:
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
-            logger.debug(
+            logger.debug(  # noqa: G200
                 "Waiting in store based barrier to initialize process group for %s seconds"
                 "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
                 time.time() - start,
@@ -1258,6 +1258,18 @@ def is_xccl_available() -> bool:
     return _XCCL_AVAILABLE
 
 
+def _check_single_backend_availability(backend_name: str) -> bool:
+    """
+    Helper function to check if a single backend is available.
+    """
+    available_func = getattr(
+        torch.distributed, f"is_{str(backend_name).lower()}_available", None
+    )
+    if available_func:
+        return available_func()
+    return str(backend_name).lower() in Backend.backend_list
+
+
 def is_backend_available(backend: str) -> bool:
     """
     Check backend availability.
@@ -1271,11 +1283,16 @@ def is_backend_available(backend: str) -> bool:
         bool: Returns true if the backend is available otherwise false.
     """
     # If the backend has an ``is_backend_available`` function, return the result of that function directly
-    available_func = getattr(torch.distributed, f"is_{backend.lower()}_available", None)
-    if available_func:
-        return available_func()
-
-    return backend.lower() in Backend.backend_list
+    if ":" in backend.lower():  # composite backend like "cpu:gloo"
+        backend_config = BackendConfig(Backend(backend))
+        device_backend_map = backend_config.get_device_backend_map()
+        return all(
+            _check_single_backend_availability(str(backend_name))
+            for backend_name in device_backend_map.values()
+        )
+    else:
+        # Handle simple backend strings like "nccl", "gloo"
+        return _check_single_backend_availability(backend)
 
 
 def is_initialized() -> bool:
@@ -5067,7 +5084,7 @@ def _is_safe_to_split() -> bool:
     users must be aware that a pg is only splittable after the first collective is
     issued.
     """
-    return False if _get_default_group().bound_device_id is None else True
+    return _get_default_group().bound_device_id is not None
 
 
 @_time_logger

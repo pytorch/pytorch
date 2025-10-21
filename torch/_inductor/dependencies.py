@@ -151,7 +151,7 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert OrderedSet(order) == OrderedSet(range(0, self.num_vars))
+        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
         return order
 
     def get_offset(self) -> sympy.Expr:

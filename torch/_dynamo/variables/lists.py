@@ -47,7 +47,7 @@ from ..utils import (
     range_iterator,
     set_example_value,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
@@ -147,13 +147,11 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             from .tensor import TensorVariable
 
-            if len(args) != 1:
-                msg = ConstantVariable.create(
-                    f"{name} takes exactly one argument ({len(args)} given)"
+            if kwargs or len(args) != 1:
+                raise_type_error_exc(
+                    tx, f"{name} takes exactly one argument ({len(args)} given)"
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
 
-            assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
@@ -1115,11 +1113,15 @@ class SizeVariable(TupleVariable):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
-            assert not kwargs and len(args) == 1
+            if kwargs or len(args) != 1:
+                raise_type_error_exc(
+                    tx, f"{name} takes exactly one argument ({len(args)} given)"
+                )
             out = self.get_item_dyn(tx, args[0])
             return out
         elif name == "numel":
-            assert not args and not kwargs
+            if args or kwargs:
+                raise_type_error_exc(tx, f"{name} takes no arguments")
             return self.numel(tx)
 
         return super().call_method(tx, name, args, kwargs)

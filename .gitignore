@@ -374,6 +374,7 @@ third_party/ruy/
 third_party/glog/
 
 # Virtualenv
+.venv/
 venv/
 
 # Log files
@@ -395,3 +396,4 @@ android/pytorch_android_torchvision/.cxx
 CLAUDE.local.md
 /test_*.py
 /debug_*.py
+CLAUDE_CONTEXT/
