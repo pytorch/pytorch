@@ -4,6 +4,7 @@
 import contextlib
 import copy
 import dataclasses
+import enum
 import functools
 import logging
 import math
@@ -289,7 +290,6 @@ class TestDynamismExpression(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
-                torch._check_is_size(b)
                 return torch.full((b, 1), 1)
 
         f = Module()
@@ -388,7 +388,6 @@ graph():
         class MySlice(torch.nn.Module):
             def forward(self, x, seq_len):
                 l = seq_len.item()
-                torch._check_is_size(l, max=x.size(1))
                 x = x.narrow(1, 0, l)
                 return x
 
@@ -417,7 +416,6 @@ graph():
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
-                torch._check_is_size(b)
                 torch._check(b >= 4)
                 torch._check(b <= 5)
                 torch._check(b <= 5)
@@ -1232,9 +1230,7 @@ def forward(self, primals, tangents):
     t = torch.ops.aten.t.default(primals_1);  primals_1 = None
     addmm = torch.ops.aten.addmm.default(primals_2, primals_5, t);  primals_2 = None
     relu = torch.ops.aten.relu.default(addmm);  addmm = None
-    detach_9 = torch.ops.aten.detach.default(relu)
-    detach_10 = torch.ops.aten.detach.default(detach_9);  detach_9 = None
-    detach_11 = torch.ops.aten.detach.default(detach_10);  detach_10 = None
+    detach_3 = torch.ops.aten.detach.default(relu)
     t_1 = torch.ops.aten.t.default(primals_3);  primals_3 = None
     addmm_1 = torch.ops.aten.addmm.default(primals_4, relu, t_1);  primals_4 = None
     t_2 = torch.ops.aten.t.default(t_1);  t_1 = None
@@ -1245,9 +1241,8 @@ def forward(self, primals, tangents):
     sum_1 = torch.ops.aten.sum.dim_IntList(tangents_1, [0], True);  tangents_1 = None
     view = torch.ops.aten.view.default(sum_1, [128]);  sum_1 = None
     t_5 = torch.ops.aten.t.default(t_4);  t_4 = None
-    detach_18 = torch.ops.aten.detach.default(detach_11);  detach_11 = None
-    detach_19 = torch.ops.aten.detach.default(detach_18);  detach_18 = None
-    threshold_backward = torch.ops.aten.threshold_backward.default(mm, detach_19, 0);  mm = detach_19 = None
+    detach_6 = torch.ops.aten.detach.default(detach_3);  detach_3 = None
+    threshold_backward = torch.ops.aten.threshold_backward.default(mm, detach_6, 0);  mm = detach_6 = None
     t_6 = torch.ops.aten.t.default(t);  t = None
     mm_2 = torch.ops.aten.mm.default(threshold_backward, t_6);  t_6 = None
     t_7 = torch.ops.aten.t.default(threshold_backward)
@@ -1630,6 +1625,24 @@ graph():
 
         ep = export(M(), (torch.ones(3),))
         self.assertEqual(len(ep.constants), 0)
+
+        class M(torch.nn.Module):
+            def __init__(self, num_features: int = 1) -> None:
+                super().__init__()
+                self.num_features = num_features
+
+            def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+                res = [torch.Tensor([])] * self.num_features
+                for i in range(self.num_features):
+                    res[i] = x * (i + 1)
+                return res
+
+        inp = torch.ones(3)
+        ep = export(M(), (inp,))
+        self.assertEqual(len(ep.constants), 0)
+
+        unf = unflatten(ep)
+        self.assertTrue(torch.allclose(M()(inp)[0], unf(inp)[0]))
 
     def test_unbacked_bincount(self):
         class Foo(torch.nn.Module):
@@ -2556,7 +2569,9 @@ class GraphModule(torch.nn.Module):
 
             def body_fn(idx, out, y0):
                 i = idx.item()
-                torch._check_is_size(i, max=x.size(0) - 1)
+                # TODO removing those causes PendingUnbackedSymbolNotFound.
+                torch._check(i >= 0)
+                torch._check(i < x.size(0))
                 y0 = x[i] + y0
                 out = out.clone()
                 out[i] = y0
@@ -5990,7 +6005,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 u0 = x.item()
-                torch._check_is_size(u0)
                 t = torch.empty(u0 - 1)
                 return t + t
 
@@ -6709,8 +6723,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 valid_idxs = torch.nonzero(valid_mask).to(scores.device)
 
                 num_topk = torch.minimum(topk, torch.tensor(valid_idxs.shape[0])).item()
-                torch._check_is_size(num_topk)
-                torch._check(scores.shape[0] >= num_topk)
                 scores, idxs = scores.sort(descending=True)
                 scores = scores[:num_topk]
                 topk_idxs = valid_idxs[idxs[:num_topk]]
@@ -6982,7 +6994,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x, y):
                 b = x.item()
 
-                torch._check_is_size(b)
+                torch._check(b >= 0)
                 torch._check(b < y.size(0))
                 return y[:b]
 
@@ -6990,7 +7002,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x, y):
                 b = x.item()
 
-                torch._check_is_size(b)
+                torch._check(b >= 0)
                 torch._check(b < y.size(0) * 2)
                 return y[:b]
 
@@ -8605,7 +8617,7 @@ def forward(self, x):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.max().item()
-                torch._check_is_size(n)
+                torch._check(n >= 0)
                 return y + n
 
         fn = Module()
@@ -8622,7 +8634,6 @@ def forward(self, x):
                 n = x.max().item()
                 torch._check(n >= 2)
                 torch._check(n <= 10)
-                torch._check_is_size(n)
                 return y + n
 
         fn = Module()
@@ -8664,7 +8675,6 @@ def forward(self, x):
         class Module1(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 0)
                 return y.sum() + torch.ones(n, 5).sum()
 
@@ -8673,7 +8683,6 @@ def forward(self, x):
         class Module2(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 0)
                 torch._check(n <= 6)
                 return y.sum() + torch.ones(n, 5).sum()
@@ -8683,7 +8692,6 @@ def forward(self, x):
         class Module3(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 0)
                 torch._check(n <= 1)
                 return y.sum() + torch.ones(n, 5).sum()
@@ -8693,7 +8701,6 @@ def forward(self, x):
         class Module4(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 2)
                 return y.sum() + torch.ones(n, 5).sum()
 
@@ -8702,7 +8709,6 @@ def forward(self, x):
         class Module5(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 1)
                 return y.sum() + torch.ones(n, 5).sum()
 
@@ -8790,7 +8796,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        error_msg = r"Invalid value range for -1 between"
+        error_msg = r".* failed for expression u0 >= 0 on node .*"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -8844,7 +8850,6 @@ def forward(self, x):
                     # this check_is_size call needs to be traced by this subgraph for the select call,
                     # it can't be in the cond graph, as that fires & fails right before loop termination.
                     i = idx.item()
-                    torch._check_is_size(i, max=x.size(0) - 1)
                     return idx + 1, acc + x[i]
 
                 acc = torch.zeros(x.size(1))
@@ -8998,12 +9003,6 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -9026,12 +9025,6 @@ def forward(self, x):
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer(self):
@@ -9436,7 +9429,6 @@ def forward(self, b_a_buffer, x):
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 u0, u1 = xs.tolist()
-                torch._check_is_size(u1)
                 return u0, u1
 
         ep = export(Foo(), (torch.tensor([2, 3]),), strict=False)
@@ -9710,7 +9702,6 @@ def forward(self, b_a_buffer, x):
             error_msg = mock_exception.args[0]
             self.assertIn("torch._check(u > 5)", error_msg)
             self.assertIn("torch._check(u <= 5)", error_msg)
-            self.assertNotIn("torch._check_is_size", error_msg)
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
@@ -10061,7 +10052,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = x.item()
-                torch._check_is_size(y)
                 return torch.zeros(y)
 
         f = Foo()
@@ -10069,17 +10059,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         ep = export(f, (torch.tensor([3]),))
 
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
 
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -10334,13 +10318,9 @@ graph():
     %x : [num_users=2] = placeholder[target=x]
     %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
-    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
-    %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
     %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
-    %detach_4 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_3,), kwargs = {})
-    %detach_5 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_4,), kwargs = {})
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach_2, %detach_5), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_1), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul_1,)""",
@@ -10421,8 +10401,6 @@ graph():
         class M(torch.nn.Module):
             def forward(self, x, y):
                 a = x.item()
-                torch._check_is_size(a)
-                torch._check(a <= y.size(0))
                 return y[:a]
 
         ep = export(
@@ -10907,17 +10885,16 @@ graph():
         test_inp = torch.randn(2, 3)
 
         torch_gm = _export_to_torch_ir(orig_eager, (torch.rand(2, 3),), {})
+        torch_gm.state_dict().keys()
         for k, v in orig_eager.state_dict().items():
-            normalized_k = k.replace(".", "_")
-            self.assertIn(normalized_k, torch_gm.state_dict())
-            self.assertEqual(v, torch_gm.state_dict()[normalized_k])
+            self.assertIn(k, torch_gm.state_dict())
+            self.assertEqual(v, torch_gm.state_dict()[k])
         self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
 
         pre_autograd_gm = torch.export._trace._export(
             orig_eager, (torch.rand(2, 3),), {}, pre_dispatch=True
         ).module()
         for k, v in orig_eager.state_dict().items():
-            normalized_k = k.replace(".", "_")
             self.assertIn(k, pre_autograd_gm.state_dict())
             self.assertEqual(v, pre_autograd_gm.state_dict()[k])
         self.assertTrue(torch.allclose(pre_autograd_gm(test_inp), orig_eager(test_inp)))
@@ -10929,6 +10906,7 @@ graph():
             self.assertIn(k, ep.state_dict)
             self.assertEqual(v, ep.state_dict[k])
         self.assertTrue(torch.allclose(ep.module()(test_inp), orig_eager(test_inp)))
+        self.assertTrue(torch_gm.state_dict().keys(), orig_eager.state_dict().keys())
 
     def test_nn_module_stack(self):
         class Leaf(torch.nn.Module):
@@ -14287,7 +14265,6 @@ graph():
                 y_sum = y.sin().sum()
                 with torch.no_grad():
                     a = x.item()
-                    torch._check_is_size(a)
                     torch._check(a > 2)
                     torch._check(a < 6)
                     unbacked_shape = torch.ops.testlib.foo_unbacked(a)
@@ -14300,9 +14277,8 @@ graph():
             """\
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
-    ge_1 = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    ge = item >= 3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
     le = item <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
     gt_1 = item > 2
@@ -14906,7 +14882,6 @@ graph():
             def forward(self, x, y):
                 n = y.item()
                 m = y.item()
-                torch._check_is_size(n)
                 torch._check(m >= 0)
                 torch._check(n >= 3)
                 torch._check(-m >= -9)  # m <= 9
@@ -14919,22 +14894,10 @@ graph():
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         # check runtime
@@ -15228,6 +15191,45 @@ graph():
             self.assertEqual(
                 filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
             )
+
+    def test_enum_str(self):
+        class TensorDim(str, enum.Enum):
+            DDP = "ddp"
+            FSDP = "fsdp"
+            CP = "cp"
+            TP = "tp"
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                val = x.sin()
+                if TensorDim.DDP in {"ddp"}:
+                    val += x.cos()
+                if "ddp" in {TensorDim.DDP}:
+                    val += x.cos()
+                return val
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        inp = torch.randn(4, 4)
+        gm = export(Foo(), (inp,)).run_decompositions().module()
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %x : [num_users=4] = placeholder[target=x]
+    %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
+    %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
+    return (add_1,)""",
+        )
+
+        self.assertEqual(gm(inp), Foo()(inp))
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
