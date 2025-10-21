@@ -1005,7 +1005,7 @@ def _interpolate_size_to_scales(g: jit_utils.GraphContext, input, output_size, d
             if i < 2
             else float(output_size[-(dim - i)])
             / float(input.type().sizes()[-(dim - i)])
-            for i in range(0, dim)
+            for i in range(dim)
         ]
         scales = g.op(
             "Constant", value_t=torch.tensor(scales_constant, dtype=torch.float32)

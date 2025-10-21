@@ -183,6 +183,13 @@ if(NOT ZENDNN_FOUND)
     CACHE_STRING "zendnnl onednn dependency"
     COMMAND_LIST ZNL_CMAKE_ARGS)
 
+  # set if zendnnl depends on libxsmm, default is OFF.
+  zendnnl_add_option(NAME ZENDNNL_DEPENDS_LIBXSMM
+    VALUE ON
+    TYPE BOOL
+    CACHE_STRING "zendnnl libxsmm dependency"
+    COMMAND_LIST ZNL_CMAKE_ARGS)
+
   # set path of amdblis if amdblis is injected. if the framework
   # does not inject it, set it to "" (empty string).
   zendnnl_add_option(NAME ZENDNNL_AMDBLIS_FWK_DIR
@@ -205,6 +212,14 @@ if(NOT ZENDNN_FOUND)
     VALUE ""
     TYPE PATH
     CACHE_STRING "zendnnl onednnn framework path"
+    COMMAND_LIST ZNL_CMAKE_ARGS)
+
+  # set path of libxsmm if libxsmm is injected. if the framework
+  # does not inject it, set it to "" (empty string).
+  zendnnl_add_option(NAME ZENDNNL_LIBXSMM_FWK_DIR
+    VALUE ""
+    TYPE PATH
+    CACHE_STRING "zendnnl libxsmm framework path"
     COMMAND_LIST ZNL_CMAKE_ARGS)
 
   # try to find pre-built package
@@ -324,6 +339,16 @@ if(NOT ZENDNN_FOUND)
         target_link_libraries(zendnnl_library INTERFACE DNNL::dnnl)
     endif()
 
+      # libxsmm dependency
+    if (ZENDNNL_DEPENDS_LIBXSMM)
+        zendnnl_add_dependency(NAME libxsmm
+          PATH "${ZENDNNL_INSTALL_PREFIX}/deps/libxsmm"
+          ARCHIVE_FILE "libxsmm.a"
+          ALIAS "libxsmm::libxsmm_archive")
+
+        target_link_libraries(zendnnl_library INTERFACE libxsmm::libxsmm_archive)
+    endif()
+
     message(STATUS "(ZENDNNL) ZNL_BYPRODUCTS=${ZNL_BYPRODUCTS}")
     message(STATUS "(ZENDNNL) ZNL_CMAKE_ARGS=${ZNL_CMAKE_ARGS}")
 
@@ -366,6 +391,10 @@ if(NOT ZENDNN_FOUND)
 
     if(ZENDNNL_DEPENDS_ONEDNN)
       add_dependencies(zendnnl_onednn_deps fwk_zendnnl)
+    endif()
+
+    if(ZENDNNL_DEPENDS_LIBXSMM)
+      add_dependencies(zendnnl_libxsmm_deps fwk_zendnnl)
     endif()
   endif()
   set(ZENDNN_FOUND TRUE)

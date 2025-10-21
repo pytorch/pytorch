@@ -9,10 +9,14 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, cast, Optional
+from typing import Any, cast, Optional, TYPE_CHECKING
 
 import boto3  # type: ignore[import]
 import requests
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
