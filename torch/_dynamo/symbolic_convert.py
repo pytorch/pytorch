@@ -47,7 +47,6 @@ from collections import deque
 from traceback import StackSummary
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias, TypeIs
-from unittest.mock import patch
 
 import torch
 import torch._logging
@@ -125,7 +124,6 @@ from .source import (
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
-    counters,
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
@@ -4480,9 +4478,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @classmethod
     def inline_call(cls, parent: Any, func: Any, args: Any, kwargs: Any) -> Any:
-        with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-            return tracer.inline_call_()
+        tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+        return tracer.inline_call_()
 
     @staticmethod
     def check_inlineable(func: Any) -> trace_rules.SkipResult:
