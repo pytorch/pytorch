@@ -1564,14 +1564,14 @@ class BuiltinVariable(VariableTracker):
 
                 try:
                     # Only supports certain function types
-                    user_func_variable = variables.UserFunctionVariable(bound_method)
+                    user_func_variable = VariableTracker.build(tx, bound_method)
                 except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
                     log.warning("Failed to create UserFunctionVariable", exc_info=True)
                     return
 
                 # Inline the user function
-                return tx.inline_user_function_return(user_func_variable, [arg], {})
+                return user_func_variable.call_function(tx, [arg], {})
         elif isinstance(arg, (variables.ExceptionVariable,)):
             if len(arg.args) == 0:
                 value = f"{arg.exc_type}"
