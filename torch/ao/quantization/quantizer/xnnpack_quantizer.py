@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import functools
 import typing_extensions
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -35,6 +35,8 @@ from torch.fx._compatibility import compatibility
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
     from torch.fx import Node
 
@@ -345,9 +347,8 @@ class XNNPACKQuantizer(Quantizer):
         quantizer.set_module_name("blocks.sub"), it will quantize all supported operator/operator
         patterns in the submodule with this module name with the given `quantization_config`
         """
-        assert quantization_config is not None, (
-            " quantization_config == None is not supported yet"
-        )
+        if quantization_config is None:
+            raise AssertionError("quantization_config == None is not supported yet")
         self.module_name_config[module_name] = quantization_config
         return self
 
