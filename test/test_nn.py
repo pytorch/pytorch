@@ -8496,7 +8496,7 @@ class TestNNDeviceType(NNTestCase):
         x = torch.rand(2**16, 2, device="cuda")
         c = F.pad(x, (1, 1), mode="reflect")
         c_cpu = F.pad(x.cpu(), (1, 1), mode="reflect")
-        torch.testing.assert_close(c.cpu(), c_cpu)
+        self.assertEqual(c, c_cpu)
 
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
