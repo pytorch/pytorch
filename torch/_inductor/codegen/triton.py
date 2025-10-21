@@ -2469,7 +2469,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     allow_block_ptr = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
     block_ptr_options_cls: type[BlockPtrOptions] = BlockPtrOptions
-    tensor_descriptor_options_cls: type[TensorDescriptorOptions] = TensorDescriptorOptions
+    tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
+        TensorDescriptorOptions
+    )
     transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None
 
     def __init__(
