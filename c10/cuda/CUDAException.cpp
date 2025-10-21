@@ -33,12 +33,6 @@ void c10_cuda_check_implementation(
   check_message.append(c10::cuda::get_cuda_error_help(cuda_error));
   check_message.append(c10::cuda::get_cuda_check_suffix());
   check_message.append("\n");
-  if (include_device_assertions) {
-    check_message.append(c10_retrieve_device_side_assertion_info());
-  } else {
-    check_message.append(
-        "Device-side assertions were explicitly omitted for this error check; the error probably arose while initializing the DSA handlers.");
-  }
 #endif
   throw c10::AcceleratorError(
       {function_name, filename, line_number}, err, check_message);
