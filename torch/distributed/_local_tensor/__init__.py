@@ -51,7 +51,14 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Any, Callable, Generator, Optional, Union
 
-import numpy as np
+
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
 
 import torch
 from torch import Size, SymBool, SymInt, Tensor
@@ -524,8 +531,13 @@ class LocalTensor(torch.Tensor):
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
 
-    def numpy(self, *, force: bool = False) -> np.ndarray:
-        return self.reconcile().numpy(force=force)
+    def numpy(
+        self, *, force: bool = False
+    ) -> np.ndarray:  # pyrefly: ignore  # missing-attribute
+        if HAS_NUMPY:
+            return self.reconcile().numpy(force=force)
+        else:
+            raise RuntimeError("Numpy is not available")
 
     def __lt__(
         self, other: torch.Tensor | bool | complex | float | int
