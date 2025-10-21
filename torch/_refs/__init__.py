@@ -1179,7 +1179,7 @@ def add(
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
-        if python_type != bool and not utils.is_weakly_lesser_type(
+        if python_type is not bool and not utils.is_weakly_lesser_type(
             type(alpha), python_type
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
@@ -4738,7 +4738,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     if a.ndim <= 1 or dim0 == dim1:
         return aten.alias.default(a)
 
-    _permutation = list(range(0, a.ndim))
+    _permutation = list(range(a.ndim))
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
     return torch.permute(a, _permutation)
