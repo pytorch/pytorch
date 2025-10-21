@@ -13330,6 +13330,7 @@ class TestAutogradStreamSynchronization(TestCase):
     def test_consumer_to_single_producer_case_2_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
+
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
         # Producer              :  cuda:0    s1
@@ -13465,6 +13466,7 @@ class TestAutogradStreamSynchronization(TestCase):
     def test_consumer_to_single_producer_case_4_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
+
         #           Device    Stream
         # Consumer: cuda:0    cuda:0 default
         # Producer: cuda:1    s1
@@ -13528,6 +13530,7 @@ class TestAutogradStreamSynchronization(TestCase):
     def test_consumer_to_multi_producer_case_4_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
+
         #             Device    Stream
         # Consumer  : cuda:0    cuda:0 default
         #
@@ -13611,9 +13614,8 @@ class TestAutogradStreamSynchronization(TestCase):
 
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
+    @onlyCUDA
     def test_side_stream_backward_overlap(self, device):
-        if "cuda" not in device:
-            self.skipTest("requires CUDA")
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
         # as soon as we've added to the InputBuffer the first time.
@@ -13718,6 +13720,7 @@ class TestAutogradStreamSynchronization(TestCase):
     def test_warn_on_accumulate_grad_stream_mismatch_flag(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
+
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
                 with warnings.catch_warnings(record=True) as warns:
