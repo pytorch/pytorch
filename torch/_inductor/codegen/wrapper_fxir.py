@@ -763,13 +763,8 @@ class FxConverter:
                 args=(input_fx_node, 1, 0),
             )
             result_fx_node = generate_item(where_fx_node)
-        elif len(keypath) == 1 and isinstance(keypath[0], DivideByKey):
-            result_fx_node = graph.call_function(
-                operator.floordiv,
-                args=(generate_item(input_fx_node), keypath[0].divisor),
-            )
         else:
-            raise NotImplementedError(f"Unsupported keypath {keypath}")
+            raise NotImplementedError(f"Unsupported keypath: {keypath}")
 
         result_symbol = ir_node.sym
         result_buffer = SymbolBuffer(result_symbol)
