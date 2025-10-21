@@ -266,8 +266,6 @@ else:
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
 
@@ -494,12 +492,11 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        self._flatten_mesh_list,
+                        id(self._rank_map),
                         self._layout,
                         self._device_type,
                         self._mesh_dim_names,
                         self._thread_id,
-                        self._root_mesh,
                     )
                 )
             return self._hash
@@ -510,12 +507,11 @@ else:
             if not isinstance(other, DeviceMesh):
                 return False
             return (
-                self._flatten_mesh_list == other._flatten_mesh_list
+                id(self._rank_map) == id(other._rank_map)
                 and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
-                and self._root_mesh == other._root_mesh
             )
 
         def __getitem__(
@@ -948,7 +944,7 @@ else:
             # will have larger span than the actual tensor. This is just internal implementation detail
             # and does not affect user facing behavior.
             mesh = (
-                mesh.detach().to(dtype=torch.int, device="cpu")
+                mesh.detach().clone().to(dtype=torch.int, device="cpu")
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
