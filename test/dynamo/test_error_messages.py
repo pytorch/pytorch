@@ -430,14 +430,24 @@ from user code:
         fn(torch.randn(4))
         self.assertEqual(len(counters["graph_break"]), 1)
         first_graph_break = next(iter(counters["graph_break"].keys()))
+
+        # Pybind11 improperly sets the __qualname__ attribute on functions and methods
+        # See https://github.com/pybind/pybind11/issues/5774 and https://github.com/pybind/pybind11/issues/2059
+        # Example prefix: pybind11_detail_function_record_v1_system_libstdcpp_gxx_abi_1xxx_use_cxx11_abi_1
+        first_graph_break = re.sub(
+            r"pybind11_detail_function_record\w*",  # remove abi/platform specific suffix
+            "pybind11_detail_function_record",
+            first_graph_break,
+        )
+
         self.assertExpectedInline(
             first_graph_break,
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten_with_path.
+  Explanation: Dynamo cannot trace optree C/C++ function optree._C.pybind11_detail_function_record.flatten_with_path.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: PyCapsule.flatten_with_path, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: pybind11_detail_function_record.flatten_with_path, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
