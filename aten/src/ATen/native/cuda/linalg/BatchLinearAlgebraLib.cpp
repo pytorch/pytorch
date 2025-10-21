@@ -1648,8 +1648,8 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   auto device = input.device();
 
 
-  int64_t n = cuda_int_cast(vectors.size(-1), "n");
-  int64_t lda = std::max<int64_t>(1, n);
+  int n = cuda_int_cast(vectors.size(-1), "n");
+  int lda = std::max<int64_t>(1, n);
   auto batch_size = batchCount(vectors);
 
   auto vectors_stride = matrixStride(vectors);
@@ -1659,18 +1659,19 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   auto values_data = values.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<int>();
 
-  Tensor A_fortran = input.mT().contiguous();
-  scalar_t* A = A_fortran.data_ptr<scalar_t>();
+  cusolverDnParams_t params = nullptr;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
 
+
+  Tensor A_fortran = input.mT().contiguous();
+  auto* A_data = A_fortran.data_ptr<scalar_t>();
+  const auto A_stride = matrixStride(A_fortran);
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
-  cusolverDnParams_t params = nullptr;
-  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
-  const int64_t ldvl = 1; // ldvl >= 1 if jobvl = CUSOLVER_EIG_MODE_NOVECTOR
+  const int ldvl = 1; // ldvl >= 1 if jobvl = CUSOLVER_EIG_MODE_NOVECTOR
   cusolverEigMode_t jobvr;
-  int64_t ldvr;
-
+  int ldvr;
   if (compute_eigenvectors) {
     ldvr = n; // ldvr >= n if jobvr = CUSOLVER_EIG_MODE_VECTOR
     jobvr = CUSOLVER_EIG_MODE_VECTOR;
@@ -1689,7 +1690,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   scalar_t* VR = vectors.data_ptr<scalar_t>();
 
 
-  const scalar_t*		A_const = A;
+  const scalar_t*	A_const = A_data;
   const scalar_t* 	W_const = W;
   const scalar_t*    	VL_const = VL;
   const scalar_t*    	VR_const = VR;
@@ -1721,20 +1722,26 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   TORCH_WARN("input   numel: ", input.numel());
   TORCH_WARN("===================");
 
+  for (decltype(batch_size) i = 0; i < batch_size; ++i) {
+    scalar_t* Ai   = A_data      + i * A_stride;
+    scalar_t* Wi   = values_data + i * values_stride;
+    scalar_t* VLi  = nullptr; // keine linken EV
+    scalar_t* VRi  = compute_eigenvectors ? (vectors_data + i * vectors_stride) : nullptr;
+    int*      info = infos_data + i;
 
 
-
-  at::cuda::solver::xgeev<scalar_t>(  // <- A-Typ zuerst, dann EV/EVec-Typ
-    handle, params,
-    CUSOLVER_EIG_MODE_NOVECTOR, CUSOLVER_EIG_MODE_VECTOR,
-    n,
-    A, lda,
-    W,
-    VL, ldvl,
-    VR, ldvr,
-    static_cast<scalar_t*>(work_device_data.get()), ws_dev,
-    static_cast<scalar_t*>(work_host_data.get()),  ws_host,
-    infos.data_ptr<int>());
+    at::cuda::solver::xgeev<scalar_t>(  // <- A-Typ zuerst, dann EV/EVec-Typ
+      handle, params,
+      CUSOLVER_EIG_MODE_NOVECTOR, jobvr,
+      n,
+      Ai, lda,
+      Wi,
+      VLi, ldvl,
+      VRi, ldvr,
+      static_cast<scalar_t*>(work_device_data.get()), ws_dev,
+      static_cast<scalar_t*>(work_host_data.get()),  ws_host,
+      info);
+  }
 
 
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));

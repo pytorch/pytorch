@@ -2021,7 +2021,7 @@ This is an in-place routine, content of 'input', 'values', 'vectors' is overwrit
 For more information see MAGMA's documentation for GEEV routine.
 */
 template <typename scalar_t>
-void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
+void linalg_eig_magma(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
 TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.linalg.eig or recompile with MAGMA.");
@@ -2082,9 +2082,9 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   TORCH_WARN("entered linalg_eig_kernel");
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
-  // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
+  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma'
 
-  // apply_linalg_eig modifies the provided input matrix in-place, therefore we need a copy
+  // linalg_eig_magma modifies the provided input matrix in-place, therefore we need a copy
   // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer 'input' to CPU
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
@@ -2101,14 +2101,30 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
       break; // fallback to CPU path below
   }
 #endif
-  TORCH_WARN("Going to CPU");
+  TORCH_WARN("Entering MAGMA path for linalg.eig");
+
+  auto eigenvalues_cpu = eigenvalues.device().is_cpu() ? eigenvalues : eigenvalues.cpu();
+  auto eigenvectors_cpu = eigenvectors.device().is_cpu() ? eigenvectors : eigenvectors.cpu();
+  auto infos_cpu = infos.device().is_cpu() ? infos : infos.cpu();
+
   Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
   input_working_copy.copy_(input);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "linalg_eig_out_cuda", [&]{
-    apply_linalg_eig<scalar_t>(eigenvalues, eigenvectors, input_working_copy, infos, compute_eigenvectors);
+    linalg_eig_magma<scalar_t>(eigenvalues_cpu, eigenvectors_cpu, input_working_copy, infos_cpu, compute_eigenvectors);
   });
+  // Copy back to GPU if needed
+  if (!eigenvalues.device().is_cpu()) {
+    eigenvalues.copy_(eigenvalues_cpu);
+  }
+  if (!eigenvectors.device().is_cpu()) {
+    eigenvectors.copy_(eigenvectors_cpu);
+  }
+  if (!infos.device().is_cpu()) {
+    infos.copy_(infos_cpu);
+  }
+
 }
 
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)

@@ -2924,11 +2924,6 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
   TORCH_WARN("Entered linalg_eig_out_info");
   auto options = input.options();
 
-  TORCH_WARN("Type of 'options': ", typeid(options).name());
-  TORCH_WARN("Device in options: ", options.device());
-  TORCH_WARN("Dtype in options: ", options.dtype());
-  TORCH_WARN("Dtype vectors: ", vectors.dtype());
-
 
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of the hierarchy of calls
