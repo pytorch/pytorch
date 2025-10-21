@@ -1,6 +1,5 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
-#include <c10/util/safe_numerics.h>
 
 namespace at::native {
 
