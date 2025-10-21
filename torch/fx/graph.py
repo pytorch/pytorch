@@ -692,13 +692,13 @@ class CodeGen:
                 # output is handled specially
 
             if include_meta and hasattr(node, "meta") and node.meta:
-                # use str over repr since repr is susceptible to sympy
-                # errors such as "cannot determine truth value of Relational"
-                meta_str = pprint.pformat(str(node.meta), width=80, compact=True)
-                body.append("# === meta start ===\n")
-                for line in meta_str.splitlines():
-                    body.append(f"# {line}\n")
-                body.append("# === meta: end ===\n")
+                body.append(f'"""\n')
+                for k, v in node.meta.items():
+                    # use str over repr since repr is susceptible to sympy
+                    # errors such as "cannot determine truth value of Relational"
+                    # Pretty print the high-level dict with str() for values
+                    body.append(f"{k}: {pprint.pformat(str(v), width=80, compact=True)}\n")
+                body.append(f'"""\n')
 
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
