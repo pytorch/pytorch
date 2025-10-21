@@ -6,7 +6,7 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Union
+from typing import Any, Callable
 
 import torch
 import torch.fx as fx
@@ -82,7 +82,7 @@ def is_compute_node(n: fx.Node) -> bool:
     )
 
 
-def get_hint(x: Union[int, torch.SymInt]) -> int | None:
+def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
     assert isinstance(x, torch.SymInt)

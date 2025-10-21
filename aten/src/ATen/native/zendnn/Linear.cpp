@@ -54,7 +54,9 @@ inline void zendnn_linear_impl(
       is_weight_prepacked);
   create_zendnn_tensor(result_2d, output_tensor, "matmul_output", datatype);
   if (bias.defined()) {
-    create_zendnn_tensor(bias, bias_tensor, "bias", datatype);
+    // adds dimension at dim=0 -> [1, n]
+    auto bias_unsqueezed = bias.unsqueeze(0);
+    create_zendnn_tensor(bias_unsqueezed, bias_tensor, "bias", datatype);
     set_linear_context_attributes(
         matmul_context, weight_tensor, post_op_id, bias_tensor);
   } else {
