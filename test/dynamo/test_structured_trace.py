@@ -21,7 +21,7 @@ import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
+from torch.testing._internal.common_utils import find_free_port, xfailIfS390X
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -1017,6 +1017,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
         logs = self.buffer.getvalue()
         self.assertTrue(all(event in logs for event in chromium_events))
 
+    @xfailIfS390X
     @requires_tlparse
     @torch._dynamo.config.patch("compiled_autograd", True)
     def test_compiled_autograd_attribution(self):

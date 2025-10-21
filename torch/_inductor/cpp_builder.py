@@ -68,6 +68,8 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
+MINGW_GXX = "x86_64-w64-mingw32-g++"
+
 SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
@@ -333,9 +335,9 @@ def check_msvc_cl_language_id(compiler: str) -> None:
 
 
 @functools.cache
-def check_mingw_win32_flavor(compiler: str) -> None:
+def check_mingw_win32_flavor(compiler: str) -> str:
     """
-    Check if MinGW `compiler` exists and whether it is the win32 flavor (instead of posix flavor).
+    Check if MinGW `compiler` exists and return it's flavor (win32 or posix).
     """
     try:
         out = subprocess.check_output(
@@ -346,10 +348,22 @@ def check_mingw_win32_flavor(compiler: str) -> None:
     except Exception as e:
         raise RuntimeError(f"Failed to run {compiler} -v") from e
 
+    flavor: str | None = None
     for line in out.splitlines():
         if "Thread model" in line:
-            if line.split(":")[1].strip().lower() != "win32":
-                raise RuntimeError(f"Compiler: {compiler} is not win32 flavor.")
+            flavor = line.split(":", 1)[-1].strip().lower()
+
+    if flavor is None:
+        raise RuntimeError(
+            f"Cannot determine the flavor of {compiler} (win32 or posix). No Thread model found in {compiler} -v"
+        )
+
+    if flavor not in ("win32", "posix"):
+        raise RuntimeError(
+            f"Only win32 and pofix flavor of {compiler} is supported. The flavor is {flavor}"
+        )
+
+    return flavor
 
 
 def get_cpp_compiler() -> str:
@@ -358,7 +372,7 @@ def get_cpp_compiler() -> str:
         and sys.platform != "win32"
     ):
         # we're doing cross-compilation
-        compiler = "x86_64-w64-mingw32-g++"
+        compiler = MINGW_GXX
         if not config.aot_inductor.package_cpp_only:
             check_mingw_win32_flavor(compiler)
         return compiler
@@ -919,8 +933,6 @@ def _get_shared_cflags(do_link: bool) -> list[str]:
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
     flags = []
-    if config.aot_inductor.cross_target_platform == "windows":
-        flags.extend(["static-libstdc++", "static-libgcc", "fPIC"])
     if do_link:
         flags.append("shared")
 
@@ -960,6 +972,11 @@ def get_cpp_options(
         ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
+        if check_mingw_win32_flavor(MINGW_GXX) == "posix":
+            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
 
     return (
         definitions,
@@ -1133,12 +1150,14 @@ def _get_torch_related_args(
             assert config.aot_inductor.aoti_shim_library, (
                 "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
             )
-            assert config.aot_inductor.aoti_shim_library_path, (
-                "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
-                " when 'cross_target_platform' is 'windows'.",
-            )
             libraries.append(config.aot_inductor.aoti_shim_library)
-            libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        assert config.aot_inductor.aoti_shim_library_path, (
+            "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
+            " when 'cross_target_platform' is 'windows'.",
+        )
+        libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
 
     if _IS_WINDOWS:
         libraries.append("sleef")
