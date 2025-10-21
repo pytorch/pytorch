@@ -7,6 +7,7 @@ import unittest
 from collections import defaultdict
 from unittest.mock import Mock, patch
 
+# pyrefly: ignore  # import-error
 from gen_operators_yaml import (
     fill_output,
     get_parser_options,
@@ -241,5 +242,6 @@ class GenOperatorsYAMLTest(unittest.TestCase):
 
         fill_output(output, options)
 
+        # pyrefly: ignore  # missing-attribute
         for op_val in output["operators"].values():
             self.assertFalse(op_val["include_all_overloads"])
