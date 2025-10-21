@@ -283,6 +283,7 @@ def clip_grad_value_(
     clip_value = float(clip_value)
 
     grads = [p.grad for p in parameters if p.grad is not None]
+    # pyrefly: ignore  # bad-argument-type
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
     for (device, _), ([grads], _) in grouped_grads.items():
