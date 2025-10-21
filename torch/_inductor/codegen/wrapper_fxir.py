@@ -29,6 +29,7 @@ from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
+    ConvertIntKey,
     DivideByKey,
     free_unbacked_symbols,
 )
@@ -54,6 +55,7 @@ from .wrapper import (
     CommBufferFreeLine,
     CommentLine,
     ConditionalLine,
+    DynamicScalarLine,
     EnterDeviceContextManagerLine,
     EnterSubgraphLine,
     ExitDeviceContextManagerLine,
@@ -737,6 +739,39 @@ class FxConverter:
     def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
+
+    def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
+        assert isinstance(line, DynamicScalarLine)
+
+        ir_node = line.node
+        (input_ir_node,) = ir_node.inputs
+        assert isinstance(input_ir_node, ir.IRNode)
+        input_fx_node = self._generate_buffer(input_ir_node)
+        keypath = ir_node.keypath
+        graph = self.gm.graph
+
+        def generate_item(x: Optional[torch.fx.Node]) -> torch.fx.Node:
+            assert x is not None
+            return graph.call_function(
+                aten.item.default,
+                args=(x,),
+            )
+
+        if len(keypath) == 0:
+            result_fx_node = generate_item(input_fx_node)
+        elif len(keypath) == 1 and isinstance(keypath[0], ConvertIntKey):
+            where_fx_node = graph.call_function(
+                aten.where.Scalar,
+                args=(input_fx_node, 1, 0),
+            )
+            result_fx_node = generate_item(where_fx_node)
+        else:
+            raise NotImplementedError(f"Unsupported keypath: {keypath}")
+
+        result_symbol = ir_node.sym
+        result_buffer = SymbolBuffer(result_symbol)
+        self._record_allocation(result_buffer, result_fx_node)
+        self._generate_size_proxy(result_fx_node, result_symbol)
 
     def _generate_enter_device_context_manager(self, line: WrapperLine) -> None:
         assert isinstance(line, EnterDeviceContextManagerLine)
