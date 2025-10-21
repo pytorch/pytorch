@@ -1887,14 +1887,7 @@ class TestStandaloneCompile(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
             with fresh_cache():
-                if is_aot:
-                    loaded = torch._inductor.AOTCompiledArtifact.load(
-                        path=path, format=format
-                    )
-                else:
-                    loaded = torch._inductor.CacheCompiledArtifact.load(
-                        path=path, format=format
-                    )
+                loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
                 if dynamic:
                     concrete_args = [
                         4 if isinstance(a, torch.SymInt) else a for a in args
@@ -1956,7 +1949,7 @@ class TestStandaloneCompile(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
             with fresh_cache():
-                loaded = torch._inductor.CacheCompiledArtifact.load(
+                loaded = torch._inductor.CompiledArtifact.load(
                     path=path, format="unpacked"
                 )
                 compiled_out = loaded(*args)[0]
@@ -2015,7 +2008,7 @@ class TestStandaloneCompile(TestCase):
                         with open(file_path, "w") as f:
                             f.write(file_contents)
 
-                loaded = torch._inductor.CacheCompiledArtifact.load(
+                loaded = torch._inductor.CompiledArtifact.load(
                     path=temp_dir, format="unpacked"
                 )
                 compiled_out = loaded(*args)
@@ -2051,7 +2044,7 @@ from torch._inductor.utils import fresh_cache
 
 arg = torch.ones(4, 1)
 with fresh_cache():
-    loaded = torch._inductor.CacheCompiledArtifact.load(path="{path}")
+    loaded = torch._inductor.CompiledArtifact.load(path="{path}")
     compiled_result = loaded(arg)[0]
 
 eager_result = arg.sin() * 2
