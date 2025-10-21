@@ -357,24 +357,11 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             if add_root:
 
                 def normalize_path(path):
-                    try:
-                        parts = []
-
-                        class Path:
-                            def __getattr__(self, name):
-                                if name != "_modules":
-                                    parts.append(name)
-                                return self
-
-                            def __getitem__(self, idx):
-                                # pyrefly: ignore  # bad-argument-type
-                                parts.append(str(idx))
-                                return self
-
-                        eval(path, {"L": {"self": Path()}})
-                        return ".".join(parts)
-                    except Exception:  # TODO(zhxchen17) Remove this.
-                        return path
+                    if path == "L['self']":
+                        return ""
+                    if path.startswith("L['self']."):
+                        return path[len("L['self'].") :]
+                    return path
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
@@ -698,9 +685,12 @@ def _restore_state_dict(
     param_buffer_table_reverse = {v: k for k, v in param_buffer_table.items()}
 
     # Replace state dict attr names with the fqn
-    for name, _ in chain(
-        original_module.named_parameters(remove_duplicate=False),
-        original_module.named_buffers(remove_duplicate=False),
+    for name, _ in list(
+        chain(
+            original_module.named_parameters(remove_duplicate=False),
+            # pyrefly: ignore  # bad-argument-type
+            original_module.named_buffers(remove_duplicate=False),
+        )
     ):
         if name in param_buffer_table_reverse:
             dynamo_name = param_buffer_table_reverse[name]

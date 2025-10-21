@@ -74,6 +74,22 @@ template <typename T, int N>
 struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
 #endif
 
+template <typename T>
+struct ScalarType {
+  using type = T;
+};
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+struct ScalarType<at::vec::Vectorized<T>> {
+  using type = T;
+};
+template <typename T, int N>
+struct ScalarType<at::vec::VectorizedN<T, N>> {
+  using type = T;
+};
+#endif
+
 template <typename T, uint64_t kChunkSize>
 struct CascadeSumHelper {
   // A data struct to help cascade summation:
@@ -133,13 +149,13 @@ inline T cascade_sum_final(CascadeSumHelper<T, kChunkSize>* c) {
   return result;
 }
 
-template <typename T, typename S, uint64_t kChunkSize>
+template <typename T, uint64_t kChunkSize>
 struct WelfordHelper {
   // A data struct to help welford reduction:
   // 1. Save the reciprocal of weights to avoid redundant divisions.
   // 2. Save the welford stack, which is used to combine welford reduction
   //    with cascade summation to improve numerical stability.
-  static std::vector<S> weight_recps;
+  static std::vector<typename ScalarType<T>::type> weight_recps;
   std::vector<Welford<T>> welford_stk{};
   uint64_t depth{0}; // depth of welford_stk.
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
@@ -153,14 +169,16 @@ struct WelfordHelper {
   }
 };
 
-template <typename T, typename S, uint64_t kChunkSize>
-std::vector<S> WelfordHelper<T, S, kChunkSize>::weight_recps = []() {
-  std::vector<S> temp(kChunkSize);
-  for (const auto i : c10::irange(kChunkSize)) {
-    temp[i] = S(static_cast<double>(1) / static_cast<double>(i + 1));
-  }
-  return temp;
-}();
+template <typename T, uint64_t kChunkSize>
+std::vector<typename ScalarType<T>::type>
+    WelfordHelper<T, kChunkSize>::weight_recps = []() {
+      using scalar_t = typename ScalarType<T>::type;
+      std::vector<scalar_t> temp(kChunkSize);
+      for (const auto i : c10::irange(kChunkSize)) {
+        temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
+      }
+      return temp;
+    }();
 
 template <typename T>
 Welford<T> welford_combine(
@@ -191,11 +209,11 @@ Welford<T> welford_combine(
   return result;
 }
 
-template <typename T, typename S = float, uint64_t kChunkSize = 0>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
-    WelfordHelper<T, S, kChunkSize>* w = nullptr) {
+    WelfordHelper<T, kChunkSize>* w = nullptr) {
   // Combine welford reduction with cascade summation to improve numerical
   // stability.
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
@@ -231,10 +249,8 @@ Welford<T> welford_combine(
   return result;
 }
 
-template <typename T, typename S, uint64_t kChunkSize>
-Welford<T> welford_combine(
-    Welford<T>& acc,
-    WelfordHelper<T, S, kChunkSize>* w) {
+template <typename T, uint64_t kChunkSize>
+Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
   }
@@ -250,12 +266,12 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T, typename S = float, uint64_t kChunkSize = 0>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
     int64_t tail_size,
-    WelfordHelper<T, S, kChunkSize>* w = nullptr) {
+    WelfordHelper<T, kChunkSize>* w = nullptr) {
   auto out = welford_combine(acc, data, w);
   return Welford<T>{
       T::set(acc.mean, out.mean, tail_size),
@@ -651,8 +667,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
     case 4:
       return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 
@@ -676,8 +692,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 
