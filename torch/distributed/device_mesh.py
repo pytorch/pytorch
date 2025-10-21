@@ -266,6 +266,8 @@ else:
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
+            # private field to pre-generate DeviceMesh's hash
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
 
@@ -492,7 +494,7 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        id(self._rank_map),
+                        self._flatten_rank_map,
                         self._layout,
                         self._device_type,
                         self._mesh_dim_names,
@@ -507,7 +509,7 @@ else:
             if not isinstance(other, DeviceMesh):
                 return False
             return (
-                id(self._rank_map) == id(other._rank_map)
+                self._flatten_rank_map == other._flatten_rank_map
                 and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
@@ -1330,7 +1332,7 @@ else:
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 
-        layout = _MeshLayout(tuple(mesh_shape), suffix_product(mesh_shape))
+        layout = _MeshLayout(tuple(mesh_shape), suffix_product(tuple(mesh_shape)))
         # Always initialize the (identity) rank map on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):

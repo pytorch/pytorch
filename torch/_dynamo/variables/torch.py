@@ -69,7 +69,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import typestr, VariableTracker
+from .base import raise_type_error_exc, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -126,6 +126,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
         torch.fx.traceback.annotate,
+        torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -146,6 +147,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.accelerator.current_device_index,
+    torch.accelerator.current_accelerator,
     torch.cuda.current_device,
     torch.cuda.is_initialized,
     torch.xpu.current_device,
@@ -363,7 +365,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
-        elif self.value is torch.fx.traceback.annotate:
+        elif self.value in (
+            torch.fx.traceback.annotate,
+            torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
+        ):
             assert len(args) <= 1 and len(kwargs) == 0
             return FxTracebackAnnotateVariable(
                 args[0].as_python_constant(), source=self.source
@@ -1174,7 +1179,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_push_torch_function(
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
-            assert len(args) == 1 and not kwargs
+            if len(args) != 1 or kwargs:
+                raise_type_error_exc(
+                    tx,
+                    f"push_torch_function takes exactly one argument ({len(args)} given)",
+                )
             TorchFunctionModeStackVariable.register_mutation(tx)
             tx.symbolic_torch_function_state.push_torch_function_mode(args[0])
             return ConstantVariable.create(None)
@@ -1183,14 +1192,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_len_torch_function(
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
-            assert not args and not kwargs
+            if args or kwargs:
+                raise_type_error_exc(tx, "len_torch_function_stack takes no arguments")
             return ConstantVariable.create(
                 len(tx.symbolic_torch_function_state.mode_stack)
             )
 
         @register(torch._C._get_function_stack_at)
         def handle_get_stack_at(self, tx: "InstructionTranslator", *args, **kwargs):
-            assert len(args) == 1 and not kwargs
+            if len(args) != 1 or kwargs:
+                raise_type_error_exc(
+                    tx,
+                    f"get_function_stack_at takes exactly one argument ({len(args)} given)",
+                )
             ind = args[0].as_python_constant()
             assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
             return tx.symbolic_torch_function_state.mode_stack[ind]

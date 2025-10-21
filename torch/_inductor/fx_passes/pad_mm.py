@@ -3,7 +3,7 @@ import itertools
 import operator
 import typing
 from collections.abc import Sequence
-from typing import Any, Callable, Union
+from typing import Any, Callable
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -118,7 +118,7 @@ def should_pad_common(mat1: Tensor, mat2: Tensor, input: Tensor | None = None) -
     )
 
 
-def get_padded_length(x: Union[int, torch.SymInt], alignment_size: int) -> int:
+def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
     # we don't pad x if it is symbolic
     if isinstance(x, torch.SymInt) or alignment_size == 0 or x % alignment_size == 0:
         return 0
@@ -438,7 +438,7 @@ def _should_pad_bench(
             return False
 
         def realize_symbols(
-            ds: Union[torch.Size, tuple[torch.SymInt, ...]],
+            ds: torch.Size | tuple[torch.SymInt, ...],
         ) -> list[int]:
             return [d if isinstance(d, int) else d.node.hint for d in ds]
 
