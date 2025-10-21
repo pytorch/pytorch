@@ -299,12 +299,14 @@ class ContinueExecutionCache:
     generated_code_metadata = ExactWeakKeyDictionary()
 
     @classmethod
-    def lookup(cls, code: types.CodeType, lineno: int, *key: Any) -> types.CodeType:
+    def lookup(
+        cls, code: types.CodeType, lineno: int, init_offset: int, *key: Any
+    ) -> types.CodeType:
         if code not in cls.cache:
             cls.cache[code] = {}
         key = tuple(key)
         if key not in cls.cache[code]:
-            cls.cache[code][key] = cls.generate(code, lineno, *key)
+            cls.cache[code][key] = cls.generate(code, lineno, init_offset, *key)
         return cls.cache[code][key]
 
     @classmethod
@@ -312,7 +314,8 @@ class ContinueExecutionCache:
         cls,
         code: types.CodeType,
         lineno: int,
-        offset: int,
+        init_offset: int,
+        resume_offset: int,
         setup_fn_target_offsets: tuple[int, ...],  # only used in Python 3.11+
         nstack: int,
         argnames: tuple[str, ...],
@@ -326,7 +329,7 @@ class ContinueExecutionCache:
         # which prevents excessive recompilation of inner frames
         nested_code_objs: tuple[types.CodeType],
     ) -> types.CodeType:
-        assert offset is not None
+        assert resume_offset is not None
         assert not (
             code.co_flags
             & (CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR)
@@ -336,7 +339,8 @@ class ContinueExecutionCache:
             return cls.generate_based_on_original_code_object(
                 code,
                 lineno,
-                offset,
+                init_offset,
+                resume_offset,
                 setup_fn_target_offsets,
                 nstack,
                 argnames,
@@ -392,7 +396,7 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
-            target = next(i for i in instructions if i.offset == offset)
+            target = next(i for i in instructions if i.offset == resume_offset)
 
             prefix = []
             if is_py311_plus:
@@ -590,7 +594,8 @@ class ContinueExecutionCache:
         cls,
         code: types.CodeType,
         lineno: int,
-        offset: int,
+        init_offset: int,
+        resume_offset: int,
         setup_fn_target_offsets: tuple[int, ...],
         *args: Any,
     ) -> types.CodeType:
@@ -605,34 +610,42 @@ class ContinueExecutionCache:
         meta: ResumeFunctionMetadata = ContinueExecutionCache.generated_code_metadata[
             code
         ]
-        new_offset = -1
 
-        def find_new_offset(
-            instructions: list[Instruction], code_options: dict[str, Any]
-        ) -> None:
-            nonlocal new_offset
-            (target,) = (i for i in instructions if i.offset == offset)
-            # match the functions starting at the last instruction as we have added a prefix
-            (new_target,) = (
-                i2
-                for i1, i2 in zip(reversed(instructions), reversed(meta.instructions))
-                if i1 is target
-            )
-            assert target.opcode == new_target.opcode
-            assert new_target.offset is not None
-            new_offset = new_target.offset
+        def find_orig_offset(cur_offset: int) -> int:
+            orig_offset = -1
 
-        transform_code_object(code, find_new_offset)
-        assert new_offset >= 0
+            def find_orig_offset_transform(
+                instructions: list[Instruction], code_options: dict[str, Any]
+            ) -> None:
+                nonlocal orig_offset
+                (target,) = (i for i in instructions if i.offset == cur_offset)
+                # match the functions starting at the last instruction as we have added a prefix
+                (new_target,) = (
+                    i2
+                    for i1, i2 in zip(
+                        reversed(instructions), reversed(meta.instructions)
+                    )
+                    if i1 is target
+                )
+                assert target.opcode == new_target.opcode
+                assert new_target.offset is not None
+                orig_offset = new_target.offset
+
+            transform_code_object(code, find_orig_offset_transform)
+            assert orig_offset >= 0
+            return orig_offset
+
+        orig_init_offset = find_orig_offset(init_offset)
+        orig_resume_offset = find_orig_offset(resume_offset)
 
         if sys.version_info >= (3, 11):
             # setup_fn_target_offsets currently contains the target offset of
             # each setup_fn, based on `code`. When we codegen the resume function
             # based on the original code object, `meta.code`, the offsets in
             # setup_fn_target_offsets must be based on `meta.code` instead.
-            if new_offset not in meta.block_target_offset_remap:
+            if orig_init_offset not in meta.block_target_offset_remap:
                 block_target_offset_remap = meta.block_target_offset_remap[
-                    new_offset
+                    orig_init_offset
                 ] = {}
 
                 def remap_block_offsets(
@@ -681,9 +694,14 @@ class ContinueExecutionCache:
 
             # if offset is not in setup_fn_target_offsets, it is an error
             setup_fn_target_offsets = tuple(
-                meta.block_target_offset_remap[new_offset][n]
+                meta.block_target_offset_remap[orig_init_offset][n]
                 for n in setup_fn_target_offsets
             )
         return ContinueExecutionCache.lookup(
-            meta.code, lineno, new_offset, setup_fn_target_offsets, *args
+            meta.code,
+            lineno,
+            orig_init_offset,
+            orig_resume_offset,
+            setup_fn_target_offsets,
+            *args,
         )
