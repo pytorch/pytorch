@@ -270,10 +270,24 @@ namespace impl {
 template <c10::ScalarType N>
 struct ScalarTypeToCPPType;
 
-#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type) \
-  template <>                                                 \
-  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {  \
-    using type = cpp_type;                                    \
+#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type)                \
+  template <>                                                                \
+  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {                 \
+    using type = cpp_type;                                                   \
+                                                                             \
+    /* This is a workaround for the CUDA bug which prevents */               \
+    /* ::detail::ScalarTypeToCType<T>::type being used directly due to */    \
+    /* ambiguous reference which can't to be resolved. For some reason it */ \
+    /* can't pick between at::detail and at::cuda::detail. */                \
+    /* For repro example, please see: */                                     \
+    /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */    \
+    /* UPDATE: while the CUDA bug is fixed, we cannot remove the  */         \
+    /* workaround as it is BC breaking. However, it is recommended to  */    \
+    /* update any code that contains */                                      \
+    /*   decltype(ScalarTypeToCPPType<T>::t) */                              \
+    /* with */                                                               \
+    /*   ScalarTypeToCPPTypeT<T> */                                          \
+    static type t;                                                           \
   };
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
@@ -285,25 +299,6 @@ using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
 
 } // namespace impl
 
-inline const char* toString(ScalarType t) {
-#define DEFINE_CASE(_, name) \
-  case ScalarType::name:     \
-    return #name;
-
-  switch (t) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
-    default:
-      return "UNKNOWN_SCALAR";
-  }
-#undef DEFINE_CASE
-}
-
-inline std::ostream& operator<<(
-    std::ostream& stream,
-    at::ScalarType scalar_type) {
-  return stream << toString(scalar_type);
-}
-
 } // namespace c10
 
 namespace torch::headeronly {
@@ -314,6 +309,4 @@ using c10::ScalarType;
 namespace impl {
 using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
-using c10::toString;
-using c10::operator<<;
 } // namespace torch::headeronly
