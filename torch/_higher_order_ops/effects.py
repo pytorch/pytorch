@@ -32,6 +32,47 @@ SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
 )
 
 
+# Register synchronization functions as side-effectful on module load
+def _register_synchronize_effects():
+    """Register synchronization operations as side-effectful."""
+    try:
+        # Register torch.cuda.synchronize if available
+        import torch.cuda
+        if hasattr(torch.cuda, 'synchronize'):
+            # This won't work directly because torch.cuda.synchronize is not an OpOverload
+            # but we handle it in get_effect_key instead
+            pass
+            
+        # Try to register aten synchronize operations if they exist
+        sync_aten_ops = [
+            'aten._cuda_synchronize',
+            'aten._mps_synchronize', 
+            'aten._xpu_synchronize'
+        ]
+        
+        for op_path in sync_aten_ops:
+            try:
+                namespace, op_name = op_path.split('.', 1)
+                if hasattr(torch.ops, namespace):
+                    ns = getattr(torch.ops, namespace)
+                    if hasattr(ns, op_name):
+                        op_obj = getattr(ns, op_name)
+                        if hasattr(op_obj, 'default'):
+                            actual_op = op_obj.default
+                            if isinstance(actual_op, torch._ops.OpOverload):
+                                SIDE_EFFECTS[actual_op] = _EffectType.ORDERED
+            except Exception:
+                continue
+                
+    except Exception:
+        # If registration fails, the get_effect_key fallback will handle it
+        pass
+
+
+# Register synchronization effects on import
+_register_synchronize_effects()
+
+
 def _register_effectful_op(op: OpType, effect: _EffectType):
     assert isinstance(
         op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
@@ -115,6 +156,18 @@ def has_effects(op, args, kwargs) -> bool:
 def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     if op in SIDE_EFFECTS:
         return SIDE_EFFECTS[op]
+    
+    # Special handling for synchronization operations
+    if hasattr(op, '__name__'):
+        op_name = op.__name__
+        if any(sync_pattern in op_name for sync_pattern in ['synchronize', '_cuda_synchronize', '_mps_synchronize', '_xpu_synchronize']):
+            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            return _EffectType.ORDERED
+    
+    # Special handling for torch.cuda.synchronize function object
+    if op is torch.cuda.synchronize:
+        SIDE_EFFECTS[op] = _EffectType.ORDERED 
+        return _EffectType.ORDERED
 
     for arg in args:
         if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
