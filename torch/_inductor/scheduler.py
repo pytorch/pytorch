@@ -195,6 +195,8 @@ class MixOrderReduction:
             return False
         if not node1.is_gpu() or not node2.is_gpu():
             return False
+        if node1.get_device().type != "cuda" or config.cuda_backend != "triton":  # type: ignore[union-attr]
+            return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
 
