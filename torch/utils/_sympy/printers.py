@@ -34,7 +34,7 @@ class ExprPrinter(StrPrinter):
 
     def _print_BitwiseFn_bitwise_or(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " | ", PRECEDENCE["BitwiseOr"])
-    
+
     def _print_BitwiseFn_bitwise_xor(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " ^ ", PRECEDENCE["BitwiseXor"])
 
