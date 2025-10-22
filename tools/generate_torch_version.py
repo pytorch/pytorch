@@ -49,6 +49,14 @@ def get_tag(pytorch_root: str | Path) -> str:
         return UNKNOWN
 
 
+def normalize_hip_version(version_str: str | None) -> str | None:
+    """Normalize ROCm/HIP version to PEP 440 format by removing git hash suffix."""
+    if version_str is None or version_str == "":
+        return None
+    # Strip git hash (e.g., '6.4.43482-0f2d60242' -> '6.4.43482')
+    return version_str.split("-")[0]
+
+
 def get_torch_version(sha: str | None = None) -> str:
     """Determine the torch version string.
 
@@ -127,6 +135,9 @@ if __name__ == "__main__":
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
     args.hip_version = None if args.hip_version == "" else args.hip_version
     args.xpu_version = None if args.xpu_version == "" else args.xpu_version
+
+    # Normalize HIP version to be PEP 440 compliant
+    args.hip_version = normalize_hip_version(args.hip_version)
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
