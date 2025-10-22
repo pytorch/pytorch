@@ -4271,69 +4271,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return self.helper_functions.add(helper.getvalue(), base_name=helper_name)
 
-    def _lift_masked_helper(
-        self,
-        lifted_helper_name: str,
-        values: tuple[CSEVariable, ...],
-        dtypes: tuple[torch.dtype, ...],
-    ) -> str:
-        # Lift IR function for scan operations into a triton function
-        # in the global namespace
-        # This masked helper function invokes the already lifted_helper function and
-        # masks out wrong or off-limit results via tl.where
-        wrapper_fn_base_name = f"{lifted_helper_name}_mask"
-        wrapper_fn_helper = IndentedBuffer()
-        wrapper_fn_helper.writeline("@triton.jit")  # jit header
-        cse = CSE()
-
-        wrapper_args_masks = [
-            tuple(
-                (
-                    cse.namedvar(f"arg{i}_{n}", dtype=dtype, shape=value.shape),
-                    cse.namedvar(
-                        f"arg{i}_{n}_mask", dtype=torch.bool, shape=value.shape
-                    ),
-                )
-                for n, (value, dtype) in enumerate(zip(values, dtypes))
-            )
-            for i in range(2)
-        ]
-        wrapper_signature = ", ".join(
-            f"{str(x[0])}, {str(x[1])}"
-            for x in itertools.chain.from_iterable(wrapper_args_masks)
-        )
-        wrapper_fn_helper.writeline(
-            f"def {{name}}({wrapper_signature}):"
-        )  # function definition
-        with wrapper_fn_helper.indent():
-            combine_fn_signature = ", ".join(
-                str(x[0]) for x in itertools.chain.from_iterable(wrapper_args_masks)
-            )
-            result_vars = [
-                self.cse.newvar(dtype=dtype, shape=value.shape)
-                for (dtype, value) in zip(dtypes, values)
-            ]
-            result_vars_signature = ", ".join(str(x) for x in result_vars)
-            wrapper_fn_helper.writeline(
-                f"{result_vars_signature} = {lifted_helper_name}({combine_fn_signature})"
-            )  # call combine_fn
-
-            wrapper_masked_results = []
-            for (arg_a, mask_a), (arg_b, mask_b), res in zip(
-                wrapper_args_masks[:1][0], wrapper_args_masks[1:][0], result_vars
-            ):
-                wrapper_masked_results.append(
-                    f"tl.where(~{mask_a}, {arg_b}, tl.where(~{mask_b}, {arg_a}, {res})), {mask_b}"
-                )
-
-            wrapper_fn_helper.writeline(
-                "return " + ", ".join(wrapper_masked_results)
-            )  # return and masking
-
-        return self.helper_functions.add(
-            wrapper_fn_helper.getvalue(), base_name=wrapper_fn_base_name
-        )
-
     def scan(
         self,
         dtypes: tuple[torch.dtype, ...],
@@ -4359,16 +4296,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         cse_compute = functools.partial(self.cse.generate, self.compute)
         combine_helper_fn = self._lift_helper(combine_fn, values, dtypes)
-
-        assert len(masks) <= 2, (
-            "ops.scan currently only supports the case with 1 mask for all values"
-        )
-
-        if reverse and len(masks) == 2:
-            combine_helper_fn = self._lift_masked_helper(
-                combine_helper_fn, values, dtypes
-            )
-
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
         for value, dtype in zip(values, dtypes):
@@ -4385,15 +4312,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 shape=tuple(self.dense_size_list()),
             )
             broadcasted_values.append(value)
-
-            if reverse and len(masks) == 2:
-                value_mask = self.cse.generate(
-                    self.compute,
-                    f"tl.broadcast_to({masks[0]} & {masks[1]}, {self.dense_size_str()})",
-                    dtype=torch.bool,
-                    shape=tuple(self.dense_size_list()),
-                )
-                broadcasted_values.append(value_mask)
 
             acc_type = triton_acc_type(dtype)
 
@@ -4435,12 +4353,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn}, {reverse})",
             broadcasted_values,
             masks,
-            tuple(
-                x
-                for x in itertools.chain.from_iterable(
-                    (dt, torch.bool) for dt in dtypes
-                )
-            ),
+            dtypes,
         )
 
         if not self.persistent_reduction:
@@ -4486,11 +4399,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             assert isinstance(result_var, TritonCSEVariable)
             result_var.mask_vars = OrderedSet(masks)
 
-        if reverse and len(masks) == 2:
-            # TODO: Does this really work?
-            return tuple(result_vars[::2])
-        else:
-            return tuple(result_vars)
+        return tuple(result_vars)
 
     def sort(
         self,
