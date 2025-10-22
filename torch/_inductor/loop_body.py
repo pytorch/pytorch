@@ -479,8 +479,8 @@ class LoopBody:
         return set_indirect
 
     def bind_scan_shim(self, combine_fn):
-        def shim(dtypes, values, reverse):
-            return V.ops.scan(dtypes, combine_fn, values, reverse)
+        def shim(dtypes, values):
+            return V.ops.scan(dtypes, combine_fn, values)
 
         shim.clone = functools.partial(LoopBody.bind_scan_shim, combine_fn=combine_fn)  # type: ignore[attr-defined]
         return shim
@@ -697,14 +697,13 @@ class CaptureIndexing(WrapperHandler):
         dtype_proxy,
         combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
         value_proxy,
-        reverse_proxy,
     ):
         shim = self.body.bind_scan_shim(combine_fn)
         name = self.body.add_submodule(shim, "scan")
         result = self.tracer.create_proxy(
             "call_module",
             name,
-            (dtype_proxy, value_proxy, reverse_proxy),
+            (dtype_proxy, value_proxy),
             {},
         )
         # Proxies are iterable, but some methods expect tuples/lists

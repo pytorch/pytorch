@@ -2355,7 +2355,7 @@ class Scan(Loops):
     ) -> Any:
         idx = self.reindex(vars, scan_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        result = ops.scan(self.dtypes, self.combine_fn, values, self.reverse)
+        result = ops.scan(self.dtypes, self.combine_fn, values)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
         )

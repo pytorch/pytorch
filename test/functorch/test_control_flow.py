@@ -4194,9 +4194,9 @@ class GraphModule(torch.nn.Module):
 
         interleaved_5: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_4, 0, 0, 3);  interleaved_4 = None
 
-        child_17: "f32[3, 10, 2]" = torch.flip(interleaved_1, [0]);  interleaved_1 = None
-        child_18: "f32[3, 10, 2]" = torch.flip(interleaved_3, [0]);  interleaved_3 = None
-        child_19: "f32[3, 10, 2]" = torch.flip(interleaved_5, [0]);  interleaved_5 = None
+        child_17: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
+        child_18: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
+        child_19: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
 
         movedim_3: "f32[3, 10, 2]" = torch.movedim(child_17, 0, 0);  child_17 = None
         movedim_4: "f32[3, 10, 2]" = torch.movedim(child_18, 0, 0);  child_18 = None

@@ -4341,7 +4341,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
         values: tuple[CSEVariable, ...],
-        reverse: bool = False,
     ) -> tuple[CSEVariable, ...]:
         """
         Perform an associative scan on 'values'.
@@ -4363,8 +4362,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         assert len(masks) <= 2, (
             "ops.scan currently only supports the case with 1 mask for all values"
         )
+        
+        use_result_masking = len(masks) == 2
 
-        if reverse and len(masks) == 2:
+        # TODO: Currently masking is used by default.
+        # However, masking may not always be needed:
+        # For example, if the size of the inputs aligns with the XBLOCK and RBLOCK
+        # i.e., there are no ``other`` values loaded with tl.load
+        if use_result_masking:
             combine_helper_fn = self._lift_masked_helper(
                 combine_helper_fn, values, dtypes
             )
@@ -4386,7 +4391,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             broadcasted_values.append(value)
 
-            if reverse and len(masks) == 2:
+            if use_result_masking:
+                # TODO: This is not be needed if the masking is not used
                 value_mask = self.cse.generate(
                     self.compute,
                     f"tl.broadcast_to({masks[0]} & {masks[1]}, {self.dense_size_str()})",
@@ -4432,7 +4438,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return tuple(result_vars)
 
         partial_scan_vars = cse_multiple(
-            f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn}, {reverse})",
+            f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
             broadcasted_values,
             masks,
             tuple(
@@ -4486,8 +4492,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             assert isinstance(result_var, TritonCSEVariable)
             result_var.mask_vars = OrderedSet(masks)
 
-        if reverse and len(masks) == 2:
-            # TODO: Does this really work?
+        if use_result_masking:
             return tuple(result_vars[::2])
         else:
             return tuple(result_vars)
