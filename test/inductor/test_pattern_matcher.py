@@ -469,7 +469,6 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_gating(self):

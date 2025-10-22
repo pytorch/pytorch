@@ -5919,6 +5919,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    @skipIfXpu(msg="Currently Profiling not enabled on XPU CI builds")
     @requires_gpu
     def test_d2h_copy(self):
         # device to copy host should always have the same stride
