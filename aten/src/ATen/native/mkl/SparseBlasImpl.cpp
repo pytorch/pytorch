@@ -131,10 +131,10 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   auto col_indices = input.col_indices();
   auto input_values = input.values();
 
-  // NB: When nnz is zero it is possible that input_values.data_ptr<scalar_t> is
+  // NB: When nnz is zero it is possible that input_values.mutable_data_ptr<scalar_t> is
   // a nullptr, if input was created via empty. As such we need to check that
   // nnz is not zero to avoid passing nullptr to std::memcpy. We will apply
-  // the same precautions to crow_indices.data_ptr<MKL_INT>.
+  // the same precautions to crow_indices.mutable_data_ptr<MKL_INT>.
   //
   // Otherwise ASAN will complain.
 
@@ -262,7 +262,7 @@ void addmm_sparse_input_dense_result(
             mkl_A.descriptor(),
             mkl_B.descriptor(),
             order,
-            C_.data_ptr<scalar_t>(),
+            C_.mutable_data_ptr<scalar_t>(),
             ldc);
       });
 

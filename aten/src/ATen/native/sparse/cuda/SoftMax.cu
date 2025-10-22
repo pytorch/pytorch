@@ -250,7 +250,7 @@ Tensor get_offsets(
     }
   }
   auto strides = at::empty({ndim}, indices.options());
-  auto strides_ptr = strides.data_ptr<int64_t>();
+  auto strides_ptr = strides.mutable_data_ptr<int64_t>();
 
   AT_CUDA_CHECK(cudaMemcpyAsync(
           strides_ptr, host_strides.data(), host_strides.size() * sizeof(int64_t),
@@ -265,7 +265,7 @@ Tensor get_offsets(
       policy,
       thrust::make_counting_iterator(int64_t(0)),
       thrust::make_counting_iterator(int64_t(nnz)),
-      thrust::device_ptr<int64_t>(offsets.data_ptr<int64_t>()),
+      thrust::device_ptr<int64_t>(offsets.mutable_data_ptr<int64_t>()),
       [indices_accessor, strides_ptr, dim, ndim] __device__(int64_t x) {
         int64_t pool_index = 0;
         for (int64_t j = 0; j < ndim; j++) {
@@ -301,10 +301,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
   auto nnz = indices.size(1);
   auto offsets = get_offsets(indices, sizes, dim);
-  int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t* offsets_ptr = offsets.mutable_data_ptr<int64_t>();
 
   auto sorted_indices = at::empty({nnz}, indices.options());
-  thrust_ptr sorted_indices_thrust_ptr(sorted_indices.data_ptr<int64_t>());
+  thrust_ptr sorted_indices_thrust_ptr(sorted_indices.mutable_data_ptr<int64_t>());
   thrust::sequence(
       policy, sorted_indices_thrust_ptr, sorted_indices_thrust_ptr + nnz, 0);
 
@@ -323,17 +323,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
       sorted_indices_thrust_ptr + nnz,
       thrust::make_constant_iterator(int64_t(1)),
       thrust::make_discard_iterator(),
-      thrust_ptr(pool_sizes.data_ptr<int64_t>()),
+      thrust_ptr(pool_sizes.mutable_data_ptr<int64_t>()),
       [offsets_ptr] __device__(int64_t x, int64_t y) {
         return offsets_ptr[x] == offsets_ptr[y];
       });
   auto new_sz = thrust::distance(
-      thrust_ptr(pool_sizes.data_ptr<int64_t>()), new_end.second);
+      thrust_ptr(pool_sizes.mutable_data_ptr<int64_t>()), new_end.second);
   pool_sizes.resize_({new_sz});
 
   auto pool_offsets = pool_sizes.clone();
   thrust_ptr pool_offsets_thrust_ptr(
-      pool_offsets.data_ptr<int64_t>());
+      pool_offsets.mutable_data_ptr<int64_t>());
   thrust::exclusive_scan(
       policy,
       pool_offsets_thrust_ptr,
@@ -348,11 +348,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
     mx_buffer = at::full({new_sz * nvalues}, Scalar(-std::numeric_limits<scalar_t>::infinity()), values.options());
 
-    auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
+    auto mx_buffer_ptr = mx_buffer.mutable_data_ptr<scalar_t>();
 
-    auto pool_sizes_ptr = pool_sizes.data_ptr<int64_t>();
-    auto sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
-    auto pool_offsets_ptr = pool_offsets.data_ptr<int64_t>();
+    auto pool_sizes_ptr = pool_sizes.mutable_data_ptr<int64_t>();
+    auto sorted_indices_ptr = sorted_indices.mutable_data_ptr<int64_t>();
+    auto pool_offsets_ptr = pool_offsets.mutable_data_ptr<int64_t>();
 
     thrust::for_each(
         policy,
@@ -501,8 +501,8 @@ void cuda_sparse_coo_softmax_backward(
           out_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
       auto host_grad_offsets =
           grad_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
-      auto out_offsets_accessor = host_out_offsets.data_ptr<int64_t>();
-      auto grad_offsets_accessor = host_grad_offsets.data_ptr<int64_t>();
+      auto out_offsets_accessor = host_out_offsets.mutable_data_ptr<int64_t>();
+      auto grad_offsets_accessor = host_grad_offsets.mutable_data_ptr<int64_t>();
       for (int64_t i = 0; i < out_nnz; i++) {
         auto low = thrust::lower_bound(
             grad_offsets_accessor,
@@ -546,11 +546,11 @@ void cuda_sparse_coo_softmax_backward(
 
   thrust::lower_bound(
       policy,
-      thrust_ptr(grad_offsets.data_ptr<int64_t>()),
-      thrust_ptr(grad_offsets.data_ptr<int64_t>() + grad_offsets.size(0)),
-      thrust_ptr(out_offsets.data_ptr<int64_t>()),
-      thrust_ptr(out_offsets.data_ptr<int64_t>()) + out_offsets.size(0),
-      thrust_ptr(lower_bound_values.data_ptr<int64_t>()));
+      thrust_ptr(grad_offsets.mutable_data_ptr<int64_t>()),
+      thrust_ptr(grad_offsets.mutable_data_ptr<int64_t>() + grad_offsets.size(0)),
+      thrust_ptr(out_offsets.mutable_data_ptr<int64_t>()),
+      thrust_ptr(out_offsets.mutable_data_ptr<int64_t>()) + out_offsets.size(0),
+      thrust_ptr(lower_bound_values.mutable_data_ptr<int64_t>()));
 
   /* Compute independent pools of indices */
   auto [
@@ -572,9 +572,9 @@ void cuda_sparse_coo_softmax_backward(
             pool_offsets.template data_ptr<int64_t>(),
             nvalues,
             grad_nnz,
-            grad_offsets.data_ptr<int64_t>(),
-            out_offsets.data_ptr<int64_t>(),
-            lower_bound_values.data_ptr<int64_t>(),
+            grad_offsets.mutable_data_ptr<int64_t>(),
+            out_offsets.mutable_data_ptr<int64_t>(),
+            lower_bound_values.mutable_data_ptr<int64_t>(),
             values_accessor,
             out_values_accessor,
             grad_values_accessor);
