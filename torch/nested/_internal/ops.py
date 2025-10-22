@@ -2003,10 +2003,7 @@ def index_put_(func, *args, **kwargs):
     # We can run on the underlying values directly
 
     # Validate indices
-    if inp.lengths() is None:
-        lengths = inp.offsets().diff()
-    else:
-        lengths = inp.lengths()
+    lengths = inp.lengths()
     torch._assert_async(
         # pyrefly: ignore  # no-matching-overload
         torch.all(indices[inp._ragged_idx] < lengths),
