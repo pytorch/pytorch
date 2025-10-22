@@ -44,11 +44,11 @@ class Performance:
 
 
 class BenchmarkKernel:
-    def __init__(self, script_args, compile_mode: str = "max-autotune-no-cudagraphs"):
+    def __init__(self, script_args):
         self.script_args = script_args
         self.name = self.__class__.__name__
         self.available_backends: list[str] = []
-        self.compile_mode: str = compile_mode
+        self.compile_mode: str = script_args.compile_mode
 
         # mapping from backend to list of performance results
         self.profiling_results: defaultdict[str, list[Performance]] = defaultdict(list)

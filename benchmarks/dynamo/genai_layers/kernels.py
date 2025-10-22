@@ -9,8 +9,8 @@ import torch.nn.functional as F
 
 
 class CrossEntropyForward(BenchmarkKernel):
-    def __init__(self, args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -106,8 +106,8 @@ class CrossEntropyForward(BenchmarkKernel):
 
 
 class CrossEntropyBackward(BenchmarkKernel):
-    def __init__(self, args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -194,8 +194,8 @@ class CrossEntropyBackward(BenchmarkKernel):
 
 
 class SoftmaxForward(BenchmarkKernel):
-    def __init__(self, args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -259,8 +259,8 @@ class SoftmaxForward(BenchmarkKernel):
 
 
 class SoftmaxBackward(BenchmarkKernel):
-    def __init__(self, args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -329,8 +329,8 @@ class SoftmaxBackward(BenchmarkKernel):
 
 
 class RMSNormForward(BenchmarkKernel):
-    def __init__(self, args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -419,8 +419,8 @@ class RMSNormForward(BenchmarkKernel):
 
 
 class RMSNormBackward(BenchmarkKernel):
-    def __init__(self, script_args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(script_args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = [
             "eager",
             "compiled",
@@ -537,8 +537,8 @@ class RMSNormBackward(BenchmarkKernel):
 
 
 class LayerNormForward(BenchmarkKernel):
-    def __init__(self, args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -611,8 +611,8 @@ class LayerNormForward(BenchmarkKernel):
 
 
 class LayerNormBackward(BenchmarkKernel):
-    def __init__(self, args, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(args, compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:

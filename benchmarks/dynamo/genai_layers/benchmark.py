@@ -58,9 +58,7 @@ def list_benchmarks():
 
 def run_benchmark(
     benchmark_name: str,
-    args,
-    should_visualize: bool = False,
-    compile_mode: str = "max-autotune-no-cudagraphs",
+    script_args,
 ):
     """Run a specific benchmark."""
     if benchmark_name not in BENCHMARK_REGISTRY:
@@ -69,31 +67,29 @@ def run_benchmark(
         return False
 
     print(f"Running benchmark: {benchmark_name}")
-    print(f"Torch compile mode: {compile_mode}")
+    print(f"Torch compile mode: {script_args.compile_mode}")
     print("=" * 60)
 
     benchmark_class = BENCHMARK_REGISTRY[benchmark_name]
-    benchmark = benchmark_class(args, compile_mode)
+    benchmark = benchmark_class(script_args)
     benchmark.benchmark()
-    if should_visualize:
+    if script_args.visualize:
         benchmark.visualize()
 
     return True
 
 
-def run_all_benchmarks(
-    args, should_visualize: bool = False, compile_mode: str = "default"
-):
+def run_all_benchmarks(script_args):
     """Run all available benchmarks."""
     print("Running all benchmarks...")
-    print(f"Torch compile mode: {compile_mode}")
+    print(f"Torch compile mode: {script_args.compile_mode}")
     print("=" * 60)
 
     for name, cls in BENCHMARK_REGISTRY.items():
         print(f"\n{'=' * 20} {name.upper()} {'=' * 20}")
-        benchmark = cls(args, compile_mode)
+        benchmark = cls(script_args)
         benchmark.benchmark()
-        if should_visualize:
+        if script_args.visualize:
             benchmark.visualize()
         print()
 
@@ -162,7 +158,7 @@ Examples:
 
     # Handle all option
     if args.all:
-        run_all_benchmarks(args, args.visualize, args.compile_mode)
+        run_all_benchmarks(args)
         return
 
     # Handle specific benchmarks
@@ -173,7 +169,7 @@ Examples:
         sys.exit(1)
 
     for benchmark_name in args.benchmarks:
-        run_benchmark(benchmark_name, args, args.visualize, args.compile_mode)
+        run_benchmark(benchmark_name, args)
         print()  # Add spacing between benchmarks
 
 
