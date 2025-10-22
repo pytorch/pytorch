@@ -2120,7 +2120,6 @@ class TestTorchDeviceType(TestCase):
 
 
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
-    @skipIfMPS
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
