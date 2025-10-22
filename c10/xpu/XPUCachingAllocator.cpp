@@ -20,8 +20,6 @@ constexpr size_t kMinBlockSize = 512;
 constexpr size_t kSmallSize = 1048576;
 // "small" allocations are packed in 2 MiB blocks
 constexpr size_t kSmallBuffer = 2097152;
-// "large" allocations may be packed in 20 MiB blocks
-constexpr size_t kLargeBuffer = 20971520;
 // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kMinLargeAlloc = 10485760;
 // round up large allocations to 2 MiB
@@ -435,6 +433,18 @@ class DeviceCachingAllocator {
       c10::xpu::DeviceProp device_prop;
       c10::xpu::get_device_properties(&device_prop, device);
       auto device_total = device_prop.global_mem_size;
+      // Estimate the available device memory when the SYCL runtime does not
+      // support the corresponding aspect (ext_intel_free_memory).
+      size_t device_free = device_prop.global_mem_size -
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto& raw_device = c10::xpu::get_raw_device(device);
+      // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
+      // affected devices.
+      if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
+        device_free =
+            raw_device.get_info<sycl::ext::intel::info::device::free_memory>();
+      }
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
@@ -457,7 +467,9 @@ class DeviceCachingAllocator {
           static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
-          ". Of the allocated memory ",
+          " of which ",
+          format_size(device_free),
+          " is free. Of the allocated memory ",
           format_size(allocated_bytes),
           " is allocated by PyTorch, and ",
           format_size(reserved_bytes - allocated_bytes),
@@ -542,7 +554,7 @@ static void local_raw_delete(void* ptr);
 
 class XPUAllocator : public DeviceAllocator {
  private:
-  std::mutex mutex;
+  alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
 
   void add_allocated_block(Block* block) {
