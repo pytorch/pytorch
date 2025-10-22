@@ -2431,6 +2431,12 @@ def triton_config_reduction(
         else:
             num_warps = total_numel() // 128
 
+    # Workaround here since less warp causes register spills on XPU.
+    # TODO: remove this workaround after https://github.com/intel/intel-xpu-backend-for-triton/issues/5367
+    # resolved.
+    if torch.xpu.is_available():
+        num_warps = total_numel() // 128
+
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
         num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
