@@ -70,11 +70,7 @@
 #define ATEN_CUB_MAXIMUM() NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max()
 #endif
 
-#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)
-
-#if !defined(USE_ROCM)
-namespace at_cuda_detail {
-#endif
+#if defined(USE_ROCM)
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
@@ -95,10 +91,6 @@ struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 template <>
 struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
        ROCM_HIPCUB(cub)::BaseTraits<ROCM_HIPCUB(cub)::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-
-#if !defined(USE_ROCM)
-} // namespace at_cuda_detail
-#endif
 
 #endif
 
@@ -121,7 +113,7 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if !defined(USE_ROCM) && CUB_SUPPORTS_NV_BFLOAT16()
+#if !defined(USE_ROCM)
 
 template<>
 struct cuda_type<c10::BFloat16> {
@@ -203,36 +195,6 @@ __global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputItera
   *out = scan_op(static_cast<acc_t>(*a), static_cast<acc_t>(*b));
 }
 
-#if !CUB_SUPPORTS_FUTURE_VALUE()
-template<typename ValueT, typename InputIteratorT>
-struct chained_iterator {
-  using iterator_category = std::random_access_iterator_tag;
-  using difference_type   = std::ptrdiff_t;
-  using value_type        = ValueT;
-  using pointer           = ValueT*;
-  using reference         = ValueT&;
-
-  InputIteratorT iter;
-  ValueT *first;
-  difference_type offset = 0;
-
-  __device__ ValueT operator[](difference_type i) {
-    i +=  offset;
-    if (i == 0) {
-      return *first;
-    } else {
-      return ValueT(iter[i - 1]);
-    }
-  }
-  __device__ chained_iterator operator+(difference_type i) {
-    return chained_iterator{iter, first, i};
-  }
-  __device__ ValueT operator*() {
-    return (*this)[0];
-  }
-};
-#endif
-
 // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
 // so split at int_max/2
 constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
@@ -277,25 +239,6 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-#if !CUB_SUPPORTS_FUTURE_VALUE()
-    using ArgIndexInputIterator = NO_ROCM(at_cuda_detail)::cub::ArgIndexInputIterator<InputIteratorT>;
-    using tuple = typename ArgIndexInputIterator::value_type;
-    auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
-      if (x.key == 0) {
-        return *first_elem_ptr;
-      } else {
-        return x.value;
-      }
-    };
-    auto input_ = ATEN_CUB_TRANSFORM_ITERATOR(input_t, decltype(input_iter_transform), ArgIndexInputIterator)(
-      ArgIndexInputIterator(input + i), input_iter_transform);
-    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
-        input_,
-        output + i,
-        scan_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream());
-#else
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
         input + i + 1,
         output + i,
@@ -303,7 +246,6 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         ::at_cuda_detail::cub::FutureValue<input_t>(first_elem_ptr),
         size_cub,
         at::cuda::getCurrentCUDAStream());
-#endif
   }
 #endif
 }
@@ -555,16 +497,6 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-#if !CUB_SUPPORTS_FUTURE_VALUE()
-    auto input_ = impl::chained_iterator<InitValueT, InputIteratorT>{
-      input + i, first_elem_ptr};
-    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
-        input_,
-        output + i,
-        scan_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream());
-#else
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
         input + i,
         output + i,
@@ -572,7 +504,6 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         ::at_cuda_detail::cub::FutureValue<InitValueT>(first_elem_ptr),
         size_cub,
         at::cuda::getCurrentCUDAStream());
-#endif
   }
 #endif
 }
