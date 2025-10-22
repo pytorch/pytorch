@@ -697,7 +697,9 @@ class CodeGen:
                     # use str over repr since repr is susceptible to sympy
                     # errors such as "cannot determine truth value of Relational"
                     # Pretty print the high-level dict with str() for values
-                    body.append(f"{k}: {pprint.pformat(str(v), width=80, compact=True)}\n")
+                    body.append(
+                        f"{k}: {pprint.pformat(str(v), width=80, compact=True)}\n"
+                    )
                 body.append('"""\n')
 
             if node.op == "placeholder":
