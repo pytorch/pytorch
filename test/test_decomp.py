@@ -945,7 +945,7 @@ def forward(self, scores_1, mask_1, value_1):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and not dtype == torch.complex32
+            and dtype != torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
@@ -1258,10 +1258,11 @@ class DecompOneOffTests(TestCase):
         )
 
         # check RMSNorm was fused with sinh
-        self.assertTrue("triton_per_fused__fused_rms_norm_sinh" in generated_codes[0])
         self.assertTrue(
-            "triton_per_fused__fused_rms_norm__fused_rms_norm_backward_cosh_mul"
-            in generated_codes[1]
+            "triton_per_fused_add_mean_mul_pow_rsqrt_sinh" in generated_codes[0]
+        )
+        self.assertTrue(
+            "triton_per_fused__fused_rms_norm_backward_cosh_mul" in generated_codes[1]
         )
 
 
