@@ -6915,6 +6915,48 @@ class AOTInductorTestsTemplate:
             )
 
     @skipIfRocm  # RoCM does not support the config block size in test suite.
+    def test_triton_autotuning_full_graph(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, m):
+                _M, K = x.shape
+                K, N = y.shape
+                M = torch.abs(m)
+                out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
+                grid = lambda META: (  # noqa: E731
+                    triton.cdiv(
+                        4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
+                    ),
+                )
+                strange_config_matmul_kernel[grid](
+                    x,
+                    y,
+                    out,
+                    M,
+                    N,
+                    K,
+                )
+                return out
+
+        x = torch.randn(4096, 1024, device=self.device)
+        y = torch.randn(1024, 2048, device=self.device)
+        m = torch.tensor([4096], dtype=torch.int32, device=self.device)
+
+        with config.patch(
+            {
+                "triton.autotune_with_sample_inputs": False,
+                "triton.autotune_full_graph": True,
+            }
+        ):
+            # The tuned best config on XPU is different with CUDA.
+            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            self.code_check_count(
+                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+            )
+
+    @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7662,6 +7704,7 @@ MPS_TEST_FAILURES = {
     # MPS doesn't support triton
     "test_autotuning_args_reuse": fail_mps(),
     "test_triton_autotuning": fail_mps(),
+    "test_triton_autotuning_full_graph": fail_mps(),
     "test_triton_dynamic_launcher_grid": fail_mps(),
     "test_triton_dynamic_launcher_grid_infer_from_tensor": fail_mps(),
     "test_triton_kernel_on_device_tma_dynamic_False_tma_version_new": fail_mps(),

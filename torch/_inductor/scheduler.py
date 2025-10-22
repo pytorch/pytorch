@@ -5479,74 +5479,102 @@ class Scheduler:
                         node.get_name(),
                     )
 
-            self.enter_context(node)
+            current_device = self.current_device
+            buffer_names_to_free = OrderedSet(self.buffer_names_to_free)
+            available_buffer_names = OrderedSet(self.available_buffer_names)
+            completed_operations = OrderedSet(self.completed_operations)
 
-            if device := node.get_device():
-                if (
-                    device != self.current_device
-                    or node.is_extern()
-                    or node.is_template()
-                ):
-                    self.flush()
-                if device != self.current_device:
-                    if self.current_device and device_need_guard(
-                        self.current_device.type
+            def wrap_codegen_node(w, *args, **kwargs):  # type: ignore[no-untyped-def]
+                self.enter_context(node)
+
+                curr_node = node
+                self.current_device = kwargs["current_device"]
+                self.buffer_names_to_free = OrderedSet(kwargs["buffer_names_to_free"])
+                self.available_buffer_names = OrderedSet(
+                    kwargs["available_buffer_names"]
+                )
+                self.completed_operations = OrderedSet(kwargs["completed_operations"])
+
+                if device := node.get_device():
+                    if (
+                        device != self.current_device
+                        or node.is_extern()
+                        or node.is_template()
                     ):
-                        V.graph.wrapper_code.codegen_device_guard_exit()
-                    self.current_device = device
-                    if device_need_guard(device.type):
-                        assert device.index is not None, "device should have an index"
-                        V.graph.wrapper_code.codegen_device_guard_enter(device.index)
+                        self.flush()
+                    if device != self.current_device:
+                        if self.current_device and device_need_guard(
+                            self.current_device.type
+                        ):
+                            w.codegen_device_guard_exit()
+                        self.current_device = device
+                        if device_need_guard(device.type):
+                            assert device.index is not None, (
+                                "device should have an index"
+                            )
+                            w.codegen_device_guard_enter(device.index)
 
-            self.current_node = node
-            self.buffer_names_to_free.update(node.last_usage)
+                self.current_node = node
+                self.buffer_names_to_free.update(node.last_usage)
+                if node.is_template():
+                    prologue, template_node, epilogue = (
+                        node.get_prologue_template_epilogue(list(node.get_nodes()))
+                    )
+                    # pyrefly: ignore  # unbound-name
+                    self.get_backend(device).codegen_template(
+                        template_node, epilogue, prologue
+                    )
+                elif node.is_extern():
+                    curr_node = typing.cast(ExternKernelSchedulerNode, curr_node)
+                    self.codegen_extern_call(curr_node)
+                elif node.is_foreach():
+                    curr_node = typing.cast(ForeachKernelSchedulerNode, curr_node)
+                    # pyrefly: ignore  # unbound-name
+                    backend_ = self.get_backend(device)
+                    from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
+                    from .codegen.simd import SIMDScheduling
 
-            if node.is_template():
-                prologue, template_node, epilogue = node.get_prologue_template_epilogue(
-                    list(node.get_nodes())
-                )
-                # pyrefly: ignore  # unbound-name
-                self.get_backend(device).codegen_template(
-                    template_node, epilogue, prologue
-                )
-            elif node.is_extern():
-                node = typing.cast(ExternKernelSchedulerNode, node)
-                self.codegen_extern_call(node)
-            elif node.is_foreach():
-                node = typing.cast(ForeachKernelSchedulerNode, node)
-                # pyrefly: ignore  # unbound-name
-                backend_ = self.get_backend(device)
-                from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
-                from .codegen.simd import SIMDScheduling
-
-                if isinstance(backend_, (SIMDScheduling, CUDACombinedScheduling)):
-                    backend = backend_
+                    if isinstance(backend_, (SIMDScheduling, CUDACombinedScheduling)):
+                        backend = backend_
+                    else:
+                        raise AssertionError(f"{type(self)=}")
+                    backend.codegen_combo_kernel(node)
+                elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
+                    # pyrefly: ignore  # unbound-name
+                    self.get_backend(device).codegen_node(node)
                 else:
-                    raise AssertionError(f"{type(self)=}")
-                backend.codegen_combo_kernel(node)
-            elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
+                    assert isinstance(node, NopKernelSchedulerNode)
+                    curr_node.mark_run()
+
                 # pyrefly: ignore  # unbound-name
-                self.get_backend(device).codegen_node(node)
+                if config.triton.debug_sync_kernel:
+                    # pyrefly: ignore  # unbound-name
+                    self.get_backend(device).codegen_sync()
+
+                self.available_buffer_names.update(curr_node.get_buffer_names())
+                self.completed_operations.update(curr_node.get_operation_names())
+
+                if not isinstance(node, NopKernelSchedulerNode):
+                    device = node.get_device()
+                    if (
+                        device is not None
+                        and device.type != "meta"
+                        and self.get_backend(device).ready_to_flush()
+                    ):
+                        self.flush()
+
+            from .codegen.wrapper import DualWrapperCodegen
+
+            states = {
+                "current_device": current_device,
+                "buffer_names_to_free": buffer_names_to_free,
+                "available_buffer_names": available_buffer_names,
+                "completed_operations": completed_operations,
+            }
+            if isinstance(V.graph.wrapper_code, DualWrapperCodegen):
+                V.graph.wrapper_code.for_each_wrapper(wrap_codegen_node, **states)
             else:
-                assert isinstance(node, NopKernelSchedulerNode)
-                node.mark_run()
-
-            # pyrefly: ignore  # unbound-name
-            if config.triton.debug_sync_kernel:
-                # pyrefly: ignore  # unbound-name
-                self.get_backend(device).codegen_sync()
-
-            self.available_buffer_names.update(node.get_buffer_names())
-            self.completed_operations.update(node.get_operation_names())
-
-            if not isinstance(node, NopKernelSchedulerNode):
-                device = node.get_device()
-                if (
-                    device is not None
-                    and device.type != "meta"
-                    and self.get_backend(device).ready_to_flush()
-                ):
-                    self.flush()
+                wrap_codegen_node(V.graph.wrapper_code, **states)
 
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen

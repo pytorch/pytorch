@@ -60,6 +60,7 @@ from .codegen.common import (
     init_backend_registration,
     WorkspaceArg,
 )
+from .codegen.wrapper import DualWrapperCodegen
 from .exc import (
     CppWrapperCodegenError,
     LoweringException,
@@ -342,6 +343,7 @@ class GraphLowering(torch.fx.Interpreter):
         name: Optional[str] = None,
         inputs_to_check: Optional[Sequence[int]] = None,
         fx_wrapper: bool = False,
+        use_dual_wrapper: bool = False,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -425,6 +427,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
+        self.autotuning_wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
 
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 
@@ -445,6 +448,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
         self.fx_wrapper = fx_wrapper
+        self.use_dual_wrapper = use_dual_wrapper
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
@@ -2091,8 +2095,51 @@ class GraphLowering(torch.fx.Interpreter):
             partition_signatures,
         )
 
+        # We do not need tuning code for Triton if only_cpu is True.
+        if only_cpu:
+            self.use_dual_wrapper = False
+
+        # Create autotuning_wrapper_code for full graph autotuning if needed
+        if self.use_dual_wrapper:
+            if self.cpp_wrapper:
+                # If we're using cpp wrapper, create a separate Python wrapper for autotuning
+                python_wrapper_code_gen_cls = get_wrapper_codegen_for_device(
+                    self.device_type, cpp_wrapper=False, fx_wrapper=self.fx_wrapper
+                )
+                assert python_wrapper_code_gen_cls is not None, (
+                    f"Python wrapper for device {self.device_type} not supported"
+                )
+                self.autotuning_wrapper_code = python_wrapper_code_gen_cls.create(
+                    is_subgraph,
+                    subgraph_name,
+                    parent_wrapper_code,
+                    partition_signatures,
+                )
+            else:
+                # If we're already using Python wrapper, create a copy for autotuning
+                self.autotuning_wrapper_code = wrapper_code_gen_cls.create(
+                    is_subgraph,
+                    subgraph_name,
+                    parent_wrapper_code,
+                    partition_signatures,
+                )
+
+            original_wrapper_code = self.wrapper_code
+            dual_wrapper = DualWrapperCodegen(
+                original_wrapper_code, self.autotuning_wrapper_code
+            )
+            self.wrapper_code = dual_wrapper  # type: ignore[assignment]
+
         if self.const_module:
-            self.wrapper_code._names_iter = self.const_module.wrapper_code._names_iter
+            wrapper = self.wrapper_code
+            if isinstance(wrapper, DualWrapperCodegen):
+                # DualWrapperCodegen case
+                start = next(self.const_module.wrapper_code._names_iter)
+                wrapper.original_wrapper_code._names_iter = itertools.count(start)  # type: ignore[attr-defined]
+                wrapper.autotuning_wrapper_code._names_iter = itertools.count(start)  # type: ignore[attr-defined]
+            else:
+                # Regular wrapper case
+                wrapper._names_iter = self.const_module.wrapper_code._names_iter
 
     def extract_autotune_inputs(
         self, example_inputs: list[Union[int, float, torch.Tensor]]
@@ -2189,6 +2236,73 @@ class GraphLowering(torch.fx.Interpreter):
         self.autotuning_inputs = returned_outputs[: len(kwargs_inputs)]
         self.autotuning_mapping = triton_inputs
 
+    def extract_real_inputs(self) -> list[Union[int, float, torch.Tensor]]:
+        def materialize(
+            x: Union[torch.SymInt, torch.SymFloat, torch.Tensor],
+        ) -> Union[int, float, torch.Tensor]:
+            if x is None:
+                # pyrefly: ignore  # bad-return
+                return None
+            elif isinstance(x, (torch.SymInt, torch.SymFloat)):
+                # Need concrete value to run dynamic shapes and tune the result
+                return x.node.hint
+            elif isinstance(x, FakeTensor):
+                return defake(x)
+            else:
+                assert isinstance(x, torch.Tensor), (
+                    "Unknown type when creating real inputs" + str(type(x))
+                )
+                return x
+
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context is not None and not isinstance(V.real_inputs, NullHandler):
+            if tracing_context.output_strides:
+                tracing_context.output_strides.clear()
+
+            params_flat = [
+                param
+                for param in tracing_context.params_flat  # type: ignore[union-attr]
+                if param is not None
+            ]
+            real_inputs = [
+                materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+            ]
+        else:
+            # In the backward pass, V.real_inputs is not OrderedSet.
+            # Generating random inputs based on self.example_inputs sometimes can be problematic,
+            # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
+            real_inputs = [
+                materialize(x)  # type:ignore[arg-type]
+                for x in (
+                    self.example_inputs  # type:ignore[union-attr]
+                    if isinstance(V.real_inputs, NullHandler)
+                    else V.real_inputs
+                )
+            ]
+
+        if self.mutated_inputs:
+            from .compile_fx import clone_preserve_strides
+
+            mutated_input_idxs = [
+                idx
+                for idx, name in enumerate(self.graph_inputs)
+                if name in self.mutated_inputs
+                and isinstance(real_inputs[idx], torch.Tensor)
+            ]
+            for idx in mutated_input_idxs:
+                # clone mutated Tensor inputs to avoid mutating them in
+                # the first pass of the CPP wrapper-based compilation, as
+                # this will lead to a side effect on the example inputs:
+                # e.g. if torch.compile(f)(x) if called on input-mutating
+                # f, the inputs x will be mutated twice in the process:
+                # once here, and again when running the compiled model;
+                # this will also lead to a numerically incorrect output
+                mutated_inp = real_inputs[idx]
+                assert isinstance(mutated_inp, torch.Tensor)
+                real_inputs[idx] = clone_preserve_strides(mutated_inp)
+                del mutated_inp
+        return real_inputs
+
     def codegen_with_cpp_wrapper(
         self,
     ) -> tuple[ValueWithLineMap, ValueWithLineMap]:
@@ -2196,76 +2310,15 @@ class GraphLowering(torch.fx.Interpreter):
         For GPU, Triton kernels are autotuned and stored as cubin files
         """
         if any(device in self.device_types for device in ["cuda", "xpu"]):
-
-            def extract_real_inputs() -> list[Union[int, float, torch.Tensor]]:
-                def materialize(
-                    x: Union[torch.SymInt, torch.SymFloat, torch.Tensor],
-                ) -> Union[int, float, torch.Tensor]:
-                    if x is None:
-                        # pyrefly: ignore  # bad-return
-                        return None
-                    elif isinstance(x, (torch.SymInt, torch.SymFloat)):
-                        # Need concrete value to run dynamic shapes and tune the result
-                        return x.node.hint
-                    elif isinstance(x, FakeTensor):
-                        return defake(x)
-                    else:
-                        assert isinstance(x, torch.Tensor), (
-                            "Unknown type when creating real inputs" + str(type(x))
-                        )
-                        return x
-
-                tracing_context = torch._guards.TracingContext.try_get()
-                if tracing_context is not None and not isinstance(
-                    V.real_inputs, NullHandler
-                ):
-                    if tracing_context.output_strides:
-                        tracing_context.output_strides.clear()
-
-                    params_flat = [
-                        param
-                        for param in tracing_context.params_flat  # type: ignore[union-attr]
-                        if param is not None
-                    ]
-                    real_inputs = [
-                        materialize(x)
-                        for x in itertools.chain(params_flat, V.real_inputs)
-                    ]
-                else:
-                    # In the backward pass, V.real_inputs is not OrderedSet.
-                    # Generating random inputs based on self.example_inputs sometimes can be problematic,
-                    # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
-                    real_inputs = [
-                        materialize(x)  # type:ignore[arg-type]
-                        for x in (
-                            self.example_inputs  # type:ignore[union-attr]
-                            if isinstance(V.real_inputs, NullHandler)
-                            else V.real_inputs
-                        )
-                    ]
-
-                if self.mutated_inputs:
-                    from .compile_fx import clone_preserve_strides
-
-                    mutated_input_idxs = [
-                        idx
-                        for idx, name in enumerate(self.graph_inputs)
-                        if name in self.mutated_inputs
-                        and isinstance(real_inputs[idx], torch.Tensor)
-                    ]
-                    for idx in mutated_input_idxs:
-                        # clone mutated Tensor inputs to avoid mutating them in
-                        # the first pass of the CPP wrapper-based compilation, as
-                        # this will lead to a side effect on the example inputs:
-                        # e.g. if torch.compile(f)(x) if called on input-mutating
-                        # f, the inputs x will be mutated twice in the process:
-                        # once here, and again when running the compiled model;
-                        # this will also lead to a numerically incorrect output
-                        mutated_inp = real_inputs[idx]
-                        assert isinstance(mutated_inp, torch.Tensor)
-                        real_inputs[idx] = clone_preserve_strides(mutated_inp)
-                        del mutated_inp
-                return real_inputs
+            # Validate mutual exclusivity between autotune_with_sample_inputs and autotune_full_graph
+            if (
+                config.triton.autotune_with_sample_inputs
+                and config.triton.autotune_full_graph
+            ):
+                raise ValueError(
+                    "autotune_with_sample_inputs and autotune_full_graph are mutually exclusive. "
+                    "Only one of these options can be enabled at a time."
+                )
 
             if config.triton.autotune_at_compile_time:
                 # If autotune_at_compile_time is True, we can do the codegen in one-pass
@@ -2277,7 +2330,7 @@ class GraphLowering(torch.fx.Interpreter):
                             user_defined_kernels = True
                             break
                     if user_defined_kernels:
-                        real_inputs = extract_real_inputs()
+                        real_inputs = self.extract_real_inputs()
                         self.extract_autotune_inputs(real_inputs)
                 return self.codegen()
             else:
@@ -2285,7 +2338,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.cpp_wrapper = False
                 compiled = self.compile_to_module().call
 
-                real_inputs = extract_real_inputs()
+                real_inputs = self.extract_real_inputs()
                 with torch.utils._python_dispatch._disable_current_modes():
                     compiled(real_inputs)
                 del real_inputs
@@ -2329,6 +2382,23 @@ class GraphLowering(torch.fx.Interpreter):
                 "Finished codegen for all nodes. The list of kernel names available: %s",
                 V.graph.all_codegen_kernel_names,
             )
+
+            if self.use_dual_wrapper:
+                # If we're doing full graph autotuning, we need to generate the autotuning wrapper code
+                # and the autotuning kernels
+                original_wrapper_code = self.wrapper_code.original_wrapper_code  # type: ignore[attr-defined]
+                autotuning_wrapper_code = self.wrapper_code.autotuning_wrapper_code  # type: ignore[attr-defined]
+
+                original_cpp_wrapper = self.cpp_wrapper
+                self.wrapper_code = autotuning_wrapper_code
+                self.cpp_wrapper = False
+                autotuning_code, _ = self.wrapper_code.generate(self.is_inference)
+                autotuning_module = self._compile_to_module_lines(autotuning_code)
+                real_inputs = self.extract_real_inputs()
+                autotuning_module.call(real_inputs)
+                del real_inputs
+                self.cpp_wrapper = original_cpp_wrapper
+                self.wrapper_code = original_wrapper_code
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
@@ -2416,7 +2486,10 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> CompiledModule:
         from .codecache import PyCodeCache
 
-        if config.triton.autotune_at_compile_time:
+        if (
+            config.triton.autotune_at_compile_time
+            and not config.triton.autotune_full_graph
+        ):
             # sanitize docstrings in kernel defs (#155006)
             kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
