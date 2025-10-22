@@ -1980,7 +1980,6 @@ void xgeev_bufferSize<float>(
     int64_t ldvr,
     size_t* workspaceInBytesOnDevice,
     size_t* workspaceInBytesOnHost) {
-  TORCH_WARN("called experimental xgeev_bufferSize<float>");
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
       handle, params, jobvl, jobvr, n,
       CUDA_R_32F,
@@ -2015,7 +2014,6 @@ void xgeev_bufferSize<double>(
     int64_t ldvr,
     size_t* workspaceInBytesOnDevice,
     size_t* workspaceInBytesOnHost) {
-  TORCH_WARN("called experimental xgeev_bufferSize<double>");
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
       handle, params, jobvl, jobvr, n,
       CUDA_R_64F,
@@ -2051,7 +2049,6 @@ void xgeev_bufferSize<c10::complex<float>>(
     int64_t ldvr,
     size_t* workspaceInBytesOnDevice,
     size_t* workspaceInBytesOnHost) {
-  TORCH_WARN("called experimental xgeev_bufferSize<complex<float>>");
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
       handle, params, jobvl, jobvr, n,
       CUDA_C_32F,
@@ -2086,7 +2083,6 @@ void xgeev_bufferSize<c10::complex<double>>(
     int64_t ldvr,
     size_t* workspaceInBytesOnDevice,
     size_t* workspaceInBytesOnHost) {
-  TORCH_WARN("called experimental xgeev_bufferSize<complex<double>>");
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev_bufferSize(
       handle, params, jobvl, jobvr, n,
       CUDA_C_64F,
@@ -2124,7 +2120,6 @@ void at::cuda::solver::xgeev<float>(
     float* bufferOnHost,
     size_t workspaceInBytesOnHost,
     int* info) {
-  TORCH_WARN("Launching cuSOLVER Xgeev<float>");
 
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
       handle,
@@ -2173,7 +2168,6 @@ void at::cuda::solver::xgeev<double>(
     double* bufferOnHost,
     size_t workspaceInBytesOnHost,
     int* info) {
-    TORCH_WARN("Launching cuSOLVER Xgeev<double>");
 
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
       handle,
@@ -2220,7 +2214,6 @@ void at::cuda::solver::xgeev<c10::complex<float>>(
     c10::complex<float>* bufferOnHost,
     size_t workspaceInBytesOnHost,
     int* info) {
-  TORCH_WARN("Launching cuSOLVER Xgeev<complex<float>>");
 
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
       handle,
@@ -2266,7 +2259,6 @@ void at::cuda::solver::xgeev<c10::complex<double>>(
     c10::complex<double>* bufferOnHost,
     size_t workspaceInBytesOnHost,
     int* info) {
-  TORCH_WARN("Launching cuSOLVER Xgeev<complex<double>>");
 
   TORCH_CUSOLVER_CHECK(cusolverDnXgeev(
       handle,

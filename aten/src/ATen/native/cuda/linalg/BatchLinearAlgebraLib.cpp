@@ -1634,22 +1634,29 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 
 template <typename scalar_t>
 void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
-  TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
-
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
+  TORCH_WARN("entered apply_xgeev")
 
   auto device = input.device();
 
 
-  int n = cuda_int_cast(vectors.size(-1), "n");
+  int n = cuda_int_cast(input.size(-1), "n");
   int lda = std::max<int64_t>(1, n);
   auto batch_size = batchCount(vectors);
 
-  auto vectors_stride = matrixStride(vectors);
+  TORCH_WARN("---0---")
+  int64_t vectors_stride = 0;
+  if (compute_eigenvectors){
+    vectors_stride = matrixStride(vectors);
+  }
+
+  TORCH_WARN("---1---")
+
   auto values_stride = values.size(-1);
+
 
   auto vectors_data = vectors.data_ptr<scalar_t>();
   auto values_data = values.data_ptr<scalar_t>();
@@ -1662,7 +1669,6 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   Tensor A_fortran = input.mT().contiguous();
   auto* A_data = A_fortran.data_ptr<scalar_t>();
   const auto A_stride = matrixStride(A_fortran);
-
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
   const int ldvl = 1; // ldvl >= 1 if jobvl = CUSOLVER_EIG_MODE_NOVECTOR
@@ -1677,7 +1683,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
     jobvr = CUSOLVER_EIG_MODE_NOVECTOR;
   }
 
-
+  TORCH_WARN("---2---")
 
 
   scalar_t* W  = values.data_ptr<scalar_t>();
@@ -1691,6 +1697,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   const scalar_t*    	VL_const = VL;
   const scalar_t*    	VR_const = VR;
 
+  TORCH_WARN("calling bufferSize")
   size_t ws_dev = 0, ws_host = 0;
   at::cuda::solver::xgeev_bufferSize<scalar_t>(
     handle, params,
@@ -1738,9 +1745,8 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
       static_cast<scalar_t*>(work_host_data.get()),  ws_host,
       info);
   }
-
-
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+  TORCH_WARN("passed apply_xgeev")
 
 
 }

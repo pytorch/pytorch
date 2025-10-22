@@ -2919,9 +2919,8 @@ static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, con
 DEFINE_DISPATCH(linalg_eig_stub);
 
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  // therefore we create all intermediate tensors on CPU
-  TORCH_WARN("Entered linalg_eig_out_info");
+  TORCH_WARN("input dtype: ", input.scalar_type());
+  TORCH_WARN("input device", input.device());
   auto options = input.options();
 
 
@@ -3001,7 +3000,23 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
   // }
 
   //call to the device-specific linalg_eig_stub (LAPACK, MAGMA or cuSOLVER)
+  TORCH_WARN("input device before linalg_eig_stub call: ", input.device());
+  TORCH_WARN("input dtype before linalg_eig_stub call: ", input.scalar_type());
+
+  TORCH_WARN("values device before linalg_eig_stub call: ", real_imag_values.device());
+  TORCH_WARN("values dtype before linalg_eig_stub call: ", real_imag_values.scalar_type());
+
+  TORCH_WARN("vectors device before linalg_eig_stub call: ", maybe_complex_vectors.device());
+  TORCH_WARN("vectors dtype before linalg_eig_stub call: ", maybe_complex_vectors.scalar_type());
+
+  TORCH_WARN("infos device before linalg_eig_stub call: ", infos.device());
+  TORCH_WARN("infos dtype before linalg_eig_stub call: ", infos.scalar_type());
+
+  TORCH_WARN("compute eigenvectors", compute_eigenvectors);
+
   linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
+
+  TORCH_WARN("passed linalg_eig_stub");
 
   // if input is not complex we need to do some post-processing
   if (!input.is_complex()) {
@@ -3046,22 +3061,6 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
       }
     }
   }
-  // TORCH_WARN("=== Debug native/BatchLinarAlgebra/linalg_eig_out_info ===");
-  // TORCH_WARN("input dtype: ", input.dtype(), " device: ", input.device());
-  // TORCH_WARN("real_imag_values: sizes=", real_imag_values.sizes(),
-  //            " dtype=", real_imag_values.dtype(),
-  //            " device=", real_imag_values.device());
-  // TORCH_WARN("values (final): sizes=", values.sizes(),
-  //            " dtype=", values.dtype(),
-  //            " device=", values.device());
-  // if (compute_eigenvectors) {
-  //   TORCH_WARN("maybe_complex_vectors: sizes=", maybe_complex_vectors.sizes(),
-  //              " dtype=", maybe_complex_vectors.dtype(),
-  //              " device=", maybe_complex_vectors.device());
-  //   TORCH_WARN("vectors (final): sizes=", vectors.sizes(),
-  //              " dtype=", vectors.dtype(),
-  //              " device=", vectors.device());
-  // }
 
   auto n = input.size(-1);
   TORCH_CHECK(values.is_complex(), "values (complex_values) not complex");
@@ -3074,7 +3073,6 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
-  TORCH_WARN("Entered linalg_eig_out");
   TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eig: input tensor should not contain infs or NaNs.");
   squareCheckInputs(input, "linalg.eig");
 
@@ -3084,7 +3082,6 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
   checkSameDevice("torch.linalg.eig", values, input, "eigenvalues");
   checkSameDevice("torch.linalg.eig", vectors, input, "eigenvectors");
 
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options();
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
 
@@ -3158,7 +3155,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 }
 
 std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
-  TORCH_WARN("Entered linalg_eig")
+  TORCH_WARN("input dtype: ", input.scalar_type());
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
   Tensor vectors = at::empty({0}, input.options().dtype(complex_dtype));
@@ -3174,14 +3171,17 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
 }
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
+  TORCH_WARN("entered linalg_eigvals_out");
+  TORCH_WARN("input dtype: ", input.scalar_type());
+  TORCH_WARN("input device: ", input.device());
   squareCheckInputs(input, "linalg.eigvals");
+  TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eigvals: input tensor should not contain infs or NaNs.");
 
   // unlike NumPy for real-valued inputs the output is always complex-valued
   checkLinalgCompatibleDtype("torch.linalg.eigvals", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
   checkSameDevice("torch.linalg.eigvals", values, input, "eigenvalues");
 
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  auto options = input.options().device(at::kCPU);
+  auto options = input.options();
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
 
   bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
@@ -3210,6 +3210,9 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   }
 
   Tensor vectors;
+  if (!vectors.defined()) {
+    vectors = at::empty({0}, input.options());
+  }
   if (values_tmp_needed) {
     Tensor values_tmp = at::empty({0}, options.dtype(values_type));
     std::tie(values_tmp, std::ignore) = linalg_eig_out_info(input, values_tmp, vectors, infos, /*compute_eigenvectors=*/false);
@@ -3225,9 +3228,11 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 }
 
 Tensor linalg_eigvals(const Tensor& input) {
+  TORCH_WARN("entered linalg_eigvals");
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
   if (_may_require_fw_or_bw_grad(input)) {
+    TORCH_WARN("Gradient required, computing eigenvectors in linalg.eigvals");
     return std::get<0>(at::linalg_eig(input));
   }
   return at::_linalg_eigvals(input);

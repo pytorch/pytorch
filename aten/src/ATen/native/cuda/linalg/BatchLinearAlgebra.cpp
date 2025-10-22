@@ -2079,13 +2079,12 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
 }
 
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
-  TORCH_WARN("entered linalg_eig_kernel");
+  TORCH_WARN("entered linalg_eig_kernel CUDA implementation");
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
-  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma'
+  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or 'linalg_eig_cusolver_xgeev'
 
-  // linalg_eig_magma modifies the provided input matrix in-place, therefore we need a copy
-  // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer 'input' to CPU
+  // both geev routines modify the provided input matrix in-place, therefore we need a copy
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
   // ───────────────────────────────────────────────
@@ -2101,8 +2100,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
       break; // fallback to CPU path below
   }
 #endif
-  TORCH_WARN("Entering MAGMA path for linalg.eig");
-
+  // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer 'input' to CPU
   auto eigenvalues_cpu = eigenvalues.device().is_cpu() ? eigenvalues : eigenvalues.cpu();
   auto eigenvectors_cpu = eigenvectors.device().is_cpu() ? eigenvectors : eigenvectors.cpu();
   auto infos_cpu = infos.device().is_cpu() ? infos : infos.cpu();
