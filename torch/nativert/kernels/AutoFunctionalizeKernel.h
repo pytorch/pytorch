@@ -22,7 +22,7 @@ class UnsafeAutoFunctionalizeKernel : public OpKernel {
 
   Arguments arguments_;
 
-  std::vector<Value*> mutatingInputArgs_;
+  std::vector<Value*> mutatingInputArgs_;  // For v1: direct mutating input values
   int numOutputs_;
   bool isV2_ = false;  // Flag to track if this is auto_functionalized_v2
 };

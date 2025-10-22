@@ -2,6 +2,7 @@
 
 #include <c10/util/Enumerate.h>
 #include <c10/util/Exception.h>
+#include <torch/nativert/graph/Graph.h>
 
 namespace torch::nativert {
 
@@ -10,16 +11,50 @@ UnsafeAutoFunctionalizeKernel::UnsafeAutoFunctionalizeKernel(const Node* node)
       op_(getOperatorForTarget(
           std::get<std::string>(node->attributes()[0].value))),
       schema_(op_.schema()),
-      arguments_(prefillStackWithStaticArgs(node, schema_)),
       numOutputs_(static_cast<int>(schema_.returns().size())) {
   // Check if this is auto_functionalized_v2
   isV2_ = node->target().find("auto_functionalized_v2") != std::string::npos;
 
-  for (const auto& [idx, schemaArg] : c10::enumerate(schema_.arguments())) {
-    if (schemaArg.alias_info() != nullptr &&
-        schemaArg.alias_info()->isWrite()) {
-      mutatingInputArgs_.push_back(node->getInput(schemaArg.name()).value);
+  if (!isV2_) {
+    // Original v1 behavior - use the original operator's schema
+    arguments_ = prefillStackWithStaticArgs(node, schema_);
+
+    for (const auto& [idx, schemaArg] : c10::enumerate(schema_.arguments())) {
+      if (schemaArg.alias_info() != nullptr &&
+          schemaArg.alias_info()->isWrite()) {
+        mutatingInputArgs_.push_back(node->getInput(schemaArg.name()).value);
+      }
     }
+  } else {
+    // For v2, we cannot use prefillStackWithStaticArgs with the original schema
+    // because v2 has a different argument structure (_all_bases, view metadata, etc.)
+    // We need to build the arguments manually
+
+    std::vector<c10::IValue> stackWithStaticArgs;
+    std::vector<Value*> dynamicArgs;
+
+    // First argument is the operator handle
+    stackWithStaticArgs.push_back(c10::IValue(op_));
+    dynamicArgs.push_back(nullptr);
+
+    // Add all inputs from the node as dynamic arguments
+    for (const auto& input : node->inputs()) {
+      stackWithStaticArgs.push_back(c10::IValue());
+      dynamicArgs.push_back(input.second);
+    }
+
+    // Add all attributes from the node as static arguments (except the first which is the op name)
+    bool firstAttr = true;
+    for (const auto& attr : node->attributes()) {
+      if (firstAttr) {
+        firstAttr = false;
+        continue;  // Skip the operator name attribute
+      }
+      stackWithStaticArgs.push_back(constantToIValue(attr.value));
+      dynamicArgs.push_back(nullptr);
+    }
+
+    arguments_ = Arguments{std::move(stackWithStaticArgs), std::move(dynamicArgs)};
   }
 }
 
@@ -32,7 +67,14 @@ void UnsafeAutoFunctionalizeKernel::computeInternal(
 
   // Call the op with the prepared stack.
   try {
-    op_.callBoxed(stack);
+    if (isV2_) {
+      // For v2, we need to call the auto_functionalized_v2 HOP
+      auto v2_op = getOperatorForTarget(node_->target());
+      v2_op.callBoxed(stack);
+    } else {
+      // For v1, call the original operator
+      op_.callBoxed(stack);
+    }
   } catch (const std::exception& ex) {
     // TODO: this eats the original exception type. ATen returns different
     // exception types that correspond to different Python errors (e.g.
