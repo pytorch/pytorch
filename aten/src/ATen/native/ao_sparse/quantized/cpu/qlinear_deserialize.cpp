@@ -98,8 +98,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
     weight_origin = at::_empty_affine_quantized(
         {output_channels, input_channels},
         at::device(c10::kCPU).dtype(c10::kQInt8),
-        std::get<weight_scales_index>(serialized).mutable_data_ptr<float>()[0],
-        weight_zero_points.mutable_data_ptr<int8_t>()[0]);
+        std::get<weight_scales_index>(serialized).const_data_ptr<float>()[0],
+        weight_zero_points.const_data_ptr<int8_t>()[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
     weight_origin = at::_empty_per_channel_affine_quantized(
         {output_channels, input_channels},
@@ -112,7 +112,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
   const at::Tensor loaded_weight_values =
       std::get<weight_values_index>(serialized);
   const uint8_t* loaded_weight_values_ptr =
-      loaded_weight_values.mutable_data_ptr<uint8_t>();
+      loaded_weight_values.const_data_ptr<uint8_t>();
   const int64_t loaded_weight_values_size = loaded_weight_values.numel();
   // Subtract 128 because we serialize as +128, which s best for
   // minimizing memory footprint for QNNPack
@@ -148,7 +148,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
       input_channels,
       out_features_block_size,
       in_features_block_size,
-      weight_zero_points.mutable_data_ptr<int8_t>(),
+      weight_zero_points.const_data_ptr<int8_t>(),
       q_scheme == c10::kPerTensorAffine);
 
   return PackedLinearWeight::prepack(
@@ -249,9 +249,9 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       std::vector<uint8_t>(output_channels_padded, 0); // Pad with 0;
 
   const float* w_scales_orig_data_ptr =
-      std::get<weight_scales_index>(serialized).mutable_data_ptr<float>();
+      std::get<weight_scales_index>(serialized).const_data_ptr<float>();
   const int8_t* w_zp_orig_data_ptr =
-      std::get<weight_zero_point_index>(serialized).mutable_data_ptr<int8_t>();
+      std::get<weight_zero_point_index>(serialized).const_data_ptr<int8_t>();
 
   const std::function<uint8_t(int8_t)> add_128 = [](int8_t v) {
     return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);

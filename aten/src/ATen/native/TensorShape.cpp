@@ -1958,8 +1958,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   auto range_a = at::arange(xtensor.dim(), at::TensorOptions(at::kLong));
   auto range_b = range_a + n_dims;
   auto stacked = stack({std::move(range_a), std::move(range_b)}, 1).flatten();
-  auto permutation =
-      IntArrayRef(stacked.mutable_data_ptr<int64_t>(), n_dims * 2);
+  auto permutation = IntArrayRef(stacked.const_data_ptr<int64_t>(), n_dims * 2);
   // Permute from [a0, ..., ad-1, b0, ..., bd-1] to [a0, b0, ..., ad-1, bd-1]
   urtensor = urtensor.permute(permutation);
   // Reshape from [a0, b0, ..., ad-1, bd-1] to [a0 * b0, ..., ad-1 * bd-1]
@@ -2455,7 +2454,7 @@ Tensor index_select_sparse_cpu(
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);
       // nneg_index = (index < 0) * (index + size) + (index >= 0) * index
-      auto* ptr_index = index_contiguous.mutable_data_ptr<int64_t>();
+      const auto* ptr_index = index_contiguous.const_data_ptr<int64_t>();
       auto* ptr_nneg_index = nneg_index.mutable_data_ptr<int64_t>();
       at::parallel_for(
           0,

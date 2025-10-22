@@ -72,7 +72,7 @@ Tensor nested_from_padded_cuda(
     if (padded.dtype() == kFloat) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded_contiguous.mutable_data_ptr<float>(),
+            padded_contiguous.const_data_ptr<float>(),
             output.mutable_data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
@@ -81,7 +81,7 @@ Tensor nested_from_padded_cuda(
             padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded_contiguous.mutable_data_ptr<float>(),
+            padded_contiguous.const_data_ptr<float>(),
             output.mutable_data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
@@ -92,7 +92,7 @@ Tensor nested_from_padded_cuda(
     } else if (padded.dtype() == kHalf) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded_contiguous.mutable_data_ptr<c10::Half>(),
+            padded_contiguous.const_data_ptr<c10::Half>(),
             output.mutable_data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,
@@ -101,7 +101,7 @@ Tensor nested_from_padded_cuda(
             padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded_contiguous.mutable_data_ptr<c10::Half>(),
+            padded_contiguous.const_data_ptr<c10::Half>(),
             output.mutable_data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,

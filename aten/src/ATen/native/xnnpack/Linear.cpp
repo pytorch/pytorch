@@ -87,9 +87,9 @@ ContextLinear create(
       weight_contig.size(Layout::Filter::output),                       // output_channels
       weight_contig.size(Layout::Filter::input),                        // input_pixel_stride
       weight_contig.size(Layout::Filter::output),                       // output_pixel_stride
-      weight_contig.mutable_data_ptr<float>(),                                  // kernel
+      weight_contig.const_data_ptr<float>(),                                  // kernel
       (bias && bias->defined()) ?
-          bias->contiguous().mutable_data_ptr<float>() :
+          bias->contiguous().const_data_ptr<float>() :
           nullptr,                                                      // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max

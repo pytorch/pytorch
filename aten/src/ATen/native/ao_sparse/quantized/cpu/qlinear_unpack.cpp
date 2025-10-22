@@ -68,7 +68,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
   const int64_t N = output_channels_;
   const int64_t K = input_channels_;
 
-  float* w_scales_ptr = w_scales_.mutable_data_ptr<float>();
+  const float* w_scales_ptr = w_scales_.const_data_ptr<float>();
 
   at::Tensor weight_origin;
   if (q_scheme_ == c10::kPerTensorAffine) {

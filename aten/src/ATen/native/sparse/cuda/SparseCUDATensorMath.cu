@@ -626,7 +626,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
       thrust_ptr grad_indices_iter(grad_indices_1D.mutable_data_ptr<int64_t>());
-      const thrust_ptr input_indices_iter(input_indices_1D.const_data_ptr<int64_t>());
+      thrust_ptr input_indices_iter(input_indices_1D.mutable_data_ptr<int64_t>());
 
       // store lower_bound of input indices at grad indices
       Tensor input_indices_pos = at::empty_like(input_indices_1D, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
