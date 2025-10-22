@@ -73,6 +73,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     scoped_load_inline,
     set_warn_always_context,
+    skipCUDANonDefaultStreamIf,
     skipIfMPS,
     skipIfNoLapack,
     skipIfTorchDynamo,
@@ -13327,6 +13328,7 @@ class TestAutogradStreamSynchronization(TestCase):
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
@@ -13434,6 +13436,7 @@ class TestAutogradStreamSynchronization(TestCase):
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
@@ -13448,6 +13451,7 @@ class TestAutogradStreamSynchronization(TestCase):
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
@@ -13460,6 +13464,7 @@ class TestAutogradStreamSynchronization(TestCase):
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
@@ -13524,6 +13529,7 @@ class TestAutogradStreamSynchronization(TestCase):
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
@@ -13615,6 +13621,7 @@ class TestAutogradStreamSynchronization(TestCase):
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
     @onlyCUDA
+    @skipCUDANonDefaultStreamIf(True)
     def test_side_stream_backward_overlap(self, device):
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
