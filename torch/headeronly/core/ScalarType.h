@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Float4_e2m1fn_x2.h>
 #include <torch/headeronly/util/Float8_e4m3fn.h>
@@ -301,7 +302,7 @@ using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::dummy_int1_7_t;
 using c10::dummy_uint1_7_t;
 using c10::NumScalarTypes;
@@ -309,4 +310,4 @@ using c10::ScalarType;
 namespace impl {
 using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
