@@ -661,7 +661,6 @@ Tensor& _scaled_mm_out_xpu(
   // TODO: oneDNN Currently only supports e4m3 with group scales on BMG. Not
   // support 2D scales, only 1D. Needs to add more checks there.
 
-  // TODO: This is fully aligned with CUDA. May need to revisit this for XPU.
   if (bias) {
     TORCH_CHECK(
         out.scalar_type() != kFloat,
