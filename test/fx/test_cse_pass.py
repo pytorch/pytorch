@@ -1,16 +1,17 @@
 # Owner(s): ["oncall: fx"]
-
+import operator
 import random
+from copy import deepcopy
 
 import torch
-from torch.fx import symbolic_trace
+from torch._ops import OpOverload
+from torch.fx import Node, symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
+from torch.fx.passes.dialect.common.cse_pass import CSEPass
 from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
-banned_ops = get_CSE_banned_ops()
-P_default = CSEPass(banned_ops=banned_ops)
+P_default = CSEPass()
 
 
 def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
@@ -76,8 +77,8 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
 
     # check correctness
     if check_val:
-        true_result = fx_g(t)
-        our_result = new_g(t)
+        true_result = fx_g(t.clone())
+        our_result = new_g(t.clone())
         if true_result is None:  # both return None
             self.assertTrue(
                 our_result is None, f"true result is None, CSE result is {our_result}"
@@ -235,7 +236,14 @@ class TestCSEPass(TestCase):
             return a + b
 
         t = torch.randn(2, 2)
-        P_ban_add = CSEPass(banned_ops=[torch.ops.aten.add])
+
+        def banned_impure(n: Node) -> bool:
+            banned_ops = [torch.ops.aten.add]
+            if isinstance(n.target, OpOverload):
+                return n.target.overloadpacket in banned_ops
+            return False
+
+        P_ban_add = CSEPass(is_impure_node=banned_impure)
         check(self, f, t, 0, P=P_ban_add)  # check that add is banned
         check(self, f, t, 1)  # check that add is not banned by default
 
@@ -256,6 +264,134 @@ class TestCSEPass(TestCase):
 
         t = torch.randn(2, 2)
         check(self, f, t, 0, check_val=False)
+
+    """
+    Check that common subexpressions across two computation chains are eliminated.
+    """
+
+    def test_double_elimination(self):
+        def f(x):
+            a = x + 0.3
+            b = x + 0.3
+            c = 3.0 * a
+            d = 3.0 * b
+            return c + d
+
+        t = torch.randn(2, 2)
+        check(self, f, t, 2, check_val=False)
+
+    """
+    Check that in-place operations are not eliminated.
+    """
+
+    def test_inplace(self):
+        def f(x):
+            x.add_(2)
+            z = 2 * x
+            x.add_(2)
+            y = 2 * x
+            return y + z
+
+        t = torch.randn(2, 2)
+
+        def is_impure(n: Node) -> bool:
+            if n.is_impure():
+                return True
+            if n.target == "add_":
+                return True
+            return False
+
+        graph, _ = torch._dynamo.export(f)(t)
+        cse_graph = CSEPass(is_impure).call(graph).graph_module
+        assert torch.allclose(f(deepcopy(t)), cse_graph(deepcopy(t)))
+
+    def test_inplace2(self):
+        def f(x):
+            z = 2 * x
+            x += 2
+            y = 2 * x
+            return y + z
+
+        t = torch.randn(2, 2)
+
+        graph, _ = torch._dynamo.export(f)(t)
+        cse_graph = P_default.call(graph).graph_module
+        assert torch.allclose(f(deepcopy(t)), cse_graph(deepcopy(t)))
+
+    def test_inplace_with_double_elimination(self):
+        def f(x):
+            l = torch.zeros(())
+            l += 2 * x.sum()
+
+            l2 = torch.zeros(())
+            l2 += 2 * x.sum() + 5
+
+            return l + l2
+
+        t = torch.randn(2, 2)
+
+        def is_impure(n: Node) -> bool:
+            if n.is_impure():
+                return True
+            if n.target == operator.iadd:
+                return True
+            return False
+
+        graph, _ = torch._dynamo.export(f)(t)
+        cse_graph = CSEPass(is_impure).call(graph).graph_module
+        assert torch.allclose(f(deepcopy(t)), cse_graph(deepcopy(t)))
+
+    """
+    Check that different gradient modes prevent elimination.
+    """
+
+    def test_with_grad(self):
+        def f(x):
+            with torch.no_grad():
+                y = 2 * x
+            z = 2 * x
+            return y + z
+
+        t = torch.randn(2, 2, requires_grad=True)
+        t.requires_grad = True
+
+        graph, _ = torch._dynamo.export(f)(t)
+
+        f(t).sum().backward()
+        eager_grad = t.grad.clone()
+
+        t.grad = None
+        cse_graph = P_default.call(graph).graph_module
+        cse_graph(t).sum().backward()
+        compile_grad = t.grad.clone()
+        assert torch.allclose(eager_grad, compile_grad)
+
+    def test_module(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10, bias=False)
+                with torch.no_grad():
+                    self.linear.weight.fill_(1)
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                # Perform the same operation twice.
+                x = self.linear(inp)
+                y = self.linear(inp)
+                return (x * 200000) + (y * 3000000)
+
+        t = torch.randn(1, 10)
+        model = LinearModel()
+        graph, _ = torch._dynamo.export(model)(t)
+
+        model(t).sum().backward()
+        eager_grad = model.linear.weight.grad.clone()
+
+        model.zero_grad()
+        cse_graph = P_default.call(graph).graph_module
+        cse_graph(t).sum().backward()
+        compile_grad = model.linear.weight.grad.clone()
+        assert torch.allclose(eager_grad, compile_grad)
 
 
 if __name__ == "__main__":
