@@ -165,7 +165,7 @@ def run_functionalized_fw_and_collect_metadata(
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[list[int]] = None,
-    pre_dispatch: bool = False
+    pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
 

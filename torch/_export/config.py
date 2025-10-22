@@ -28,7 +28,9 @@ detect_non_strict_fake_tensor_leaks = False
 # that we don't know how to proxy, resulting in untracked fake tensors
 error_on_lifted_constant_tensors = True
 
-# enable auto_functionalized_v2 in export 
+# enable auto_functionalized_v2 in export
+# We turn this off in fbcode due to downstream users not
+# being ready to handle auto_functionalized_v2.
 enable_auto_functionalized_v2_for_export = not is_fbcode()
 
 if TYPE_CHECKING:
