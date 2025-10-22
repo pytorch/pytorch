@@ -113,12 +113,6 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       scale_b.strides());
 }
 
-static bool _scaled_mm_allowed_device() {
-  // Always return True. We will wait for SYCL to provide device info query
-  // APIs.
-  return true;
-}
-
 } // namespace
 
 namespace xpu {
@@ -600,12 +594,7 @@ Tensor& _scaled_mm_out_xpu(
     Tensor& out) {
   // Note: fast_accum is not supported in XPU for now.
   TORCH_CHECK(!use_fast_accum, "fast_accum is not supported in XPU for now.");
-  // TODO: Current scaled_mm_allowed_device is a stub that always returns true.
-  // Will need to provide actual implementation once SYCL provides device query
-  // APIs.
-  bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK(
-      allowed_device, "torch._scaled_mm not supported on current XPU device.");
+
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
 
