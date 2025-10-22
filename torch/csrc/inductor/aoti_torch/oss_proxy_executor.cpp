@@ -737,7 +737,7 @@ void OSSProxyExecutor::call_function(
 
     switch (dynamic_arg_type) {
       case DynamicArgType::TensorType: {
-        at::Tensor* tensor =
+        at::Tensor const* tensor =
             tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
         stack[arg_index] = *tensor;
         break;
@@ -750,7 +750,7 @@ void OSSProxyExecutor::call_function(
       case DynamicArgType::ListTensorType: {
         std::vector<at::Tensor> tensor_list;
         for (int j = 0; j < length; j++) {
-          at::Tensor* tensor =
+          at::Tensor const* tensor =
               tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
           tensor_list.push_back(*tensor);
         }

@@ -246,7 +246,7 @@ void recursive_store(
       seq_size,
       ")");
 
-  PyObject** items = PySequence_Fast_ITEMS(seq.get());
+  PyObject* const* items = PySequence_Fast_ITEMS(seq.get());
   for (const auto i : c10::irange(n)) {
 #ifdef USE_NUMPY
     if (is_numpy_available() && PyArray_Check(items[i])) {

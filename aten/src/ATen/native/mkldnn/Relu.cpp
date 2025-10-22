@@ -61,7 +61,7 @@ Tensor& mkldnn_relu_(Tensor& input) {
 }
 
 Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
-  ideep::tensor& x = itensor_from_mkldnn(input);
+  ideep::tensor const& x = itensor_from_mkldnn(input);
   ideep::tensor grady = itensor_from_mkldnn(grad_output);
   ideep::tensor gradx;
   ideep::eltwise_backward::compute(x, grady, gradx,

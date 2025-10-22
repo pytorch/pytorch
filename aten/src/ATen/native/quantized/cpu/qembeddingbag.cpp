@@ -51,7 +51,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   auto* output_data = output.data_ptr<float>();
   const auto weight_data = weight.data_ptr<uint8_t>();
   const auto indices_data = indices.data_ptr<IndexType>();
-  int32_t* compressed_indices_mapping_data = nullptr;
+  int32_t const* compressed_indices_mapping_data = nullptr;
   const auto weight_sizes = weight.sizes();
   const int64_t N = weight_sizes[0];
   const int64_t weight_size = weight_sizes[1];
@@ -70,7 +70,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   }
 
   int64_t current = 0;
-  float* per_sample_weights_data = nullptr;
+  float const* per_sample_weights_data = nullptr;
   if (per_sample_weights_.has_value()) {
     per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
   }
@@ -644,7 +644,7 @@ at::Tensor& embedding_bag_nbit_impl(
   auto offsets_data = offsets.data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights op.
-  int32_t* compressed_indices_mapping_data = nullptr;
+  int32_t const* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
   bool fallback_to_no_sparse = false;
   if (pruned_weights) {
@@ -815,7 +815,7 @@ at::Tensor& embedding_bag_byte_impl(
   auto offsets_data = offsets.data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights.
-  int32_t* compressed_indices_mapping_data = nullptr;
+  int32_t const* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
   bool fallback_to_no_sparse = false;
   if (pruned_weights) {

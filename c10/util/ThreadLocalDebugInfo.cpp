@@ -11,7 +11,7 @@ C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
 
 /* static */
 DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
-  ThreadLocalDebugInfo* cur = debug_info.get();
+  ThreadLocalDebugInfo const* cur = debug_info.get();
   while (cur) {
     if (cur->kind_ == kind) {
       return cur->info_.get();

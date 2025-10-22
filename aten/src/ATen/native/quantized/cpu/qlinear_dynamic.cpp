@@ -583,7 +583,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
   if (get_cache().hit_dynamic(cache_key)) {
-    LinearParams& params = get_cache().get_param();
+    LinearParams const& params = get_cache().get_param();
     ideep::matmul_forward::compute(params, x, w, b, y, src_scales, src_zero_point);
   } else {
     ideep::matmul_forward::compute(x, w, b, y,

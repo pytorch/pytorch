@@ -148,7 +148,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   TORCH_CHECK(weight.defined() && bias.defined(),
              "mkldnn_batch_norm: currently mkldnn only support affine model");
 
-  ideep::tensor& x = itensor_from_mkldnn(input);
+  ideep::tensor const& x = itensor_from_mkldnn(input);
   ideep::tensor w = itensor_from_tensor(weight);
   ideep::tensor b = itensor_from_tensor(bias);
   bool use_running_stat = (running_mean.defined() && running_var.defined());
@@ -254,11 +254,11 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   const Tensor& save_invstd = save_invstd_opt.value_or(Tensor());
 
   TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
-  ideep::tensor& grady = itensor_from_mkldnn(grad_output);
-  ideep::tensor& x = itensor_from_mkldnn(input);
+  ideep::tensor const& grady = itensor_from_mkldnn(grad_output);
+  ideep::tensor const& x = itensor_from_mkldnn(input);
   ideep::tensor w = itensor_from_tensor(weight);
-  ideep::tensor& m = itensor_from_mkldnn(save_mean);
-  ideep::tensor& v = itensor_from_mkldnn(save_invstd);
+  ideep::tensor const& m = itensor_from_mkldnn(save_mean);
+  ideep::tensor const& v = itensor_from_mkldnn(save_invstd);
 
   ideep::tensor gradx, gradw, gradb;
   ideep::batch_normalization_backward::compute(

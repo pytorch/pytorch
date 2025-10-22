@@ -122,8 +122,8 @@ static PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
     Py_INCREF(Py_NotImplemented);
     return Py_NotImplemented;
   }
-  THPDevice* da = reinterpret_cast<THPDevice*>(a);
-  THPDevice* db = reinterpret_cast<THPDevice*>(b);
+  THPDevice const* da = reinterpret_cast<THPDevice*>(a);
+  THPDevice const* db = reinterpret_cast<THPDevice*>(b);
 
   switch (op) {
     case Py_EQ:

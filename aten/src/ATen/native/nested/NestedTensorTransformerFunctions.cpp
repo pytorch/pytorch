@@ -193,7 +193,7 @@ Tensor NestedTensor_softmax_dropout_cuda(const Tensor& self, const Tensor& query
 Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
     int64_t extra_elements) {
-  int64_t* const sizes_ptr = sizes.data_ptr<int64_t>();
+  int64_t const* const sizes_ptr = sizes.data_ptr<int64_t>();
   Tensor offsets = at::empty({1 + sizes.size(0) + extra_elements}, at::kInt);
   int32_t* const offsets_ptr = offsets.mutable_data_ptr<int32_t>();
   offsets_ptr[0] = 0;

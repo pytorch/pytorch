@@ -88,7 +88,7 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   const auto& sizes = self_impl->get_nested_sizes();
   const auto& strides = self_impl->get_nested_strides();
   const auto offsets = self_impl->get_storage_offsets();
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t  const*offsets_ptr = offsets.data_ptr<int64_t>();
   // Account for the implicit batch dim
   --dim;
   int64_t tensor_dim = sizes.size(1);
@@ -143,7 +143,7 @@ std::vector<Tensor> split_with_sizes_nested(
   const auto& sizes = self_impl->get_nested_sizes();
   const auto& strides = self_impl->get_nested_strides();
   const auto offsets = self_impl->get_storage_offsets();
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t  const*offsets_ptr = offsets.data_ptr<int64_t>();
   // Account for the implicit batch dim
   --dim;
   int64_t tensor_dim = sizes.size(1);

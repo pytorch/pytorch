@@ -156,7 +156,7 @@ namespace torch::autograd {
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
-  THPFunction* py_fn = (THPFunction*)obj;
+  THPFunction const* py_fn = (THPFunction*)obj;
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -235,7 +235,7 @@ auto PyNode::apply_with_saved_impl(
 
     const auto& input_info = input_infos[i - offset];
 
-    PyObject* device(THPDevice_New(input_info.device));
+    PyObject const* device(THPDevice_New(input_info.device));
     if (!device)
       throw_python_error();
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
@@ -255,7 +255,7 @@ auto PyNode::apply_with_saved_impl(
 
   auto [bwd_idx, maybe_bwd_state_idx] = saved.retrieve_pynode_objs(this);
 
-  PyObject* backward_state_idx = Py_None;
+  PyObject const* backward_state_idx = Py_None;
   if (maybe_bwd_state_idx.has_value()) {
     backward_state_idx = THPUtils_packUInt64(maybe_bwd_state_idx.value());
     // this might be simplifiable now that we no longer inline

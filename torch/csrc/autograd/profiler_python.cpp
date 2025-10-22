@@ -1499,7 +1499,7 @@ static void toggle_memory_tracing(bool enable) {
   PyTuple_SetItem(args, 3, THPUtils_packInt64(100000)); // max_entries
   PyTuple_SetItem(args, 4, Py_None); // device (None)
   PyTuple_SetItem(args, 5, PyBool_FromLong(0)); // clear_history (False)
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  PyObject const* result = PyObject_Call(snapshot_func.get(), args, nullptr);
   Py_DECREF(args);
   if (result == nullptr) {
     return;
@@ -1522,10 +1522,10 @@ void PythonMemoryTracer::export_memory_history(const std::string& path) {
   if (!snapshot_func) {
     return;
   }
-  PyObject* py_filename = PyUnicode_FromString(path.c_str());
+  PyObject const* py_filename = PyUnicode_FromString(path.c_str());
   // Call the function with arguments (e.g., a file path)
   PyObject* args = PyTuple_Pack(1, py_filename);
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  PyObject const* result = PyObject_Call(snapshot_func.get(), args, nullptr);
   Py_DECREF(args);
   if (result == nullptr) {
     return;

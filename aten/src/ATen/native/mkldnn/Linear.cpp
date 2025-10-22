@@ -143,7 +143,7 @@ Tensor mkldnn_linear_backward_input(
   auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
 
-  ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
+  ideep::tensor const& grady = itensor_from_mkldnn(grad_output_reshaped);
   // weight_t always dense tensor for training.
   const Tensor weight = weight_t.is_contiguous() ? weight_t : weight_t.contiguous();
   const ideep::tensor w = itensor_view_from_dense(weight);
@@ -175,8 +175,8 @@ std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
   auto input_reshaped = input.dim() > 2 ? input.reshape({-1, input.size(input.dim() - 1)}) : input;
 
-  ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
-  ideep::tensor& x = itensor_from_mkldnn(input_reshaped);
+  ideep::tensor const& grady = itensor_from_mkldnn(grad_output_reshaped);
+  ideep::tensor const& x = itensor_from_mkldnn(input_reshaped);
   ideep::tensor gradw, gradb;
   if (bias_defined) {
     ideep::inner_product_backward_weights::compute(x, grady, gradw, gradb);

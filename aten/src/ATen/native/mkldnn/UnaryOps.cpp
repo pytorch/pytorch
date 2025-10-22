@@ -40,7 +40,7 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
-  ideep::tensor& x = itensor_from_mkldnn(self);
+  ideep::tensor const& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_logistic, ideep::prop_kind::forward);
@@ -56,7 +56,7 @@ Tensor& mkldnn_sigmoid_(Tensor& self) {
 }
 
 Tensor mkldnn_tanh(const Tensor& self) {
-  ideep::tensor& x = itensor_from_mkldnn(self);
+  ideep::tensor const& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_tanh, ideep::prop_kind::forward);

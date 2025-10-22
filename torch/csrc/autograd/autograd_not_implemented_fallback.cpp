@@ -631,7 +631,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
   }
 
   if (is_view) {
-    c10::IValue& aliased_output_iv =
+    c10::IValue const& aliased_output_iv =
         (*stack)[stack->size() - num_returns + aliased_output_idx];
 
     // See NOTE [ View + Inplace detection ] for more details about this logic

@@ -829,7 +829,7 @@ static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
 
 static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(obj) == expected`
-  PyObject* obj = nullptr;
+  PyObject const* obj = nullptr;
   unsigned long long expected = 0;
   if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return nullptr;
@@ -1856,7 +1856,7 @@ class RANGE_ITERATOR_MATCH : public LeafGuard {
     if (Py_TYPE(value) != (void*)_type_id) {
       return false;
     }
-    _PyRangeIterObject* iter = (_PyRangeIterObject*)value;
+    _PyRangeIterObject const* iter = (_PyRangeIterObject*)value;
 
 #if IS_PYTHON_3_12_PLUS
     long start = iter->start;
@@ -1893,7 +1893,7 @@ class TUPLE_ITERATOR_LEN : public LeafGuard {
     if (Py_TYPE(value) != (void*)_type_id) {
       return false;
     }
-    _PyTupleIterObject* it = (_PyTupleIterObject*)value;
+    _PyTupleIterObject const* it = (_PyTupleIterObject*)value;
     Py_ssize_t length = 0;
     if (it->it_seq)
       length = PyTuple_GET_SIZE(it->it_seq) - it->it_index;
@@ -4299,7 +4299,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
-      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      PyTypeObject const* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
       if (mode_type != _ref_stack.at(idx)) {
         return false;
       }
@@ -5855,7 +5855,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    _PyTupleIterObject const* it = (_PyTupleIterObject*)obj;
     PyObject* x =
         PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
     if (x == nullptr) {
@@ -5869,7 +5869,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    _PyTupleIterObject const* it = (_PyTupleIterObject*)obj;
     PyObject* x =
         PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
     if (x == nullptr) {
@@ -6594,7 +6594,7 @@ void* convert_to_root_guard_manager(py::object root) {
   if (root.is(py::none())) {
     return nullptr;
   }
-  RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
+  RootGuardManager const* root_mgr = std::move(root).cast<RootGuardManager*>();
   return (void*)root_mgr;
 }
 

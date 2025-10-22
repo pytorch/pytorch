@@ -38,7 +38,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   checkLongTensor(lengths_t);
 
   int64_t batch_size = input.size(1);
-  int64_t * lengths = lengths_t.data_ptr<int64_t>();
+  const int64_t * lengths = lengths_t.data_ptr<int64_t>();
 
   TORCH_CHECK(lengths_t.size(0) == batch_size,
            "Expected `len(lengths)` to be equal to batch_size, but got ", lengths_t.size(0),

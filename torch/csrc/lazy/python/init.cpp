@@ -136,7 +136,7 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_metrics_report", []() { return torch::lazy::CreateMetricReport(); });
   lazy.def("_counter_value", [](const std::string& name) -> py::object {
-    torch::lazy::CounterData* data = torch::lazy::GetCounter(name);
+    torch::lazy::CounterData const* data = torch::lazy::GetCounter(name);
     return data != nullptr ? py::cast<int64_t>(data->Value()) : py::none();
   });
   lazy.def("_get_tensor_id", [](const at::Tensor& tensor) {

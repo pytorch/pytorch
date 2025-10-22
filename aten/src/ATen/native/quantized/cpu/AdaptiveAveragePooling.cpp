@@ -92,7 +92,7 @@ void adaptive_avg_pool_single_out_frame(
             float kDHWr = kDHr / kW;
 
             /* local pointers */
-            scalar_t* ip = input_p +
+            scalar_t const* ip = input_p +
                            c * istrideC +
                            istartD * istrideD +
                            istartH * istrideH +

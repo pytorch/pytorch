@@ -130,7 +130,7 @@ void CUDAPluggableAllocator::raw_delete(void* ptr) {
     TORCH_CHECK(
         allocation_metadata_.count(ptr),
         "Trying to free a pointer not allocated here");
-    _AllocationMetadata& metadata = allocation_metadata_[ptr];
+    _AllocationMetadata const& metadata = allocation_metadata_[ptr];
     size = metadata.size;
     device_idx = metadata.device_idx;
     stream = metadata.stream;

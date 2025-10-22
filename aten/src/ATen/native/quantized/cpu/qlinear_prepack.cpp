@@ -97,7 +97,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     }
   }
 
-  int8_t* weight_ptr_int8 =
+  int8_t const* weight_ptr_int8 =
       reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
 
   std::vector<int32_t> col_offsets(N);
@@ -198,7 +198,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   at::Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  float const* weight_contig_ptr = weight_contig.data_ptr<float>();
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16

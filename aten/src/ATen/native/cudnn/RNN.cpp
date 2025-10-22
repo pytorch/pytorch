@@ -1118,7 +1118,7 @@ inline bool use_persist_device_heuristics(
     const RNNDescriptorParams& rnn,
     const TensorDescriptorListParams& tensors) {
   auto bsize = tensors.mini_batch;
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  cudaDeviceProp const* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major == 7) {
     if (prop->minor == 5) {
       // Excludes Turing from using persistent rnn.
@@ -1166,7 +1166,7 @@ inline bool use_rnn_persist_small_h(
     const RNNDescriptorParams& rnn,
     const TensorDescriptorListParams& tensors,
     bool forward) {
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  cudaDeviceProp const* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major < 6)
     return false;
 

@@ -377,7 +377,7 @@ struct PythonLogger {
     if (pyfunc == nullptr) {
       throw_python_error();
     }
-    PyObject* result =
+    PyObject const* result =
         PyObject_CallFunction(pyfunc.get(), "s", std::string(msg).c_str());
     if (result == nullptr) {
       throw_python_error();
@@ -995,14 +995,14 @@ static CacheNode* _compiled_autograd_impl(
     InputBuffers input_buffers;
 
     for (size_t i = 0; i < ordered_calls.size(); i++) {
-      NodeCall& call = *ordered_calls[i];
+      NodeCall const& call = *ordered_calls[i];
 
       std::string _node_name = call.node->name();
       THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
       TORCH_INTERNAL_ASSERT(node_name != nullptr);
       THPObjectPtr set_node_origin(
           PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
-      PyObject* pyobj = Py_None;
+      PyObject const* pyobj = Py_None;
       if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
         pyobj = pynode->obj;
       }

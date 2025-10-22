@@ -183,7 +183,7 @@ void host_softmax(
         for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
-          scalar_t* input_data =
+          scalar_t const* input_data =
               input_data_base + outer_idx * outer_stride + inner_idx;
           scalar_t* output_data =
               output_data_base + outer_idx * outer_stride + inner_idx;
@@ -201,7 +201,7 @@ void host_softmax(
               mask_outer_idx = outer_idx / (input.size(1) * input.size(2));
           }
 
-          bool* mask_data = mask_data_base + mask_outer_idx * outer_stride + inner_idx;
+          bool const* mask_data = mask_data_base + mask_outer_idx * outer_stride + inner_idx;
 
           // Calc max in softmax dim
           bool is_meaningful_max = false;
@@ -273,11 +273,11 @@ void host_softmax_backward(
           int64_t inner_idx = i % inner_size;
           scalar_t* gradInput_data =
               gradInput_data_base + outer_idx * outer_stride + inner_idx;
-          scalar_t* output_data =
+          scalar_t const* output_data =
               output_data_base + outer_idx * outer_stride + inner_idx;
           const scalar_t* gradOutput_data =
               gradOutput_data_base + outer_idx * outer_stride + inner_idx;
-          bool* mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          bool const* mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
 
           acc_type<scalar_t, false> sum = 0;
           for (const auto d : c10::irange(dim_size)) {
