@@ -129,6 +129,8 @@ struct C10_API PyInterpreterVTable {
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
   // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
   virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
+  // Run Py_REFCNT on a PyObject.
+  virtual size_t refcnt(PyObject* pyobj) const = 0;
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this

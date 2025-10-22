@@ -24,14 +24,15 @@ void PyObjectSlot::maybe_destroy_pyobj() {
   }
 }
 
-PyInterpreter* PyObjectSlot::pyobj_interpreter() {
-  return pyobj_interpreter_.load(std::memory_order_acquire);
-}
-
 PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   return reinterpret_cast<PyObject*>(
       reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
+}
+
+bool PyObjectSlot::has_unique_reference() const {
+  PyObject* pyobj = _unchecked_untagged_pyobj();
+  return pyobj != nullptr && load_pyobj_interpreter()->refcnt(pyobj) == 1;
 }
 
 PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {

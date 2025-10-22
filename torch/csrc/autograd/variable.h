@@ -197,6 +197,10 @@ TORCH_API std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
 TORCH_API void create_cpp_hook(
     const at::TensorBase& /*self*/,
     bool is_retains_grad_hooks = false);
+
+TORCH_API bool is_tensor_stealable(
+    const at::Tensor& new_grad,
+    size_t num_expected_refs = 1);
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -894,7 +898,7 @@ inline Variable make_variable(
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    if (data.getIntrusivePtr().use_count() == 1 &&
+    if (impl::is_tensor_stealable(data) &&
         data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);

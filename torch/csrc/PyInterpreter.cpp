@@ -46,6 +46,7 @@ struct ConcretePyInterpreterVTable final
 
   void incref(PyObject* pyobj) const override;
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
+  size_t refcnt(PyObject* pyobj) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
   // operate upon a PyObjectSlot rather than a TensorImpl
@@ -251,6 +252,7 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
   if (!Py_IsInitialized())
     return;
 
+  // printf("decref %p (%s)\n", pyobj, Py_TYPE(pyobj)->tp_name);
   pybind11::gil_scoped_acquire gil;
   // Two possibilities:
   // 1. We are decref-ing an object that has a PyObjectSlot, like a Tensor or
@@ -290,6 +292,13 @@ void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
     return;
   pybind11::gil_scoped_acquire gil;
   Py_INCREF(pyobj);
+}
+
+size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
+  if (!Py_IsInitialized() || pyobj == nullptr)
+    return 0;
+  pybind11::gil_scoped_acquire gil;
+  return Py_REFCNT(pyobj);
 }
 
 bool isPythonTensor(const at::Tensor& tensor) {

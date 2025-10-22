@@ -33,6 +33,8 @@ constexpr uint64_t kImpracticallyHugeWeakReferenceCount =
 constexpr uint64_t kReferenceCountOne = 1;
 constexpr uint64_t kWeakReferenceCountOne = (kReferenceCountOne << 32);
 constexpr uint64_t kUniqueRef = (kReferenceCountOne | kWeakReferenceCountOne);
+// Indicates whether the object has a PyObject wrapper.
+constexpr uint64_t kHasPyObject = (uint64_t(1) << 63);
 
 template <class TTarget>
 struct intrusive_target_default_null_type final {
@@ -55,7 +57,11 @@ inline uint32_t refcount(uint64_t combined_refcount) {
 }
 
 inline uint32_t weakcount(uint64_t combined_refcount) {
-  return static_cast<uint32_t>(combined_refcount >> 32);
+  return static_cast<uint32_t>((combined_refcount & ~kHasPyObject) >> 32);
+}
+
+inline bool has_pyobject(uint64_t combined_refcount) {
+  return (combined_refcount & kHasPyObject) != 0;
 }
 
 // The only requirement for refcount increment is that it happens-before
@@ -64,12 +70,6 @@ inline uint64_t atomic_combined_refcount_increment(
     std::atomic<uint64_t>& combined_refcount,
     uint64_t inc) {
   return combined_refcount.fetch_add(inc, std::memory_order_relaxed) + inc;
-}
-
-inline uint32_t atomic_refcount_increment(
-    std::atomic<uint64_t>& combined_refcount) {
-  return detail::refcount(atomic_combined_refcount_increment(
-      combined_refcount, kReferenceCountOne));
 }
 
 inline uint32_t atomic_weakcount_increment(
@@ -155,6 +155,12 @@ class C10_API intrusive_ptr_target {
   // we can atomically operate on both at the same time for performance
   // and defined behaviors.
   //
+  // Note [PyObject preservation for Tensor and Storages]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // intrusive_ptr has special support for preserving PyObject wrappers
+  // for TensorImpl and StorageImpl. The most significant bit of the
+  // combined_refcount_ is used to indicate whether the object has a
+  // PyObject wrapper. TODO(sgross) expand on this note.
   mutable std::atomic<uint64_t> combined_refcount_;
   static_assert(sizeof(std::atomic<uint64_t>) == 8);
   static_assert(alignof(std::atomic<uint64_t>) == 8);
@@ -241,6 +247,12 @@ class C10_API intrusive_ptr_target {
     return *this;
   }
 
+  bool set_has_pyobject() noexcept {
+    uint64_t combined = combined_refcount_.fetch_or(
+        detail::kHasPyObject, std::memory_order_acq_rel);
+    return !detail::has_pyobject(combined) && detail::refcount(combined) > 1;
+  }
+
  private:
   /**
    * This is called when refcount reaches zero.
@@ -254,6 +266,13 @@ class C10_API intrusive_ptr_target {
    * destructed), this function WILL NOT be called.
    */
   virtual void release_resources() {}
+
+  /**
+   * These two methods are called when the refcount transitions between one
+   * and two and the object has a PyObject wrapper.
+   */
+  virtual void incref_pyobject() const {}
+  virtual void decref_pyobject() const {}
 
   uint32_t refcount(std::memory_order order = std::memory_order_relaxed) const {
     return detail::refcount(combined_refcount_.load(order));
@@ -314,11 +333,15 @@ class intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      uint32_t new_refcount =
-          detail::atomic_refcount_increment(target_->combined_refcount_);
+      uint64_t combined = detail::atomic_combined_refcount_increment(
+            target_->combined_refcount_, detail::kReferenceCountOne);
+      uint32_t new_refcount = detail::refcount(combined);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
+      if (C10_UNLIKELY(detail::has_pyobject(combined) && new_refcount == 2)) {
+        target_->incref_pyobject();
+      }
     }
   }
 
@@ -337,9 +360,9 @@ class intrusive_ptr final {
 
       auto combined_refcount = detail::atomic_combined_refcount_decrement(
           target_->combined_refcount_, detail::kReferenceCountOne);
-      if (detail::refcount(combined_refcount) == 0) {
-        bool should_delete =
-            (combined_refcount == detail::kWeakReferenceCountOne);
+      uint32_t new_refcount = detail::refcount(combined_refcount);
+      if (new_refcount == 0) {
+        bool should_delete = detail::weakcount(combined_refcount) == 1;
         // See comment above about weakcount. As long as refcount>0,
         // weakcount is one larger than the actual number of weak references.
         // So we need to decrement it here.
@@ -356,6 +379,8 @@ class intrusive_ptr final {
         if (should_delete) {
           delete target_;
         }
+      } else if (detail::has_pyobject(combined_refcount) && new_refcount == 1) {
+        target_->decref_pyobject();
       }
     }
   }
@@ -946,6 +971,13 @@ class weak_intrusive_ptr final {
           std::memory_order_acquire,
           std::memory_order_relaxed));
 
+      // FIXME(sgross): this isn't thread-safe if the Python wrapper is the
+      // only reference and may be deallocated concurrently.
+      if (detail::has_pyobject(combined_refcount) &&
+          detail::refcount(combined_refcount) + 1 == 2) {
+        target_->incref_pyobject();
+      }
+
       return intrusive_ptr<TTarget, NullType>(
           target_, raw::DontIncreaseRefcount{});
     }
@@ -1060,7 +1092,12 @@ namespace intrusive_ptr {
 // NullType::singleton to this function
 inline void incref(intrusive_ptr_target* self) {
   if (self) {
-    detail::atomic_refcount_increment(self->combined_refcount_);
+    uint64_t new_refcount = detail::atomic_combined_refcount_increment(
+        self->combined_refcount_, detail::kReferenceCountOne);
+    if (C10_UNLIKELY(detail::has_pyobject(new_refcount) &&
+                     detail::refcount(new_refcount) == 2)) {
+      self->incref_pyobject();
+    }
   }
 }
 

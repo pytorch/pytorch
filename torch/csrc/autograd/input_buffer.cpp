@@ -84,8 +84,8 @@ bool can_accumulate_inplace(const Variable& v) {
       v.is_non_overlapping_and_dense() &&
 
       // and we hold the last reference
-      at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
-      v.storage().use_count() == 1);
+      impl::is_tensor_stealable(v, 1) &&
+      v.has_storage() && v.storage().use_count() == 1);
 }
 } // anonymous namespace
 

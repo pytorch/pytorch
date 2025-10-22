@@ -406,9 +406,6 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
       "Expected no weakrefs to t2's Tensor object but got  ",
       b->cdata->weak_use_count() - 1);
 
-  // Swap the Tensor Impl
-  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
-
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
@@ -423,8 +420,12 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   TORCH_CHECK(mb_obj_a.value() == a_);
   TORCH_CHECK(mb_obj_b.value() == b_);
 
-  a->cdata = b->cdata;
-  b->cdata = tmp;
+  // Swap the Tensor Impl
+  {
+    c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+    a->cdata = b->cdata;
+    b->cdata = tmp;
+  }
 
   a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
   b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
