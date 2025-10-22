@@ -5,7 +5,7 @@ import operator
 import os
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 from typing_extensions import TypeAlias
 
 import torch
@@ -38,10 +38,10 @@ log = logging.getLogger(__name__)
 
 _Arguments: TypeAlias = tuple[torch.fx.node.Argument, ...]
 _TransformParam: TypeAlias = tuple[
-    Optional[_Arguments],
-    Optional[_Arguments],
-    Optional[_Arguments],
-    Optional[_Arguments],
+    _Arguments | None,
+    _Arguments | None,
+    _Arguments | None,
+    _Arguments | None,
 ]
 _Range: TypeAlias = tuple[int, int]
 
@@ -167,7 +167,7 @@ def _get_dim(node: Any):
 def normalize_split_base(
     match: Match,
     _get_split_args: Callable[
-        [torch.fx.Node], tuple[Optional[torch.fx.Node], Optional[Any], Optional[int]]
+        [torch.fx.Node], tuple[torch.fx.Node | None, Any | None, int | None]
     ],
 ):
     """
@@ -725,14 +725,14 @@ class SplitCatSimplifier:
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: list[torch.fx.Node]
-    ) -> list[list[Union[torch.fx.Node, _Range]]]:
+    ) -> list[list[torch.fx.Node | _Range]]:
         """
         Returns list of inputs to the following user nodes, in order. The outer list represents the user node. The inner
         list represents the inputs to that particular node. This list can either contain
           - a tuple representing the ranges of get_items that should go into the cat (closed interval)
           - torch.fx.Node representing "other" inputs (which are not coming from our split)
         """
-        user_inputs_list: list[list[Union[torch.fx.Node, _Range]]] = []
+        user_inputs_list: list[list[torch.fx.Node | _Range]] = []
         for user in next_users:
             if user.target in (torch.cat, torch.stack):
                 user_inputs_list.append(self.get_merged_user_inputs(split_node, user))
@@ -742,7 +742,7 @@ class SplitCatSimplifier:
 
     def get_merged_user_inputs(
         self, split_node: torch.fx.Node, cat_node: torch.fx.Node
-    ) -> list[Union[torch.fx.Node, _Range]]:
+    ) -> list[torch.fx.Node | _Range]:
         user_inputs = get_arg_value(cat_node, 0, "tensors")
         simplified_user_inputs = []
         split_users = OrderedSet(split_node.users.keys())
@@ -769,8 +769,8 @@ class SplitCatSimplifier:
         return node_input
 
     def merge_consecutive_inputs(
-        self, inputs: list[Union[torch.fx.Node, int]]
-    ) -> list[Union[torch.fx.Node, _Range]]:
+        self, inputs: list[torch.fx.Node | int]
+    ) -> list[torch.fx.Node | _Range]:
         """
         Merge consecutive inputs going into a user node.
 
@@ -801,8 +801,8 @@ class SplitCatSimplifier:
         self,
         split_sections,
         next_users,
-        user_inputs_list: list[list[Union[torch.fx.Node, _Range]]],
-    ) -> Optional[list[_Range]]:
+        user_inputs_list: list[list[torch.fx.Node | _Range]],
+    ) -> list[_Range] | None:
         ranges = OrderedSet[Any]()
         for user_inputs in user_inputs_list:
             ranges.update(u for u in user_inputs if isinstance(u, tuple))
@@ -847,8 +847,8 @@ class SplitCatSimplifier:
         self,
         split_node: torch.fx.Node,
         next_users: list[torch.fx.Node],
-        user_inputs_list: list[list[Union[torch.fx.Node, _Range]]],
-    ) -> Optional[list[list[_TransformParam]]]:
+        user_inputs_list: list[list[torch.fx.Node | _Range]],
+    ) -> list[list[_TransformParam]] | None:
         """
         Figure out what transforms are needed for each input to each cat node.
 
@@ -901,7 +901,7 @@ class SplitCatSimplifier:
         graph: torch.fx.Graph,
         split_node: torch.fx.Node,
         split_sections: list[int],
-        user_inputs_list: list[list[Union[torch.fx.Node, _Range]]],
+        user_inputs_list: list[list[torch.fx.Node | _Range]],
         split_ranges: list[_Range],
     ) -> list[list[torch.fx.Node]]:
         """
@@ -1177,8 +1177,8 @@ class UnbindCatRemover(SplitCatSimplifier):
         self,
         split_sections: list[int],
         next_users: list[torch.fx.Node],
-        user_inputs_list: list[list[Union[torch.fx.Node, _Range]]],
-    ) -> Optional[list[_Range]]:
+        user_inputs_list: list[list[torch.fx.Node | _Range]],
+    ) -> list[_Range] | None:
         simplified_split_ranges = super().get_simplified_split_ranges(
             split_sections, next_users, user_inputs_list
         )
@@ -1190,8 +1190,8 @@ class UnbindCatRemover(SplitCatSimplifier):
         self,
         split_node: torch.fx.Node,
         next_users: list[torch.fx.Node],
-        user_inputs_list: list[list[Union[torch.fx.Node, _Range]]],
-    ) -> Optional[list[list[_TransformParam]]]:
+        user_inputs_list: list[list[torch.fx.Node | _Range]],
+    ) -> list[list[_TransformParam]] | None:
         """
         Figure out what transforms are needed for each input to each cat node.
 

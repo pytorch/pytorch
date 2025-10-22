@@ -17,7 +17,7 @@ from torch._dynamo.source import AttrSource, GetItemSource
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented_v2
 from ..utils import cmp_name_to_op_mapping, common_constant_types, istype, np
-from .base import VariableTracker
+from .base import raise_type_error_exc, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -149,7 +149,8 @@ its type to `common_constant_types`.
                 tx, [self, *args], kwargs
             )
         elif name == "join" and istype(self.value, str):
-            assert len(args) == 1 and len(kwargs) == 0
+            if not (len(args) == 1 and len(kwargs) == 0):
+                raise_type_error_exc(tx, "str.join() takes exactly one argument")
             arg_unpacked = args[0].force_unpack_var_sequence(tx)
             try:
                 arg_const = [x.as_python_constant() for x in arg_unpacked]
