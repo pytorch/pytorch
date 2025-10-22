@@ -13919,16 +13919,28 @@ def forward(self, x, b_t, y):
         inps = (torch.ones(5),)
 
         ep = torch.export.export(M(), inps).run_decompositions({})
-        self.assertExpectedInline(
-            str(ep.graph_module.code.strip()),
-            """\
+        if IS_FBCODE:
+            self.assertExpectedInline(
+                str(ep.graph_module.code.strip()),
+                """\
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
-    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [x, cos]);  x = cos = None
-    getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""",
-        )
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph_module.code.strip()),
+                """\
+    def forward(self, x):
+        cos = torch.ops.aten.cos.default(x)
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [x, cos]);  x = cos = None
+        getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
+        cos_1 = torch.ops.aten.cos.default(getitem_3)
+        return (getitem_3, getitem_3, cos_1)""",
+            )
 
     def test_custom_op_auto_warn_pre_dispatch(self):
         class M(torch.nn.Module):
@@ -13941,17 +13953,30 @@ def forward(self, x):
         inps = (torch.ones(5),)
 
         ep = torch.export.export(M(), inps).run_decompositions()
-        self.assertExpectedInline(
-            str(ep.graph_module.code.strip()),
-            """\
-def forward(self, x):
-    cos = torch.ops.aten.cos.default(x)
-    cos_1 = torch.ops.aten.cos.default(x);  x = None
-    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [cos, cos_1]);  cos = cos_1 = None
-    getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
-    cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
-    return (cos_2,)""",
-        )
+        if IS_FBCODE:
+            self.assertExpectedInline(
+                str(ep.graph_module.code.strip()),
+                """\
+    def forward(self, x):
+        cos = torch.ops.aten.cos.default(x)
+        cos_1 = torch.ops.aten.cos.default(x);  x = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [cos, cos_1]);  cos = cos_1 = None
+        getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
+        cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
+        return (cos_2,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph_module.code.strip()),
+                """\
+    def forward(self, x):
+        cos = torch.ops.aten.cos.default(x)
+        cos_1 = torch.ops.aten.cos.default(x);  x = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [cos, cos_1]);  cos = cos_1 = None
+        getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
+        cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
+        return (cos_2,)""",
+            )
 
         ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
         self.assertExpectedInline(
@@ -15192,6 +15217,25 @@ graph():
                 filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
             )
 
+    def test_invalid_pytree_dynamo_graph_capture(self):
+        class Block:
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        class Foo(torch.nn.Module):
+            def forward(self, block):
+                return block.a + block.b
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "It looks like one of the inputs with type"
+        ):
+            _dynamo_graph_capture_for_export(Foo())(
+                Block(torch.randn(4, 4), torch.randn(4, 4))
+            )
+
     def test_enum_str(self):
         class TensorDim(str, enum.Enum):
             DDP = "ddp"
@@ -15328,17 +15372,30 @@ graph():
             decomp_table,
         )
 
-        self.assertExpectedInline(
-            str(ep.graph_module.code).strip(),
-            """\
-def forward(self, x):
-    foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
-    cos = torch.ops.aten.cos.default(foo_functional)
-    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [foo_functional, cos]);  foo_functional = cos = None
-    getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
-    cos_1 = torch.ops.aten.cos.default(getitem_3)
-    return (getitem_3, cos_1)""",
-        )
+        if IS_FBCODE:
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+    def forward(self, x):
+        foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
+        cos = torch.ops.aten.cos.default(foo_functional)
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [foo_functional, cos]);  foo_functional = cos = None
+        getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
+        cos_1 = torch.ops.aten.cos.default(getitem_3)
+        return (getitem_3, cos_1)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+    def forward(self, x):
+        foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
+        cos = torch.ops.aten.cos.default(foo_functional)
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.testlib.foo.default, _x_base_index = 0, _z_base_index = 1, _all_bases = [foo_functional, cos]);  foo_functional = cos = None
+        getitem_3 = auto_functionalized_v2[3];  auto_functionalized_v2 = None
+        cos_1 = torch.ops.aten.cos.default(getitem_3)
+        return (getitem_3, cos_1)""",
+            )
 
     def test_run_decompositions_keep_metadata(self):
         """Make sure the metadata is kept after exported program run_decompositions."""
