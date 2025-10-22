@@ -912,7 +912,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
   auto meta_cpu = dense_cpu.new_empty({meta_nrows, meta_ncols},
                                       at::TensorOptions().dtype(meta_dtype));
 
-  auto* mask_cpu_ptr = mask_cpu.mutable_data_ptr<bool>();
+  const auto* mask_cpu_ptr = mask_cpu.const_data_ptr<bool>();
   for (auto i = 0; i < meta_nrows; ++i) {
     for (auto j = 0; j < meta_ncols; ++j) {
       uint64_t meta_val = 0;
@@ -962,7 +962,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
     using MetaElement = int16_t;
     auto meta_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaLayout>(
-          meta_cpu.mutable_data_ptr<MetaElement>(),
+          meta_cpu.const_data_ptr<MetaElement>(),
           MetaLayout::packed({meta_nrows, meta_ncols}));
     auto meta_reordered_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaReorderedLayout>(
@@ -973,7 +973,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
     using MetaElement = int32_t;
     auto meta_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaLayout>(
-          meta_cpu.mutable_data_ptr<MetaElement>(),
+          meta_cpu.const_data_ptr<MetaElement>(),
           MetaLayout::packed({meta_nrows, meta_ncols}));
     auto meta_reordered_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaReorderedLayout>(

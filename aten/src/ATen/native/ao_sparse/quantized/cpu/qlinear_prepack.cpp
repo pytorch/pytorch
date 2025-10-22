@@ -97,8 +97,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
     }
   }
 
-  int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_contig.mutable_data_ptr<c10::qint8>());
+  const int8_t* weight_ptr_int8 =
+      reinterpret_cast<const int8_t*>(weight_contig.const_data_ptr<c10::qint8>());
 
   std::vector<int32_t> col_offsets(N);
   calc_col_offsets_transpose(
@@ -192,8 +192,8 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       w_zero_points_[0]);
   auto* qnnp_w_data = qnnp_weight.mutable_data_ptr<c10::quint8>();
   auto wt_numel = weight_contig.numel();
-  int8_t* w_data =
-      reinterpret_cast<int8_t*>(weight_contig.mutable_data_ptr<c10::qint8>());
+  const int8_t* w_data =
+      reinterpret_cast<const int8_t*>(weight_contig.const_data_ptr<c10::qint8>());
   for (const auto i : c10::irange(wt_numel)) {
     qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
   }

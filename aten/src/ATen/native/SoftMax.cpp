@@ -248,7 +248,7 @@ void host_softmax_backward(
     const Tensor& grad,
     const Tensor& output,
     int64_t dim,
-    bool* mask = nullptr) {
+    const bool* mask) {
 
   int64_t outer_size = 1;
   int64_t dim_size = grad.size(dim);
@@ -264,7 +264,7 @@ void host_softmax_backward(
   scalar_t* gradInput_data_base = gI.mutable_data_ptr<scalar_t>();
   scalar_t* output_data_base = output.mutable_data_ptr<scalar_t>();
   scalar_t* gradOutput_data_base = grad.mutable_data_ptr<scalar_t>();
-  bool* mask_data_base = mask;
+  const bool* mask_data_base = mask;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
@@ -277,7 +277,7 @@ void host_softmax_backward(
               output_data_base + outer_idx * outer_stride + inner_idx;
           const scalar_t* gradOutput_data =
               gradOutput_data_base + outer_idx * outer_stride + inner_idx;
-          bool* mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          const bool* mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
 
           acc_type<scalar_t, false> sum = 0;
           for (const auto d : c10::irange(dim_size)) {
@@ -619,7 +619,7 @@ Tensor masked_softmax_backward_cpu(
   Tensor grad_input = at::empty_like(grad, grad.options());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::BFloat16, at::ScalarType::Half, grad.scalar_type(), "masked_softmax_backward", [&] {
-        host_softmax_backward<scalar_t>(grad_input, grad, output, dim, mask.mutable_data_ptr<bool>());
+        host_softmax_backward<scalar_t>(grad_input, grad, output, dim, mask.const_data_ptr<bool>());
       });
   return grad_input;
 }

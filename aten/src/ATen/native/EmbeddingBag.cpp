@@ -1075,7 +1075,7 @@ static void embedding_bag_cpu_max_out(
   int64_t vocab_size = weight.size(0);
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cpu_max_out", [&] {
     auto* indices_data = indices.const_data_ptr<index_t>();
-    auto* offset2bag_data = offset2bag.mutable_data_ptr<index_t>();
+    const auto* offset2bag_data = offset2bag.const_data_ptr<index_t>();
 
     index_t* max_indices_data = nullptr;
     int64_t max_indices_stride = 0;

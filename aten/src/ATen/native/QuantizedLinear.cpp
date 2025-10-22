@@ -123,8 +123,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   auto& pack_b =
       cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
-  int32_t* col_offsets_data = col_offsets.mutable_data_ptr<int32_t>();
-  float* bias_contig_data = bias_contig.mutable_data_ptr<float>();
+  const int32_t* col_offsets_data = col_offsets.const_data_ptr<int32_t>();
+  const float* bias_contig_data = bias_contig.const_data_ptr<float>();
 
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
