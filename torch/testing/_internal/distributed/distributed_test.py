@@ -5742,7 +5742,9 @@ class DistributedTest:
 
             dist.barrier()
             map_location = {"cuda:0": f"cuda:{self.rank:d}"}
-            checkpoint = torch.load(chkpt_file, map_location=map_location)
+            checkpoint = torch.load(
+                chkpt_file, map_location=map_location, weights_only=True
+            )
             dummy_post_localSGD_opt.load_state_dict(checkpoint["optimizer_state_dict"])
 
             # Check that we didn't hit the trivial case
@@ -10167,7 +10169,9 @@ class DistributedTest:
             dist.barrier()
             map_location = {"cuda:0": f"cuda:{rank:d}"}
             with self.assertLogs("torch.distributed") as captured:
-                checkpoint = torch.load(chkpt_file, map_location=map_location)
+                checkpoint = torch.load(
+                    chkpt_file, map_location=map_location, weights_only=True
+                )
 
             # Check that the logger has only one entry
             self.assertEqual(len(captured.records), 1)
