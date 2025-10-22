@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/ops/clamp.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
@@ -347,14 +348,24 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& pos_weight_opt, int64_t reduction) {
-  auto log_sigmoid_input = at::log_sigmoid(input);
+  // Binary cross entropy with logits tensor is defined by the equation:
+  // L = -w (p y ln(sigma(x)) + (1-y) ln(1-sigma(x)))
+  // Which can be simplified to
+  // L = -w (x (1-y) - ln(sigma(x))(1+y(p-1))
+  // => L = -w (x (1-y) - ln(sigma(x)), when p==1.
+
+  // // Threshold when ln(sigma(x)) or ln(1-sigma(x)) < -100 to be consistent with binary_cross_entropy
+  // // Note: ln(sigma(x)) ~= x if x < -100 and ln(1-sigma(x)) ~= -x for x > 100
+  Tensor input_clamped = at::clamp(input, -100, 100);
+
+  auto log_sigmoid_input = at::log_sigmoid(input_clamped);
+
   if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
       // pos_weight need to be broadcasted, thus mul(target) is not inplace.
       auto log_weight = (*pos_weight_opt- 1).mul(target).add_(1);
       log_sigmoid_input.mul_(log_weight);
   }
-
-  Tensor loss = (1 - target).mul_(input).sub_(log_sigmoid_input);
+  Tensor loss = (1 - target).mul_(input_clamped).sub_(log_sigmoid_input);
 
   if (weight_opt.has_value() && weight_opt->defined()) {
       loss.mul_(*weight_opt);
