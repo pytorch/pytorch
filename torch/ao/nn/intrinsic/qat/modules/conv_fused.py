@@ -573,10 +573,18 @@ class ConvBnReLU1d(ConvBn1d):
         )
 
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         return F.relu(self._forward(input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
+        r"""Create a qat module from a float module or qparams_dict
+
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
+        or directly from user
+        """
         return super().from_float(mod, use_precomputed_fake_quant)
 
 
@@ -629,12 +637,20 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         return F.relu(
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
         )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Create a qat module from a float module or qparams_dict
+
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
+        or directly from user
+        """
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -774,10 +790,18 @@ class ConvBnReLU2d(ConvBn2d):
         )
 
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         return F.relu(self._forward(input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
+        r"""Create a qat module from a float module or qparams_dict
+
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
+        or directly from user
+        """
         return super().from_float(mod, use_precomputed_fake_quant)
 
 
@@ -830,12 +854,20 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         return F.relu(
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
         )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Create a qat module from a float module or qparams_dict
+
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
+        or directly from user
+        """
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -974,10 +1006,18 @@ class ConvBnReLU3d(ConvBn3d):
         )
 
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         return F.relu(ConvBn3d._forward(self, input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
+        r"""Create a qat module from a float module or qparams_dict
+
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
+        or directly from user
+        """
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -1032,12 +1072,20 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         return F.relu(
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
         )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Create a qat module from a float module or qparams_dict
+
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
+        or directly from user
+        """
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
