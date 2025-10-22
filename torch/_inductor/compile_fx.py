@@ -114,7 +114,7 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
-from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap  # noqa: F401
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
