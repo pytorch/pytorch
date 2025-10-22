@@ -244,8 +244,8 @@ def device_assert_then(cond, msg, r):
 
 
 @triton.jit
-def rand_eager(
-    seed: tl.int32,
+def rand_eager_kernel(
+    seed: tl.uint32,
     offset_blocks,
     tid: tl.tensor, 
     VEC: tl.constexpr  
@@ -257,7 +257,7 @@ def rand_eager(
 
     subseq  = (tid_u64 // VEC)
     which4  = ((tid_u64 % VEC) // 4)
-    lane    = (tid_u64 % 4).to(tl.int32)
+    lane    = (tid_u64 % 4).to(tl.uint32)
 
     offblk = offset_blocks.to(tl.uint64) + which4
 
