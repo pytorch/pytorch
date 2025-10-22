@@ -10,6 +10,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
@@ -24,7 +25,6 @@
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #include <ATen/ops/max_unpool2d_native.h>
 #include <ATen/ops/max_unpool3d_native.h>
-#include <ATen/ops/aminmax.h>
 #endif
 
 namespace at::native {
