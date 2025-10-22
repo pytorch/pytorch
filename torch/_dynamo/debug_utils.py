@@ -79,7 +79,8 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
-    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")  # type: ignore[possibly-undefined]
+    build_rule = libfb.py.build_info.BuildInfo.get_build_rule()
+    cur_target = build_rule.replace("fbcode:", "//") if build_rule is not None else None
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
 
 
@@ -103,6 +104,15 @@ class BuckTargetWriter:
 
     def build(self) -> str:
         extra_cpp_deps = "\n".join([f'        "{x}",' for x in extra_deps])
+        deps_list = [
+            "//caffe2:torch",
+            "//caffe2:libtorch",
+            "//caffe2/functorch:functorch",
+            "//triton:triton",
+        ]
+        if cur_target is not None:
+            deps_list.append(f"{cur_target}")
+        deps_str = "\n        ".join(f'"{dep}",' for dep in deps_list)
         return textwrap.dedent(
             f"""
 load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
@@ -112,11 +122,7 @@ python_binary(
     srcs = ["{self.py_file}"],
     compile = False,
     deps = [
-        "//caffe2:torch",
-        "//caffe2:libtorch",
-        "//caffe2/functorch:functorch",
-        "//triton:triton",
-        "{cur_target}",
+        {deps_str}
     ],
     cpp_deps = [
 {extra_cpp_deps}
