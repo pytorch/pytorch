@@ -33,7 +33,7 @@ namespace at::native {
 Tensor& mkldnn_zero_(Tensor& self) {
   using Vec = vec::Vectorized<float>;
 
-  ideep::tensor& x = itensor_from_mkldnn(self);
+  const ideep::tensor& x = itensor_from_mkldnn(self);
 
   auto n = x.get_nelems();
   auto* x_ = static_cast<float*>(x.get_data_handle());
