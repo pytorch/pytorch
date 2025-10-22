@@ -225,7 +225,7 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
      c_element_op);
 
 
- TORCH_CHECK(gemm.IsSupportedArgument(argument) != nullptr, "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
+ TORCH_CHECK(gemm.IsSupportedArgument(argument), "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
 
 
  auto stream = at::cuda::getCurrentHIPStream().stream();
