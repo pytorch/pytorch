@@ -624,30 +624,25 @@ __host__ __device__
 #define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
 
 // Macros to handle 1-3 namespace levels
-#define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden")))
+#define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden"))) {
 #define _HIDDEN_NS_2(n1, n2) \
   namespace n1 {             \
-  namespace n2 __attribute__((visibility("hidden")))
+  namespace n2 __attribute__((visibility("hidden"))) {
 #define _HIDDEN_NS_3(n1, n2, n3) \
-  namespace n1 {                 \
-  namespace n2 {                 \
-  namespace n3 __attribute__((visibility("hidden")))
+  namespace n1::n2 {             \
+  namespace n3 __attribute__((visibility("hidden"))) {
 
 // Macros to close namespaces
 #define _HIDDEN_NS_END_1(n1) }
-#define _HIDDEN_NS_END_2(n1, n2) \
-  }                              \
-  }
-#define _HIDDEN_NS_END_3(n1, n2, n3) \
-  }                                  \
-  }                                  \
+#define _HIDDEN_NS_END_N(n1, ...) \
+  }                               \
   }
 
 #if !defined(HIDDEN_NAMESPACE_BEGIN)
 #if defined(__GNUG__) && !defined(_WIN32)
 #define HIDDEN_NAMESPACE_BEGIN(...)       \
   _HIDDEN_NS_EXPAND(_HIDDEN_NS_GET_MACRO( \
-      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__)) {
+      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__))
 #else
 #define HIDDEN_NAMESPACE_BEGIN(...) namespace __VA_ARGS__ {
 #endif
@@ -657,7 +652,7 @@ __host__ __device__
 #if defined(__GNUG__) && !defined(_WIN32)
 #define HIDDEN_NAMESPACE_END(...)                                         \
   _HIDDEN_NS_EXPAND(_HIDDEN_NS_GET_MACRO(                                 \
-      __VA_ARGS__, _HIDDEN_NS_END_3, _HIDDEN_NS_END_2, _HIDDEN_NS_END_1)( \
+      __VA_ARGS__, _HIDDEN_NS_END_N, _HIDDEN_NS_END_N, _HIDDEN_NS_END_1)( \
       __VA_ARGS__))
 #else
 #define HIDDEN_NAMESPACE_END(...) }
