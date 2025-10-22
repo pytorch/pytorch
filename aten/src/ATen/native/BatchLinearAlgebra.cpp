@@ -3046,22 +3046,22 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
       }
     }
   }
-  TORCH_WARN("=== Debug native/BatchLinarAlgebra/linalg_eig_out_info ===");
-  TORCH_WARN("input dtype: ", input.dtype(), " device: ", input.device());
-  TORCH_WARN("real_imag_values: sizes=", real_imag_values.sizes(),
-             " dtype=", real_imag_values.dtype(),
-             " device=", real_imag_values.device());
-  TORCH_WARN("values (final): sizes=", values.sizes(),
-             " dtype=", values.dtype(),
-             " device=", values.device());
-  if (compute_eigenvectors) {
-    TORCH_WARN("maybe_complex_vectors: sizes=", maybe_complex_vectors.sizes(),
-               " dtype=", maybe_complex_vectors.dtype(),
-               " device=", maybe_complex_vectors.device());
-    TORCH_WARN("vectors (final): sizes=", vectors.sizes(),
-               " dtype=", vectors.dtype(),
-               " device=", vectors.device());
-  }
+  // TORCH_WARN("=== Debug native/BatchLinarAlgebra/linalg_eig_out_info ===");
+  // TORCH_WARN("input dtype: ", input.dtype(), " device: ", input.device());
+  // TORCH_WARN("real_imag_values: sizes=", real_imag_values.sizes(),
+  //            " dtype=", real_imag_values.dtype(),
+  //            " device=", real_imag_values.device());
+  // TORCH_WARN("values (final): sizes=", values.sizes(),
+  //            " dtype=", values.dtype(),
+  //            " device=", values.device());
+  // if (compute_eigenvectors) {
+  //   TORCH_WARN("maybe_complex_vectors: sizes=", maybe_complex_vectors.sizes(),
+  //              " dtype=", maybe_complex_vectors.dtype(),
+  //              " device=", maybe_complex_vectors.device());
+  //   TORCH_WARN("vectors (final): sizes=", vectors.sizes(),
+  //              " dtype=", vectors.dtype(),
+  //              " device=", vectors.device());
+  // }
 
   auto n = input.size(-1);
   TORCH_CHECK(values.is_complex(), "values (complex_values) not complex");
@@ -3162,6 +3162,11 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
   Tensor vectors = at::empty({0}, input.options().dtype(complex_dtype));
+
+  // TORCH_WARN("input shape: ", input.sizes());
+  // TORCH_WARN("values shape: ", values.sizes());
+  // TORCH_WARN("vectors shape: ", vectors.sizes());
+
 
   at::linalg_eig_outf(input, values, vectors);
 

@@ -1635,10 +1635,6 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 template <typename scalar_t>
 void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
   TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
-  TORCH_WARN("values device: ", values.device());
-  TORCH_WARN("vectors device: ", vectors.device());
-  TORCH_WARN("input device: ", input.device());
-  TORCH_WARN("infos device: ", infos.device());
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.is_cuda());
@@ -1711,16 +1707,16 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   auto& host_allocator = *at::cuda::getPinnedMemoryAllocator();
   auto work_host_data = host_allocator.allocate(ws_host);
 
-  TORCH_WARN("=== XGEEV DEBUG ===");
-  TORCH_WARN("vectors shape: ", vectors.sizes());
-  TORCH_WARN("values  shape: ", values.sizes());
-  TORCH_WARN("input   shape: ", input.sizes());
-  TORCH_WARN("vectors dtype: ", vectors.scalar_type());
-  TORCH_WARN("values  dtype: ", values.scalar_type());
-  TORCH_WARN("vectors numel: ", vectors.numel());
-  TORCH_WARN("values  numel: ", values.numel());
-  TORCH_WARN("input   numel: ", input.numel());
-  TORCH_WARN("===================");
+  // TORCH_WARN("=== XGEEV DEBUG ===");
+  // TORCH_WARN("vectors shape: ", vectors.sizes());
+  // TORCH_WARN("values  shape: ", values.sizes());
+  // TORCH_WARN("input   shape: ", input.sizes());
+  // TORCH_WARN("vectors dtype: ", vectors.scalar_type());
+  // TORCH_WARN("values  dtype: ", values.scalar_type());
+  // TORCH_WARN("vectors numel: ", vectors.numel());
+  // TORCH_WARN("values  numel: ", values.numel());
+  // TORCH_WARN("input   numel: ", input.numel());
+  // TORCH_WARN("===================");
 
   for (decltype(batch_size) i = 0; i < batch_size; ++i) {
     scalar_t* Ai   = A_data      + i * A_stride;
