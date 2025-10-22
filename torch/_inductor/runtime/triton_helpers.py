@@ -245,7 +245,7 @@ def device_assert_then(cond, msg, r):
 
 @triton.jit
 def rand_eager_kernel(
-    seed: tl.uint32,
+    seed,
     offset_blocks,
     tid: tl.tensor, 
     VEC: tl.constexpr  
