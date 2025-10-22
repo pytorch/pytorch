@@ -1555,7 +1555,7 @@ class SIMDScheduling(BaseScheduling):
 
         # decide the split size
         nrow, ncol = node1.group[1]
-        split_size = 128  # TODO need add heuristics
+        split_size = 64  # TODO need add heuristics
         nsplit = (nrow + split_size - 1) // split_size
 
         numel, rnumel = node1.group[1]

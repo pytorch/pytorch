@@ -3335,19 +3335,26 @@ def persistent_reduction(
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
 
-    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
-
     if inductor_meta.get("RSPLIT_SIZE"):
+        new_configs = []
         for c in configs:
             c.kwargs["RSPLIT_SIZE"] = inductor_meta.get("RSPLIT_SIZE")
 
-            # does not make sense if XBLOCK > RSPLIT_SIZE
-            if c.kwargs["XBLOCK"] > c.kwargs["RSPLIT_SIZE"]:
-                c.kwargs["XBLOCK"] = c.kwargs["RSPLIT_SIZE"]
+            # small XBLOCK to use less registers/smem
+            c.kwargs["XBLOCK"] = 1
+            c.num_warps //= 2
+            c.num_warps = max(c.num_warps, 2)
 
-                # We use power of 2 RSPLIT_SIZE for now
-                assert c.kwargs["RSPLIT_SIZE"] % c.kwargs["XBLOCK"] == 0
+            # less warps so potentially each sm can run more thread blocks
+            # Inside each thread block, we handle the split sequentially,
+            # more thread blocks is beneficial here.
+            newc = copy.deepcopy(c)
+            newc.num_warps = 2
+            new_configs.append(newc)
 
+        configs = unique_configs(new_configs)
+
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs,

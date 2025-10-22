@@ -705,7 +705,7 @@ conv_1x1_as_mm = False
 #   split_reductions: uses multiple kernels to gain more parallelism
 #   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
 # enabling both of these will implicitly disable split_reductions
-split_reductions = True
+split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
