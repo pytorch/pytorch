@@ -386,10 +386,11 @@ def meta_select(fake_mode, func, self, dim, index):
     new_stride = list(self.stride())
 
     new_storage_offset = None
-    if guard_or_false(index >= 0):
-        new_storage_offset = self.storage_offset() + index * new_stride[dim]
-    elif guard_or_false(index < 0):
-        new_storage_offset = self.storage_offset() + (index + size) * new_stride[dim]
+    with torch.fx.experimental._config.patch(backed_size_oblivious=False):
+        if guard_or_false(index >= 0):
+            new_storage_offset = self.storage_offset() + index * new_stride[dim]
+        elif guard_or_false(index < 0):
+            new_storage_offset = self.storage_offset() + (index + size) * new_stride[dim]
 
     if new_storage_offset is None:
         if fake_mode.shape_env is None or (
@@ -762,6 +763,7 @@ def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=No
     return padded.new_empty(output_shape)
 
 
+@torch.fx.experimental._config.patch(backed_size_oblivious=False)
 def _compute_slice_index(size, index):
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
 
@@ -814,10 +816,11 @@ def slice_forward(
     # size
     new_size = None
     if start_index is not None and end_index is not None:
-        if guard_or_false(end_index >= start_index):
-            new_size = (end_index - start_index + step - 1) // step
-        elif guard_or_false(start_index >= end_index):
-            new_size = 0
+        with torch.fx.experimental._config.patch(backed_size_oblivious=False):
+            if guard_or_false(end_index >= start_index):
+                new_size = (end_index - start_index + step - 1) // step
+            elif guard_or_false(start_index >= end_index):
+                new_size = 0
 
     # create unbacked if case unknown
     if new_size is None:
