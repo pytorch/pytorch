@@ -1,0 +1,79 @@
+.icicle-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.icicle-modal {
+  background-color: white;
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.icicle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.icicle-header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.icicle-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.icicle-controls button {
+  padding: 8px 16px;
+  background-color: #1877f2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.icicle-controls button:hover {
+  background-color: #166fe5;
+}
+
+.icicle-info {
+  margin-bottom: 10px;
+  color: #666;
+  font-size: 14px;
+}
+
+.icicle-canvas-container {
+  border: 1px solid #ddd;
+  overflow: auto;
+  border-radius: 4px;
+  background-color: #fafafa;
+}
+
+.icicle-canvas-container canvas {
+  display: block;
+  cursor: pointer;
+}
+
+.icicle-help {
+  margin-top: 15px;
+  font-size: 13px;
+  color: #666;
+  text-align: center;
+}
