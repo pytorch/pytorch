@@ -1457,7 +1457,7 @@ class _Ops(types.ModuleType):
         """
         importlib.import_module(module)
 
-    def load_library(self, path):
+    def load_library(self, path: str) -> ctypes.CDLL:
         """
         Loads a shared library from the given path into the current process.
 
@@ -1474,6 +1474,9 @@ class _Ops(types.ModuleType):
 
         Args:
             path (str): A path to a shared library to load.
+
+        Returns:
+            ctypes.CDLL: The ctypes object for the loaded library.
         """
         path = _utils_internal.resolve_library_path(path)
         with dl_open_guard():
@@ -1481,10 +1484,11 @@ class _Ops(types.ModuleType):
             # static (global) initialization code in order to register custom
             # operators with the JIT.
             try:
-                ctypes.CDLL(path)
+                lib = ctypes.CDLL(path)
             except Exception as e:
                 raise OSError(f"Could not load this library: {path}") from e
         self.loaded_libraries.add(path)
+        return lib
 
 
 # The ops "namespace"
