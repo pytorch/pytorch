@@ -87,12 +87,13 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -441,8 +442,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and isinstance(args[0], UserDefinedClassVariable)
             and args[0].value is collections.OrderedDict
         ):
-            assert len(args) == 1
-            assert len(kwargs) == 0
+            if kwargs and len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
@@ -591,7 +597,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
-            assert args[0].is_python_constant()
+            if not args[0].is_python_constant():
+                raise_type_error_exc(
+                    tx, "torch.cuda.device() requires a constant argument"
+                )
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
@@ -693,8 +702,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
             if self.value.__module__ == "torch.return_types":
-                assert len(args) == 1
-                assert not kwargs
+                if kwargs or len(args) != 1:
+                    raise_args_mismatch(
+                        tx,
+                        "torch.return_types",
+                        "1 args and 0 kwargs",
+                        f"{len(args)} args and {len(kwargs)} kwargs",
+                    )
                 items = args[0].force_unpack_var_sequence(tx)
             else:
                 field_defaults = self.value._field_defaults
