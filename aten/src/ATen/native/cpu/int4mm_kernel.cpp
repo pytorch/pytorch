@@ -703,7 +703,7 @@ void int4pack_mm_kernel_(
     const Tensor& qScaleAndZeros) {
 
   const auto* A_data = A.const_data_ptr<T>();
-  const auto* B_data = reinterpret_cast<const uint8_t*>(B.const_data_ptr());
+  const auto* B_data = B.const_data_ptr<uint8_t>();
   auto* C_data = C.data_ptr<T>();
   const auto* S_data = qScaleAndZeros.const_data_ptr<T>();
 

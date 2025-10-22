@@ -2599,7 +2599,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       "batch_sizes tensor should be on CPU, but got ",
       _batch_sizes.device());
   IntArrayRef batch_sizes{
-      _batch_sizes.mutable_data_ptr<int64_t>(),
+      _batch_sizes.const_data_ptr<int64_t>(),
       static_cast<size_t>(_batch_sizes.size(0))};
 
   auto& dropout_state = get_dropout_state(dropout_p, train, input.options());

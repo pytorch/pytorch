@@ -1186,7 +1186,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
-    const index_t* crow_indices_ptr = crow_indices.const_data_ptr<index_t>();
+    index_t* crow_indices_ptr = crow_indices.data_ptr<index_t>();
     index_t* new_crow_indices_ptr = new_crow_indices.mutable_data_ptr<index_t>();
     index_t* row_map_ptr = row_map.mutable_data_ptr<index_t>();
     int64_t nnz = 0;
