@@ -122,13 +122,15 @@ if __name__ == "__main__":
         if not path.is_file() or path.suffix not in {".yml", ".yaml"}:
             continue
         workflow = load_yaml(path)
-        if is_workflow(workflow):
-            jobs = workflow.get("jobs", {})
-            for job_id, job in jobs.items():
-                res = get_jobs_with_sync_tag(job)
-                if res is not None:
-                    sync_tag, path, job_dict = res
-                    tag_to_jobs[sync_tag].append((path, {job_id: job}))
+        if not is_workflow(workflow):
+            continue
+        jobs = workflow.get("jobs", {})
+        for job_id, job in jobs.items():
+            res = get_jobs_with_sync_tag(job)
+            if res is None:
+                continue
+            sync_tag, path, job_dict = res
+            tag_to_jobs[sync_tag].append((path, {job_id: job}))
 
     # Check the files passed as arguments
     for path in args.filenames:
