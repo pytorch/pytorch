@@ -9677,6 +9677,7 @@ class TestHopSchema(TestCase):
         schema = torch.ops.higher_order.associative_scan.gen_schema(
             combine_fn,
             (torch.randn(5, 3, 4),),
+            False,
             (),
         )
         self.assertExpectedInline(
@@ -9691,6 +9692,7 @@ class TestHopSchema(TestCase):
         schema = torch.ops.higher_order.associative_scan.gen_schema(
             combine_fn,
             (torch.randn(5, 3, 4),),
+            False,
             (torch.tensor(2.0),),
         )
         self.assertExpectedInline(
@@ -9705,6 +9707,7 @@ class TestHopSchema(TestCase):
         schema = torch.ops.higher_order.associative_scan.gen_schema(
             combine_fn,
             (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            False,
             (),
         )
         self.assertExpectedInline(
