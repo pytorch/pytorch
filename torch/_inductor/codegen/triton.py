@@ -4362,7 +4362,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         assert len(masks) <= 2, (
             "ops.scan currently only supports the case with 1 mask for all values"
         )
-        
+
         use_result_masking = len(masks) == 2
 
         # TODO: Currently masking is used by default.
