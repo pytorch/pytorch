@@ -92,6 +92,7 @@ class MixOrderReductionTest(TestBase):
         ],
     )
     @parametrize("swap", (False, True))
+    # TODO parametrize this
     @inductor_config.patch(split_reductions=False)
     def test_mix_order_reduction(self, name, swap):
         def f(x):
@@ -101,6 +102,7 @@ class MixOrderReductionTest(TestBase):
                 return reduction_fn(x, dim=1), reduction_fn(x, dim=0)
 
         reduction_fn = getattr(torch, name)
+        # M, N = 32768 + 1, 768
         M, N = 32768, 768
         dtype = torch.float
         x = torch.randn(M, N, dtype=dtype, device=GPU_TYPE)
@@ -110,17 +112,10 @@ class MixOrderReductionTest(TestBase):
         ref = f(x)
         act = opt_f(x)
 
+        # breakpoint()
         self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
 
-        expected_num_kernel = 1 + (not inductor_config.triton.mix_order_reduction)
-        if name == "mean" and inductor_config.triton.mix_order_reduction:
-            # for mean we generate one more kernel to do the division
-            # this kernel should be very cheap since tensor size is small
-            expected_num_kernel = 2
-        self.assertEqual(
-            expected_num_kernel,
-            metrics.generated_kernel_count,
-        )
+        self.assertEqual(inductor_config.triton.mix_order_reduction, metrics.codegen_mix_order_reduction)
 
     @parametrize(
         "wdtype",

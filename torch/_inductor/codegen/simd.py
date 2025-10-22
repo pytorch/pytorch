@@ -1536,6 +1536,9 @@ class SIMDScheduling(BaseScheduling):
                 epilogues.append(node)
         return reductions, epilogues
 
+    def _is_split_reduction(self, reds):
+        return reds[0].node._split_size is not None
+
     def _codegen_mix_order_reduction(self, node1, node2):
         if not V.graph.sizevars.statically_known_gt(
             node1.group[1][0], node1.group[1][1]
@@ -1555,13 +1558,24 @@ class SIMDScheduling(BaseScheduling):
 
         # decide the split size
         nrow, ncol = node1.group[1]
-        split_size = 64  # TODO need add heuristics
-        nsplit = (nrow + split_size - 1) // split_size
 
+        # is_split_reduction = self._is_split_reduction(node2_reductions)
+        force_split_size = node2_reductions[0].node._split_size
+
+        # the split size is decided by split reduction
+        if force_split_size is not None:
+            split_size = force_split_size
+        else:
+            # TODO need add heuristics. But this is not really important
+            # ATM since the common code path goes thru split reduction.
+            split_size = 64
+
+        nsplit = (nrow + split_size - 1) // split_size
         numel, rnumel = node1.group[1]
 
         converted_nodes = []
         for subnode in node2_reductions:
+            subnode.cancel_reduction_split()
             converted = subnode.extract_pw_from_reduction()
             converted.swap_pw_red_dimension()
             converted_nodes.append(converted)
@@ -1617,9 +1631,15 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
-            V.graph.wrapper_code.writeline(
-                f"{buffer_name} = workspace_0[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
-            )
+
+            if force_split_size is not None:
+                V.graph.wrapper_code.writeline(
+                    f"{buffer_name} = workspace_0[{start} : {end}].view({nsplit}, {rnumel})",
+                )
+            else:
+                V.graph.wrapper_code.writeline(
+                    f"{buffer_name} = workspace_0[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
+                )
 
         kernel.deallocate_workspaces()
 
