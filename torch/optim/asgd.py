@@ -310,7 +310,8 @@ def _multi_tensor_asgd(
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
         ):
             raise AssertionError(
-                f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
+                f"If capturable=True, params, mus, etas, and state_steps must be on "
+                f"supported devices: {capturable_supported_devices}."
             )
 
     lr = _to_scalar(lr)
