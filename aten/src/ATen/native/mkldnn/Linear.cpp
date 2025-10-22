@@ -438,12 +438,12 @@ Tensor mkl_linear(
     auto K = origin_weight_t.size(1);
     auto N = origin_weight_t.size(0);
     const ideep::tensor& w = itensor_from_mkldnn(mkl_weight_t);
-    auto in_ptr = self_.data_ptr<float>();
-    auto weight_ptr = (float*)(w.get_data_handle());
-    auto out_ptr = output.data_ptr<float>();
+    auto in_ptr = self_.const_data_ptr<float>();
+    auto weight_ptr = (const float*)(w.get_data_handle());
+    auto out_ptr = output.mutable_data_ptr<float>();
     if (bias.defined()) {
       auto bias_ = bias.is_contiguous() ? bias : bias.contiguous();
-      auto bias_ptr = bias_.data_ptr<float>();
+      const auto bias_ptr = bias_.const_data_ptr<float>();
       at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
         for (const auto d : c10::irange(begin, end)) {
           memcpy(out_ptr + d * N, bias_ptr, sizeof(float) * N);

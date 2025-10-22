@@ -18,7 +18,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
   const auto& sizes = nt_impl->get_nested_sizes();
   auto size_tensor_stride = sizes.stride(0);
   const int64_t batch_size = nestedtensor.size(0);
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  auto* sizes_ptr = sizes.mutable_data_ptr<int64_t>();
   int64_t cumulative_sequence_length = 0;
   for (const auto i : c10::irange(batch_size)) {
     // Calculate the cumulative sum of the sequence lengths
@@ -49,8 +49,8 @@ int64_t get_nnz(const Tensor& nestedtensor) {
     auto cumulative_seqlen = at::zeros(
         {batch_size + 1}, TensorOptions().device(at::kCPU).dtype(at::kInt));
 
-    auto* sizes_ptr = sizes.data_ptr<int64_t>();
-    auto* cumulative_seqlen_ptr = cumulative_seqlen.data_ptr<int32_t>();
+    auto* sizes_ptr = sizes.mutable_data_ptr<int64_t>();
+    auto* cumulative_seqlen_ptr = cumulative_seqlen.mutable_data_ptr<int32_t>();
 
     int64_t sum = 0;
     int64_t max_seqlen = -1;
@@ -84,7 +84,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
    */
   bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
     const int64_t* tensor_offsets_ptr =
-        tensor->get_storage_offsets().data_ptr<int64_t>();
+        tensor->get_storage_offsets().mutable_data_ptr<int64_t>();
     const Tensor& tensor_sizes = tensor->get_nested_sizes();
     const Tensor& tensor_strides = tensor->get_nested_strides();
 
@@ -99,7 +99,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
       return true;
     }
 
-    int64_t* previous_tensor_stride = tensor_strides.data_ptr<int64_t>();
+    int64_t* previous_tensor_stride = tensor_strides.mutable_data_ptr<int64_t>();
 
     // Check initially that the first tensor's strides
     // are in strictly descending order
@@ -180,9 +180,9 @@ int64_t get_nnz(const Tensor& nestedtensor) {
 
     constexpr int64_t head_dim_stride = 1;
     const int64_t* nt_strides =
-        tensor_impl->get_nested_strides().data_ptr<int64_t>();
+        tensor_impl->get_nested_strides().mutable_data_ptr<int64_t>();
     const int64_t* nt_offsets_ptr =
-        tensor_impl->get_storage_offsets().data_ptr<int64_t>();
+        tensor_impl->get_storage_offsets().mutable_data_ptr<int64_t>();
 
     const int64_t nnz_stride = nt_strides[0];
     const int64_t head_stride = num_heads_needs_broadcast ? 0 : nt_strides[1];

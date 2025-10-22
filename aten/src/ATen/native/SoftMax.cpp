@@ -154,7 +154,7 @@ void host_softmax(
     Tensor& output,
     const Tensor& input,
     const int64_t dim,
-    bool* mask,
+    const bool* mask,
     const std::optional<int64_t> mask_type_) {
 
   TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
@@ -173,9 +173,9 @@ void host_softmax(
   }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* input_data_base = input.data_ptr<scalar_t>();
-  scalar_t* output_data_base = output.data_ptr<scalar_t>();
-  bool* mask_data_base = mask;
+  const scalar_t* input_data_base = input.const_data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.mutable_data_ptr<scalar_t>();
+  const bool* mask_data_base = mask;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
       0, outer_size * inner_size, grain_size,
@@ -183,7 +183,7 @@ void host_softmax(
         for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
-          scalar_t* input_data =
+          const scalar_t* input_data =
               input_data_base + outer_idx * outer_stride + inner_idx;
           scalar_t* output_data =
               output_data_base + outer_idx * outer_stride + inner_idx;
@@ -201,7 +201,7 @@ void host_softmax(
               mask_outer_idx = outer_idx / (input.size(1) * input.size(2));
           }
 
-          bool* mask_data = mask_data_base + mask_outer_idx * outer_stride + inner_idx;
+          const bool* mask_data = mask_data_base + mask_outer_idx * outer_stride + inner_idx;
 
           // Calc max in softmax dim
           bool is_meaningful_max = false;
@@ -261,9 +261,9 @@ void host_softmax_backward(
   }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
-  scalar_t* output_data_base = output.data_ptr<scalar_t>();
-  scalar_t* gradOutput_data_base = grad.data_ptr<scalar_t>();
+  scalar_t* gradInput_data_base = gI.mutable_data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.mutable_data_ptr<scalar_t>();
+  scalar_t* gradOutput_data_base = grad.mutable_data_ptr<scalar_t>();
   bool* mask_data_base = mask;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
@@ -590,7 +590,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::BFloat16, at::ScalarType::Half, input.scalar_type(), "masked_softmax", [&] {
         host_softmax<scalar_t>(
-            output, input, dim, mask.data_ptr<bool>(), mask_type);
+            output, input, dim, mask.const_data_ptr<bool>(), mask_type);
       });
   return output;
 }
@@ -619,7 +619,7 @@ Tensor masked_softmax_backward_cpu(
   Tensor grad_input = at::empty_like(grad, grad.options());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::BFloat16, at::ScalarType::Half, grad.scalar_type(), "masked_softmax_backward", [&] {
-        host_softmax_backward<scalar_t>(grad_input, grad, output, dim, mask.data_ptr<bool>());
+        host_softmax_backward<scalar_t>(grad_input, grad, output, dim, mask.mutable_data_ptr<bool>());
       });
   return grad_input;
 }

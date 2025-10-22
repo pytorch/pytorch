@@ -1860,7 +1860,7 @@ void convert_indices_from_coo_to_csr_cpu(
     const int64_t size) {
   int64_t numel = input.numel();
   const input_t* data_in = input.const_data_ptr<input_t>();
-  output_t* data_out = result.data_ptr<output_t>();
+  output_t* data_out = result.mutable_data_ptr<output_t>();
 
   if (numel == 0) {
     result.zero_();
@@ -1912,7 +1912,7 @@ void convert_indices_from_csr_to_coo_cpu(
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
   auto row0 = indices.select(0, transpose ? batch_ndim + 1 : batch_ndim + 0);
   auto row1 = indices.select(0, transpose ? batch_ndim + 0 : batch_ndim + 1);
-  output_t* data_out = row0.data_ptr<output_t>();
+  output_t* data_out = row0.mutable_data_ptr<output_t>();
   auto col_indices_ = col_indices.expect_contiguous();
   row1.copy_(col_indices_->view({-1}));
   at::parallel_for(
@@ -2138,8 +2138,8 @@ static Tensor _compressed_to_block_compressed_cpu(
             plain_dim,
             compressed_blocksize,
             plain_blocksize,
-            input_compressed_indices.data_ptr<index_t>(),
-            input_plain_indices.data_ptr<index_t>());
+            input_compressed_indices.const_data_ptr<index_t>(),
+            input_plain_indices.const_data_ptr<index_t>());
       });
   DimVector dense_shape{input_values.sizes().slice(1, input_values.dim() - 1)};
   DimVector values_shape{num_blocks, blocksize[0], blocksize[1]};
@@ -2170,12 +2170,12 @@ static Tensor _compressed_to_block_compressed_cpu(
                   compressed_blocksize,
                   plain_blocksize,
                   n_dense,
-                  input_compressed_indices.data_ptr<index_t>(),
-                  input_plain_indices.data_ptr<index_t>(),
-                  input_values.data_ptr<scalar_t>(),
-                  result_compressed_indices.data_ptr<index_t>(),
-                  result_plain_indices.data_ptr<index_t>(),
-                  result_values.data_ptr<scalar_t>());
+                  input_compressed_indices.const_data_ptr<index_t>(),
+                  input_plain_indices.const_data_ptr<index_t>(),
+                  input_values.const_data_ptr<scalar_t>(),
+                  result_compressed_indices.mutable_data_ptr<index_t>(),
+                  result_plain_indices.mutable_data_ptr<index_t>(),
+                  result_values.mutable_data_ptr<scalar_t>());
             });
       });
 

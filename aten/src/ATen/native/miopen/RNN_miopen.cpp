@@ -905,7 +905,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     int64_t hidden_size = hx.size(2);
 
     TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-    IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+    IntArrayRef batch_sizes { _batch_sizes.mutable_data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());
 

@@ -83,8 +83,8 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
       runtime_ptr, &xnn_delete_runtime);
 
   std::array<xnn_external_value, 2> external = {
-    xnn_external_value{input_id, input.data_ptr<float>()},
-    xnn_external_value{output_id, output.data_ptr<float>()}};
+    xnn_external_value{input_id, input.mutable_data_ptr<float>()},
+    xnn_external_value{output_id, output.mutable_data_ptr<float>()}};
 
   status = xnn_setup_runtime(
     runtime_ptr,

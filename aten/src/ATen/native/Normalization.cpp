@@ -252,7 +252,7 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
   // non-contiguous path
   auto channel_stride = input.strides()[1];
-  auto in_data = input.data_ptr<scalar_t>();
+  auto in_data = input.mutable_data_ptr<scalar_t>();
   auto reduce_iter = TensorIteratorConfig()
       .add_input(input)
       .resize_outputs(false)

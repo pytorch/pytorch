@@ -1704,8 +1704,8 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
   char uplo = upper ? 'U' : 'L';
 
   auto A_data = A.const_data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<int>();
+  auto b_data = b.mutable_data_ptr<scalar_t>();
+  auto infos_data = infos.mutable_data_ptr<int>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
@@ -2870,7 +2870,7 @@ static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tens
   auto n = real_vectors.size(-1);
   auto matrix_stride = matrixStride(real_vectors);
 
-  auto result_data = result.data_ptr<c10::complex<scalar_t>>();
+  auto result_data = result.mutable_data_ptr<c10::complex<scalar_t>>();
   auto real_vectors_data = real_vectors.const_data_ptr<scalar_t>();
   auto values_data = complex_values.const_data_ptr<c10::complex<scalar_t>>();
 

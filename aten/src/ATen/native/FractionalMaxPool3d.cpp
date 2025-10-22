@@ -242,8 +242,8 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
     [&] {
       fractional_max_pool3d_out_frame<scalar_t>(
         input.const_data_ptr<scalar_t>(),
-        output.data_ptr<scalar_t>(),
-        indices.data_ptr<int64_t>(),
+        output.mutable_data_ptr<scalar_t>(),
+        indices.mutable_data_ptr<int64_t>(),
         randomSamples.const_data_ptr<scalar_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
@@ -375,7 +375,7 @@ void fractional_max_pool3d_backward_out_cpu_template(
     "fractional_max_pool3d_backward_out_frame",
     [&]{
       fractional_max_pool3d_backward_out_frame<scalar_t>(
-        gradInput.data_ptr<scalar_t>(),
+        gradInput.mutable_data_ptr<scalar_t>(),
         gradOutput.const_data_ptr<scalar_t>(),
         indices.const_data_ptr<int64_t>(),
         numBatch, numPlanes,

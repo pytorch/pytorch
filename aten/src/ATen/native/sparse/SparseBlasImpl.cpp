@@ -365,28 +365,28 @@ void addmv_out_sparse_csr(
     const Tensor& result) {
   auto cont_values = mat.values().contiguous();
   if (mat.layout() == kSparseBsr) {
-    addmv_sparse_bsr(cont_values.data_ptr<scalar_t>(),
-        mat.crow_indices().data_ptr<idx_t>(),
-        mat.col_indices().data_ptr<idx_t>(),
+    addmv_sparse_bsr(cont_values.mutable_data_ptr<scalar_t>(),
+        mat.crow_indices().mutable_data_ptr<idx_t>(),
+        mat.col_indices().mutable_data_ptr<idx_t>(),
         mat.size(0),
         mat.values().size(1),
         mat.values().size(2),
-        vec.data_ptr<scalar_t>(),
+        vec.mutable_data_ptr<scalar_t>(),
         vec.stride(0),
         alpha.to<scalar_t>(),
         beta.to<scalar_t>(),
-        result.data_ptr<scalar_t>(),
+        result.mutable_data_ptr<scalar_t>(),
         result.stride(0));
   } else {
-    addmv_sparse_csr(cont_values.data_ptr<scalar_t>(),
-        mat.crow_indices().data_ptr<idx_t>(),
-        mat.col_indices().data_ptr<idx_t>(),
+    addmv_sparse_csr(cont_values.mutable_data_ptr<scalar_t>(),
+        mat.crow_indices().mutable_data_ptr<idx_t>(),
+        mat.col_indices().mutable_data_ptr<idx_t>(),
         mat.size(0),
-        vec.data_ptr<scalar_t>(),
+        vec.mutable_data_ptr<scalar_t>(),
         vec.stride(0),
         alpha.to<scalar_t>(),
         beta.to<scalar_t>(),
-        result.data_ptr<scalar_t>(),
+        result.mutable_data_ptr<scalar_t>(),
         result.stride(0));
   }
 }
