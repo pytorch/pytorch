@@ -145,7 +145,7 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
      weight_nhwc.opt_names());
 
   float* out_ptr = reordered.mutable_data_ptr<float>();
-  float* in_ptr = weight_nhwc.mutable_data_ptr<float>();
+  const float* in_ptr = weight_nhwc.const_data_ptr<float>();
 
   int out_index = 0;
   for (const auto g : c10::irange(num_groups)) {
@@ -225,9 +225,9 @@ ContextConv2D create(
       weight_reordered.size(Layout::Filter::input),                   // group_output_channels
       weight_reordered.size(Layout::Filter::output),                  // input_pixel_stride
       weight_reordered.size(Layout::Filter::input) * groups,          // output_pixel_stride
-      weight_reordered.mutable_data_ptr<float>(),                             // kernel
+      weight_reordered.const_data_ptr<float>(),                             // kernel
       (bias && bias->defined())
-          ? bias->contiguous().mutable_data_ptr<float>()
+          ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
@@ -255,9 +255,9 @@ ContextConv2D create(
       weight_nhwc.size(Layout::Filter::output) / groups,              // group_output_channels
       weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
       weight_nhwc.size(Layout::Filter::output),                       // output_pixel_stride
-      weight_nhwc.mutable_data_ptr<float>(),                                  // kernel
+      weight_nhwc.const_data_ptr<float>(),                                  // kernel
       (bias && bias->defined())
-          ? bias->contiguous().mutable_data_ptr<float>()
+          ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
