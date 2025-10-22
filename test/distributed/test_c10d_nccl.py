@@ -4630,7 +4630,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     )
     def test_intra_node_comm_all_reduce(self, custom_group_name):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
-        from torch.testing._internal.common_cuda import SM80OrLater
+        from torch.testing._internal.common_cuda import SM90OrLater
 
         for peer in range(self.world_size):
             if peer == self.rank:
@@ -4638,8 +4638,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
                 raise SkipTest("Test requires p2p access")
 
-        if not SM80OrLater:
-            raise SkipTest("Test requires sm>=80")
+        if not SM90OrLater:
+            raise SkipTest("Test requires sm>=90")
 
         group_name = ""
         if custom_group_name:
