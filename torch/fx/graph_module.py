@@ -841,6 +841,8 @@ class {module_name}(torch.nn.Module):
         if "_wrapped_call" not in vars(cls):
             cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
 
+        self._recompile_submodules()
+
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
 
@@ -848,15 +850,15 @@ class {module_name}(torch.nn.Module):
 
         return python_code
 
-    def recompile_submodules(self) -> list[tuple[str, PythonCode]]:
+    def _recompile_submodules(self) -> list[tuple[str, PythonCode]]:
         """
         Recompile all submodules of this graph module, returning their respective PythonCodes
         in a similar format to named_children()
         """
         results: list[tuple[str, PythonCode]] = []
         for name, mod in self.named_children():
-            assert isinstance(mod, GraphModule)
-            results.append((name, mod.recompile()))
+            if isinstance(mod, GraphModule):
+                results.append((name, mod.recompile()))
         return results
 
     # Passing Tracer as argument allows subclasses extending fx.GraphModule

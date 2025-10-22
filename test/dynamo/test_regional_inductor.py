@@ -57,8 +57,7 @@ def aot_eager_regional_inductor(serialize=False):
             with torch._guards.tracing(context):
                 result = GraphPickler.loads(serialized, fake_mode)
                 assert isinstance(result, torch.fx.GraphModule)
-                result.recompile()
-                result.recompile_submodules()
+                result.recompile(recompile_submodules=True)
                 return result
 
         return aot_autograd(
