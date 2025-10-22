@@ -591,6 +591,7 @@ def run_until_failure(
                     pbar.set_postfix_str(f"{total_successful}/{total_ignored}")
 
                     def write_func(msg):
+                        # pyrefly: ignore  # missing-attribute
                         pbar.write(msg)
                 else:
                     pbar = None

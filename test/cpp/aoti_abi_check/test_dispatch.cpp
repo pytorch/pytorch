@@ -34,12 +34,6 @@
     scalar_t tmp;        \
     (void)tmp;           \
   }
-#define MY_INDEX_CASE_FUNCTION \
-  [&] {                        \
-    count++;                   \
-    index_t tmp;               \
-    (void)tmp;                 \
-  }
 
 #define DEFINE_ITEM(TYPE, SCALARTYPE) ScalarType::SCALARTYPE,
 

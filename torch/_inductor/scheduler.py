@@ -5014,6 +5014,16 @@ class Scheduler:
             for node in partition:
                 buffer_names_to_free.update(node.last_usage)
 
+            # buffer_names_to_free may contain buffers allocated in previous
+            # graph partitions. These buffers should also be a partition
+            # input.
+            extra_input_names = [
+                name
+                for name in (buffer_names_to_free - output_names)
+                if name in name_to_node
+            ]
+            partition_input_names.update(extra_input_names)
+
             input_nodes = {
                 name: name_to_node[name]
                 for name in partition_input_names
