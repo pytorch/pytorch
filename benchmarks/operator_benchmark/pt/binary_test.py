@@ -25,7 +25,7 @@ binary_configs_broadcast = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu"],
-        "dtype": [torch.float],
+        "dtype": [torch.float, torch.bfloat16],
     },
     tags=["short"],
 )
@@ -71,8 +71,8 @@ binary_short_configs = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
-        "dtype_one": [torch.int32],
-        "dtype_two": [torch.int32],
+        "dtype_one": [torch.int32, torch.uint8],
+        "dtype_two": [torch.int32, torch.uint8],
     },
     tags=["short"],
 )
@@ -82,8 +82,8 @@ binary_long_configs = op_bench.cross_product_configs(
     N=[32, 64],
     K=[256, 512],
     device=["cpu", "cuda"],
-    dtype_one=[torch.int8, torch.int32],
-    dtype_two=[torch.int8, torch.int32],
+    dtype_one=[torch.int8, torch.int32, torch.uint8],
+    dtype_two=[torch.int8, torch.int32, torch.uint8],
     tags=["long"],
 )
 

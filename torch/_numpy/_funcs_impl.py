@@ -1449,7 +1449,7 @@ def rollaxis(a: ArrayLike, axis, start=0):
         # numpy returns a view, here we try returning the tensor itself
         # return tensor[...]
         return a
-    axes = list(range(0, n))
+    axes = list(range(n))
     axes.remove(axis)
     axes.insert(start, axis)
     return a.view(axes)
