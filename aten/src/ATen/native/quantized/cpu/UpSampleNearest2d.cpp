@@ -128,10 +128,8 @@ static Tensor _upsample_nearest2d_quantized_cpu(
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
 
-  int64_t channels = input.size(1);
-
   TORCH_CHECK(
-      input.dim() == 4 && channels > 0,
+      input.dim() == 4 && input.size(1) > 0,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -139,6 +137,7 @@ static Tensor _upsample_nearest2d_quantized_cpu(
   int64_t output_width = output_size[1];
 
   int64_t nbatch = input.size(0);
+  int64_t channels = input.size(1);
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
 
