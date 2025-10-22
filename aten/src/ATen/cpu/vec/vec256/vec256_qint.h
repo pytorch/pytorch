@@ -1390,7 +1390,7 @@ std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
 
 std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
     at::vec::Vectorized<uint8_t> src) {
-  auto u8x8 = vld1_u8(src.operator const uint8_t*());
+  auto u8x8 = vget_low_u8(src);
   auto u16x8 = vmovl_u8(u8x8);
   auto u32x4_hi = vmovl_u16(vget_high_u16(u16x8));
   auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
@@ -1412,7 +1412,7 @@ Vectorized<float> inline convert_int8_half_register_to_float(
 
 Vectorized<float> inline convert_int8_half_register_to_float(
     at::vec::Vectorized<uint8_t> src) {
-  auto u8x8 = vld1_u8(src.operator const uint8_t*());
+  auto u8x8 = vget_low_u8(src);
   auto u16x8 = vmovl_u8(u8x8);
   auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
 
