@@ -62,7 +62,13 @@ def is_workflow(yaml: Any) -> bool:
     return yaml.get("jobs") is not None
 
 
-def print_lint_message(path: Path, job: dict[str, Any], sync_tag: str) -> None:
+def print_lint_message(
+    path: Path,
+    job: dict[str, Any],
+    sync_tag: str,
+    baseline_path: Path,
+    baseline_job_id: str,
+) -> None:
     job_id = next(iter(job.keys()))
     with open(path) as f:
         lines = f.readlines()
@@ -80,14 +86,14 @@ def print_lint_message(path: Path, job: dict[str, Any], sync_tag: str) -> None:
         name="workflow-inconsistency",
         original=None,
         replacement=None,
-        description=f"Job doesn't match other jobs with sync-tag: '{sync_tag}'",
+        description=f"Job doesn't match other job {baseline_job_id} in file {baseline_path} with sync-tag: '{sync_tag}'",
     )
     print(json.dumps(lint_message._asdict()), flush=True)
 
 
 def get_jobs_with_sync_tag(
     job: dict[str, Any],
-) -> tuple[str, Path, dict[str, Any]] | None:
+) -> tuple[str, str, dict[str, Any]] | None:
     sync_tag = job.get("with", {}).get("sync-tag")
     if sync_tag is None:
         return None
@@ -101,7 +107,7 @@ def get_jobs_with_sync_tag(
     # same is true for ['with']['test-matrix']
     if "test-matrix" in job.get("with", {}):
         del job["with"]["test-matrix"]
-    return (sync_tag, path, {job_id: job})
+    return (sync_tag, job_id, job)
 
 
 if __name__ == "__main__":
@@ -124,13 +130,14 @@ if __name__ == "__main__":
         workflow = load_yaml(path)
         if not is_workflow(workflow):
             continue
+        clean_path = path.relative_to(REPO_ROOT)
         jobs = workflow.get("jobs", {})
         for job_id, job in jobs.items():
             res = get_jobs_with_sync_tag(job)
             if res is None:
                 continue
-            sync_tag, path, job_dict = res
-            tag_to_jobs[sync_tag].append((path, {job_id: job}))
+            sync_tag, job_id, job_dict = res
+            tag_to_jobs[sync_tag].append((clean_path, job_id, job_dict))
 
     # Check the files passed as arguments
     for path in args.filenames:
@@ -140,14 +147,15 @@ if __name__ == "__main__":
             res = get_jobs_with_sync_tag(job)
             if res is None:
                 continue
-            sync_tag, path, job_dict = res
+            sync_tag, job_id, job_dict = res
+            job_str = dump(job_dict)
 
             # For each sync tag, check that all the jobs have the same code.
-            for baseline_path, baseline_dict in tag_to_jobs[sync_tag]:
+            for baseline_path, baseline_job_id, baseline_dict in tag_to_jobs[sync_tag]:
                 baseline_str = dump(baseline_dict)
 
-                printed_baseline = False
-
-                job_str = dump(job_dict)
-                if baseline_str != job_str:
-                    print_lint_message(path, job_dict, sync_tag)
+                if job_id != baseline_job_id or job_str != baseline_str:
+                    print_lint_message(
+                        path, job_dict, sync_tag, baseline_path, baseline_job_id
+                    )
+                    break
