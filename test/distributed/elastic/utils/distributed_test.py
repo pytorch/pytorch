@@ -174,7 +174,6 @@ class DistributedUtilTest(TestCase):
                 is_server=True, server_addr=server_addr, server_port=store1.port
             )
 
-    @skipIfRocm
     def test_port_already_in_use_on_worker(self):
         sock = get_socket_with_port()
         with closing(sock):
