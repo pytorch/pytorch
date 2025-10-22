@@ -1088,20 +1088,23 @@ Tensor& rand_out(
 }
 
 Tensor rand_like(
-    const Tensor& self,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
+  const Tensor& self,
+  std::optional<Generator> generator,
+  std::optional<ScalarType> dtype,
+  std::optional<Layout> layout,
+  std::optional<Device> device,
+  std::optional<bool> pin_memory,
+  std::optional<c10::MemoryFormat> optional_memory_format) {
+// See [Note: hacky wrapper removal for TensorOptions]
+TensorOptions options =
+    TensorOptions().dtype(dtype)
+                  .layout(layout)
+                  .device(device)
+                  .pinned_memory(pin_memory);
 
-  auto result = at::empty_like(self, options, optional_memory_format);
-  return result.uniform_(0, 1, std::nullopt);
-}
+auto result = at::empty_like(self, options, optional_memory_format);
+return result.uniform_(0, 1, std::move(generator));  // ← pass generator here
+
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
