@@ -514,8 +514,6 @@ Tensor convolution_overrideable(
       at::borrow_from_optional_tensor(bias_r_opt);
   const Tensor& bias_r = *bias_r_maybe_owned;
 
-  auto k = weight_r.ndimension();
-
   return _convolution(
       input_r,
       weight_r,
