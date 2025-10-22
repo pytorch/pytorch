@@ -7704,6 +7704,7 @@ MPS_TEST_FAILURES = {
     # MPS doesn't support triton
     "test_autotuning_args_reuse": fail_mps(),
     "test_triton_autotuning": fail_mps(),
+    "test_triton_autotuning_full_graph": fail_mps(),
     "test_triton_dynamic_launcher_grid": fail_mps(),
     "test_triton_dynamic_launcher_grid_infer_from_tensor": fail_mps(),
     "test_triton_kernel_on_device_tma_dynamic_False_tma_version_new": fail_mps(),
