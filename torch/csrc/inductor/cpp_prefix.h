@@ -75,17 +75,17 @@ struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
 #endif
 
 template <typename T>
-struct ScalarType {
+struct GetScalarType {
   using type = T;
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
-struct ScalarType<at::vec::Vectorized<T>> {
+struct GetScalarType<at::vec::Vectorized<T>> {
   using type = T;
 };
 template <typename T, int N>
-struct ScalarType<at::vec::VectorizedN<T, N>> {
+struct GetScalarType<at::vec::VectorizedN<T, N>> {
   using type = T;
 };
 #endif
@@ -155,7 +155,7 @@ struct WelfordHelper {
   // 1. Save the reciprocal of weights to avoid redundant divisions.
   // 2. Save the welford stack, which is used to combine welford reduction
   //    with cascade summation to improve numerical stability.
-  static std::vector<typename ScalarType<T>::type> weight_recps;
+  static std::vector<typename GetScalarType<T>::type> weight_recps;
   std::vector<Welford<T>> welford_stk{};
   uint64_t depth{0}; // depth of welford_stk.
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
@@ -170,9 +170,9 @@ struct WelfordHelper {
 };
 
 template <typename T, uint64_t kChunkSize>
-std::vector<typename ScalarType<T>::type>
+std::vector<typename GetScalarType<T>::type>
     WelfordHelper<T, kChunkSize>::weight_recps = []() {
-      using scalar_t = typename ScalarType<T>::type;
+      using scalar_t = typename GetScalarType<T>::type;
       std::vector<scalar_t> temp(kChunkSize);
       for (const auto i : c10::irange(kChunkSize)) {
         temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
