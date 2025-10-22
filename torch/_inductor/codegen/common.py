@@ -719,7 +719,7 @@ def check_shape(
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
 
 
-def check_nan(buffer: IndentedBuffer, var: CSEVariableType):
+def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
     backend = get_current_backend()
     if backend == "triton":
         msg = "NaN or Inf found"
