@@ -24,22 +24,8 @@ class DeterministicTest(TestCase):
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(fresh_cache())
-        self._exit_stack.enter_context(
-            getattr(torch.backends, "__allow_nonbracketed_mutation")()  # noqa: B009
-        )
-
-        self.old_flags = [
-            torch.backends.cudnn.deterministic,
-            torch.backends.cudnn.benchmark,
-            torch.backends.mkldnn.deterministic,
-        ]
 
     def tearDown(self) -> None:
-        (
-            torch.backends.cudnn.deterministic,
-            torch.backends.cudnn.benchmark,
-            torch.backends.mkldnn.deterministic,
-        ) = self.old_flags
         self._exit_stack.close()
         super().tearDown()
 

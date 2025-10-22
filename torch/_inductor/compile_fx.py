@@ -2450,11 +2450,6 @@ def compile_fx(
                 ignore_shape_env=ignore_shape_env,
             )
 
-    if config.deterministic:
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        torch.backends.mkldnn.deterministic = True  # type: ignore[assignment]
-
     # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
     if any(
         isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
