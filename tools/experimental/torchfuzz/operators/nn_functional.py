@@ -963,3 +963,67 @@ class SiLUOperator(Operator):
 
         input_name = input_names[0]
         return f"{output_name} = torch.nn.functional.silu({input_name})"
+
+
+class ScaledDotProductAttentionOperator(Operator):
+    """Operator for torch.nn.functional.scaled_dot_product_attention."""
+
+    def __init__(self):
+        super().__init__("torch.nn.functional.scaled_dot_product_attention")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.nn.functional.scaled_dot_product_attention"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Scaled dot product attention can produce tensor outputs with floating point dtypes."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # SDPA needs at least 3 dimensions (batch, seq_len, embed_dim)
+        if len(output_spec.size) < 3:
+            return False
+        return is_float_dtype(output_spec.dtype)
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input specs for scaled_dot_product_attention.
+
+        SDPA requires:
+        - query: (batch, seq_len, embed_dim) or (batch, num_heads, seq_len, head_dim)
+        - key: (batch, seq_len, embed_dim) or (batch, num_heads, seq_len_kv, head_dim)
+        - value: (batch, seq_len, embed_dim) or (batch, num_heads, seq_len_kv, head_dim)
+        Output shape matches query shape.
+        """
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError(
+                "ScaledDotProductAttentionOperator can only produce TensorSpec outputs"
+            )
+
+        if len(output_spec.size) < 3:
+            raise ValueError("SDPA output must have at least 3 dimensions")
+
+        # Query has the same shape as output
+        query_spec = TensorSpec(
+            size=output_spec.size, stride=output_spec.stride, dtype=output_spec.dtype
+        )
+
+        # Key and value: match query shape for simplicity
+        # In practice, seq_len for key/value can differ, but we'll keep it simple
+        key_spec = TensorSpec(
+            size=output_spec.size, stride=output_spec.stride, dtype=output_spec.dtype
+        )
+        value_spec = TensorSpec(
+            size=output_spec.size, stride=output_spec.stride, dtype=output_spec.dtype
+        )
+
+        return [query_spec, key_spec, value_spec]
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for scaled_dot_product_attention operation."""
+        if len(input_names) != 3:
+            raise ValueError("SDPA requires exactly 3 inputs: query, key, value")
+
+        query_name, key_name, value_name = input_names
+        return f"{output_name} = torch.nn.functional.scaled_dot_product_attention({query_name}, {key_name}, {value_name})"
