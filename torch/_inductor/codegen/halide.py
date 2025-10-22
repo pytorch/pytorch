@@ -570,6 +570,14 @@ class HalideOverrides(OpOverrides):
     def device_assert_async(cond, msg):
         raise NotImplementedError("device_assert_async")
 
+    @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
+
 
 HalideOverrides._initialize_pointwise_overrides("halide")
 

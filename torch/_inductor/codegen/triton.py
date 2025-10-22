@@ -1904,6 +1904,14 @@ class TritonKernelOverrides(TritonOverrides):
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
 
+    @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
+
 
 class HelperFunctions:
     """An ordered set of helper functions."""

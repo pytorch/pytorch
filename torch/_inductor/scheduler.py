@@ -210,8 +210,8 @@ class MixOrderReduction:
             return False
 
         g1 = node1.group[1]
-        nrow = max(g1[0], g1[1])
-        ncol = min(g1[0], g1[1])
+        nrow = sympy.Max(g1[0], g1[1])
+        ncol = sympy.Min(g1[0], g1[1])
 
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
