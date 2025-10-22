@@ -1570,7 +1570,7 @@ class Reduction(Loops):
             and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
-            and not (reduction_type == "dot")
+            and reduction_type != "dot"
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -4542,9 +4542,7 @@ class ComputedBuffer(OperationBuffer):
             unbacked_only
         ) | self.data.get_free_symbol_uses(unbacked_only)
 
-        if self.has_store_function() and isinstance(
-            self.get_store_function(), LoopBody
-        ):
+        if self.has_store_function():
             result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
         return result
 
