@@ -328,5 +328,21 @@ struct pair {
   T2 second;
 };
 
+#define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
+  MACRO(float);                          \
+  MACRO(half);                           \
+  MACRO(bfloat);                         \
+  MACRO(float2);                         \
+  MACRO(long);                           \
+  MACRO(char);                           \
+  MACRO(uchar);                          \
+  MACRO(short);                          \
+  MACRO(int);
+
+#define INSTANTIATE_FOR_FLOAT_TYPES(MACRO) \
+  MACRO(float);                            \
+  MACRO(half);                             \
+  MACRO(bfloat);
+
 } // namespace metal
 } // namespace c10

@@ -1702,7 +1702,7 @@ class TritonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -3147,35 +3147,82 @@ class AlgorithmSelectorCache(PersistentCache):
             for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
-        example_inputs_extern = [
-            (
-                unique_example_inputs[input_node.get_name()]
-                if unique_example_inputs[input_node.get_name()].is_mkldnn
-                else torch.as_strided(
-                    unique_example_inputs[input_node.get_name()],
-                    V.graph.sizevars.size_hints(
-                        input_node.get_size(),
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
-                    V.graph.sizevars.size_hints(
-                        input_node.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
-                    V.graph.sizevars.size_hint(
-                        input_node.get_layout().offset,
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
+        example_inputs_extern = []
+        for input_node in input_nodes:
+            if unique_example_inputs[input_node.get_name()].is_mkldnn:
+                example_inputs_extern.append(
+                    unique_example_inputs[input_node.get_name()]
                 )
-            )
-            for input_node in input_nodes
-        ]
+            else:
+                base = unique_example_inputs[input_node.get_name()]
+                base = base if base._base is None else base._base
+                sizes = tuple(
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        size,
+                        fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override,
+                    )
+                    for size in input_node.get_size()
+                )
+                strides = tuple(
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        stride,
+                        fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override,
+                    )
+                    for stride in input_node.get_stride()
+                )
+                storage_offset = V.graph.sizevars.atomically_apply_size_hint(
+                    input_node.get_layout().offset,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+
+                # Check if the required storage size exceeds the current storage
+                # to avoid illegal memory access
+                needed_size = torch._prims_common.compute_required_storage_length(
+                    sizes, strides, storage_offset
+                )
+                current_size = base.storage().size()
+
+                if needed_size > current_size:
+                    # Create a new base tensor with sufficient storage
+                    new_base = torch.randn(
+                        needed_size,
+                        dtype=base.dtype,
+                        device=base.device,
+                        requires_grad=base.requires_grad,
+                    )
+                    base = new_base.as_strided(
+                        base.size(), base.stride(), base.storage_offset()
+                    )
+
+                example_inputs_extern.append(
+                    torch.as_strided(base, sizes, strides, storage_offset)
+                )
         out = cls.benchmark_example_value(layout, hint_override=hint_override)
-        out_extern = torch.as_strided(
-            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
+
+        # Also check the output tensor for storage size
+        out_base = out if out._base is None else out._base
+        out_offset = V.graph.sizevars.size_hint(layout.offset)
+        needed_out_size = torch._prims_common.compute_required_storage_length(
+            out.size(), out.stride(), out_offset
         )
+        current_out_size = out_base.storage().size()
+
+        if needed_out_size > current_out_size:
+            # Create a new base tensor with sufficient storage
+            new_out_base = torch.randn(
+                needed_out_size,
+                dtype=out_base.dtype,
+                device=out_base.device,
+                requires_grad=out_base.requires_grad,
+            )
+            out_base = new_out_base.as_strided(
+                out_base.size(), out_base.stride(), out_base.storage_offset()
+            )
+
+        out_extern = torch.as_strided(out_base, out.size(), out.stride(), out_offset)
         expected = None
         if VERIFY:
             choices[0].benchmark(*example_inputs_extern, out=out_extern)
@@ -3223,17 +3270,16 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in choices:
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
-            except CUDACompileError as e:
+            except CUDACompileError:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 if not isinstance(choice, CUDATemplateCaller):
-                    log.error(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        e,
+                    log.exception(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
                     )
                 timing = float("inf")
-            except NotImplementedError as e:
-                log.warning("Not yet implemented: %s", e)
+            except NotImplementedError:
+                log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -3266,7 +3312,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     from triton.runtime.autotuner import OutOfResources
 
                     if isinstance(e, OutOfResources):
-                        log.warning(e)
+                        log.warning(e)  # noqa: G200
                         timing = float("inf")
                     else:
                         raise e
@@ -3617,25 +3663,38 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    size,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                for size in node.get_size()
             ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                for stride in node.get_stride()
             ),
             node.get_device(),
             node.get_dtype(),
             # pyrefly: ignore  # missing-attribute
-            node.layout.offset,
-            V.graph.sizevars.size_hints(
-                # pyrefly: ignore  # bad-argument-type
-                V.graph.get_allocation_size(node),
+            V.graph.sizevars.atomically_apply_size_hint(
+                node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
+            ),
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    size,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                # pyrefly: ignore  # bad-argument-type
+                for size in V.graph.get_allocation_size(node)
             ),
         )
 
@@ -3677,9 +3736,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
             ),
-            *sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
+            *tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for stride in node.get_stride()
             ),
             sizevars.size_hint(
                 node.get_layout().offset,

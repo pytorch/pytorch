@@ -28,7 +28,7 @@ def get_type_a_related_to_b(
     for s in base_name_to_sets_of_related_ops.values():
         s_list = list(s)
         # add every bidirectional pair
-        for idx_0 in range(0, len(s_list)):
+        for idx_0 in range(len(s_list)):
             for idx_1 in range(idx_0, len(s_list)):
                 type_a_related_to_b.add((s_list[idx_0], s_list[idx_1]))
                 type_a_related_to_b.add((s_list[idx_1], s_list[idx_0]))
@@ -167,7 +167,8 @@ def end_node_matches_reversed_fusion(
         elif cur_node.op == "call_module":
             fusion_el_is_mod = isinstance(cur_fusion_el, type)
             if fusion_el_is_mod:
-                assert isinstance(cur_node.target, str)
+                if not isinstance(cur_node.target, str):
+                    raise AssertionError(f"Expected str, got {type(cur_node.target)}")
                 target_mod = getattr_from_fqn(gm, cur_node.target)
                 if not isinstance(cur_fusion_el, type):
                     return False
@@ -190,7 +191,10 @@ def end_node_matches_reversed_fusion(
                     if cur_node.target != cur_fusion_el:
                         return False
                 else:
-                    assert isinstance(cur_fusion_el, tuple)
+                    if not isinstance(cur_fusion_el, tuple):
+                        raise AssertionError(
+                            f"Expected tuple, got {type(cur_fusion_el)}"
+                        )
                     if cur_node.target != cur_fusion_el[0]:
                         return False
                     elif len(cur_node.args) < 2:

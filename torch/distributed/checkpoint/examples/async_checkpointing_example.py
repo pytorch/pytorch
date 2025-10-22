@@ -109,7 +109,8 @@ def run(rank, world_size):
 
             if epoch % SAVE_PERIOD == 0:
                 if f is not None:
-                    assert isinstance(f, Future)
+                    if not isinstance(f, Future):
+                        raise AssertionError("f should be a Future instance")
                     f.result()
                 f = dcp.state_dict_saver.async_save(
                     state_dict, checkpoint_id=CHECKPOINT_DIR
@@ -126,7 +127,8 @@ def run(rank, world_size):
 
             _print("Reloading model from last checkpoint!")
             if f is not None:
-                assert isinstance(f, Future)
+                if not isinstance(f, Future):
+                    raise AssertionError("f should be a Future instance") from None
                 f.result()
             dcp.load(state_dict)
 

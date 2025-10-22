@@ -1315,6 +1315,7 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool] = None
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
+    compiler_config: Optional[str] = None
     is_forward: Optional[bool] = None
     num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
@@ -1376,6 +1377,7 @@ class CompilationMetrics:
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
     pytorch_version: Optional[str] = None
+    inductor_provenance: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1554,6 +1556,30 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
     return json.dumps(config_dict, sort_keys=True)
 
 
+def _compiler_config_for_logging() -> Optional[str]:
+    def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
+        blocklist = {
+            "TYPE_CHECKING",
+        }
+
+        return {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in d.items()
+            if key not in blocklist
+        }
+
+    if not torch.compiler.config:
+        return None
+
+    try:
+        compiler_config_copy = torch.compiler.config.get_config_copy()  # type: ignore[attr-defined]
+    except (TypeError, AttributeError):
+        return "Compiler Config cannot be pickled"
+
+    config_dict = clean_for_json(compiler_config_copy)
+    return json.dumps(config_dict, sort_keys=True)
+
+
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
@@ -1575,7 +1601,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     if torch._inductor.config:
         try:
             inductor_config_copy = torch._inductor.config.get_config_copy()
-        except (TypeError, AttributeError):
+        except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
     if inductor_config_copy is not None:
@@ -1641,6 +1667,7 @@ def record_compilation_metrics(
         "config_suppress_errors": config.suppress_errors,
         "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
@@ -4725,6 +4752,7 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
 user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
 
 
+# TODO: mlazos to remove after replacing w/ above API
 def get_user_object_from_id(obj_id: int) -> Any:
     obj = user_obj_id_to_weakref[obj_id]()
     assert obj is not None, "User object is no longer alive"
@@ -4739,7 +4767,7 @@ def store_user_object_weakref(obj: object) -> None:
         from .exc import unimplemented_v2
 
         unimplemented_v2(
-            gb_type="Failed to make weakref to User Object",
+            gb_type="Failed to make weakref to User Object when storing by ID",
             context=f"user_objected: {obj}",
             explanation="Object does not allow us to make a weakref to it",
             hints=[],
