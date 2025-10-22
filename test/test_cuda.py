@@ -98,7 +98,7 @@ requiresCppContext = unittest.skipUnless(
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 try:
     import torchvision.models  # noqa: F401
@@ -4582,34 +4582,54 @@ class TestCudaMallocAsync(TestCase):
         reg_mem = torch.cuda.memory_stats()[key_allocated]
         self.assertEqual(reg_mem - start_mem, nbytes)
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings("foo:1,bar:2")
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings(
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings(
                 "garbage_collection_threshold:1.2"
             )
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings("max_split_size_mb:2")
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings(
+                "release_lock_on_cudamalloc:none"
+            )
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings(
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings(
                 "pinned_use_cuda_host_register:none"
             )
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings(
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings(
                 "pinned_num_register_threads:none"
             )
 
-        with self.assertRaises(RuntimeError):
-            torch.cuda.memory._set_allocator_settings(
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings(
                 "pinned_num_register_threads:1024"
             )
+
+    def test_allocator_backend(self):
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import os
+os.environ["PYTORCH_ALLOC_CONF"] = "max_split_size_mb:20,backend:cudaMallocAsync,release_lock_on_cudamalloc:none"
+import torch
+torch.cuda.init()
+print(torch.cuda.get_allocator_backend())
+"""
+        rc = check_output(test_script)
+        self.assertEqual(rc, "cudaMallocAsync")
 
     def test_cachingAllocator_raw_alloc(self):
         # Test that raw_alloc respects the setting that

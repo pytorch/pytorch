@@ -1,5 +1,10 @@
 #include <gtest/gtest.h>
 
+#if defined(ENABLE_RECORD_KERNEL_FUNCTION_DTYPE) || \
+    defined(TEMPLATE_SELECTIVE_BUILD)
+#error "selective build not supported when testing AT_DISPATCH macros"
+#endif
+
 #include <torch/headeronly/core/Dispatch.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
 
@@ -34,12 +39,6 @@
     count++;             \
     scalar_t tmp;        \
     (void)tmp;           \
-  }
-#define MY_INDEX_CASE_FUNCTION \
-  [&] {                        \
-    count++;                   \
-    index_t tmp;               \
-    (void)tmp;                 \
   }
 
 #define DEFINE_ITEM(TYPE, SCALARTYPE) ScalarType::SCALARTYPE,
@@ -80,8 +79,6 @@ TEST_DISPATCH_V2(AT_COMPLEX_TYPES_, 2, AT_COMPLEX_TYPES);
 TEST_DISPATCH_V2(AT_QINT_TYPES_, 3, AT_QINT_TYPES);
 TEST_DISPATCH_V2(AT_ALL_TYPES_, 7, AT_ALL_TYPES);
 TEST_DISPATCH_V2(AT_ALL_TYPES_AND_COMPLEX_, 9, AT_ALL_TYPES_AND_COMPLEX);
-
-// Test V1 dispatch macros:
 
 #define TEST_DISPATCH_TMPL(M, EXPECTEDCOUNT, ...)                        \
   TEST(TestDispatch, M) {                                                \
@@ -323,6 +320,13 @@ TEST_DISPATCH(THO_DISPATCH_CASE_BIT_TYPES, 5, MY_CASE_FUNCTION);
 // ignoring DISPATCH_CASE:
 #define MY_DISPATCH_CASE_INDEX_TYPES(DISPATCH_CASE, ...) \
   THO_DISPATCH_CASE_INDEX_TYPES(MY_PRIVATE_CASE_TYPE_USING_HINT, __VA_ARGS__)
+#define MY_INDEX_CASE_FUNCTION \
+  [&] {                        \
+    count++;                   \
+    index_t tmp;               \
+    (void)tmp;                 \
+  }
+
 TEST_DISPATCH(MY_DISPATCH_CASE_INDEX_TYPES, 2, MY_INDEX_CASE_FUNCTION);
 #undef MY_DISPATCH_CASE_INDEX_TYPES
 
