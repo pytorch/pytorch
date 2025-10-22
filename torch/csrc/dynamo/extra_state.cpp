@@ -156,7 +156,7 @@ void destroy_extra_state(void* obj) {
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
-  ExtraState* old_extra_state = get_extra_state(code);
+  const ExtraState* old_extra_state = get_extra_state(code);
   CHECK(extra_state == nullptr || old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
@@ -427,10 +427,10 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
-  ExtraState* extra = get_extra_state(code);
+  const ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
-    for (PrecompileEntry& e : extra->precompile_entries) {
+    for (const PrecompileEntry& e : extra->precompile_entries) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
   }

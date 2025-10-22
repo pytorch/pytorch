@@ -1264,7 +1264,7 @@ struct ResultGreater {
 void set_in_tree_building(
     std::vector<result_ptr_t>& results,
     const bool value) {
-  for (result_ptr_t& r : results) {
+  for (const result_ptr_t& r : results) {
     r->visit(c10::overloaded(
         [value](ExtraFields<EventType::Vulkan>& i) {
           i.in_tree_building_ = value;

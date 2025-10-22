@@ -77,7 +77,7 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
   // of that interpreter, and this will ensure that everyone is on the same
   // interpreter.
   bool tensors_with_python_key_present = false;
-  c10::impl::PyInterpreter* interpreter = nullptr;
+  const c10::impl::PyInterpreter* interpreter = nullptr;
   for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
     if (ivalue.isTensor()) {
       auto* t = ivalue.unsafeToTensorImpl();
