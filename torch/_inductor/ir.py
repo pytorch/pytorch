@@ -2324,7 +2324,6 @@ class Scan(Loops):
     # output_index indexes the following tuples
     dtypes: tuple[torch.dtype, ...]
     inner_fns: tuple[Callable[..., Any], ...]
-    reverse: bool = False
 
     # HACK we mimic reduction
 
