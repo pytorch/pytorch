@@ -4811,7 +4811,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.randn((22, 22), dtype=torch.double)
+        x = torch.randn((37, 37), dtype=torch.double)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -4836,7 +4836,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.randn((22, 22), dtype=torch.double)
+        x = torch.randn((37, 37), dtype=torch.double)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -4847,7 +4847,6 @@ class CPUReproTests(TestCase):
             # 1 generated vec kernel
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
             # Check that both main and tail loops are vectorized
-            print(code)
             FileCheck().check_count(
                 "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
             ).run(code)
@@ -4862,7 +4861,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.randn(22, 22)
+        x = torch.randn(37, 37)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -4887,7 +4886,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.randn((22, 22), dtype=torch.double)
+        x = torch.randn((37, 37), dtype=torch.double)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -4898,7 +4897,6 @@ class CPUReproTests(TestCase):
             # 1 generated vec kernel
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
             # Check that both main and tail loops are vectorized
-            print(code)
             FileCheck().check_count(
                 "at::vec::convert<float,1,double,2>", 2, exactly=True
             ).run(code)
