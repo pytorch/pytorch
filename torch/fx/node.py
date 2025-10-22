@@ -385,41 +385,7 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put before this node. Must be a member of the same graph.
         """
-        assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
-        if self == x:
-            log.debug(
-                "Trying to prepend a node to itself. This behavior has no effect on the graph."
-            )
-            return
-        x._remove_from_list()
-        p = self._prev
-        p._next, x._prev = x, p
-        x._next, self._prev = self, x
-
-        # compute x._sort_key
-        psk = x._prev._sort_key
-        nsk = x._next._sort_key
-        if len(psk) > len(nsk):
-            idx: int
-            *prefix, idx = psk[: len(nsk) + 1]
-            x._sort_key = (*prefix, idx + 1)
-        elif len(psk) < len(nsk):
-            *prefix, idx = nsk[: len(psk) + 1]
-            x._sort_key = (*prefix, idx - 1)
-        else:  # same length, increase length by 1
-            x._sort_key = (*psk, 0)
-
-    def __gt__(self, other: "Node") -> bool:
-        return self._sort_key > other._sort_key
-
-    def __lt__(self, other: "Node") -> bool:
-        return self._sort_key < other._sort_key
-
-    def __ge__(self, other: "Node") -> bool:
-        return self > other or self == other
-
-    def __le__(self, other: "Node") -> bool:
-        return self < other or self == other
+        self._prepend(x)
 
     @compatibility(is_backward_compatible=True)
     def append(self, x: "Node") -> None:
@@ -430,11 +396,7 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
         """
-        self._next.prepend(x)
-
-    def _remove_from_list(self) -> None:
-        p, n = self._prev, self._next
-        p._next, n._prev = n, p
+        self._next._prepend(x)
 
     @property
     def args(self) -> tuple[Argument, ...]:
