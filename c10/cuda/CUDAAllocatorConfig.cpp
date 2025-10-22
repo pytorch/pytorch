@@ -20,7 +20,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
   tokenizer.checkToken(++i, ":");
   i++; // Move to the value after the colon
 #ifdef USE_ROCM
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       ((tokenizer[i] == "native") || (tokenizer[i] == PYTORCH_TOKEN1) ||
        (tokenizer[i] == PYTORCH_TOKEN2)),
       "Unknown allocator backend, "
@@ -36,7 +36,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
       " != ",
       get()->name());
 #else // USE_ROCM
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       ((tokenizer[i] == "native") || (tokenizer[i] == PYTORCH_TOKEN1)),
       "Unknown allocator backend, "
       "options are native and " PYTORCH_TOKEN1);
@@ -109,7 +109,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           keys.find(key) != keys.end(),
           "Unrecognized key '",
           key,
@@ -151,12 +151,12 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
     size_t i) {
   tokenizer.checkToken(++i, ":");
   size_t val2 = tokenizer.toSizeT(++i);
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       llvm::isPowerOf2_64(val2),
       "Number of register threads has to be power of 2, got ",
       val2);
   auto maxThreads = CUDAAllocatorConfig::pinned_max_register_threads();
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       val2 <= maxThreads,
       "Number of register threads should be less than or equal to ",
       maxThreads,
@@ -171,7 +171,8 @@ size_t CUDAAllocatorConfig::parsePinnedReserveSegmentSize(
     size_t i) {
   tokenizer.checkToken(++i, ":");
   size_t val2 = tokenizer.toSizeT(++i);
-  TORCH_CHECK(val2 > 0, "Pinned reserve segment size has to be greater than 0");
+  TORCH_CHECK_VALUE(
+      val2 > 0, "Pinned reserve segment size has to be greater than 0");
   m_pinned_reserve_segment_size_mb = val2;
   return i;
 }

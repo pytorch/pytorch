@@ -296,6 +296,7 @@ def run_multi_process_fuzzer(
                 )
 
                 def write_func(msg):
+                    # pyrefly: ignore  # missing-attribute
                     pbar.write(msg)
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")
@@ -590,6 +591,7 @@ def run_until_failure(
                     pbar.set_postfix_str(f"{total_successful}/{total_ignored}")
 
                     def write_func(msg):
+                        # pyrefly: ignore  # missing-attribute
                         pbar.write(msg)
                 else:
                     pbar = None
