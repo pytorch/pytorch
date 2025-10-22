@@ -229,7 +229,7 @@ if not buck_build:
     fbgemm_original = fbgemm_dir / "tuning_cache.cuh"
 
     print(f'{fbgemm_original=}')
-    extra_files += fbgemm_original.as_posix()
+    extra_files.append(fbgemm_original.as_posix())
 
 print(f'{extra_files=}')
 hipify_python.hipify(
