@@ -3814,6 +3814,141 @@ void dequantize_tensor_arm<c10::quint8>(
 
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
+#if defined(__powerpc__)
+const static int PARALLEL_THRESHOLD = 1 << 20;
+
+// Generic template defaults to naive quantize implementation
+
+template <typename T>
+void quantize_tensor_vsx(
+    const float* __restrict__ in,
+    T* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  for (const auto i : c10::irange(N)) {
+    out[i] = at::native::quantize_val<T>(scale, zero_point, in[i]);
+  }
+}
+
+template <typename scalar_t, typename underlying_t>
+void quantize_tensor_vsx_q8(
+    const float* __restrict__ in,
+    scalar_t* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  underlying_t* out_underlying = reinterpret_cast<underlying_t*>(out);
+  const float inv_scale = 1.0f / scale;
+  // Broadcasts
+  const __vector float  vinvs  = vec_splats(inv_scale);
+  int i = 0;
+  if constexpr (std::is_same<underlying_t, uint8_t>::value) {
+    // -------- u8 path: saturate to [0,255] via unsigned packs --------
+    const __vector float v_zp      = vec_splats((float)zero_point);
+    static constexpr uint32_t qmin = std::numeric_limits<underlying_t>::min();
+    static constexpr uint32_t qmax = std::numeric_limits<underlying_t>::max();
+    const __vector unsigned int vmin_u32 = vec_splats(qmin);
+    const __vector unsigned int vmax_u32 = vec_splats(qmax);
+
+    auto vectorized_quant = [&](const __vector float& vin) -> __vector unsigned int {
+      __vector float tmp = vec_mul(vin, vinvs);       // Multiply by inv_scale
+      tmp = vec_rint(tmp);                             // Round to nearest int
+      __vector unsigned int vec_int = vec_ctu(vec_add(tmp, v_zp), 0); // Convert to uint32
+      vec_int = vec_max(vec_int, vmin_u32);           // Clamp min
+      vec_int = vec_min(vec_int, vmax_u32);           // Clamp max
+      return vec_int;
+    };
+
+    // Load 16 floats
+    for (; i + 16 <= N; i += 16) {
+      __vector float vec0 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+      __vector float vec1 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+      __vector float vec2 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+      __vector float vec3 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+
+     __vector unsigned int vec_int_0 = vectorized_quant(vec0);
+      __vector unsigned int vec_int_1 = vectorized_quant(vec1);
+     __vector unsigned int vec_int_2 = vectorized_quant(vec2);
+     __vector unsigned int vec_int_3 = vectorized_quant(vec3);
+
+      // Pack signed: s32 -> s16 -> s8
+      __vector unsigned short vec_s01 = vec_packs(vec_int_0, vec_int_1);
+      __vector unsigned short vec_s23 = vec_packs(vec_int_2, vec_int_3);
+      __vector unsigned char vec_res = vec_packs(vec_s01, vec_s23);
+
+      // Store 16 bytes
+      vec_vsx_st(vec_res, 0, (underlying_t*)out_underlying);
+      out_underlying += 16;
+    }
+
+  } else {
+    // -------- s8 path: saturate to [-128,127] via signed packs --------
+    const __vector float  v_zp      = vec_splats((float)zero_point);
+    static constexpr int32_t qmin = std::numeric_limits<underlying_t>::min();
+    static constexpr int32_t qmax = std::numeric_limits<underlying_t>::max();
+    const __vector int vmin_s32 = vec_splats(qmin);
+    const __vector int vmax_s32 = vec_splats(qmax);
+
+   auto vectorized_quant = [&](const __vector float& vin) -> __vector signed int {
+      __vector float tmp = vec_mul(vin, vinvs);       // Multiply by inv_scale
+      tmp = vec_rint(tmp);                             // Round to nearest int
+      __vector signed int vec_int = vec_cts(vec_add(tmp, v_zp), 0); // Convert to uint32
+      vec_int = vec_max(vec_int, vmin_s32);           // Clamp min
+      vec_int = vec_min(vec_int, vmax_s32);           // Clamp max
+      return vec_int;
+    };
+    // Load 16 floats
+    for (; i + 16 <= N; i += 16) {
+      __vector float vec0 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+      __vector float vec1 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+      __vector float vec2 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+      __vector float vec3 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+
+      __vector int vec_int_0 = vectorized_quant(vec0);
+      __vector int vec_int_1 = vectorized_quant(vec1);
+      __vector int vec_int_2 = vectorized_quant(vec2);
+      __vector int vec_int_3 = vectorized_quant(vec3);
+
+      // Pack signed: s32 -> s16 -> s8
+      __vector short vec_s01 = vec_packs(vec_int_0, vec_int_1);
+      __vector short vec_s23 = vec_packs(vec_int_2, vec_int_3);
+      __vector signed char vec_res = vec_packs(vec_s01, vec_s23);
+
+      // Store 16 bytes
+      vec_vsx_st(vec_res, 0, (underlying_t*)out_underlying);
+      out_underlying += 16;
+      }
+   }
+    for (; i < N; ++i) {
+        (*out_underlying++) =
+            at::native::quantize_val_vsx<underlying_t>(scale, zero_point, (*in++));
+    }
+}
+
+template <>
+void quantize_tensor_vsx<c10::quint8>(
+    const float* __restrict__ in,
+    c10::quint8* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  quantize_tensor_vsx_q8<c10::quint8, uint8_t>(
+      in, out, N, scale, zero_point);
+}
+
+template <>
+void quantize_tensor_vsx<c10::qint8>(
+    const float* __restrict__ in,
+    c10::qint8* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  quantize_tensor_vsx_q8<c10::qint8, int8_t>(
+      in, out, N, scale, zero_point);
+}
+#endif  // defined(__powerpc__)
+
 void quantize_tensor_per_tensor_affine_cpu(
     const Tensor& rtensor,
     Tensor& qtensor,
@@ -3836,6 +3971,20 @@ void quantize_tensor_per_tensor_affine_cpu(
           quantize_range(0, numel);
         }
       });
+#elif defined(__powerpc__)
+  AT_DISPATCH_QINT_TYPES(
+    qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
+        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        auto quantize_range = [&](int64_t begin, int64_t end) {
+            quantize_tensor_vsx<scalar_t>(
+                rdata + begin, qdata + begin, end - begin, scale, zero_point);
+        };
+        if (numel >= PARALLEL_THRESHOLD) {
+            at::parallel_for(0, numel, 1, quantize_range);
+        } else {
+            quantize_range(0, numel);
+        }
+    });
 #else
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
@@ -4130,6 +4279,181 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
 #endif // defined(__ARM_NEON__)
 }
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
+
+#if defined(__powerpc__)
+template <>
+void quantize_tensor_per_channel_impl<c10::qint8>(
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  // TODO: channels last kernel can be made faster.
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implementation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+
+  int64_t batches = size_to_dim_(axis, rtensor.sizes());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
+  int64_t channels = rtensor.size(axis);
+  auto scales_data = scales.data_ptr<double>();
+  auto zero_points_data = zero_points.data_ptr<int64_t>();
+  const float* in = rtensor.const_data_ptr<float>();
+  auto out = (int8_t*)qtensor.data_ptr<c10::qint8>();
+
+  // Copy reciprocal of scales (double) into float array
+  // Copy zero_points with magic int (int64_t) into int32_t array
+  std::vector<float> inv_scales(channels);
+  std::vector<int32_t> zero_points_int32t(channels);
+  for(const auto i : c10::irange(channels)) {
+      inv_scales[i] = 1.0f / (float)scales_data[i];
+      zero_points_int32t[i] = (int32_t)zero_points_data[i];
+  }
+  static constexpr int32_t qmin = std::numeric_limits<int8_t>::min();
+  static constexpr int32_t qmax = std::numeric_limits<int8_t>::max();
+  const __vector int vmin_s32 = vec_splats(qmin);
+  const __vector int vmax_s32 = vec_splats(qmax);
+
+  if (axis == 1 &&
+      (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+    // This code handles per channel quant when axis = 1 and
+    // channels_last contig.
+    // If axis = 0 and channels_last contig, implementation for channels
+    // first (NCHW) works.
+    for (const auto b : c10::irange(batches)) {
+      for (const auto e : c10::irange(elements_per_channel)) {
+          uint32_t c = 0;
+          while (c + 16 <= channels) {
+              const __vector int vec_zero_point_1x4 = vec_xl(0, &zero_points_int32t[c]);
+              const __vector float vec_inv_scale_1x4 = vec_xl(0, &inv_scales[c]);
+              c += 4;
+              const __vector int vec_zero_point_2x4 = vec_xl(0, &zero_points_int32t[c]);
+              const __vector float vec_inv_scale_2x4 = vec_xl(0, &inv_scales[c]);
+              c += 4;
+              const __vector int vec_zero_point_3x4 = vec_xl(0, &zero_points_int32t[c]);
+              const __vector float vec_inv_scale_3x4 = vec_xl(0, &inv_scales[c]);
+              c += 4;
+              const __vector int vec_zero_point_4x4 = vec_xl(0, &zero_points_int32t[c]);
+              const __vector float vec_inv_scale_4x4 = vec_xl(0, &inv_scales[c]);
+              c += 4;
+              __vector float vec_in1 = vec_xl(0, in);
+              in += 4;
+                __vector float vec_in2 = vec_xl(0, in);
+              in += 4;
+              __vector float vec_in3 = vec_xl(0, in);
+              in += 4;
+              __vector float vec_in4 = vec_xl(0, in);
+              in += 4;
+              // Multiply with scale
+              vec_in1 = vec_mul(vec_in1, vec_inv_scale_1x4);
+              vec_in2 = vec_mul(vec_in2, vec_inv_scale_2x4);
+              vec_in3 = vec_mul(vec_in3, vec_inv_scale_3x4);
+              vec_in4 = vec_mul(vec_in4, vec_inv_scale_4x4);
+
+              // Round to nearest integer
+              vec_in1 = vec_rint(vec_in1);
+              vec_in2 = vec_rint(vec_in2);
+              vec_in3 = vec_rint(vec_in3);
+              vec_in4 = vec_rint(vec_in4);
+
+              // Convert to int32
+              __vector int vec_int1 = vec_cts(vec_add(vec_in1, vec_ctf(vec_zero_point_1x4, 0)), 0);
+              __vector int vec_int2 = vec_cts(vec_add(vec_in2, vec_ctf(vec_zero_point_2x4, 0)), 0);
+              __vector int vec_int3 = vec_cts(vec_add(vec_in3, vec_ctf(vec_zero_point_3x4, 0)), 0);
+              __vector int vec_int4 = vec_cts(vec_add(vec_in4, vec_ctf(vec_zero_point_4x4, 0)), 0);
+              //Clamp
+              vec_int1 = vec_max(vec_int1, vmin_s32);
+              vec_int1 = vec_min(vec_int1, vmax_s32);
+
+              vec_int2 = vec_max(vec_int2, vmin_s32);
+              vec_int2 = vec_min(vec_int2, vmax_s32);
+
+              vec_int3 = vec_max(vec_int3, vmin_s32);
+              vec_int3 = vec_min(vec_int3, vmax_s32);
+
+              vec_int4 = vec_max(vec_int4, vmin_s32);
+              vec_int4 = vec_min(vec_int4, vmax_s32);
+
+              // Pack signed int -> signed char
+              __vector short vec_out_1 = vec_packs(vec_int1, vec_int2);
+              __vector short vec_out_2 = vec_packs(vec_int3, vec_int4);
+
+              __vector signed char vec_out = vec_packs(vec_out_1, vec_out_2);
+              // store 16 bytes
+              vec_vsx_st(vec_out, 0, (signed char*)(out));
+              out += 16;
+
+          }
+          for (; c < channels; ++c) {
+              (*out++) = at::native::quantize_val_vsx<int8_t>(
+                      scales_data[c], zero_points_data[c], (*in++));
+          }
+      }
+    }
+  } else {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto c : c10::irange(channels)) {
+        uint32_t e = 0;
+        __vector float vinvs = vec_splats(inv_scales[c]);
+        __vector int v_zp = vec_splats(zero_points_int32t[c]);
+        for(; e + 16 <= elements_per_channel; e += 16){
+            // Load 16 floats
+            __vector float x0 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+            __vector float x1 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+            __vector float x2 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+            __vector float x3 = vec_vsx_ld(0,  (const float*)(in)); in += 4;
+
+            // Multiply by inv_scale y = x0 * inv_scale
+            x0 = vec_mul(x0, vinvs);
+            x1 = vec_mul(x1, vinvs);
+            x2 = vec_mul(x2, vinvs);
+            x3 = vec_mul(x3, vinvs);
+
+            // Round to integral float using current FP rounding mode
+            __vector float r0 = vec_rint(x0);
+            __vector float r1 = vec_rint(x1);
+            __vector float r2 = vec_rint(x2);
+            __vector float r3 = vec_rint(x3);
+
+            // Convert to int32 (values already integral)
+            __vector int i0 = vec_cts(vec_add(r0, vec_ctf(v_zp, 0)),0);
+            __vector int i1 = vec_cts(vec_add(r1, vec_ctf(v_zp, 0)),0);
+            __vector int i2 = vec_cts(vec_add(r2, vec_ctf(v_zp, 0)),0);
+            __vector int i3 = vec_cts(vec_add(r3, vec_ctf(v_zp, 0)),0);
+
+            // Clamp
+            i0 = vec_max(i0, vmin_s32);
+            i0 = vec_min(i0, vmax_s32);
+            i1 = vec_max(i1, vmin_s32);
+            i1 = vec_min(i1, vmax_s32);
+            i2 = vec_max(i2, vmin_s32);
+            i2 = vec_min(i2, vmax_s32);
+            i3 = vec_max(i3, vmin_s32);
+            i3 = vec_min(i3, vmax_s32);
+
+            // Pack signed: s32 -> s16 -> s8
+            __vector short s01 = vec_packs(i0, i1);
+            __vector short s23 = vec_packs(i2, i3);
+            __vector signed char b0123 = vec_packs(s01, s23);
+
+            // Store 16 bytes
+            vec_vsx_st(b0123, 0, (signed char*)(out)); // + e));
+            out += 16;
+          }
+        for (; e < elements_per_channel; ++e) {
+                c * elements_per_channel + e;
+            (*out++) = at::native::quantize_val_vsx<int8_t>(
+                scales_data[c], zero_points_data[c], (*in++));
+        }
+      }
+    }
+  }
+}
+#endif // defined(__powerpc__)
 
 void quantize_tensor_per_channel_affine_cpu(
     const Tensor& rtensor,

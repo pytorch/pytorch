@@ -147,6 +147,19 @@ T quantize_val_arm(
   return static_cast<T>(r);
 }
 
+template <typename T>
+T quantize_val_vsx(
+    const float scale,
+    const int32_t zero_point,
+    const float value) {
+  constexpr int32_t qmin = std::numeric_limits<T>::min();
+  constexpr int32_t qmax = std::numeric_limits<T>::max();
+  float inv_scale = 1.0f / scale;
+  auto r = static_cast<int32_t>(zero_point + std::nearbyint(value * inv_scale));
+  r = std::max(r, qmin);
+  r = std::min(r, qmax);
+  return static_cast<T>(r);
+}
 template <typename T, int precision>
 void quantize_vec(
     double scale,
@@ -165,6 +178,14 @@ template uint8_t quantize_val_arm<uint8_t>(
     const int32_t zero_point,
     const float value);
 template int8_t quantize_val_arm<int8_t>(
+    const float scale,
+    const int32_t zero_point,
+    const float value);
+template uint8_t quantize_val_vsx<uint8_t>(
+    const float scale,
+    const int32_t zero_point,
+    const float value);
+template int8_t quantize_val_vsx<int8_t>(
     const float scale,
     const int32_t zero_point,
     const float value);

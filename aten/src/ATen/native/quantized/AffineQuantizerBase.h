@@ -14,6 +14,11 @@ T quantize_val_arm(
     const float scale,
     const int32_t zero_point,
     const float value);
+template <typename T>
+T quantize_val_vsx(
+    const float scale,
+    const int32_t zero_point,
+    const float value);
 template <typename T, int precision = 8>
 void quantize_vec(
     double scale,
