@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: custom-operators"]
 
 import os.path
 import sys
