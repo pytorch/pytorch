@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import unittest
 from typing import Optional
 
 import torch
@@ -208,6 +209,7 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     def test_float8_basics(self, device="xpu") -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
 
@@ -223,6 +225,7 @@ class TestFP8Matmul(TestCase):
         with self.assertRaises(AssertionError):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     def test_float8_scale(self, device="xpu") -> None:
         size = (16, 16)
         x = torch.full(size, 0.5, device=device, dtype=e4m3_type)
@@ -236,6 +239,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated(self, base_dtype):
         torch.manual_seed(42)
@@ -278,6 +282,7 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_change_stride(self, base_dtype):
         torch.manual_seed(42)
@@ -323,6 +328,7 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     @onlyXPU
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -341,6 +347,7 @@ class TestFP8Matmul(TestCase):
             difference, torch.tensor(4.0, device=device).expand_as(out_fp32)
         )
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     @onlyXPU
     @parametrize("bias", [True, False])
     def test_non_divisible_leading_dim(self, device, bias: bool) -> None:
@@ -353,6 +360,7 @@ class TestFP8Matmul(TestCase):
             input_bias = torch.rand((16,), device=device).to(torch.bfloat16)
         _ = scaled_mm_wrap(x, y, scale_a, scale_b, bias=input_bias)
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     @onlyXPU
     def test_float8_bias_relu_edgecase(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -367,6 +375,7 @@ class TestFP8Matmul(TestCase):
             outb_fp32, torch.tensor(-3.0, device=device).expand_as(outb_fp32)
         )
 
+    @unittest.skip("XPU: rely on #166056 be merged")
     @onlyXPU
     def test_float32_output_errors_with_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
