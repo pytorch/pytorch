@@ -33,6 +33,9 @@ target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 target_link_libraries(test_aoti_abi_check PRIVATE gtest_main)
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})
 
+target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-variable)
+target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-but-set-variable)
+
 foreach(test_src ${AOTI_ABI_CHECK_VEC_TEST_SRCS})
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     get_filename_component(test_name ${test_src} NAME_WE)
@@ -47,6 +50,8 @@ foreach(test_src ${AOTI_ABI_CHECK_VEC_TEST_SRCS})
     # Define CPU_CAPABILITY and CPU_CAPABILITY_XXX macros for conditional compilation
     target_compile_definitions(${test_name}_${CPU_CAPABILITY} PRIVATE CPU_CAPABILITY=${CPU_CAPABILITY} CPU_CAPABILITY_${CPU_CAPABILITY})
     target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE ${FLAGS})
+    target_compile_options_if_supported(${test_name}_${CPU_CAPABILITY} -Wno-unused-variable)
+    target_compile_options_if_supported(${test_name}_${CPU_CAPABILITY} -Wno-unused-but-set-variable)
   endforeach()
 endforeach()
 
