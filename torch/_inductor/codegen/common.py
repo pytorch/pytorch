@@ -1739,6 +1739,7 @@ class KernelArgs:
         for outer, inner in chain(
             # pyrefly: ignore  # bad-argument-type
             self.input_buffers.items(),
+            # pyrefly: ignore  # bad-argument-type
             self.output_buffers.items(),
         ):
             if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
@@ -2492,7 +2493,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
