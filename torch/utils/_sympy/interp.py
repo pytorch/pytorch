@@ -20,6 +20,7 @@ import torch
 from .functions import (
     BitwiseFn_bitwise_and,
     BitwiseFn_bitwise_or,
+    BitwiseFn_bitwise_xor,
     CeilToInt,
     CleanDiv,
     FloatPow,
@@ -108,6 +109,7 @@ def handlers():
         OpaqueUnaryFn_log2: "log2",
         BitwiseFn_bitwise_and: "bitwise_and",
         BitwiseFn_bitwise_or: "bitwise_or",
+        BitwiseFn_bitwise_xor: "bitwise_xor",
     }
     # TODO: This is kind of pointless, we shouldn't be generating sympy.sin
     # for these functions, they should be Opaque instead

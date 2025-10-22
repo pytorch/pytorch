@@ -1426,6 +1426,8 @@ OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")
 def make_opaque_bitwise_fn(name, real_op_name):
     if name == "bitwise_and":
         prec = PRECEDENCE["BitwiseAnd"]
+    elif name == "bitwise_xor":
+        prec = PRECEDENCE["BitwiseXor"]
     elif name == "bitwise_or":
         prec = PRECEDENCE["BitwiseOr"]
     else:
@@ -1461,3 +1463,4 @@ def make_opaque_bitwise_fn(name, real_op_name):
 
 BitwiseFn_bitwise_and = make_opaque_bitwise_fn("bitwise_and", "and_")
 BitwiseFn_bitwise_or = make_opaque_bitwise_fn("bitwise_or", "or_")
+BitwiseFn_bitwise_xor = make_opaque_bitwise_fn("bitwise_xor", "xor")

@@ -448,13 +448,13 @@ class BuiltinVariable(VariableTracker):
                 ["__rshift__", "__rrshift__", "__irshift__"],
                 operator.irshift,
             ),
+            operator.xor: (["__xor__", "__rxor__", "__ixor__"], operator.xor),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
             # divmod
             # operator.and_
             # operator.or_
-            # operator.xor
         }
         return fns
 
