@@ -400,7 +400,7 @@ sycl::event scaled_matmul(
 
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
-  // 1.3 Create the matmul primitive attr
+  // 1.3 Create the matmul primitive descriptor
   dnnl::matmul::primitive_desc matmul_pd = with_bias
       ? dnnl::matmul::primitive_desc(
             engine, src_md, weights_md, bias_md, dst_md, op_attr)
