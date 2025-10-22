@@ -7,6 +7,7 @@ import itertools
 import unittest
 
 import torch
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -29,7 +30,9 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 from torch.utils._debug_mode import DebugMode
@@ -163,7 +166,9 @@ class RedistributeTest(DTensorTestBase):
             )
 
             # make local tensor as the element of the corresponding chunked list
-            local_tensor = splitted_list[self.rank]
+            local_tensor = map_local_tensor_for_rank(
+                splitted_list, self.rank, lambda tl, r: tl[r]
+            )
             replica_tensor = distribute_tensor(local_replica, device_mesh, replica_spec)
             with comm_mode:
                 reshard_tensor = replica_tensor.redistribute(device_mesh, shard_spec)
@@ -407,7 +412,7 @@ class RedistributeTest(DTensorTestBase):
     def test_partial_to_shard(self, dtype):
         device_mesh = self.build_device_mesh()
         partial_spec = [Partial()]
-        my_rank = device_mesh.get_rank()
+        my_rank = self.rank
 
         input_sizes_and_shard_dim = [
             ((self.world_size * 3, 3), 0),
@@ -440,8 +445,13 @@ class RedistributeTest(DTensorTestBase):
                 for idx in range(self.world_size)
             ]
 
-            local_shape = list(input_size)
-            local_shape[shard_dim] = chunk_sizes[my_rank]
+            @maybe_run_for_local_tensor
+            def _compute_local_shape(rank) -> list[int]:
+                local_shape = list(input_size)
+                local_shape[shard_dim] = chunk_sizes[rank]
+                return local_shape
+
+            local_shape = _compute_local_shape(my_rank)
 
             # test partial to shard, trigger reduce_scatter
             with comm_mode:
@@ -586,7 +596,8 @@ class RedistributeTest(DTensorTestBase):
                     out_dt = sharded_dt.redistribute(mesh_2d, dst)
 
                 self.assertEqual(out_dt.placements, expected_dt.placements)
-                self.assertEqual(comm_mode.get_total_counts(), comm_counts_2d[idx])
+                if not self.is_local_tensor_enabled:
+                    self.assertEqual(comm_mode.get_total_counts(), comm_counts_2d[idx])
 
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
@@ -1162,6 +1173,19 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
 
+
+RedistributeTestWithLocalTensor = create_local_tensor_test_class(
+    RedistributeTest,
+)
+
+MultiDimRedistributeTestWithLocalTensor = create_local_tensor_test_class(
+    MultiDimRedistributeTest,
+    skipped_tests=["test_multi_dim_mesh"],
+)
+
+DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
+    DistributeWithDeviceOrderTest,
+)
 
 if __name__ == "__main__":
     run_tests()
