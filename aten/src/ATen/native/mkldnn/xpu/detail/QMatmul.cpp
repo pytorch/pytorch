@@ -348,16 +348,17 @@ sycl::event scaled_matmul(
   // 3. execute
 
   // 1.1 Create memory descriptor
-  // int64_t M = mat1.size(0);
-  // int64_t K = mat1.size(1);
-  // int64_t N = mat2.size(1);
-
   // TODO: We also need to consider dnnl::memory::format_tag!
   // Currently, the get_onednn_md() call does not consider the
   // memory::format_tag. So by default, every md is memory::format_tag::any
   dnnl::memory::desc src_md = get_onednn_md(mat1);
   dnnl::memory::desc weights_md = get_onednn_md(mat2);
   dnnl::memory::desc dst_md = get_onednn_md(result);
+
+  // scale_a and scale_b has already be checked in `is_desired_scaling()` call.
+  // So we could directly get their memory desc and set later.
+  dnnl::memory::desc scale_a_md = get_onednn_md(scale_a);
+  dnnl::memory::desc scale_b_md = get_onednn_md(scale_b);
 
   dnnl::memory::desc bias_md;
   bool with_bias = bias.has_value();
@@ -399,7 +400,7 @@ sycl::event scaled_matmul(
 
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
-  // 1.3 Set the primitive attr
+  // 1.3 Create the matmul primitive attr
   dnnl::matmul::primitive_desc matmul_pd = with_bias
       ? dnnl::matmul::primitive_desc(
             engine, src_md, weights_md, bias_md, dst_md, op_attr)
@@ -422,6 +423,10 @@ sycl::event scaled_matmul(
     b_usr_m =
         make_onednn_memory(bias_md, engine, possible_reshaped_bias.data_ptr());
   }
+  dnnl::memory src_scales_t =
+      make_onednn_memory(scale_a_md, engine, scale_a.data_ptr());
+  dnnl::memory wei_scales_t =
+      make_onednn_memory(scale_b_md, engine, scale_b.data_ptr());
 
   auto scratchpad =
       make_onednn_memory(matmul_pd.scratchpad_desc(), engine, nullptr);
@@ -437,37 +442,8 @@ sycl::event scaled_matmul(
   }
 
   // Set scales
-  // TODO: Set scale should be related to the scaling_choice_a and
-  // scaling_choice_b!
-  dnnl::memory src_scales_t = scale_a.numel() == 1
-      ? at::native::onednn::make_onednn_memory(
-            {{1}, dnnl::memory::data_type::f32, {1}},
-            engine,
-            scale_a.data_ptr())
-      : at::native::onednn::make_onednn_memory(
-            {{scale_a.numel(), 1},
-             dnnl::memory::data_type::f32,
-             dnnl::memory::format_tag::ab},
-            engine,
-            scale_a.data_ptr());
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
 
-  if (scale_a.numel() == 1)
-    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
-  else
-    args.insert(
-        {DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src_scales_t});
-
-  dnnl::memory wei_scales_t = scale_b.numel() == 1
-      ? at::native::onednn::make_onednn_memory(
-            {{1}, dnnl::memory::data_type::f32, {1}},
-            engine,
-            scale_b.data_ptr())
-      : at::native::onednn::make_onednn_memory(
-            {{scale_b.numel(), 1},
-             dnnl::memory::data_type::f32,
-             dnnl::memory::format_tag::ab},
-            engine,
-            scale_b.data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
 
   dnnl::matmul matmul_p = dnnl::matmul(matmul_pd);
