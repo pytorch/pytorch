@@ -480,19 +480,24 @@ static inline int get_onednn_mask_from_scaling_type(ScalingType scaling_type) {
 
     // ChannelWise
     // TODO: ScalingType for Blockwise 1x16, 1x32, and 1x128 is not currently
-    // supported. But they should be set as per_dim_1/per_oc for now.
+    // supported. But they should be set as per_dim_1/per_oc for now (1<<1)
     case ScalingType::BlockWise1x16:
     case ScalingType::BlockWise1x32:
     case ScalingType::BlockWise1x128:
+      TORCH_CHECK(
+          false,
+          "Unsupported ChannelWise Scaling for oneDNN matmul, got scaling_type: ",
+          static_cast<int>(scaling_type));
       return 1 << 1;
-
     // per_ocic or per_dim_01
-    // TODO: This does not consider the batch_size.
-    // For the batch, mask = (1 << batch_ndims) + (1 << batch_ndims + 1)
-    // TODO: Refer to
+    // Refer to
     // https://github.com/uxlfoundation/oneDNN/blob/5365a85d641add53946d6b647dabad65d8e4d3ad/tests/gtests/test_iface_attr_quantization.cpp#L521
-    // To refactor this code. This might not correct!
+    // To refactor this codeE
     case ScalingType::BlockWise128x128:
+      TORCH_CHECK(
+          false,
+          "Unsupported BlockWise Scaling for oneDNN matmul, got scaling_type: ",
+          static_cast<int>(scaling_type));
       return (1 << 0) | (1 << 1);
     default:
       TORCH_CHECK(false, "Unsupported scaling type for oneDNN matmul");

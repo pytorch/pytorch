@@ -36,14 +36,6 @@ namespace {
  * 1:
  *   - Returns RowWise.
  *
- * - Else if scale.dim() == 2 && scale.size(0) == outer_dim && scale.size(1) ==
- * inner_dim / 128:
- *   - Returns BlockWise 1x128.
- *
- * - Else if scale.dim() == 2 && scale.size(0) == outer_dim / 128 &&
- * scale.size(1) == inner_dim / 128:
- *   - Returns BlockWise 128x128.
- *
  * - Otherwise:
  *   - Returns Error.
  */
@@ -61,55 +53,6 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.is_contiguous());
 }
 
-// 1x16 blocks for packed nvfp4 data and fp8_e4m3fn scales
-bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  // Multiply t.size(1) by 2 to adjust for fp4x2 packing
-  // TODO: We might want to enforce some structure on the shapes of the scale
-  // tensors
-  return (
-      t.scalar_type() == ScalarType::Float4_e2m1fn_x2 &&
-      scale.scalar_type() == at::kFloat8_e4m3fn &&
-      scale.numel() ==
-          at::round_up<int64_t>(t.size(0), 128) *
-              at::round_up<int64_t>(
-                  at::ceil_div<int64_t>(t.size(1) * 2, 16), 4) &&
-      scale.is_contiguous());
-}
-
-// 1x32 blocks for microscaled fp8 data and fp8_e8m0fnu scales
-bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  // TODO: We might want to enforce some structure on the shapes of the scale
-  // tensors
-  return (
-      at::isFloat8Type(t.scalar_type()) &&
-      scale.scalar_type() == at::kFloat8_e8m0fnu &&
-      scale.numel() ==
-          at::round_up<int64_t>(t.size(0), 128) *
-              at::round_up<int64_t>(at::ceil_div<int64_t>(t.size(1), 32), 4) &&
-      scale.is_contiguous());
-}
-
-bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  return (
-      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat &&
-      scale.dim() == 2 && scale.size(0) == t.size(0) &&
-      scale.size(1) == at::ceil_div<int64_t>(t.size(1), 128) &&
-      scale.stride(0) == 1 && scale.stride(1) == t.size(0));
-}
-
-bool is_blockwise_128x128_scaling(
-    const at::Tensor& t,
-    const at::Tensor& scale) {
-  return (
-      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat &&
-      scale.dim() == 2 &&
-      scale.size(0) == at::ceil_div<int64_t>(t.size(0), 128) &&
-      scale.size(1) == at::ceil_div<int64_t>(t.size(1), 128) &&
-      scale.stride(0) ==
-          at::round_up<int64_t>(at::ceil_div<int64_t>(t.size(1), 128), 4) &&
-      scale.stride(1) == 1);
-}
-
 bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
@@ -119,10 +62,6 @@ bool is_desired_scaling(
       return is_tensorwise_scaling(t, scale);
     case ScalingType::RowWise:
       return is_rowwise_scaling(t, scale);
-    case ScalingType::BlockWise1x128:
-      return is_blockwise_1x128_scaling(t, scale);
-    case ScalingType::BlockWise128x128:
-      return is_blockwise_128x128_scaling(t, scale);
     default:
       TORCH_CHECK(
           false,
@@ -141,17 +80,8 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
     const at::Tensor& scale_a,
     const at::Tensor& scale_b) {
   for (auto [lhs, rhs] : options) {
-    // For blockwise 1x16 and 1x32 scaling, the scale tensors are
-    // swizzled/blocked and should not be transposed as their structure is based
-    // on the original tensor dimensions
-    bool use_swizzled_scale =
-        (rhs == ScalingType::BlockWise1x16 ||
-         rhs == ScalingType::BlockWise1x32);
-    const at::Tensor& scale_b_check =
-        use_swizzled_scale ? scale_b : scale_b.t();
-
     if (is_desired_scaling(a, scale_a, lhs) &&
-        is_desired_scaling(b.t(), scale_b_check, rhs)) {
+        is_desired_scaling(b.t(), scale_b.t(), rhs)) {
       return {lhs, rhs};
     }
   }
@@ -164,24 +94,6 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ", 1) and scale_b should be (1, ",
       b.size(1),
       "), and both should be contiguous.\n"
-      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
-      a.size(0),
-      ", ",
-      ceil_div<int64_t>(a.size(1), 128),
-      ") and scale_b should be (",
-      ceil_div<int64_t>(b.size(0), 128),
-      ", ",
-      b.size(1),
-      "), and both should be outer-dim-major.\n"
-      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
-      ceil_div<int64_t>(a.size(0), 128),
-      ", ",
-      ceil_div<int64_t>(a.size(1), 128),
-      ") and scale_b should be (",
-      ceil_div<int64_t>(b.size(0), 128),
-      ", ",
-      ceil_div<int64_t>(b.size(1), 128),
-      "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
       "Got a.dtype()=",
       a.scalar_type(),
       ", scale_a.dtype()=",
@@ -202,7 +114,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 }
 
 static bool _scaled_mm_allowed_device() {
-  // Return True for now. We will wait for SYCL to provide device info query
+  // Always return True. We will wait for SYCL to provide device info query
   // APIs.
   return true;
 }
@@ -715,12 +627,6 @@ Tensor& _scaled_mm_out_xpu(
       {
           std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
           std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
-          std::make_pair(
-              ScalingType::BlockWise128x128, ScalingType::BlockWise1x128),
-          std::make_pair(
-              ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
-          std::make_pair(
-              ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
       },
       mat1,
       mat2,
