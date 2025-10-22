@@ -1574,6 +1574,7 @@ def init_process_group(
     group_name: str = "",
     pg_options: Optional[Any] = None,
     device_id: Optional[Union[torch.device, int]] = None,
+    ranks: list[int] = [],
 ) -> None:
     """
     Initialize the default distributed process group.
@@ -1752,7 +1753,10 @@ def init_process_group(
     internals of c10d. This means we can ignore the value
     they provide as it not exposed in a public way.
     """
-    group_name = _process_group_name([], use_hashed_name=False)
+    if len(ranks) == 0:
+        group_name = _process_group_name([], use_hashed_name=False)
+    else:
+        group_name = _process_group_name(ranks, use_hashed_name=True)
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
