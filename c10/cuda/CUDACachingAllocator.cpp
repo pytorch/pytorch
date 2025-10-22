@@ -4469,7 +4469,10 @@ struct BackendStaticInitializer {
         if (key == "backend") {
           tokenizer.checkToken(++i, ":");
           i++; // Move to the value after the colon
-          if (tokenizer[i] == "cudaMallocAsync"
+          // break up token to trick hipify
+          if (tokenizer[i] ==
+                  "c"
+                  "udaMallocAsync"
 #ifdef USE_ROCM
               // convenience for ROCm users to allow either CUDA or HIP env var
               || tokenizer[i] == "hipMallocAsync"
