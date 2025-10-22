@@ -1,9 +1,6 @@
 #include <gtest/gtest.h>
 
-// This file contains tests for AT_DISPATCH macros.  Version 2
-// dispatch macros are tested in
-// test/cpp/aoti_abi_check/test_dispatch.cpp
-
+// This file contains tests for AT_DISPATCH macros.
 #include <ATen/Dispatch.h>
 
 // MY_CASE_FUNCTION is called in a case block. For testing, we count
@@ -28,7 +25,7 @@
          {AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ITEM)}) { \
       total_count++;                                                     \
       try {                                                              \
-        M(__VA_ARGS__ t, "test_my_dispatch_v2", CASE_FUNCTION);          \
+        M(__VA_ARGS__ t, "test_at_dispatch_v1", CASE_FUNCTION);          \
       } catch (...) {                                                    \
         default_count++; /* counts mismatches */                         \
       }                                                                  \
