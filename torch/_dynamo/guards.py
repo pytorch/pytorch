@@ -2282,6 +2282,9 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
         # don't support this in serialization because it uses unsupported ID_MATCH
+        val = self.get(guard.name)
+        if type(val) is types.MethodType:
+            assert False
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard) -> None:
