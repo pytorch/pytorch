@@ -4071,6 +4071,48 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             torch.ones([]).index_select(0, torch.Tensor([0, 0]).int())
 
+    @dtypes(*floating_and_complex_types())
+    def test_zerotensor(self, device, dtype):
+        def _check_zerotensor(t: torch.Tensor, expect: torch.Tensor):
+            self.assertEqual(t, expect)
+            self.assertEqual(t.device, expect.device)
+            self.assertEqual(t.dtype, expect.dtype)
+            self.assertEqual(t.shape, expect.shape)
+
+        # TODO Add more ops after support zero tensors
+        support_unary_ops = [torch.zeros_like, torch.clone]
+        x = torch.zeros((2,), device=device, dtype=dtype)
+        z = torch._efficientzerotensor((2,), device=device, dtype=dtype)
+        for ops in support_unary_ops:
+            _check_zerotensor(ops(z), ops(x))
+
+        # TODO Add more ops after support zero tensors
+        supported_1d_ops = [torch.vdot, torch.dot, torch.mul, torch.add]
+        x = torch.randn((2,), device=device, dtype=dtype)
+        y = torch.zeros((2,), device=device, dtype=dtype)
+        z = torch._efficientzerotensor((2,), device=device, dtype=dtype)
+        for ops in supported_1d_ops:
+            _check_zerotensor(ops(x, z), ops(x, y))
+
+        # TODO Add more ops after support zero tensors
+        supported_2d_ops = [torch.mm, torch.mul, torch.add, torch.sub]
+        x = torch.randn((2, 2), device=device, dtype=dtype)
+        y = torch.zeros((2, 2), device=device, dtype=dtype)
+        z = torch._efficientzerotensor((2, 2), device=device, dtype=dtype)
+        for ops in supported_2d_ops:
+            _check_zerotensor(ops(x, z), ops(x, y))
+
+        x = torch.zeros((2, 2), device=device, dtype=dtype)
+        y = torch.randn((2, 2), device=device, dtype=dtype)
+        z = torch._efficientzerotensor((2, 2), device=device, dtype=dtype)
+        _check_zerotensor(torch.div(z, y), torch.div(x, y))
+        _check_zerotensor(x.copy_(z), y.copy_(torch.zeros((2, 2,), device=device, dtype=dtype)))
+
+        x = torch.randn(4, 3, device=device, dtype=dtype)
+        y = torch.zeros(4, 3, device=device, dtype=dtype)
+        z = torch._efficientzerotensor(4, 3, device=device, dtype=dtype)
+        _check_zerotensor(torch.linalg.cross(x, z), torch.linalg.cross(x, y))
+
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @skipIfRocm
