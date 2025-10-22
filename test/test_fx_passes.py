@@ -404,7 +404,7 @@ class TestFXGraphPasses(JitTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "Test needs GPUs")
     def test_fx_cudagraph_partition(self):
-        from torch.fx.passes.backends.cudagraph_partition import cudagraph_partition_pass
+        from torch.fx.passes.cudagraph_partition import cudagraph_partition_pass, cudagraph_wrapper
 
         BATCH_SIZE = 16
         MLP_SIZE = 128
@@ -518,7 +518,7 @@ class TestFXGraphPasses(JitTestCase):
         # TODO: better ux to identify input_clone_indices.
         input_clone_indices = [4]
 
-        cg_graph = cudagraph_partition_pass(ep.graph_module, example_inputs, input_clone_indices, ["silly::attention"])
+        cg_graph = cudagraph_partition_pass(ep.graph_module, example_inputs, input_clone_indices, ["silly::attention"], cudagraph_wrapper)
 
         for _ in range(3):
             user_input = torch.randn(BATCH_SIZE, MLP_SIZE, device="cuda")
