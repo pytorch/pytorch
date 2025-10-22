@@ -611,4 +611,57 @@ __host__ __device__
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 0
 #endif
 
+// The HIDDEN_NAMESPACE_BEGIN and HIDDEN_NAMESPACE_END below
+// are needed for maintaining robustness in our header APIs in
+// torch/headeronly and torch/csrc/stable under the namespaces
+// torch::headeronly and torch::stable respectively. We enforce
+// hidden visibility for these APIs because we want to enable
+// loading custom extensions compiled against different libtorch
+// versions where these APIs may have changed.
+
+// Helper macros for nested namespace expansion
+#define _HIDDEN_NS_EXPAND(...) __VA_ARGS__
+#define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+
+// Macros to handle 1-3 namespace levels
+#define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden")))
+#define _HIDDEN_NS_2(n1, n2) \
+  namespace n1 {             \
+  namespace n2 __attribute__((visibility("hidden")))
+#define _HIDDEN_NS_3(n1, n2, n3) \
+  namespace n1 {                 \
+  namespace n2 {                 \
+  namespace n3 __attribute__((visibility("hidden")))
+
+// Macros to close namespaces
+#define _HIDDEN_NS_END_1(n1) }
+#define _HIDDEN_NS_END_2(n1, n2) \
+  }                              \
+  }
+#define _HIDDEN_NS_END_3(n1, n2, n3) \
+  }                                  \
+  }                                  \
+  }
+
+#if !defined(HIDDEN_NAMESPACE_BEGIN)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_BEGIN(...)       \
+  _HIDDEN_NS_EXPAND(_HIDDEN_NS_GET_MACRO( \
+      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__)) {
+#else
+#define HIDDEN_NAMESPACE_BEGIN(...) namespace __VA_ARGS__ {
+#endif
+#endif
+
+#if !defined(HIDDEN_NAMESPACE_END)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_END(...)                                         \
+  _HIDDEN_NS_EXPAND(_HIDDEN_NS_GET_MACRO(                                 \
+      __VA_ARGS__, _HIDDEN_NS_END_3, _HIDDEN_NS_END_2, _HIDDEN_NS_END_1)( \
+      __VA_ARGS__))
+#else
+#define HIDDEN_NAMESPACE_END(...) }
+#endif
+#endif
+
 #endif // C10_MACROS_MACROS_H_
