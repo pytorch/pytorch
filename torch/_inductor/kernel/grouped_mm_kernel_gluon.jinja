@@ -1,0 +1,457 @@
+import triton
+
+from triton.language.core import _aggregate as aggregate
+
+from triton.experimental import gluon
+from triton.experimental.gluon import language as gl
+
+from triton.experimental.gluon.language.nvidia.blackwell import (
+    tensor_memory_descriptor,
+    TensorMemoryLayout,
+    allocate_tensor_memory,
+    get_tmem_32x32b_reg_layout,
+    tma,
+    mbarrier,
+    tcgen05_mma,
+    tcgen05_commit,
+    fence_async_shared,
+)
+
+
+# Helper class for passing arguments around partitions.
+@aggregate
+class PartitionArgs:
+    a_desc: tma.tensor_descriptor
+    b_desc: tma.tensor_descriptor
+    c_desc: tma.tensor_descriptor
+    offs_ptr: gl.tensor
+    c_ptr: gl.tensor
+    a_smem_bufs: gl.shared_memory_descriptor
+    b_smem_bufs: gl.shared_memory_descriptor
+    acc_tmem_bufs: tensor_memory_descriptor
+    load_buf_empty_bars: gl.shared_memory_descriptor
+    load_buf_full_bars: gl.shared_memory_descriptor
+    acc_buf_empty_bars: gl.shared_memory_descriptor
+    acc_buf_full_bars: gl.shared_memory_descriptor
+    G: gl.constexpr
+    M: gl.tensor
+    N: gl.tensor
+    K: gl.tensor
+    BLOCK_M: gl.constexpr
+    BLOCK_N: gl.constexpr
+    BLOCK_K: gl.constexpr
+    store_layout: gl.constexpr
+    NUM_BLOCKS: gl.constexpr
+    num_warps: gl.constexpr
+
+    def __init__(
+        self,
+        a_desc,
+        b_desc,
+        c_desc,
+        offs_ptr,
+        c_ptr,
+        a_smem_bufs,
+        b_smem_bufs,
+        acc_tmem_bufs,
+        load_buf_empty_bars,
+        load_buf_full_bars,
+        acc_buf_empty_bars,
+        acc_buf_full_bars,
+        G,
+        M,
+        N,
+        K,
+        BLOCK_M,
+        BLOCK_N,
+        BLOCK_K,
+        store_layout,
+        NUM_BLOCKS,
+        num_warps,
+    ):
+        self.a_desc = a_desc
+        self.b_desc = b_desc
+        self.c_desc = c_desc
+        self.offs_ptr = offs_ptr
+        self.c_ptr = c_ptr
+        self.a_smem_bufs = a_smem_bufs
+        self.b_smem_bufs = b_smem_bufs
+        self.acc_tmem_bufs = acc_tmem_bufs
+        self.load_buf_empty_bars = load_buf_empty_bars
+        self.load_buf_full_bars = load_buf_full_bars
+        self.acc_buf_empty_bars = acc_buf_empty_bars
+        self.acc_buf_full_bars = acc_buf_full_bars
+        self.G = G
+        self.M = M
+        self.N = N
+        self.K = K
+        self.BLOCK_M = BLOCK_M
+        self.BLOCK_N = BLOCK_N
+        self.BLOCK_K = BLOCK_K
+        self.store_layout = store_layout
+        self.NUM_BLOCKS = NUM_BLOCKS
+        self.num_warps = num_warps
+
+
+# Counter abstraction for tracking barrier index and phase.
+@aggregate
+class Counter:
+    index: gl.tensor
+    phase: gl.tensor
+    num_barriers: gl.constexpr
+
+    def __init__(self, index, phase, num_barriers):
+        self.index = index
+        self.phase = phase
+        self.num_barriers = num_barriers
+
+    @gluon.jit
+    def create(phase, num_barriers: gl.constexpr):
+        return Counter(gl.to_tensor(0), gl.to_tensor(phase), num_barriers)
+
+    @gluon.must_use_result
+    @gluon.jit
+    def next(self):
+        incr = self.index + 1
+        rollover = incr == self.num_barriers
+        index = gl.where(rollover, 0, incr)
+        phase = gl.where(rollover, self.phase ^ 1, self.phase)
+        return Counter(index, phase, self.num_barriers)
+
+
+@gluon.jit
+def load_partition(pargs: PartitionArgs):
+    tidx = gl.program_id(0)
+
+    G: gl.constexpr = pargs.G
+    M: gl.constexpr = pargs.M
+    N: gl.constexpr = pargs.N
+    K: gl.constexpr = pargs.K
+    BLOCK_M: gl.constexpr = pargs.BLOCK_M
+    BLOCK_N: gl.constexpr = pargs.BLOCK_N
+    BLOCK_K: gl.constexpr = pargs.BLOCK_K
+
+    load_buf_empty_bars = pargs.load_buf_empty_bars
+    load_buf_full_bars = pargs.load_buf_full_bars
+    state = Counter.create(1, load_buf_empty_bars.shape[0])
+
+    iterated_tiles = 0
+
+    n_start_offset = 0
+    m_end_offset = 0
+    for g in range(G):
+        m_start_offset = m_end_offset
+        m_end_offset = gl.load(pargs.offs_ptr + g)
+        m_size = m_end_offset - m_start_offset
+        n_size = N
+        k_size = K
+
+        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
+        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
+        num_tiles = num_m_tiles * num_n_tiles
+
+        while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
+            gidx = tidx - iterated_tiles
+            tile_m_idx = gidx % num_m_tiles
+            tile_n_idx = gidx // num_m_tiles
+            m_tile_offset = tile_m_idx * BLOCK_M
+            n_tile_offset = tile_n_idx * BLOCK_N
+            m_offset = m_start_offset + m_tile_offset
+            n_offset = n_start_offset + n_tile_offset
+
+            for k in range(0, k_size, BLOCK_K):
+                load_buf_empty_bar = load_buf_empty_bars.index(state.index)
+                load_buf_full_bar = load_buf_full_bars.index(state.index)
+                a_smem = pargs.a_smem_bufs.index(state.index)
+                b_smem = pargs.b_smem_bufs.index(state.index)
+
+                mbarrier.wait(load_buf_empty_bar, state.phase)
+                mbarrier.expect(
+                    load_buf_full_bar,
+                    pargs.a_desc.block_type.nbytes + pargs.b_desc.block_type.nbytes,
+                )
+                tma.async_copy_global_to_shared(
+                    pargs.a_desc, [m_offset, k], load_buf_full_bar, a_smem
+                )
+                tma.async_copy_global_to_shared(
+                    pargs.b_desc, [g, n_offset, k], load_buf_full_bar, b_smem
+                )
+                state = state.next()
+
+            tidx += pargs.NUM_BLOCKS
+
+        iterated_tiles += num_tiles
+
+
+@gluon.jit
+def compute_partition(pargs: PartitionArgs):
+    tidx = gl.program_id(0)
+
+    G: gl.constexpr = pargs.G
+    M: gl.constexpr = pargs.M
+    N: gl.constexpr = pargs.N
+    K: gl.constexpr = pargs.K
+    BLOCK_M: gl.constexpr = pargs.BLOCK_M
+    BLOCK_N: gl.constexpr = pargs.BLOCK_N
+    BLOCK_K: gl.constexpr = pargs.BLOCK_K
+
+    load_buf_empty_bars = pargs.load_buf_empty_bars
+    load_buf_full_bars = pargs.load_buf_full_bars
+    load_state = Counter.create(0, load_buf_empty_bars.shape[0])
+
+    acc_buf_empty_bars = pargs.acc_buf_empty_bars
+    acc_buf_full_bars = pargs.acc_buf_full_bars
+    acc_state = Counter.create(1, acc_buf_empty_bars.shape[0])
+
+    iterated_tiles = 0
+
+    n_start_offset = 0
+    m_end_offset = 0
+    for g in range(G):
+        m_start_offset = m_end_offset
+        m_end_offset = gl.load(pargs.offs_ptr + g)
+        m_size = m_end_offset - m_start_offset
+        n_size = N
+        k_size = K
+
+        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
+        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
+        num_tiles = num_m_tiles * num_n_tiles
+
+        while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
+            gidx = tidx - iterated_tiles
+            tile_m_idx = gidx % num_m_tiles
+            tile_n_idx = gidx // num_m_tiles
+            m_tile_offset = tile_m_idx * BLOCK_M
+            n_tile_offset = tile_n_idx * BLOCK_N
+            m_offset = m_start_offset + m_tile_offset
+            n_offset = n_start_offset + n_tile_offset
+
+            acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
+            mbarrier.wait(acc_buf_empty_bar, acc_state.phase)
+            acc = pargs.acc_tmem_bufs.index(acc_state.index)
+            use_acc = False
+            for k in range(0, k_size, BLOCK_K):
+                load_buf_empty_bar = load_buf_empty_bars.index(load_state.index)
+                load_buf_full_bar = load_buf_full_bars.index(load_state.index)
+
+                mbarrier.wait(load_buf_full_bar, load_state.phase)
+
+                a_smem = pargs.a_smem_bufs.index(load_state.index)
+                b_smem = pargs.b_smem_bufs.index(load_state.index)
+                b = b_smem.reshape([BLOCK_N, BLOCK_K]).permute((1, 0))
+
+                tcgen05_mma(a_smem, b, acc, use_acc=use_acc)
+                tcgen05_commit(load_buf_empty_bar)
+                use_acc = True
+
+                load_state = load_state.next()
+
+            acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
+            tcgen05_commit(acc_buf_full_bar)
+
+            acc_state = acc_state.next()
+
+            tidx += pargs.NUM_BLOCKS
+
+        iterated_tiles += num_tiles
+
+
+@gluon.jit
+def store_partition(pargs: PartitionArgs):
+    tidx = gl.program_id(0)
+
+    G: gl.constexpr = pargs.G
+    M: gl.constexpr = pargs.M
+    N: gl.constexpr = pargs.N
+    K: gl.constexpr = pargs.K
+    BLOCK_M: gl.constexpr = pargs.BLOCK_M
+    BLOCK_N: gl.constexpr = pargs.BLOCK_N
+    BLOCK_K: gl.constexpr = pargs.BLOCK_K
+    num_warps: gl.constexpr = pargs.num_warps
+
+    acc_buf_empty_bars = pargs.acc_buf_empty_bars
+    acc_buf_full_bars = pargs.acc_buf_full_bars
+    acc_state = Counter.create(0, acc_buf_empty_bars.shape[0])
+    acc_reg_layout: gl.constexpr = get_tmem_32x32b_reg_layout(
+        BLOCK_M, BLOCK_N, [BLOCK_M, BLOCK_N], num_warps
+    )
+
+    c_smem = gl.allocate_shared_memory(
+        pargs.c_desc.dtype, pargs.c_desc.block_type.shape, pargs.c_desc.layout
+    )
+
+    iterated_tiles = 0
+
+    n_start_offset = 0
+    m_end_offset = 0
+    for g in range(G):
+        m_start_offset = m_end_offset
+        m_end_offset = gl.load(pargs.offs_ptr + g)
+        m_size = m_end_offset - m_start_offset
+        n_size = N
+        k_size = K
+
+        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
+        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
+        num_tiles = num_m_tiles * num_n_tiles
+
+        while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
+            gidx = tidx - iterated_tiles
+            tile_m_idx = gidx % num_m_tiles
+            tile_n_idx = gidx // num_m_tiles
+            m_tile_offset = tile_m_idx * BLOCK_M
+            n_tile_offset = tile_n_idx * BLOCK_N
+            m_offset = m_start_offset + m_tile_offset
+            n_offset = n_start_offset + n_tile_offset
+
+            # fixme: add epilogue here!
+
+            acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
+
+            mbarrier.wait(acc_buf_full_bar, acc_state.phase)
+            acc_tmem = pargs.acc_tmem_bufs.index(acc_state.index)
+            acc = acc_tmem.load(acc_reg_layout)
+
+            acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
+            acc_state = acc_state.next()
+
+            # if m_tile_offset + BLOCK_M <= m_size:
+            if True:
+                c = acc.to(pargs.c_desc.dtype)
+                tma.store_wait(pendings=0)
+                c_smem.store(c)
+
+                # After usage of acc, we're sure that smem/tmem buffer
+                # is free for reuse
+                mbarrier.arrive(acc_buf_empty_bar, count=1)
+
+                fence_async_shared()
+                tma.async_copy_shared_to_global(
+                    pargs.c_desc, [m_offset, n_offset], c_smem
+                )
+            """
+            else:
+                # fixme:
+                # 1. check is it possible to update a tensor descriptor
+                # 2. check if ptr could be extracted from the descriptor
+
+                acc_blocked = gl.convert_layout(acc, pargs.store_layout)
+
+                # After usage of acc, we're sure that smem/tmem buffer
+                # is free for reuse
+                mbarrier.arrive(acc_buf_empty_bar, count=1)
+
+                m_range = gl.arange(
+                    0, BLOCK_M, layout=gl.SliceLayout(dim=1, parent=pargs.store_layout)
+                )[:, None]
+                n_range = gl.arange(
+                    0, BLOCK_N, layout=gl.SliceLayout(dim=0, parent=pargs.store_layout)
+                )[None, :]
+                c_ptrs = (
+                    pargs.c_ptr
+                    + (m_offset + m_range) * pargs.c_desc.strides[0]
+                    + (n_offset + n_range) * pargs.c_desc.strides[1]
+                )
+                mask = (m_tile_offset + m_range < m_size) & (
+                    n_tile_offset + n_range < n_size
+                )
+                gl.store(c_ptrs, acc_blocked.to(pargs.c_desc.dtype), mask=mask)
+            """
+
+            tidx += pargs.NUM_BLOCKS
+
+        iterated_tiles += num_tiles
+
+    tma.store_wait(pendings=0)
+
+
+@gluon.jit
+def grouped_mm_kernel(
+    a_desc,
+    b_desc,
+    c_desc,
+    offs_ptr,
+    c_ptr,
+    G: gl.constexpr,
+    store_layout: gl.constexpr,
+    NUM_BLOCKS: gl.constexpr,
+    num_load_buffers: gl.constexpr,
+    num_acc_buffers: gl.constexpr,
+    num_warps: gl.constexpr,
+):
+    BLOCK_M: gl.constexpr = c_desc.block_type.shape[0]
+    BLOCK_N: gl.constexpr = c_desc.block_type.shape[1]
+    BLOCK_K: gl.constexpr = a_desc.block_type.shape[1]
+    dtype: gl.constexpr = a_desc.dtype
+
+    M = a_desc.shape[0]
+    N = b_desc.shape[-2]
+    K = a_desc.shape[1]
+
+    a_smem_bufs = gl.allocate_shared_memory(
+        dtype, [num_load_buffers] + a_desc.block_type.shape, a_desc.layout
+    )
+    b_smem_bufs = gl.allocate_shared_memory(
+        dtype, [num_load_buffers] + b_desc.block_type.shape, b_desc.layout
+    )
+    load_buf_empty_bars = gl.allocate_shared_memory(
+        gl.int64, [num_load_buffers, 1], mbarrier.MBarrierLayout()
+    )
+    load_buf_full_bars = gl.allocate_shared_memory(
+        gl.int64, [num_load_buffers, 1], mbarrier.MBarrierLayout()
+    )
+    for i in gl.static_range(num_load_buffers):
+        mbarrier.init(load_buf_empty_bars.index(i), count=1)
+        mbarrier.init(load_buf_full_bars.index(i), count=1)
+
+    tmem_layout: gl.constexpr = TensorMemoryLayout(
+        block=[BLOCK_M, BLOCK_N], unpacked=True
+    )
+    acc_tmem_bufs = allocate_tensor_memory(
+        gl.float32, [num_acc_buffers, BLOCK_M, BLOCK_N], tmem_layout
+    )
+
+    acc_buf_empty_bars = gl.allocate_shared_memory(
+        gl.int64, [num_acc_buffers, 1], mbarrier.MBarrierLayout()
+    )
+    acc_buf_full_bars = gl.allocate_shared_memory(
+        gl.int64, [num_acc_buffers, 1], mbarrier.MBarrierLayout()
+    )
+    for i in gl.static_range(num_acc_buffers):
+        mbarrier.init(acc_buf_empty_bars.index(i), count=1)
+        mbarrier.init(acc_buf_full_bars.index(i), count=1)
+
+    pargs = PartitionArgs(
+        a_desc,
+        b_desc,
+        c_desc,
+        offs_ptr,
+        c_ptr,
+        a_smem_bufs,
+        b_smem_bufs,
+        acc_tmem_bufs,
+        load_buf_empty_bars,
+        load_buf_full_bars,
+        acc_buf_empty_bars,
+        acc_buf_full_bars,
+        G,
+        M,
+        N,
+        K,
+        BLOCK_M,
+        BLOCK_N,
+        BLOCK_K,
+        store_layout,
+        NUM_BLOCKS,
+        num_warps,
+    )
+
+    gl.warp_specialize(
+        default_args=(pargs,),
+        default_partition=store_partition,
+        worker_args=(pargs,),
+        worker_partitions=[load_partition, compute_partition],
+        worker_num_warps=[1, 1],
+        worker_num_regs=[24, 24],
+    )
