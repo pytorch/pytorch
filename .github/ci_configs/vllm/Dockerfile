@@ -283,9 +283,12 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --pre apache-tvm-ffi==0.1.0b15
+    
 # Install the vllm wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /wheels/vllm/*.whl uv pip install --system --pre apache-tvm-ffi==0.1.0b15 \
     uv pip install --system /wheels/vllm/*.whl --verbose
 
 # Install xformers wheel from previous stage
