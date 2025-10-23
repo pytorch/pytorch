@@ -1,12 +1,25 @@
 # Owner(s): ["oncall: distributed"]
-
 import contextlib
 
 import torch
 import torch.distributed as dist
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -14,6 +27,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._debug_mode import _OpCall, _RedistributeCall, DebugMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -381,6 +395,103 @@ class TestDTensorDebugMode(TestCase):
       [nn.Mod] Bar.xyz
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
+        )
+
+    def test_export(self):
+        # inherited from test/distributed/tensor/test_dtensor_export.py
+        class SimpleModel(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.mlp_0 = MLPModule(device)
+                self.mlp_1 = MLPModule(device)
+
+            def forward(self, input):
+                return self.mlp_1(self.mlp_0(input))
+
+        mesh = init_device_mesh(
+            self.device_type,
+            mesh_shape=(2, 4),
+            mesh_dim_names=["dp", "tp"],
+        )
+        model = SimpleModel(self.device_type)
+        parallelize_plan = {
+            "mlp_0.net1": ColwiseParallel(),
+            "mlp_0.net2": RowwiseParallel(),
+            "mlp_1.net1": ColwiseParallel(),
+            "mlp_1.net2": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, mesh["tp"], parallelize_plan)
+
+        inputs = torch.rand(20, 10, device=self.device_type)
+        inputs = distribute_tensor(inputs, mesh["tp"], placements=[Replicate()])
+
+        with torch._dynamo.config.patch(install_free_tensors=True):
+            gm = _dynamo_graph_capture_for_export(tp_model)(inputs)
+
+        debug_mode = DebugMode()
+        debug_mode.run_graph(gm, inputs)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [node] l_flat_args_0_: placeholder
+  [node] l__self____export_root_mlp_0_net1_weight: get_attr[L__self___mlp_0_net1_weight]()
+  [node] l__self____export_root_mlp_0_net1_bias: get_attr[L__self___mlp_0_net1_bias]()
+  [node] linear: call_function[torch._C._nn.linear](l_flat_args_0_, l__self____export_root_mlp_0_net1_weight, l__self____export_root_mlp_0_net1_bias)
+    aten::t(dt: f32[16, 10]| S(0))
+      aten::t(t: f32[4, 10])
+    aten::addmm(dt: f32[16]| S(0), dt: f32[20, 10]| R, dt: f32[10, 16]| S(1))
+      aten::addmm(t: f32[4], t: f32[20, 10], t: f32[10, 4])
+  [node] outputs: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear)
+  [node] hook_result: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs)
+      aten::view(t: f32[20, 4], [20, 4])
+  [node] input_tensor: call_function[torch.nn.functional.relu](hook_result, inplace=False)
+      aten::relu(t: f32[20, 4])
+  [node] input_tensor_1: call_function[torch._dynamo.variables.torch.prim from_local](input_tensor)
+      aten::view(t: f32[20, 4], [20, 4])
+  [node] l__self____export_root_mlp_0_net2_weight: get_attr[L__self___mlp_0_net2_weight]()
+  [node] l__self____export_root_mlp_0_net2_bias: get_attr[L__self___mlp_0_net2_bias]()
+  [node] linear_1: call_function[torch._C._nn.linear](input_tensor_1, l__self____export_root_mlp_0_net2_weight, l__self____export_root_mlp_0_net2_bias)
+    aten::t(dt: f32[10, 16]| S(1))
+      aten::t(t: f32[10, 4])
+    aten::addmm(dt: f32[10]| R, dt: f32[20, 16]| S(1), dt: f32[16, 10]| S(0))
+      redistribute_input(0, R -> P)
+        redistribute_input(t: f32[10], trace: R->P)
+          aten::div.Tensor(t: f32[10], 4)
+      aten::addmm(t: f32[10], t: f32[20, 4], t: f32[4, 10])
+  [node] outputs_1: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear_1)
+      redistribute_input(t: f32[20, 10], trace: P->R)
+        _c10d_functional::all_reduce(t: f32[20, 10], sum, 5)
+  [node] hook_result_1: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs_1)
+  [node] input_tensor_2: call_function[torch._dynamo.variables.torch.prim from_local](hook_result_1)
+  [node] l__self____export_root_mlp_1_net1_weight: get_attr[L__self___mlp_1_net1_weight]()
+  [node] l__self____export_root_mlp_1_net1_bias: get_attr[L__self___mlp_1_net1_bias]()
+  [node] linear_2: call_function[torch._C._nn.linear](input_tensor_2, l__self____export_root_mlp_1_net1_weight, l__self____export_root_mlp_1_net1_bias)
+    aten::t(dt: f32[16, 10]| S(0))
+      aten::t(t: f32[4, 10])
+    aten::addmm(dt: f32[16]| S(0), dt: f32[20, 10]| R, dt: f32[10, 16]| S(1))
+  [node] outputs_2: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear_2)
+  [node] hook_result_2: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs_2)
+      aten::view(t: f32[20, 4], [20, 4])
+  [node] input_tensor_3: call_function[torch.nn.functional.relu](hook_result_2, inplace=False)
+      aten::relu(t: f32[20, 4])
+  [node] input_tensor_4: call_function[torch._dynamo.variables.torch.prim from_local](input_tensor_3)
+      aten::view(t: f32[20, 4], [20, 4])
+  [node] l__self____export_root_mlp_1_net2_weight: get_attr[L__self___mlp_1_net2_weight]()
+  [node] l__self____export_root_mlp_1_net2_bias: get_attr[L__self___mlp_1_net2_bias]()
+  [node] linear_3: call_function[torch._C._nn.linear](input_tensor_4, l__self____export_root_mlp_1_net2_weight, l__self____export_root_mlp_1_net2_bias)
+    aten::t(dt: f32[10, 16]| S(1))
+      aten::t(t: f32[10, 4])
+    aten::addmm(dt: f32[10]| R, dt: f32[20, 16]| S(1), dt: f32[16, 10]| S(0))
+      redistribute_input(0, R -> P)
+        redistribute_input(t: f32[10], trace: R->P)
+          aten::div.Tensor(t: f32[10], 4)
+      aten::addmm(t: f32[10], t: f32[20, 4], t: f32[4, 10])
+  [node] outputs_3: call_function[torch._dynamo.variables.tensor.prim_redistribute](linear_3)
+      redistribute_input(t: f32[20, 10], trace: P->R)
+        _c10d_functional::all_reduce(t: f32[20, 10], sum, 5)
+  [node] hook_result_3: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs_3)
+  [node] output: output""",  # NOQA: B950
         )
 
 
