@@ -4,6 +4,7 @@ import gc
 import itertools
 import json
 import random
+import sys
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -25,6 +26,8 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
 )
+
+from config_utils import heads_input_type, load_config_file, print_default_config
 
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -1402,14 +1405,6 @@ def main(
     if isinstance(dtype, str):
         dtype = getattr(torch, dtype)
 
-    # Parse head configurations (if not already parsed)
-    nh_parsed = []
-    for h in nh:
-        if isinstance(h, tuple):
-            nh_parsed.append(h)
-        else:
-            nh_parsed.append(heads_input_type(h))
-
     # Always calculate throughput
     throughput = True
     print('Backend: ', backend)
@@ -1423,7 +1418,7 @@ def main(
             calculate_bwd,
             dtype,
             b,
-            nh_parsed,
+            nh,
             s,
             d,
             mods,
@@ -1456,14 +1451,6 @@ def main(
         _output_json_for_dashboard(
             results, output_json_for_dashboard, benchmark_name
         )
-
-
-def heads_input_type(s: str) -> tuple[int, int]:
-    try:
-        hq, hkv = map(int, s.split(","))
-        return hq, hkv
-    except Exception as e:
-        raise ValueError("Heads must be Hq,Hkv") from e
 
 
 if __name__ == "__main__":
@@ -1570,135 +1557,25 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
 
     # Handle --print-config
     if args.print_config:
-        default_config = {
-            "dynamic": False,
-            "calculate_bwd": False,
-            "dtype": "bfloat16",
-            "b": [2, 8, 16],
-            "nh": ["16,16", "16,2"],
-            "s": [512, 1024, 4096],
-            "d": [64, 128],
-            "mods": ["noop", "causal", "alibi", "sliding_window"],
-            "backend": ["efficient"],
-            "max_autotune": False,
-            "decoding": False,
-            "kv_size": None,
-            "throughput": True,
-            "save_path": None,
-            "output_json_for_dashboard": None,
-            "benchmark_name": "PyTorch operator microbenchmark"
-        }
-
-        if args.print_config == "json":
-            print(json.dumps(default_config, indent=2))
-        else:  # yaml
-            for key, value in default_config.items():
-                if value is None:
-                    print(f"{key}: null")
-                elif isinstance(value, bool):
-                    print(f"{key}: {str(value).lower()}")
-                elif isinstance(value, str):
-                    print(f'{key}: "{value}"')
-                elif isinstance(value, list):
-                    print(f"{key}: {json.dumps(value)}")
-                else:
-                    print(f"{key}: {value}")
-
-        import sys
+        print_default_config(args.print_config)
         sys.exit(0)
 
-    # Load config file if provided
+    # Load and merge config if provided
     if args.config:
-        with open(args.config, 'r') as f:
-            # Try to load as JSON first, then fall back to YAML
-            config_str = f.read()
-            try:
-                config = json.loads(config_str)
-            except json.JSONDecodeError:
-                # Simple YAML parser for basic configs (without external dependencies)
-                config = {}
-                for line in config_str.split('\n'):
-                    line = line.split('#')[0].strip()  # Remove comments
-                    if not line or ':' not in line:
-                        continue
-                    key, value = line.split(':', 1)
-                    key = key.strip()
-                    value = value.strip()
+        config = load_config_file(args.config)
 
-                    # Parse value
-                    if value.lower() == 'true':
-                        config[key] = True
-                    elif value.lower() == 'false':
-                        config[key] = False
-                    elif value.lower() in ('null', 'none', ''):
-                        config[key] = None
-                    elif value.startswith('[') and value.endswith(']'):
-                        # Parse list - handle quoted strings properly
-                        import re
-                        # Match quoted strings (with anything inside) or unquoted items
-                        pattern = r'"([^"]+)"|\'([^\']+)\'|([^,\[\]\s]+)'
-                        matches = re.findall(pattern, value[1:-1])  # Remove [ ]
-                        parsed_items = []
-                        for match in matches:
-                            # match is a tuple of (double_quoted, single_quoted, unquoted)
-                            item = match[0] or match[1] or match[2]
-                            item = item.strip()
-                            if item:
-                                try:
-                                    parsed_items.append(int(item))
-                                except ValueError:
-                                    parsed_items.append(item)
-                        config[key] = parsed_items
-                    elif value.startswith('"') or value.startswith("'"):
-                        config[key] = value.strip('"\'')
-                    else:
-                        # Try to parse as number
-                        try:
-                            config[key] = int(value)
-                        except ValueError:
-                            try:
-                                config[key] = float(value)
-                            except ValueError:
-                                config[key] = value
-
-        # Merge config file with command line args (CLI args take precedence)
-        # Only override if the argument wasn't explicitly set on command line
-        for key, value in config.items():
-            # Convert key format (e.g., "calculate_bwd" to "calculate_bwd")
-            key_normalized = key.replace("-", "_")
-
-            # Check if this arg was set on command line by comparing with default
-            if hasattr(args, key_normalized):
-                arg_value = getattr(args, key_normalized)
-                default_value = parser.get_default(key_normalized)
-
-                # If the arg value equals default, use config file value
-                if arg_value == default_value:
-                    # Handle special case for 'nh' which needs conversion
-                    if key_normalized == "nh" and isinstance(value, list):
-                        setattr(args, key_normalized, [heads_input_type(h) if isinstance(h, str) else h for h in value])
-                    else:
-                        setattr(args, key_normalized, value)
+        # Merge config with CLI args (CLI args take precedence)
+        json_args = argparse.Namespace()
+        json_args.__dict__ = config
+        args = parser.parse_args(namespace=json_args)
 
     # Convert dtype string to torch dtype (only if it's still a string)
     if isinstance(args.dtype, str):
         args.dtype = getattr(torch, args.dtype)
 
-    main(
-        dynamic=args.dynamic,
-        calculate_bwd=args.calculate_bwd,
-        dtype=args.dtype,
-        b=args.b,
-        nh=args.nh,
-        s=args.s,
-        d=args.d,
-        mods=args.mods,
-        backend=args.backend,
-        max_autotune=args.max_autotune,
-        decoding=args.decoding,
-        kv_size=args.kv_size,
-        throughput=args.throughput,
-        save_path=args.save_path,
-        output_json_for_dashboard=args.output_json_for_dashboard,
-        benchmark_name=args.benchmark_name,
-    )
+    # Remove config and print_config from args before passing to main
+    args_dict = vars(args)
+    args_dict.pop('config', None)
+    args_dict.pop('print_config', None)
+
+    main(**args_dict)
