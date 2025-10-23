@@ -1638,22 +1638,39 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
-  TORCH_WARN("entered apply_xgeev")
 
-  auto device = input.device();
 
 
   int n = cuda_int_cast(input.size(-1), "n");
   int lda = std::max<int64_t>(1, n);
   auto batch_size = batchCount(vectors);
 
-  TORCH_WARN("---0---")
+  if (n == 0 || batch_size == 0) {
+    //XGeev does not support empty input, so we need to handle this case separately to
+    // emulate CPU semantics for empty input
+    auto values_shape = IntArrayRef(input.sizes().data(), input.dim() - 1);
+    values.resize_(values_shape, MemoryFormat::Contiguous);
+    values.zero_();  // optional
+
+    if (compute_eigenvectors) {
+      vectors.resize_(input.sizes(), MemoryFormat::Contiguous);
+      vectors.zero_();  // optional
+    } else {
+      // ensure defined but empty (e.g. for eigvals)
+      vectors.resize_({0});
+    }
+
+    infos.resize_({std::max<int64_t>(1, batch_size)}, MemoryFormat::Contiguous);
+    infos.zero_();
+
+    // early exit – nothing to compute
+    return;
+  }
+
   int64_t vectors_stride = 0;
   if (compute_eigenvectors){
     vectors_stride = matrixStride(vectors);
   }
-
-  TORCH_WARN("---1---")
 
   auto values_stride = values.size(-1);
 
@@ -1683,8 +1700,6 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
     jobvr = CUSOLVER_EIG_MODE_NOVECTOR;
   }
 
-  TORCH_WARN("---2---")
-
 
   scalar_t* W  = values.data_ptr<scalar_t>();
   scalar_t*    VL = nullptr;
@@ -1697,7 +1712,6 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   const scalar_t*    	VL_const = VL;
   const scalar_t*    	VR_const = VR;
 
-  TORCH_WARN("calling bufferSize")
   size_t ws_dev = 0, ws_host = 0;
   at::cuda::solver::xgeev_bufferSize<scalar_t>(
     handle, params,
@@ -1746,8 +1760,6 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
       info);
   }
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
-  TORCH_WARN("passed apply_xgeev")
-
 
 }
 
