@@ -25,7 +25,7 @@ function install_torchbench() {
   python install.py --continue_on_fail
 
   echo "Print all dependencies after TorchBench is installed"
-  python -mpip freeze
+  python -m pip freeze
   popd
 
   chown -R jenkins torchbench

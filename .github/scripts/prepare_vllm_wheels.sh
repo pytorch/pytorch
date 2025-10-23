@@ -24,7 +24,7 @@ change_wheel_version() {
   local t_version=$4
 
   # Extract the wheel
-  ${PYTHON_EXECUTABLE} -mwheel unpack $wheel
+  ${PYTHON_EXECUTABLE} -m wheel unpack $wheel
 
   mv "${package}-${f_version}" "${package}-${t_version}"
   # Change the version from f_version to t_version in the dist-info dir
@@ -47,7 +47,7 @@ change_wheel_version() {
   popd
 
   # Repack the wheel
-  ${PYTHON_EXECUTABLE} -mwheel pack "${package}-${t_version}"
+  ${PYTHON_EXECUTABLE} -m wheel pack "${package}-${t_version}"
 
   # Clean up
   rm -rf "${package}-${t_version}"
@@ -85,7 +85,7 @@ repackage_wheel() {
 }
 
 # Require to re-package the wheel
-${PYTHON_EXECUTABLE} -mpip install wheel==0.45.1
+${PYTHON_EXECUTABLE} -m pip install wheel==0.45.1
 
 pushd externals/vllm/wheels
 for package in xformers flashinfer-python vllm; do

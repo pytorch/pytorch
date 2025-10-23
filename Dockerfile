@@ -39,7 +39,7 @@ RUN chmod +x ~/miniconda.sh && \
     bash ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh && \
     /opt/conda/bin/conda install -y python=${PYTHON_VERSION} cmake conda-build pyyaml numpy ipython && \
-    /opt/conda/bin/python -mpip install -r requirements.txt && \
+    /opt/conda/bin/python -m pip install -r requirements.txt && \
     /opt/conda/bin/conda clean -ya
 
 FROM dev-base as submodule-update
