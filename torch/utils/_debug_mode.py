@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import traceback
 from typing import Optional, TYPE_CHECKING
 
 import torch
@@ -11,6 +12,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map
+from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
@@ -19,7 +21,10 @@ if TYPE_CHECKING:
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
 
+
 REDISTRIBUTE_FUNC = "redistribute_input"
+RECORD_STACK_TRACE = False
+CPP_STACK_TRACE = False
 
 
 def _stringify_shape(shape) -> str:
@@ -81,11 +86,27 @@ def _arg_to_str(arg, attributes) -> str:
     return str(arg)
 
 
+def _get_stack_trace(cpp=False) -> str:
+    from torch.fx.experimental.symbolic_shapes import uninteresting_files
+
+    summary = CapturedTraceback.extract(cpp=cpp).summary()
+    summary = [
+        frame for frame in summary if frame.filename not in uninteresting_files()
+    ]
+    summary = traceback.StackSummary.from_list(summary)
+    return ",".join(summary.format())
+
+
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
 
     def __init__(self, call_depth: int):
-        self.call_depth = call_depth
+        global RECORD_STACK_TRACE, CPP_STACK_TRACE
+
+        self.call_depth: int = call_depth
+        self.stack_trace: Optional[str] = None
+        if RECORD_STACK_TRACE:
+            self.stack_trace = _get_stack_trace(cpp=CPP_STACK_TRACE)
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
@@ -281,6 +302,20 @@ class DebugMode(TorchDispatchMode):
             self.call_depth -= 1
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def dispatch_stack_trace(cpp=False):
+        global RECORD_STACK_TRACE, CPP_STACK_TRACE
+        old_stack_trace, old_cpp = RECORD_STACK_TRACE, CPP_STACK_TRACE
+
+        RECORD_STACK_TRACE = True
+        CPP_STACK_TRACE = cpp
+        try:
+            yield
+        finally:
+            RECORD_STACK_TRACE = old_stack_trace
+            CPP_STACK_TRACE = old_cpp
 
     @contextlib.contextmanager
     def record_redistribute_calls(
