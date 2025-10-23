@@ -14313,14 +14313,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x = x.t()
             return x.argmin()
 
-        self.common(fn, (torch.randn(6, 4, device=self.device),))
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
 
         def fn(x):
             return (x.t().argmin(), x.t().argmax())
 
-        self.common(fn, (torch.randn(6, 4, device=self.device),))
-        self.common(fn, (torch.randn(128, 64, device=self.device),))
-        self.common(fn, (torch.randn(8, 6, device=self.device, dtype=torch.float16),))
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(128, 64, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(8, 6, device=GPU_TYPE, dtype=torch.float16),))
 
         def fn(x):
             transposed = x.t()
@@ -14331,15 +14331,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.argmax(transposed, 1),
             )
 
-        self.common(fn, (torch.randn(32, 16, device=self.device),))
-        self.common(fn, (torch.randn(512, 256, device=self.device),))
+        self.common(fn, (torch.randn(32, 16, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(512, 256, device=GPU_TYPE),))
 
         def fn(x):
             # Permute: (A, B, C) -> (C, A, B)
             permuted = x.permute(2, 0, 1)
             return (permuted.argmin(), permuted.argmax())
 
-        self.common(fn, (torch.randn(4, 6, 8, device=self.device),))
+        self.common(fn, (torch.randn(4, 6, 8, device=GPU_TYPE),))
 
     # end of class CommonTemplate - add new tests here
 
