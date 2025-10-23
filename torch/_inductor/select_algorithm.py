@@ -3290,7 +3290,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 elif "illegal memory access" in msg:
                     msg += "\n\nEither error in template or triton bug.\n"
                 elif "unspecified launch failure" in msg:
-                    msg += "\n\nAn unspecified launch failure was caught. It is an unrecoverable failure."
+                    msg += "\n\nAn unrecoverable unspecified launch failure was caught during autotuning."
                     msg += "\nPlease try re-running with TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1.\n\n"
 
                 if isinstance(choice, CUDATemplateCaller):
