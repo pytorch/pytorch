@@ -52,7 +52,7 @@ def _parse_supported_ops_with_weights(spec: str) -> tuple[list[str], dict[str, f
 def fuzz_and_execute(
     seed: Optional[int] = None,
     max_depth: Optional[int] = None,
-    log_at_faluire: bool = False,
+    log_at_failure: bool = False,
     template: str = "default",
     supported_ops: Optional[list[str]] = None,
     op_weights: Optional[dict[str, float]] = None,
@@ -222,7 +222,7 @@ def fuzz_and_execute(
         logger.debug("   Completed in %.3fs", time.time() - start_time)
 
         # # Validate the result matches target specification
-        if not log_at_faluire:
+        if not log_at_failure:
             log(True)
 
     except Exception as e:
