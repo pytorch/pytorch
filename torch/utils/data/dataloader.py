@@ -996,9 +996,30 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
             self._NUM_YIELDED in state_dict
         ), f"State doesn't contain key '{self._NUM_YIELDED}' expected for single process dataloader"
 
+        # Load sampler state
+        self._load_sampler_state(state_dict)
+
+        # Load common state
+        self._load_common_state(state_dict)
+
+        # Load dataset state (if applicable)
+        self._load_dataset_state(state_dict)
+
+        # Create fetcher
+        self._create_fetcher()
+
+        # Load dataset-kind-specific state
+        if self._dataset_kind == _DatasetKind.Iterable:
+            self._load_iterable_dataset_state(state_dict)
+        # Map datasets don't need additional loading
+
+        # Load finished state
+        self._finished = state_dict[_StateKeys.ITERATOR_FINISHED]
+
+    def _load_sampler_state(self, state_dict):
+        """Restore sampler/sampler_iter state."""
         self._sampler_iter_yielded = state_dict[_StateKeys.SAMPLER_ITER_YIELDED]
 
-        # Try to restore from either _index_sampler state_dict or _sampler_iter state_dict
         if isinstance(self._index_sampler, Stateful):
             # Restore sampler and create fresh iterator from it
             _try_load_state_dict(
@@ -1006,7 +1027,7 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
             )
             self._sampler_iter = iter(self._index_sampler)
         elif isinstance(self._sampler_iter, Stateful):
-            # Only restore iterator state (sampler creates iterator, then we restore iterator)
+            # Only restore iterator state
             self._sampler_iter = iter(self._index_sampler)
             if state_dict[_StateKeys.SAMPLER_ITER_STATE] is not None:
                 _try_load_state_dict(
@@ -1019,16 +1040,16 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
                     self._index_sampler, self._sampler_iter_yielded, None
                 )
 
+    def _load_common_state(self, state_dict):
+        """Load state common to all dataset kinds."""
         self._num_yielded = state_dict[self._NUM_YIELDED]
         self._IterableDataset_len_called = state_dict[
             _StateKeys.ITERABLEDATASET_LEN_CALLED
         ]
         self._shared_seed = state_dict[_StateKeys.SHARED_SEED]
 
-        # Always restore in this order:
-        #  1. try to restore dataset state
-        #  2. generate dataset iterator
-        #  3. try to restore iterator state
+    def _load_dataset_state(self, state_dict):
+        """Load dataset state if it's stateful."""
         if (
             _StateKeys.DATASET_STATE in state_dict
             and state_dict[_StateKeys.DATASET_STATE] is not None
@@ -1036,6 +1057,8 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
         ):
             _try_load_state_dict(self._dataset, state_dict[_StateKeys.DATASET_STATE])
 
+    def _create_fetcher(self):
+        """Create the dataset fetcher."""
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind,
             self._dataset,
@@ -1044,39 +1067,42 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
             self._drop_last,
         )
 
-        if self._dataset_kind == _DatasetKind.Iterable:
-            # If either dataset or it's iter is stateful, we don't fast-forward
-            if isinstance(self._dataset, Stateful) or isinstance(
-                self._dataset_fetcher.dataset_iter, Stateful
+    def _load_iterable_dataset_state(self, state_dict):
+        """Load state specific to iterable datasets."""
+        # If either dataset or its iter is stateful, we don't fast-forward
+        if isinstance(self._dataset, Stateful) or isinstance(
+            self._dataset_fetcher.dataset_iter, Stateful
+        ):
+            self._load_stateful_iterable_state(state_dict)
+        else:
+            self._fastforward_iterable_dataset()
+
+    def _load_stateful_iterable_state(self, state_dict):
+        """Load state for stateful iterable datasets."""
+        if state_dict[_StateKeys.FETCHER_STATE] is not None:
+            if (
+                state_dict[_StateKeys.FETCHER_STATE][_StateKeys.DATASET_ITER_STATE]
+                is not None
             ):
-                if state_dict[_StateKeys.FETCHER_STATE] is not None:
-                    if (
-                        state_dict[_StateKeys.FETCHER_STATE][
-                            _StateKeys.DATASET_ITER_STATE
-                        ]
-                        is not None
-                    ):
-                        _try_load_state_dict(
-                            self._dataset_fetcher.dataset_iter,
-                            state_dict[_StateKeys.FETCHER_STATE][
-                                _StateKeys.DATASET_ITER_STATE
-                            ],
-                        )
-                    self._dataset_fetcher.ended = state_dict[_StateKeys.FETCHER_STATE][
-                        _StateKeys.FETCHER_STATE
-                    ]
-            else:
-                # No state, just try to fastforward
-                if self._num_yielded > 0:
-                    logger.warning(
-                        "Neither dataset nor iter(dataset) defines state_dict/load_state_dict so we are "
-                        "naively fast-forwarding your dataset by %d steps. For more efficient "
-                        "resumes, please implement `state_dict` and `load_state_dict` in your IterableDataset and/or iterator.",
-                        self._num_yielded,
-                    )
-                    for _ in range(self._num_yielded):
-                        next(self)
-        self._finished = state_dict[_StateKeys.ITERATOR_FINISHED]
+                _try_load_state_dict(
+                    self._dataset_fetcher.dataset_iter,
+                    state_dict[_StateKeys.FETCHER_STATE][_StateKeys.DATASET_ITER_STATE],
+                )
+            self._dataset_fetcher.ended = state_dict[_StateKeys.FETCHER_STATE][
+                _StateKeys.FETCHER_STATE
+            ]
+
+    def _fastforward_iterable_dataset(self):
+        """Fast-forward non-stateful iterable dataset."""
+        if self._num_yielded > 0:
+            logger.warning(
+                "Neither dataset nor iter(dataset) defines state_dict/load_state_dict so we are "
+                "naively fast-forwarding your dataset by %d steps. For more efficient "
+                "resumes, please implement `state_dict` and `load_state_dict` in your IterableDataset and/or iterator.",
+                self._num_yielded,
+            )
+            for _ in range(self._num_yielded):
+                next(self)
 
     def _next_data(self):
         index = self._next_index()  # may raise StopIteration
