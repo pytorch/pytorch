@@ -237,13 +237,13 @@ class OverlapScheduler:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        max_in_flight_gb: float = 0.5,
-        compute_overlap_multipler: float = 2.0,
-        max_coll_distance: int = 1000,
-        max_compute_pre_fetch: int = 5,
-        custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
-        enable_preserving_bucketing: bool = False,
-        insert_overlap_deps: bool = False,
+        max_in_flight_gb: float,
+        max_compute_pre_fetch: int,
+        collective_bucketing: bool,
+        insert_overlap_deps: bool,
+        compute_overlap_multipler: float,
+        max_coll_distance: int,
+        custom_runtime_estimation: Callable[[fx.Node], float | None] | None,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -251,8 +251,9 @@ class OverlapScheduler:
         self.max_node_distance = max_coll_distance
         self.max_in_flight_bytes: int = gb_to_bytes(max_in_flight_gb)
         self.custom_runtime_estimation = custom_runtime_estimation
-        self.enable_preserving_bucketing = enable_preserving_bucketing
+        self.collective_bucketing = collective_bucketing
         self.insert_overlap_deps = insert_overlap_deps
+        self.max_compute_pre_fetch = max_compute_pre_fetch
 
         # Build structures
         stable_topological_sort(self.graph)
@@ -423,7 +424,7 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        if self.enable_preserving_bucketing:
+        if self.collective_bucketing:
             self._bucket_collectives()
         elif self.insert_overlap_deps:
             # If not bucketing, add effect tokens to preserve hiding dependencies
@@ -887,11 +888,12 @@ class OverlapScheduler:
 def schedule_overlap_bucketing(
     gm: torch.fx.GraphModule,
     max_in_flight_gb: float = 2.0,
+    max_compute_pre_fetch: int = 5,
+    collective_bucketing: bool = False,
+    insert_overlap_deps: bool = True,
     compute_overlap_multipler: float = 1.0,
     max_coll_distance: int = 1000,
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
-    enable_preserving_bucketing: bool | None = None,
-    insert_overlap_deps: bool | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -899,40 +901,24 @@ def schedule_overlap_bucketing(
         gm: Input graph module to optimize.
         max_in_flight_gb: Maximum GB of concurrent collective data. Too much in flight memory
             can cause memory fragmentation within the CUDA Caching Allocator.
+        max_compute_pre_fetch: Maximum compute node prefetch distance.
+        collective_bucketing: Enable overlap-preserving collective bucketing.
+        insert_overlap_deps: Insert overlap dependencies using control deps operator. This should only be used if
+            compiling with inductor, or for subsequent passes before removing the ops prior to execution.
         compute_overlap_multipler: Scale factor for compute time used to hide collectives. This can be used
             to address over or under aggressive overlapping.
         max_coll_distance: Maximum node distance for overlap or bucketing. Mostly intended to reduce compile time.
         custom_runtime_estimation: Custom runtime estimation function that estimates runtime in ms for an fx node.
             If None, uses default estimations. This is currently limited to collectives and compute nodes.
-        enable_preserving_bucketing: Enable overlap preserving bucketing. Note: memory use within bucketing still WIP.
-        insert_overlap_deps: Insert overlap dependencies using control deps operator. This should only be used if
-            graph is being compiled with inductor, or for subsequent passes before removing the ops prior to execution.
     """
-    from torch._inductor.config import aten_distributed_optimizations as aten_dist_opts
-
-    # Read from config if not explicitly provided
-    custom_runtime_estimation = (
-        custom_runtime_estimation
-        if custom_runtime_estimation is not None
-        else aten_dist_opts.estimate_op_runtime
-    )
-    enable_preserving_bucketing = (
-        enable_preserving_bucketing
-        if enable_preserving_bucketing is not None
-        else aten_dist_opts.enable_preserving_bucketing
-    )
-    insert_overlap_deps = (
-        insert_overlap_deps
-        if insert_overlap_deps is not None
-        else aten_dist_opts.insert_overlap_deps
-    )
 
     return OverlapScheduler(
         gm,
         compute_overlap_multipler=compute_overlap_multipler,
         max_in_flight_gb=max_in_flight_gb,
         max_coll_distance=max_coll_distance,
+        max_compute_pre_fetch=max_compute_pre_fetch,
         custom_runtime_estimation=custom_runtime_estimation,
-        enable_preserving_bucketing=enable_preserving_bucketing,
+        collective_bucketing=collective_bucketing,
         insert_overlap_deps=insert_overlap_deps,
     ).run()

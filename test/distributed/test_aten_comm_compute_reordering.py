@@ -62,7 +62,7 @@ def run_and_get_aten_graph(fn, *inputs):
 
 def get_patches():
     return {
-        "aten_distributed_optimizations.estimate_op_runtime": estimate_aten_runtime,
+        "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime,
         "reorder_for_locality": False,
         "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
@@ -392,8 +392,8 @@ def get_bucket_patches(compute_multiplier=1.0):
         estimate_aten_runtime, compute_multiplier=compute_multiplier
     )
     return {
-        "aten_distributed_optimizations.estimate_op_runtime": estimate_aten_runtime_part,
-        "aten_distributed_optimizations.enable_preserving_bucketing": True,
+        "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime_part,
+        "aten_distributed_optimizations.collective_bucketing": True,
         "reorder_for_locality": False,
         "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],

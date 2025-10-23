@@ -276,12 +276,26 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Apply overlap scheduling if enabled
     if config.aten_distributed_optimizations.enable_overlap_scheduling:
+        from torch._inductor.config import aten_distributed_optimizations as dist_opts
         from torch._inductor.fx_passes.overlap_scheduling import (
             schedule_overlap_bucketing,
         )
 
+        # Read config values, only pass non-None values to use function defaults
+        config_keys = [
+            "collective_bucketing",
+            "insert_overlap_deps",
+            "max_compute_pre_fetch",
+            "custom_runtime_estimation",
+        ]
+        kwargs = {
+            key: val
+            for key in config_keys
+            if (val := getattr(dist_opts, key)) is not None
+        }
+
         GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
-            lambda graph: schedule_overlap_bucketing(graph.owning_module)
+            lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)
         )
 
     # Keep these last, since they introduce mutation. Look at

@@ -860,17 +860,21 @@ class aten_distributed_optimizations:
     # Enable overlap scheduling pass
     enable_overlap_scheduling: bool = False
 
-    # Insert ordering dependencies to preserve overlap relationships
-    insert_overlap_deps: bool = True
+    # Enable overlap-preserving collective bucketing
+    collective_bucketing: Optional[bool] = None
 
-    # Enable overlap-preserving bucketing
-    enable_preserving_bucketing: bool = False
+    # Insert ordering dependencies to preserve overlap relationships. This should only be used if
+    # compiling with inductor, or for subsequent passes before removing the ops prior to execution
+    insert_overlap_deps: Optional[bool] = None
 
-    # Runtime estimation function for ops
+    # Maximum compute node prefetch distance for overlap scheduling
+    max_compute_pre_fetch: Optional[int] = None
+
+    # Custom runtime estimation function for ops
     # For user-defined estimation function, pass in the function handle
     # None means use default estimations
     # TODO - need estimated and profile based version
-    estimate_op_runtime: Optional[Callable[[torch.fx.Node], Optional[float]]] = None
+    custom_runtime_estimation: Optional[Callable[[torch.fx.Node], Optional[float]]] = None
 
 
 def parallel_compile_enabled_internally() -> bool:
