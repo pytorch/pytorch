@@ -56,13 +56,13 @@ static PyObject* THPEvent_pynew(
   (void)blocking;
   (void)interprocess;
 
+  // LITERALINCLUDE START: PYTORCH EVENT CTOR
   new (&self->event) c10::Event(
       device->type(),
       // See note [Flags defining the behavior of events]
-      // BACKEND_DEFAULT is a enable-timing flag, and
-      // PYTORCH_DEFAULT is a disable-timing flag.
       (enable_timing ? c10::EventFlag::BACKEND_DEFAULT
                      : c10::EventFlag::PYTORCH_DEFAULT));
+  // LITERALINCLUDE END: PYTORCH EVENT CTOR
 
   return static_cast<PyObject*>(ptr.release());
   END_HANDLE_TH_ERRORS
@@ -110,6 +110,7 @@ static PyObject* THPEvent_record(
     TORCH_WARN("Parsing THPEvent_record arg fails");
     return nullptr;
   }
+  // LITERALINCLUDE START: PYTORCH EVENT RECORD
   if (_stream != Py_None) {
     auto stream = reinterpret_cast<THPStream*>(_stream);
     self->event.record(c10::Stream::unpack3(
@@ -121,6 +122,7 @@ static PyObject* THPEvent_record(
         static_cast<c10::DeviceType>(self->event.device_type())};
     self->event.record(impl.getStream(impl.getDevice()));
   }
+  // LITERALINCLUDE END: PYTORCH EVENT RECORD
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -188,6 +190,7 @@ static PyObject* THPEvent_wait(
       TORCH_WARN("Parsing THPEvent_wait arg fails");
       return nullptr;
     }
+    // LITERALINCLUDE START: PYTORCH EVENT WAIT
     if (_stream != Py_None) {
       auto stream = reinterpret_cast<THPStream*>(_stream);
       self->event.block(c10::Stream::unpack3(
@@ -199,6 +202,7 @@ static PyObject* THPEvent_wait(
           static_cast<c10::DeviceType>(self->event.device_type())};
       self->event.block(impl.getStream(impl.getDevice()));
     }
+    // LITERALINCLUDE END: PYTORCH EVENT WAIT
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -207,7 +211,9 @@ static PyObject* THPEvent_wait(
 static PyObject* THPEvent_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
+  // LITERALINCLUDE START: PYTORCH EVENT QUERY
   return PyBool_FromLong(self->event.query());
+  // LITERALINCLUDE END: PYTORCH EVENT QUERY
   END_HANDLE_TH_ERRORS
 }
 
@@ -215,7 +221,9 @@ static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
   auto other = reinterpret_cast<THPEvent*>(_other);
+  // LITERALINCLUDE START: PYTORCH EVENT ELAPSED
   return PyFloat_FromDouble(self->event.elapsedTime(other->event));
+  // LITERALINCLUDE END: PYTORCH EVENT ELAPSED
   END_HANDLE_TH_ERRORS
 }
 
@@ -223,7 +231,9 @@ static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil{};
     auto self = reinterpret_cast<THPEvent*>(_self);
+    // LITERALINCLUDE START: PYTORCH EVENT SYNC
     self->event.synchronize();
+    // LITERALINCLUDE END: PYTORCH EVENT SYNC
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
