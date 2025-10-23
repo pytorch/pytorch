@@ -5921,6 +5921,62 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(torch.float32)
+    def test_offline_tuning_append_to_existing_file(self, device, dtype):
+        """If an offline tuning untuned file already exists,
+        new untuned GEMMs should be appended (not overwritten).
+
+        This test verifies the fix for the bug where untuned files were being
+        overwritten instead of appended to when recording was restarted.
+        """
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+
+            # Enable offline tuning recording mode (record untuned, no tuning)
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            # Get the untuned file path
+            untuned_filename = get_tunableop_untuned_filename()
+
+            # Seed the existing untuned file with 1 entry
+            # Format: OperatorSignature,ParameterSignature
+            seed_lines = [
+                "GemmTunableOp_float_NT,nt_768_1024_512"
+            ]
+
+            with open(untuned_filename, "w") as f:
+                f.write("\n".join(seed_lines) + "\n")
+
+            # Count initial entries
+            with open(untuned_filename) as f:
+                initial_content = f.read()
+            initial_lines = [l.strip() for l in initial_content.split("\n") if l.strip()]
+            initial_count = len(initial_lines)
+            self.assertGreater(initial_count, 0)  # we seeded 1 entry
+
+            # Perform a matmul with different dimensions to generate a new untuned entry
+            # Use dimensions that are likely to be different from the seeded entry
+            A = torch.randn(41, 59, device=device, dtype=dtype)
+            B = torch.randn(59, 31, device=device, dtype=dtype)
+            _ = torch.matmul(A, B)
+
+            # Verify that new untuned entries were appended to the same file
+            with open(untuned_filename) as f:
+                final_content = f.read()
+            final_lines = [l.strip() for l in final_content.split("\n") if l.strip()]
+            final_count = len(final_lines)
+
+            # The file should have more entries (appended), not the same or fewer (overwritten)
+            self.assertGreater(final_count, initial_count)
+
+            # Verify the seeded entry is still present (proving it wasn't overwritten)
+            self.assertIn(seed_lines[0], final_content)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float32)
     def test_matmul_empty_existing_file_tunableop(self, device, dtype):
         """ Test that if an existing results file is empty/corrupted, then the default behaviour should hold """
         with self._tunableop_ctx():
