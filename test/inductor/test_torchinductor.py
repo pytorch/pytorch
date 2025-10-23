@@ -4992,28 +4992,38 @@ class CommonTemplate:
         self.common(fn, (x, w), atol=atol, rtol=rtol)
 
     def test_convolution_private_api_symint(self):
-        def fn(x, w, b):
-            return torch._convolution(
-                x,
-                w,
-                b,
-                stride=[2, 2],
-                padding=[1, 1],
-                dilation=[1, 1],
-                transposed=False,
-                output_padding=[0, 0],
-                groups=1,
-                benchmark=False,
-                deterministic=False,
-                cudnn_enabled=True,
-                allow_tf32=True,
-            )
+        class ConvModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(64, 3, 3, 3))
+                self.bias = torch.nn.Parameter(torch.randn(64))
 
-        x = torch.randn(2, 3, 224, 224)
-        w = torch.randn(64, 3, 3, 3)
-        b = torch.randn(64)
+            def forward(self, x):
+                return torch._convolution(
+                    x,
+                    self.weight,
+                    self.bias,
+                    stride=[2, 2],
+                    padding=[1, 1],
+                    dilation=[1, 1],
+                    transposed=False,
+                    output_padding=[0, 0],
+                    groups=1,
+                    benchmark=False,
+                    deterministic=False,
+                    cudnn_enabled=True,
+                    allow_tf32=True,
+                )
 
-        self.common(fn, (x, w, b), atol=1e-3, rtol=2e-3)
+        model = ConvModel().to(self.device).eval()
+        x = torch.randn(2, 3, 224, 224, device=self.device)
+        with torch.no_grad():
+            expected = model(x)
+        compiled_model = torch.compile(model, backend="inductor", dynamic=True)
+        with torch.no_grad():
+            actual = compiled_model(x)
+
+        torch.testing.assert_close(actual, expected, atol=1e-05, rtol=1e-05)
 
     def test_conv3d(self):
         m = torch.nn.Sequential(
