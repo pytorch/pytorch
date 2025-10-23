@@ -565,6 +565,64 @@ class TestDTensorDebugMode(TestCase):
         record = debug_mode.operators[3].record["output"]
         self.assertTrue(torch.allclose(record, x1))
 
+    def test_nn_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.abc = Foo()
+                self.xyz = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.xyz(self.abc(x))
+
+        mod = Bar()
+        inp = torch.randn(4, 4)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            _ = mod(inp)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [nn.Mod] Bar
+      [nn.Mod] Bar.abc
+        [nn.Mod] Bar.abc.l1
+          aten::t(t: f32[4, 4])
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
+        [nn.Mod] Bar.abc.l2
+          aten::t(t: f32[4, 4])
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
+      [nn.Mod] Bar.xyz
+        aten::t(t: f32[4, 4])
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
+        )
+
+    def test_inductor_calls_for_mm(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8, requires_grad=False)
+        y = torch.randn(1, 32, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            out = fn(x_dtensor, y_dtensor)
+            out.sum().backward()
+
+        self.assertEqual(debug_mode.debug_string().count("inductor_graph_call"), 2)
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 

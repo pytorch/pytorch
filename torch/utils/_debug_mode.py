@@ -279,6 +279,65 @@ class _FXNodeCall(_DebugCall):
         return f"{node_str}{log_str}"
 
 
+class _NNModuleCall(_DebugCall):
+    """Designates entering an nn.Module's forward method"""
+
+    def __init__(self, module_name: str, call_depth: int):
+        super().__init__(call_depth, record=None, log=None)
+        self.module_name = module_name
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[nn.Mod] {self.module_name}"
+
+
+class _InductorGraphCall(_DebugCall):
+    """Inductor compiled graph call (at runtime)"""
+
+    def __init__(
+        self,
+        post_grad_graph: str,
+        cache_key: Union[str, None],
+        inputs: tuple,
+        fx_kwargs: dict,
+        call_depth: int,
+    ):
+        super().__init__(call_depth, record=None, log=None)
+        self.post_grad_graph = post_grad_graph
+        self.cache_key = cache_key
+        self.inputs = inputs
+        self.fx_kwargs = fx_kwargs
+
+    def render(self, attributes: list[str]) -> str:
+        # Base indentation for this call
+        base_indent = "  " + "  " * self.call_depth
+        inner_indent = base_indent + "  "
+
+        # Runtime args
+        args_str = ", ".join(_arg_to_str(arg, attributes) for arg in self.inputs)
+
+        # Add call_depth indentation to graph module str
+        graph_lines = self.post_grad_graph.strip().split("\n")
+        indented_graph = "\n".join(inner_indent + "  " + line for line in graph_lines)
+
+        # Format fx_kwargs
+        if self.fx_kwargs:
+            kwargs_items = [f"{k}={v}" for k, v in self.fx_kwargs.items()]
+            fx_kwargs_str = ", ".join(kwargs_items)
+        else:
+            fx_kwargs_str = ""
+
+        # Build the full string
+        result = "inductor_graph_call(\n"
+        result += f"{inner_indent}inputs: ({args_str})\n"
+        result += f"{inner_indent}cache_key: {self.cache_key}\n"
+        if fx_kwargs_str:
+            result += f"{inner_indent}fx_kwargs: {{{fx_kwargs_str}}}\n"
+        result += f"{inner_indent}post_grad_graph:\n"
+        result += indented_graph + "\n"
+        result += f"{base_indent})"
+        return result
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert isinstance(out, dict) and all(isinstance(k, str) for k in out.keys())
@@ -510,6 +569,19 @@ class DebugMode(TorchDispatchMode):
             yield
         finally:
             self.call_depth -= 1
+
+    def record_inductor_graph_call(
+        self,
+        post_grad_graph: str,
+        cache_key: Union[str, None],
+        inputs: tuple[Any],
+        fx_kwargs: dict[str, Any],
+    ):
+        self.operators.append(
+            _InductorGraphCall(
+                post_grad_graph, cache_key, inputs, fx_kwargs, self.call_depth + 1
+            )
+        )
 
     def run_graph(self, graph_module, *args, **kwargs):
         interpreter = _DebugInterpreter(graph_module, self)
