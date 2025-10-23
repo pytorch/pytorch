@@ -9,8 +9,6 @@ import os
 import sys
 import unittest
 
-import etcd
-
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
@@ -51,7 +49,7 @@ class EtcdServerTest(unittest.TestCase):
                 max_nodes=1,
                 timeout=60,
                 last_call_timeout=30,
-                local_addr="127.0.0.1"
+                local_addr="127.0.0.1",
             )
             rdzv_handler = create_rdzv_handler(rdzv_params)
             rdzv_info = rdzv_handler.next_rendezvous()
