@@ -6376,8 +6376,8 @@ class AOTInductorTestsTemplate:
         runner.free_inactive_constant_buffer()
 
     def test_update_user_managed_buffer(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
 
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6421,10 +6421,10 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
-        mem_before, _ = torch.cuda.mem_get_info(self.device)
+        mem_before, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         # Do not use user managed_buffer, should have less free memory.
         runner.update_constant_buffer(new_weights, True, False, False)
-        mem_after, _ = torch.cuda.mem_get_info(self.device)
+        mem_after, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         self.assertGreater(mem_before, mem_after)
 
         runner.swap_constant_buffer()
@@ -6456,10 +6456,10 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
-        mem_before, _ = torch.cuda.mem_get_info(self.device)
+        mem_before, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         # Try user managed_buffer, should have same free memory.
         runner.update_constant_buffer(new_weights, True, False, True)
-        mem_after, _ = torch.cuda.mem_get_info(self.device)
+        mem_after, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         self.assertEqual(mem_before, mem_after, atol=1e-3, rtol=1e-3)
 
         runner.swap_constant_buffer()
