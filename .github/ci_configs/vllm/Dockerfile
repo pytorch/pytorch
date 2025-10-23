@@ -285,7 +285,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
 
 # Install the vllm wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /wheels/vllm/*.whl --verbose
+    uv pip install --system /wheels/vllm/*.whl uv pip install --system --prerelease=allow /wheels/vllm/*.whl --verbose
 
 # Install xformers wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -296,7 +296,7 @@ ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
-ARG FLASHINFER_GIT_REF="v0.2.14.post1"
+ARG FLASHINFER_GIT_REF="v0.4.0"
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     git clone --depth 1 --recursive --shallow-submodules \
