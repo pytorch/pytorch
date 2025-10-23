@@ -14295,26 +14295,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(torch.all(result < 2560).item())
 
         code_str = "\n".join(code)
+        if torch.version.hip:
+            triton_str = "tl.minimum"
+        else:
+            triton_str = "triton_helpers.minimum"
         self.assertIn(
-            "triton_helpers.minimum",
+            triton_str,
             code_str,
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
 
+    @skip_if_cpp_wrapper("skip cpp wrapper")
+    @requires_cuda_and_triton
     def test_argmin_argmax_transpose_logical_index(self):
         def fn(x):
             x.tan_()
             x = x.t()
             return x.argmin()
 
-        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(6, 4, device=self.device),))
 
         def fn(x):
             return (x.t().argmin(), x.t().argmax())
 
-        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
-        self.common(fn, (torch.randn(128, 64, device=GPU_TYPE),))
-        self.common(fn, (torch.randn(8, 6, device=GPU_TYPE, dtype=torch.float16),))
+        self.common(fn, (torch.randn(6, 4, device=self.device),))
+        self.common(fn, (torch.randn(128, 64, device=self.device),))
+        self.common(fn, (torch.randn(8, 6, device=self.device, dtype=torch.float16),))
 
         def fn(x):
             transposed = x.t()
@@ -14325,15 +14331,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.argmax(transposed, 1),
             )
 
-        self.common(fn, (torch.randn(32, 16, device=GPU_TYPE),))
-        self.common(fn, (torch.randn(512, 256, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(32, 16, device=self.device),))
+        self.common(fn, (torch.randn(512, 256, device=self.device),))
 
         def fn(x):
             # Permute: (A, B, C) -> (C, A, B)
             permuted = x.permute(2, 0, 1)
             return (permuted.argmin(), permuted.argmax())
 
-        self.common(fn, (torch.randn(4, 6, 8, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(4, 6, 8, device=self.device),))
 
     # end of class CommonTemplate - add new tests here
 

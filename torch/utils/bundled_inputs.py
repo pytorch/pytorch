@@ -119,12 +119,10 @@ def bundle_inputs(
     # Fortunately there is a function in _recursive that does exactly that conversion.
     cloned_module = wrap_cpp_module(clone)
     if isinstance(inputs, dict):
-        if not isinstance(info, dict) and info is not None:
-            raise AssertionError("If inputs is a dict, info must be a dict or None")
+        assert isinstance(info, dict) or info is None
         augment_many_model_functions_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     else:
-        if not isinstance(info, list) and info is not None:
-            raise AssertionError("If inputs is a list, info must be a list or None")
+        assert isinstance(info, list) or info is None
         augment_model_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     return cloned_module
 
