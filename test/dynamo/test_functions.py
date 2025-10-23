@@ -2302,30 +2302,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         return augment(x)
 
-    # # This is to test the new syntax for pattern matching
-    # # ("match ... case ...") added on python 3.10.
-    # # Uncomment these test cases if you run on 3.10+
-    # @make_test
-    # def test_match_sequence(a):
-    #     point = (5, 8)
-    #     match point:
-    #         case (0, 0):
-    #             return a
-    #         case (0, y):
-    #             return a - y
-    #         case (x, 0):
-    #             return a + x
-    #         case (x, y):
-    #             return a + x - y
+    @make_test
+    def test_match_sequence(a):
+        point = (5, 8)
+        match point:
+            case (0, 0):
+                return a
+            case (0, y):
+                return a - y
+            case (x, 0):
+                return a + x
+            case (x, y):
+                return a + x - y
 
-    # @make_test
-    # def test_match_mapping_and_match_keys(x):
-    #     param = {"a": 0.5}
-    #     match param:
-    #         case {"a": param}:
-    #             return x * param
-    #         case {"b": param}:
-    #             return x / param
+    @make_test
+    def test_match_mapping_and_match_keys(x):
+        param = {"a": 0.5}
+        match param:
+            case {"a": param}:
+                return x * param
+            case {"b": param}:
+                return x / param
 
     def test_math_radians(self):
         def func(x, a):
