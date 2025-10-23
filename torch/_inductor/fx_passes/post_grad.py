@@ -274,6 +274,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
 
+    # Apply overlap scheduling if enabled
+    if config.aten_distributed_optimizations.enable_overlap_scheduling:
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
+            lambda graph: schedule_overlap_bucketing(graph.owning_module)
+        )
+
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(

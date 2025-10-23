@@ -854,6 +854,25 @@ class _collective:
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024
 
 
+class aten_distributed_optimizations:
+    """Configuration for distributed optimization passes on ATen FX graphs."""
+
+    # Enable overlap scheduling pass
+    enable_overlap_scheduling: bool = False
+
+    # Insert ordering dependencies to preserve overlap relationships
+    insert_overlap_deps: bool = True
+
+    # Enable overlap-preserving bucketing
+    enable_preserving_bucketing: bool = False
+
+    # Runtime estimation function for ops
+    # For user-defined estimation function, pass in the function handle
+    # None means use default estimations
+    # TODO - need estimated and profile based version
+    estimate_op_runtime: Optional[Callable[[torch.fx.Node], Optional[float]]] = None
+
+
 def parallel_compile_enabled_internally() -> bool:
     """
     TODO: Remove when parallel compiled is fully enabled internally. For rollout, use a
@@ -2070,25 +2089,8 @@ class test_configs:
     # for unit testing
     use_libtorch = False
 
-    # to be migrated when ready for use
-    aten_fx_overlap_scheduling = False
-
-    # insert ordering deps for overlap
-    aten_fx_overlap_insert_overlap_deps = True
-
-    # to be migrated when ready for use
-    aten_fx_overlap_preserving_bucketing = False
-
-    # mostly disabled testing
-    assume_bucketing_reduces_latency = True
-
-    # to be migrated when ready for use
-    # runtime estimation function for ops
-    # for user-defined estimation function, pass in the function handle
-    # TODO - need estimated and profile based version
-    estimate_aten_runtime: Union[
-        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
-    ] = "default"
+    # Assume bucketing reduces latency (mostly for testing)
+    assume_bucketing_reduces_latency: bool = True
 
     # A test config to ease the test for perf of reduction config filtering
     force_filter_reduction_configs = (
