@@ -5,13 +5,21 @@ from typing import Optional, Union
 import torch
 from torch import Size, Tensor
 from torch.nn import functional as F, init
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, UninitializedParameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
+from .lazy import LazyModuleMixin
 from .module import Module
 
 
-__all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "GroupNorm", "RMSNorm"]
+__all__ = [
+    "LocalResponseNorm",
+    "CrossMapLRN2d",
+    "LayerNorm",
+    "LazyLayerNorm",
+    "GroupNorm",
+    "RMSNorm",
+]
 
 
 class LocalResponseNorm(Module):
@@ -203,6 +211,7 @@ class LayerNorm(Module):
         self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
         self.eps = eps
         self.elementwise_affine = elementwise_affine
+
         if self.elementwise_affine:
             self.weight = Parameter(
                 torch.empty(self.normalized_shape, **factory_kwargs)
@@ -235,6 +244,135 @@ class LayerNorm(Module):
             "{normalized_shape}, eps={eps}, "
             "elementwise_affine={elementwise_affine}".format(**self.__dict__)
         )
+
+
+class LazyLayerNorm(LazyModuleMixin, LayerNorm):
+    r"""A :class:`torch.nn.LayerNorm` module where `normalized_shape` is inferred.
+
+    This module is a lazy-initialized version of :class:`torch.nn.LayerNorm`.
+    In this module, the `weight` and `bias` of the affine transformation are of :class:`torch.nn.UninitializedParameter`
+    The `normalized_shape` of the layer is inferred from the `start_dim` argument and shape of the input
+    tensor during the first forward pass. After this the module becomes a regular :class:`torch.nn.LayerNorm` with regular `torch.nn.Parameter`
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        start_dim (int): The dimension starting from here to the end will be normalized. Default: -1
+
+        .. math::
+            \text{normalized\_shape} = \text{input.shape}[\,\text{start\_dim}:\,]
+
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        elementwise_affine: a boolean value that when set to ``True``, this module
+            has learnable per-element affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`elementwise_affine` is ``True``). Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, *)`
+        - Output: :math:`(N, *)` (same shape as input)
+
+    Examples::
+
+        >>> # NLP Example
+        >>> batch, sentence_length, embedding_dim = 20, 5, 10
+        >>> embedding = torch.randn(batch, sentence_length, embedding_dim)
+        >>> # Normalize over the last dimension (i.e. the embedding_dim)
+        >>> lazy_layer_norm = nn.LazyLayerNorm(-1)
+        >>> # Activate module
+        >>> lazy_layer_norm(embedding)
+        >>>
+        >>> # Image Example
+        >>> N, C, H, W = 20, 5, 10, 10
+        >>> input = torch.randn(N, C, H, W)
+        >>> # Normalize over the last three dimensions (i.e. the channel and spatial dimensions)
+        >>> # as shown in the image below
+        >>> lazy_layer_norm = nn.LazyLayerNorm(-3)
+        >>> output = lazy_layer_norm(input)
+
+        .. image:: ../_static/img/nn/layer_norm.jpg
+        :scale: 50 %
+
+    """
+
+    cls_to_become = LayerNorm  # type: ignore[assignment]
+    weight: UninitializedParameter  # type: ignore[assignment]
+    bias: UninitializedParameter  # type: ignore[assignment]
+
+    def __init__(
+        self,
+        start_dim: int = -1,
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
+        # normalized_shape  set to zero as place holder gets overwritten by materialization
+        # elementwise_affine and bias are hardcoded to False to avoid creating tensor
+        # that will soon be overwritten.
+        super().__init__(0, eps, False, False)
+
+        self.start_dim = start_dim
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+
+        if start_dim == 0:
+            raise ValueError(
+                "start dim is 0 but layer norm is not intended to normalize over batch dimension"
+            )
+
+        if self.elementwise_affine:
+            self.weight = UninitializedParameter(**factory_kwargs)
+            if bias:
+                self.bias = UninitializedParameter(**factory_kwargs)
+            else:
+                self.register_parameter("bias", None)
+        else:
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
+        if not self.has_uninitialized_params() and self.elementwise_affine:
+            super().reset_parameters()
+
+    def initialize_parameters(self, input) -> None:
+        """
+        Infers ``normalized_shape`` based on ``start_dim`` and ``input`` also initializes parameters.
+        """
+
+        input_shape = input.shape
+
+        rank = len(input_shape)
+
+        start_dim_eff = self.start_dim if self.start_dim > 0 else rank + self.start_dim
+
+        if not 0 < start_dim_eff < rank:
+            raise ValueError(
+                f"start dim {self.start_dim} is out of bound for an input tensor with rank {rank}"
+            )
+
+        self.normalized_shape = tuple(input_shape[start_dim_eff:])
+
+        if self.has_uninitialized_params():
+            with torch.no_grad():
+                if self.elementwise_affine:
+                    assert isinstance(self.weight, UninitializedParameter)
+                    self.weight.materialize(self.normalized_shape)
+                    if self.bias is not None:
+                        assert isinstance(self.bias, UninitializedParameter)
+                        self.bias.materialize(self.normalized_shape)
+            self.reset_parameters()
+
+        delattr(self, "start_dim")
 
 
 class GroupNorm(Module):
