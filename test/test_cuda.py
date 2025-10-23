@@ -98,7 +98,7 @@ requiresCppContext = unittest.skipUnless(
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 try:
     import torchvision.models  # noqa: F401

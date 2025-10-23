@@ -286,7 +286,14 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f32, f64},
+    "to_sparse": {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    },  # align with cuda.
     "linalg.eig": {f32, f64},
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
