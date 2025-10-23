@@ -41,7 +41,7 @@ def process_inputs(
                         return x
                     source = ConstantSource(f"sym_{idx}")
                     return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source),
+                        shape_env.create_symbol(x, source, positive=x >= 0),
                         hint=x,
                         source=source,
                     )
