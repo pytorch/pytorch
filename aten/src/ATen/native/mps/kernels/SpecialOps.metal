@@ -16,6 +16,7 @@ DEFINE_UNARY_FLOATING_FUNCTOR(i0e);
 DEFINE_UNARY_FLOATING_FUNCTOR(i1);
 DEFINE_UNARY_FLOATING_FUNCTOR(i1e);
 DEFINE_UNARY_FLOATING_FUNCTOR(spherical_bessel_j0);
+DEFINE_UNARY_FLOATING_FUNCTOR(special_ndtri);
 
 // TODO: Replaceme with DEFINE_UNARY_FLOATING_FUNCTOR
 // But for some reason instantinating bessel_y[01] and entr on M1/M2 results in
@@ -79,7 +80,8 @@ struct entr_functor {
   REGISTER_UNARY_OP(i1, DTI, DTO);                                \
   REGISTER_UNARY_OP(i1e, DTI, DTO);                               \
   REGISTER_UNARY_OP(spherical_bessel_j0, DTI, DTO);               \
-  REGISTER_UNARY_OP(entr, DTI, DTO)
+  REGISTER_UNARY_OP(entr, DTI, DTO);                              \
+  REGISTER_UNARY_OP(special_ndtri, DTI, DTO)
 
 REGISTER_SPECIAL(float, float);
 REGISTER_SPECIAL(bool, float);

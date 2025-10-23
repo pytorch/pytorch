@@ -6751,6 +6751,7 @@
   dispatch:
     CPU: _standard_gamma_grad_cpu
     CUDA: _standard_gamma_grad_cuda
+    MPS: _standard_gamma_grad_mps
   autogen: _standard_gamma_grad.out
 
 - func: _standard_gamma(Tensor self, Generator? generator=None) -> Tensor
@@ -6758,6 +6759,7 @@
   dispatch:
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
+    MPS: _s_gamma_mps
   tags: nondeterministic_seeded
   autogen: _standard_gamma.out
 
@@ -6765,6 +6767,7 @@
   dispatch:
     CPU: _dirichlet_grad_cpu
     CUDA: _dirichlet_grad_cuda
+    MPS: _dirichlet_grad_mps
   autogen: _dirichlet_grad.out
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
@@ -6773,6 +6776,7 @@
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
+    MPS: _s_dirichlet_mps
   autogen: _sample_dirichlet.out
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
@@ -6780,6 +6784,7 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+    MPS: _s_poisson_mps
   tags: nondeterministic_seeded
   autogen: poisson.out
 
@@ -6788,6 +6793,7 @@
   dispatch:
     CPU: _s_binomial_cpu
     CUDA: _s_binomial_cuda
+    MPS: _s_binomial_mps
   tags: nondeterministic_seeded
   autogen: binomial.out
 
@@ -8958,6 +8964,7 @@
   tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: cauchy_
+    MPS: cauchy_mps_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
@@ -13487,6 +13494,7 @@
   variants: function
   dispatch:
     CPU, CUDA: special_ndtri_out
+    MPS: special_ndtri_out_mps
   tags: pointwise
 
 - func: special_log_ndtr(Tensor self) -> Tensor
