@@ -1362,11 +1362,15 @@ def main(
     """Run sweep over sizes and score mods for flex attention.
 
     Usage Examples:
-        # Generate a config template
-        python score_mod.py --print-config > my_config.json
-
-        # Use a config file
+        # Use a yml config file
+        python score_mod.py --config basic_config.yaml
+        
+        # Use a json config file
         python score_mod.py --config my_config.json
+
+        # Generate a config template
+        python score_mod.py --print-config json > my_config.json # For a json config
+        python score_mod.py --print-config yaml > my_config.yaml # For a yaml config
 
         # Override config with CLI args
         python score_mod.py --config my_config.json -dtype float16 --max-autotune
@@ -1554,8 +1558,54 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
         help="Name of the benchmark for dashboard output",
         default="PyTorch operator microbenchmark",
     )
+    parser.add_argument(
+        "--print-config",
+        type=str,
+        choices=["json", "yaml"],
+        help="Print a default config template in JSON or YAML format and exit",
+        default=None,
+    )
     # Parse arguments
     args = parser.parse_args()
+
+    # Handle --print-config
+    if args.print_config:
+        default_config = {
+            "dynamic": False,
+            "calculate_bwd": False,
+            "dtype": "bfloat16",
+            "b": [2, 8, 16],
+            "nh": ["16,16", "16,2"],
+            "s": [512, 1024, 4096],
+            "d": [64, 128],
+            "mods": ["noop", "causal", "alibi", "sliding_window"],
+            "backend": ["efficient"],
+            "max_autotune": False,
+            "decoding": False,
+            "kv_size": None,
+            "throughput": True,
+            "save_path": None,
+            "output_json_for_dashboard": None,
+            "benchmark_name": "PyTorch operator microbenchmark"
+        }
+
+        if args.print_config == "json":
+            print(json.dumps(default_config, indent=2))
+        else:  # yaml
+            for key, value in default_config.items():
+                if value is None:
+                    print(f"{key}: null")
+                elif isinstance(value, bool):
+                    print(f"{key}: {str(value).lower()}")
+                elif isinstance(value, str):
+                    print(f'{key}: "{value}"')
+                elif isinstance(value, list):
+                    print(f"{key}: {json.dumps(value)}")
+                else:
+                    print(f"{key}: {value}")
+
+        import sys
+        sys.exit(0)
 
     # Load config file if provided
     if args.config:
