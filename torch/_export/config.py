@@ -10,7 +10,6 @@ behavior, including:
 import sys
 from typing import Any, TYPE_CHECKING
 
-from torch._environment import is_fbcode
 from torch.utils._config_module import install_config_module
 
 
@@ -31,7 +30,7 @@ error_on_lifted_constant_tensors = True
 # enable auto_functionalized_v2 in export
 # We turn this off in fbcode due to downstream users not
 # being ready to handle auto_functionalized_v2.
-enable_auto_functionalized_v2_for_export = not is_fbcode()
+enable_auto_functionalized_v2_for_export = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
