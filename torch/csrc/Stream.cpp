@@ -82,11 +82,15 @@ static PyObject* THPStream_pynew(
   // manage the lifetime of streams.
   std::optional<c10::Stream> stream_opt;
   if (r.idx == 0) {
+    // LITERALINCLUDE START: PYTORCH STREAM CTOR GETNEW
     c10::impl::VirtualGuardImpl impl{device_type};
     stream_opt = impl.getNewStream(
         c10::Device(device_type, device_index), static_cast<int>(priority));
+    // LITERALINCLUDE END: PYTORCH STREAM CTOR GETNEW
   } else {
+    // LITERALINCLUDE START: PYTORCH STREAM CTOR UNPACK
     stream_opt = c10::Stream::unpack3(stream_id, device_index, device_type);
+    // LITERALINCLUDE END: PYTORCH STREAM CTOR UNPACK
   }
 
   TORCH_CHECK(stream_opt.has_value(), "Failed to create stream");
@@ -276,9 +280,11 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   if (stream_device_idx != cur_device_idx) {
     at::accelerator::setDeviceIndex(stream_device_idx);
   }
+  // LITERALINCLUDE START: PYTORCH STREAM ENTER SET CURRENT
   c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       self->stream_id, stream_device_idx, stream_device_type));
+  // LITERALINCLUDE END: PYTORCH STREAM ENTER SET CURRENT
   // Save the current device index and previous stream to the context.
   auto ctx_device_index =
       THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
@@ -328,6 +334,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
       ctx_device_index.get(),
       "ctx_device_index should be present on the context dict.");
   auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
+  // LITERALINCLUDE START: PYTORCH STREAM EXIT RESTORE
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       prev_stream->stream_id,
       static_cast<c10::DeviceIndex>(prev_stream->device_index),
@@ -336,6 +343,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
   }
+  // LITERALINCLUDE END: PYTORCH STREAM EXIT RESTORE
   Py_CLEAR(self->context);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

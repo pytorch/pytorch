@@ -87,7 +87,9 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * the lifetime of the stream.
    */
   Stream getNewStream(Device d, int priority = 0) const override {
+    // LITERALINCLUDE START: OPENREG GUARD GET NEW STREAM
     return getStreamFromPool(priority, d.index());
+    // LITERALINCLUDE END: OPENREG GUARD GET NEW STREAM
   }
 
   /**
@@ -104,10 +106,12 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * to set the current device to match the device of this stream.
    */
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
+    // LITERALINCLUDE START: OPENREG GUARD EXCHANGE STREAM
     const OpenRegStream stream(s);
     const auto old_stream = getCurrentOpenRegStream(s.device().index());
     setCurrentOpenRegStream(stream);
     return old_stream.unwrap();
+    // LITERALINCLUDE END: OPENREG GUARD EXCHANGE STREAM
   }
 
   /**
