@@ -1175,7 +1175,7 @@ def _output_json_for_dashboard(
         # Process each backend result
         for backend, results in results_dict.items():
             # Extract data from experiment
-            test_name = f"{config.attn_type}_{backend}"
+            test_name = f"{backend}_{config.attn_type}_"
             input_config = f"shape: {config.shape}, dtype: {config.dtype}"
 
             # Determine mode based on backward pass
@@ -1227,22 +1227,24 @@ def _output_json_for_dashboard(
             benchmark: BenchmarkInfo
             model: ModelInfo
             metric: MetricInfo
-
+        
+        # Benchmark extra info
+        benchmark_extra_info={
+            "input_config": input_config,
+            "device": device,
+            "arch": device_arch,
+            "operator_name": backend,
+            "attn_type": config.attn_type,
+            "shape": str(config.shape),
+            "max_autotune": config.max_autotune,
+        },
         # Add record for forward latency
         record_fwd_latency = BenchmarkRecord(
             benchmark=BenchmarkInfo(
                 name=benchmark_name,
                 mode=mode,
                 dtype=dtype,
-                extra_info={
-                    "input_config": input_config,
-                    "device": device,
-                    "arch": device_arch,
-                    "operator_name": backend,
-                    "attn_type": config.attn_type,
-                    "shape": str(config.shape),
-                    "max_autotune": config.max_autotune,
-                },
+                extra_info=benchmark_extra_info,
             ),
             model=ModelInfo(
                 name=test_name+str(config.shape),
@@ -1250,10 +1252,11 @@ def _output_json_for_dashboard(
                 origins=["pytorch"],
                 extra_info={
                     "operator_name": backend,
+                    "attn_type": config.attn_type,
                 },
             ),
             metric=MetricInfo(
-                name="forward_latency",
+                name="forward latency",
                 unit="us",
                 benchmark_values=[results.fwd_time],
                 target_value=None,
@@ -1268,22 +1271,14 @@ def _output_json_for_dashboard(
                     name=benchmark_name,
                     mode=mode,
                     dtype=dtype,
-                    extra_info={
-                        "input_config": input_config,
-                        "device": device,
-                        "arch": device_arch,
-                        "operator_name": backend,
-                        "attn_type": config.attn_type,
-                        "shape": str(config.shape),
-                        "max_autotune": config.max_autotune,
-                    },
+                    extra_info=benchmark_extra_info,
                 ),
                 model=ModelInfo(
                     name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
                     extra_info={"operator_name": backend,}
                 ),
                 metric=MetricInfo(
-                    name="forward_memory_bandwidth",
+                    name="memory bandwidth",
                     unit="TB/s",
                     benchmark_values=[calculate_bandwidth(config, results, "fwd")],
                     target_value=None,
@@ -1298,15 +1293,7 @@ def _output_json_for_dashboard(
                     name=benchmark_name,
                     mode=mode,
                     dtype=dtype,
-                    extra_info={
-                        "input_config": input_config,
-                        "device": device,
-                        "arch": device_arch,
-                        "operator_name": backend,
-                        "attn_type": config.attn_type,
-                        "shape": str(config.shape),
-                        "max_autotune": config.max_autotune,
-                    },
+                    extra_info=benchmark_extra_info,
                 ),
                 model=ModelInfo(
                     name=test_name+str(config.shape),
@@ -1317,7 +1304,7 @@ def _output_json_for_dashboard(
                     }
                 ),
                 metric=MetricInfo(
-                    name="forward_tflops",
+                    name="tflops",
                     unit="TFLOPS/s",
                     benchmark_values=[calculate_tflops(config, results)],
                     target_value=None,
@@ -1332,15 +1319,7 @@ def _output_json_for_dashboard(
                     name=benchmark_name,
                     mode=mode,
                     dtype=dtype,
-                    extra_info={
-                        "input_config": input_config,
-                        "device": device,
-                        "arch": device_arch,
-                        "operator_name": backend,
-                        "attn_type": config.attn_type,
-                        "shape": str(config.shape),
-                        "max_autotune": config.max_autotune,
-                    },
+                    extra_info=benchmark_extra_info,
                 ),
                 model=ModelInfo(
                     name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
@@ -1349,7 +1328,7 @@ def _output_json_for_dashboard(
                 },
                 ),
                 metric=MetricInfo(
-                    name="backward_latency",
+                    name="backward latency",
                     unit="us",
                     benchmark_values=[results.bwd_time],
                     target_value=None,
