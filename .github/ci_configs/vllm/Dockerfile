@@ -300,7 +300,7 @@ ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
-ARG FLASHINFER_GIT_REF="v0.4.0"
+ARG FLASHINFER_GIT_REF="v0.4.1"
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     git clone --depth 1 --recursive --shallow-submodules \
