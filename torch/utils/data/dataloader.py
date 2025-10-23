@@ -527,6 +527,7 @@ class DataLoader(Generic[_T_co]):
         # However, in the case of a multiple workers iterator
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
+        loading_state = self.stateful and self.next_iter_state is not None
         if self._initial_iter_for_state_dict:
             self._initial_iter_for_state_dict = False
             assert self._iterator is not None
@@ -535,14 +536,12 @@ class DataLoader(Generic[_T_co]):
                 self._iterator = self._get_iterator()
             else:
                 self._iterator._reset(self)
-        else:
-            self._iterator = self._get_iterator()
-
-        if (
-            self.stateful
-            and self._iterator is not None
-            and getattr(self._iterator, "_finished", False)
+        elif loading_state and self.next_iter_state.get(
+            _StateKeys.ITERATOR_FINISHED, False
         ):
+            self.next_iter_state = None
+            self._iterator = self._get_stateful_iterator()
+        else:
             self._iterator = self._get_iterator()
 
         return self._iterator
