@@ -159,6 +159,7 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
 ]
 
 MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
+    torch.float64,
     torch.float,
     torch.bfloat16,
     torch.float16,
