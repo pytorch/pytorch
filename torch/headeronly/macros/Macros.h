@@ -623,7 +623,7 @@ __host__ __device__
 #define _HIDDEN_NS_EXPAND(...) __VA_ARGS__
 #define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
 
-// Macros to handle 1-3 namespace levels
+// Macros to handle 1-3 hidden namespace levels when not windows
 #define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden"))) {
 #define _HIDDEN_NS_2(n1, n2) \
   namespace n1 {             \
@@ -632,11 +632,17 @@ __host__ __device__
   namespace n1::n2 {             \
   namespace n3 __attribute__((visibility("hidden"))) {
 
-// Macros to close namespaces
+// Macros to close namespaces when not windows
 #define _HIDDEN_NS_END_1(n1) }
 #define _HIDDEN_NS_END_N(n1, ...) \
   }                               \
   }
+
+// Macros to join strs with :: (for win, where symbols are hidden by default)
+#define _GET_JOIN_NS(_1, _2, _3, NAME, ...) NAME
+#define _JOIN_NS1(a) a
+#define _JOIN_NS2(a, b) a::b
+#define _JOIN_NS3(a, b, c) a::b::c
 
 #if !defined(HIDDEN_NAMESPACE_BEGIN)
 #if defined(__GNUG__) && !defined(_WIN32)
@@ -644,7 +650,9 @@ __host__ __device__
   _HIDDEN_NS_EXPAND(_HIDDEN_NS_GET_MACRO( \
       __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__))
 #else
-#define HIDDEN_NAMESPACE_BEGIN(...) namespace __VA_ARGS__ {
+#define HIDDEN_NAMESPACE_BEGIN(...) \
+  namespace _GET_JOIN_NS(           \
+      __VA_ARGS__, _JOIN_NS3, _JOIN_NS2, _JOIN_NS1)(__VA_ARGS__) {
 #endif
 #endif
 
