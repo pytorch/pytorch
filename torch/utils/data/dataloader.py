@@ -536,8 +536,10 @@ class DataLoader(Generic[_T_co]):
                 self._iterator = self._get_iterator()
             else:
                 self._iterator._reset(self)
-        elif loading_state and self.next_iter_state.get(
-            _StateKeys.ITERATOR_FINISHED, False
+        elif (
+            loading_state
+            and self.next_iter_state
+            and self.next_iter_state.get(_StateKeys.ITERATOR_FINISHED, False)
         ):
             self.next_iter_state = None
             self._iterator = self._get_stateful_iterator()
