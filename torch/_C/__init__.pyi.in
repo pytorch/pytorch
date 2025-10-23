@@ -2792,3 +2792,17 @@ class _StaticCudaLauncher:
         args: tuple[Any, ...],
         stream: _int,
     ) -> None: ...
+
+# Defined in torch/csrc/cuda/GreenContext.cpp
+class GreenContext:
+    @staticmethod
+    def create(
+        num_sms: _int,
+        device_id: _int,
+    ) -> GreenContext: ...
+    def set_context(
+        self,
+    ) -> None: ...
+    def pop_context(
+        self,
+    ) -> None: ...

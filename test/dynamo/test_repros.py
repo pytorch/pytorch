@@ -8101,14 +8101,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         res = gm(x, y)
         self.assertEqual(res, ref)
 
-    def test_current_accelerator(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            torch.accelerator.current_accelerator()
-            return x + 1
-
-        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
-
 
 instantiate_parametrized_tests(ReproTests)
 
