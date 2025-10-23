@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -106,15 +105,21 @@ class MixOrderReductionTest(TestBase):
         dtype = torch.float
         x = torch.randn(M, N, dtype=dtype, device=GPU_TYPE)
 
-        opt_f = torch.compile(f, options={
-            "split_reductions": split_reductions,
-        })
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )
 
         ref = f(x)
         act = opt_f(x)
 
         self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
-        self.assertEqual(inductor_config.triton.mix_order_reduction, metrics.codegen_mix_order_reduction)
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
 
     @parametrize(
         "wdtype",
@@ -150,15 +155,21 @@ class MixOrderReductionTest(TestBase):
         dy = torch.randn_like(x)
         eps = 1e-5
 
-        opt_f = torch.compile(f, options={
-            "split_reductions": split_reductions,
-        })
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )
 
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
-        self.assertEqual(inductor_config.triton.mix_order_reduction, metrics.codegen_mix_order_reduction)
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
 
     @parametrize(
         "wbdtype",
@@ -190,15 +201,21 @@ class MixOrderReductionTest(TestBase):
         dy = torch.randn_like(x)
         eps = 1e-5
 
-        opt_f = torch.compile(f, options={
-            "split_reductions": split_reductions,
-        })
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )
 
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
-        self.assertEqual(inductor_config.triton.mix_order_reduction, metrics.codegen_mix_order_reduction)
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
 
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768)))
@@ -222,15 +239,21 @@ class MixOrderReductionTest(TestBase):
         dy = torch.randn_like(x)
         eps = 1e-5
 
-        opt_f = torch.compile(f, options={
-            "split_reductions": split_reductions,
-        })
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )
 
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
-        self.assertEqual(inductor_config.triton.mix_order_reduction, metrics.codegen_mix_order_reduction)
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
 
 
 @inductor_config.patch(

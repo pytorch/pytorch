@@ -3656,9 +3656,7 @@ class MixOrderReductionGrid(GridExpr):
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
         assert split_size
-        assert xblock
-        # The assertion may fail for the split size decided by split reduction
-        # assert split_size % xblock == 0
+        assert xblock == 1, "Mix order reduction force XBLOCK=1 right now"
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 

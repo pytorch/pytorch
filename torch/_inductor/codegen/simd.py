@@ -1536,11 +1536,7 @@ class SIMDScheduling(BaseScheduling):
                 epilogues.append(node)
         return reductions, epilogues
 
-    def _is_split_reduction(self, reds):
-        return reds[0].node._split_size is not None
-
     def _codegen_mix_order_reduction(self, node1, node2):
-        # decide the split size
         nrow, ncol = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
         if not V.graph.sizevars.statically_known_gt(
@@ -1561,12 +1557,15 @@ class SIMDScheduling(BaseScheduling):
             node2
         )
 
-        # is_split_reduction = self._is_split_reduction(node2_reductions)
         force_split_size = node2_reductions[0].node._split_size
+
+        split_reduction_names: OrderedSet[str] = OrderedSet()
 
         # the split size is decided by split reduction
         if force_split_size is not None:
             split_size = force_split_size
+            for subnode in node2_reductions:
+                split_reduction_names.add(subnode.get_name())
         else:
             # TODO need add heuristics. But this is not really important
             # ATM since the common code path goes thru split reduction.
@@ -1609,7 +1608,11 @@ class SIMDScheduling(BaseScheduling):
 
         with V.set_kernel_handler(kernel):
             for node in kernel_features.scheduler_nodes():
-                node.mark_run()
+                # No need to allocate buffer for split reduction
+                # since we are gonna to allocate workspace to store the
+                # intermediate reduction reduction
+                if node.get_name() not in split_reduction_names:
+                    node.mark_run()
 
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)

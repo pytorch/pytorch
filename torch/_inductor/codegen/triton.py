@@ -4533,7 +4533,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.writelines(
                     [
                         "x0 = xindex + suboff",
-                        # "xmask = x0 < xnumel",
                     ]
                 )
                 self.body.splice(self.indexing_code)

@@ -19,6 +19,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import ParamSpec, TypeAlias
 
 from torch.utils._ordered_set import OrderedSet
+
 from .ir import ComputedBuffer
 
 
@@ -126,36 +127,52 @@ class MixOrderReduction:
     """
 
     @staticmethod
-    def is_split_reduction(node: BaseSchedulerNode):
+    def is_split_reduction(node: BaseSchedulerNode) -> bool:
         return node.is_reduction() and all(
             subnode.node._split_size is not None
             for subnode in node.get_nodes()
-            if isinstance(subnode, SchedulerNode) and subnode.is_reduction() and isinstance(subnode.node, ComputedBuffer)
+            if isinstance(subnode, SchedulerNode)
+            and subnode.is_reduction()
+            and isinstance(subnode.node, ComputedBuffer)
         )
 
     @classmethod
-    def get_numel_rnumel(cls, node: BaseSchedulerNode):
+    def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
         if cls.is_split_reduction(node):
             xnumel = None
-            rnunmel = None
+            rnumel = None
             for subnode in node.get_nodes():
-                if not(isinstance(subnode, SchedulerNode) and subnode.is_reduction() and isinstance(subnode.node, ComputedBuffer)):
+                if not (
+                    isinstance(subnode, SchedulerNode)
+                    and subnode.is_reduction()
+                    and isinstance(subnode.node, ComputedBuffer)
+                ):
                     continue
 
-                curxnumel = V.graph.sizevars.simplify(sympy_product(subnode.node._original_ranges))
-                currnumel = V.graph.sizevars.simplify(sympy_product(subnode.node._original_reduction_ranges))
+                assert subnode.node._original_ranges is not None
+                curxnumel = V.graph.sizevars.simplify(
+                    sympy_product(subnode.node._original_ranges)
+                )
+                assert subnode.node._original_reduction_ranges is not None
+                currnumel = V.graph.sizevars.simplify(
+                    sympy_product(subnode.node._original_reduction_ranges)
+                )
 
                 if xnumel is None:
                     xnumel = curxnumel
                     rnumel = currnumel
                 else:
-                    assert V.graph.sizevars.statically_known_equals(xnumel, curxnumel), f"{xnumel} v.s. {curxnumel}"
-                    assert V.graph.sizevars.statically_known_equals(rnumel, currnumel), f"{rnumel} v.s. {currnumel}"
+                    assert V.graph.sizevars.statically_known_equals(
+                        xnumel, curxnumel
+                    ), f"{xnumel} v.s. {curxnumel}"
+                    assert V.graph.sizevars.statically_known_equals(
+                        rnumel, currnumel
+                    ), f"{rnumel} v.s. {currnumel}"
 
             assert xnumel is not None
             return (xnumel, rnumel)
         else:
-            return node.group[1]
+            return node.group[1]  # type: ignore[return-value]
 
     @classmethod
     def has_mix_reduction_orders(
@@ -1483,9 +1500,10 @@ class SchedulerNode(BaseSchedulerNode):
         self._body = self._body.extract_pw_from_reduction()
         return self
 
-    def cancel_reduction_split(self):
+    def cancel_reduction_split(self) -> None:
         if not MixOrderReduction.is_split_reduction(self):
             return
+        assert isinstance(self.node, ir.ComputedBuffer)
         with self.node.with_original_inner_fn():
             self._compute_attrs()
 
