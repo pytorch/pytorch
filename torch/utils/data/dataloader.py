@@ -591,6 +591,7 @@ class DataLoader(Generic[_T_co]):
         self._iterator = None
         self._initial_iter_for_state_dict = False
         if state_dict == {}:
+            self.next_iter_state = None
             return
         self.next_iter_state = state_dict
 

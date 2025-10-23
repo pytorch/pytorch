@@ -4842,6 +4842,132 @@ class TestConcurrentLoaderParity(TestCase):
         self.assertEqual(got, exp)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)",
+)
+class TestStatefulDataLoaderEmptyStateDict(TestCase):
+    """Test behavior when passing an empty dict to load_state_dict."""
+
+    def test_load_empty_state_dict_resets_state(self):
+        """Test that passing empty dict to load_state_dict resets the dataloader state."""
+        dataset = StatefulMapDataset(20, shuffle=False)
+        
+        # Create initial dataloader
+        dl = DataLoader(
+            dataset=dataset,
+            num_workers=0,
+            stateful=True,
+            batch_size=4,
+        )
+        
+        # Consume some batches
+        it = iter(dl)
+        _ = next(it)
+        _ = next(it)
+        
+        # Save state after consuming 2 batches
+        state_dict = dl.state_dict()
+        self.assertIsNotNone(state_dict)
+        self.assertNotEqual(state_dict, {})
+        
+        # Now load empty state dict
+        dl.load_state_dict({})
+        
+        # Check that internal state was reset
+        self.assertIsNone(dl._iterator)
+        self.assertFalse(dl._initial_iter_for_state_dict)
+        self.assertIsNone(dl.next_iter_state)
+    
+    def test_load_empty_state_dict_then_load_real_state(self):
+        """Test that after loading empty dict, we can still load a real state dict."""
+        dataset = StatefulMapDataset(20, shuffle=False)
+        
+        dl = DataLoader(
+            dataset=dataset,
+            num_workers=0,
+            stateful=True,
+            batch_size=4,
+        )
+        
+        # Consume some batches and save state
+        it = iter(dl)
+        _ = next(it)
+        _ = next(it)
+        state_dict = dl.state_dict()
+        batch3_original = next(it)
+        
+        # Load empty dict first
+        dl2 = DataLoader(
+            dataset=dataset,
+            num_workers=0,
+            stateful=True,
+            batch_size=4,
+        )
+        dl2.load_state_dict({})
+        
+        # Now load the real state dict
+        dl2.load_state_dict(state_dict)
+        
+        # Verify we can resume from the saved state
+        it2 = iter(dl2)
+        batch3_resumed = next(it2)
+        
+        self.assertEqual(len(batch3_original), len(batch3_resumed))
+        for o, r in zip(batch3_original, batch3_resumed):
+            self.assertEqual(o, r)
+    
+    def test_load_empty_state_dict_iteration_behavior(self):
+        """Test iteration behavior after loading empty state dict."""
+        dataset = StatefulMapDataset(20, shuffle=False)
+        
+        # Create dataloader and consume some data
+        dl = DataLoader(
+            dataset=dataset,
+            num_workers=0,
+            stateful=True,
+            batch_size=4,
+        )
+        
+        it = iter(dl)
+        _ = next(it)
+        _ = next(it)
+        
+        # Load empty state dict
+        dl.load_state_dict({})
+        
+        # Create new iterator - should start from beginning
+        # (or have some defined behavior)
+        it2 = iter(dl)
+        batch1_new = next(it2)
+        
+        # Document current behavior: With empty dict, it may behave unexpectedly
+        # The test passes if iteration is possible, but the behavior needs to be clarified
+        self.assertIsNotNone(batch1_new)
+    
+    def test_empty_state_dict_multiple_times(self):
+        """Test loading empty state dict multiple times."""
+        dataset = StatefulMapDataset(20, shuffle=False)
+        
+        dl = DataLoader(
+            dataset=dataset,
+            num_workers=0,
+            stateful=True,
+            batch_size=4,
+        )
+        
+        # Load empty dict multiple times - should not cause errors
+        dl.load_state_dict({})
+        dl.load_state_dict({})
+        dl.load_state_dict({})
+        
+        # Should still be able to iterate
+        it = iter(dl)
+        batch = next(it)
+        self.assertIsNotNone(batch)
+
+
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 parametrized_classes = [
     TestDictDataLoader,
