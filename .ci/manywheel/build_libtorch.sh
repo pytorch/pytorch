@@ -104,7 +104,13 @@ if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     export ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr
 fi
 
-echo "Calling -m pip install . -v --no-build-isolation at $(date)"
+if [[ -z "$USE_SPIN" ]]; then
+    INSTALL_COMMAND="python -m pip install --no-build-isolation -v ."
+else
+    INSTALL_COMMAND="spin install"
+fi
+
+echo "Calling ${INSTALL_COMMAND} at $(date)"
 
 if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
     STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
@@ -120,7 +126,7 @@ fi
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
         CFLAGS='-Wno-deprecated-declarations' \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \
-        python -m pip install --no-build-isolation -v .
+        ${INSTALL_COMMAND}
 
     mkdir -p libtorch/{lib,bin,include,share}
 
