@@ -13,6 +13,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/cuda/CUDAScaledBlas.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -1740,261 +1741,26 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
   return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
 
-/**
- * Track concrete implementations available
- */
-enum class ScaledGemmImplementation {
-  NONE = 0,
-  TENSORWISE_TENSORWISE = 1,
-  ROWWISE_ROWWISE = 2,
-  BLOCK_128x128_1x128 = 3,
-  BLOCK_1x128_128x128 = 4,
-  BLOCK_1x128_1x128 = 5,
-  MXFP8_MXFP8 = 6,
-  NVFP4_NVFP4 = 7,
-  NVFP4_NVFP4_SINGLE_SCALE = 8,
-  MXFP4_MXFP4 = 9,
-};
-
-/**
- * Convert passed int (enum) from python back into a
- * strictly-typed enum
- */
-template <class EnumType, class ArrayType>
-std::vector<EnumType> convert_int_to_enum(ArrayType& v) {
-  std::vector<EnumType> converted;
-  converted.reserve(v.size());
-
-  for (auto vi : v) {
-    converted.push_back(static_cast<EnumType>(vi));
-  }
-  return converted;
-}
-
-/**
- * Both inputs must be fp8,
- * Each needs a single scale, {Tensorwise (float)}
- */
-bool check_tensorwise_recipe(c10::ScalarType type_a,
-                             std::vector<ScalingType>& recipe_a,
-                             ArrayRef<Tensor>& scales_a,
-                             c10::ScalarType type_b,
-                             std::vector<ScalingType>& recipe_b,
-                             ArrayRef<Tensor>& scales_b) {
-  // both types must be fp8
-  if (!isFloat8Type(type_a) || !isFloat8Type(type_b)) {
-    return false;
-  }
-
-  // 1 scale each, {Tensorwise, float}
-  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
-    return false;
-  }
-  // Need {Blockwise_1x32, e8m0} for A & B
-  if (recipe_a[0] != ScalingType::TensorWise) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float) return false;
-  if (recipe_b[0] != ScalingType::TensorWise) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float) return false;
-
-  return true;
-}
-
-/**
- * Both inputs must be fp8,
- * Each needs scales, {Rowwise (float)}
- */
-bool check_rowwise_recipe(c10::ScalarType type_a,
-                             std::vector<ScalingType>& recipe_a,
-                             ArrayRef<Tensor>& scales_a,
-                             c10::ScalarType type_b,
-                             std::vector<ScalingType>& recipe_b,
-                             ArrayRef<Tensor>& scales_b) {
-  // both types must be fp8
-  if (!isFloat8Type(type_a) || !isFloat8Type(type_b)) {
-    return false;
-  }
-
-  // 1 scale each, {Tensorwise, float}
-  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
-    return false;
-  }
-
-  // Need {RowWise, dp32} for A & B
-  if (recipe_a[0] != ScalingType::RowWise) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float) return false;
-  if (recipe_b[0] != ScalingType::RowWise) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float) return false;
-
-  return true;
-}
-
-
-/**
- * Two-level scaling, canonical NVFP4
- * Both inputs must be fp4
- * A, B need 2 scales, {Blockwise_1x16 (e4m3), Tensorwise (fp32)}
- */
-bool check_nvfp4_recipe(c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
-  // both types must be fp4
-  if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
-    return false;
-  }
-
-  // 2 scales, 2 recipes for each input
-  if (scales_a.size() != 2 || recipe_a.size() != 2 || scales_b.size() != 2 || recipe_b.size() != 2) {
-    return false;
-  }
-
-  // Need {Blockwise_1x16, e4m3 for scale[0], Tensorwise, fp32 for scale[1]}
-  if (recipe_a[0] != ScalingType::BlockWise1x16 || recipe_a[1] != ScalingType::TensorWise) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float8_e4m3fn || scales_a[1].scalar_type() != ScalarType::Float) return false;
-  if (recipe_b[0] != ScalingType::BlockWise1x16 || recipe_b[1] != ScalingType::TensorWise) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float8_e4m3fn || scales_b[1].scalar_type() != ScalarType::Float) return false;
-
-  return true;
-}
-
-/**
- * Single-level scaling, what PyT currently understands
- * Both inputs must be fp4
- * A, B need 1 scale, {Blockwise_1x16 (e4m3)}
- */
-bool check_nvfp4_recipe_single_scale
-                       (c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
-  // both types must be fp4
-  if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
-    return false;
-  }
-
-  // 2 scales, 2 recipes for each input
-  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
-    return false;
-  }
-
-  // Need {Blockwise_1x16, e4m3 for scale[0], Tensorwise, fp32 for scale[1]}
-  if (recipe_a[0] != ScalingType::BlockWise1x16) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float8_e4m3fn) return false;
-  if (recipe_b[0] != ScalingType::BlockWise1x16) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float8_e4m3fn) return false;
-
-  return true;
-}
-
-/**
- * Both inputs must be fp8
- * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B: {Blockwise_128x128 (float)
- */
-bool check_deepseek_recipe(ScalingType expected_recipe_a,
-                           ScalingType expected_recipe_b,
-                           c10::ScalarType type_a,
-                           std::vector<ScalingType>& recipe_a,
-                           ArrayRef<Tensor>& scales_a,
-                           c10::ScalarType type_b,
-                           std::vector<ScalingType>& recipe_b,
-                           ArrayRef<Tensor>& scales_b) {
-  // both types must be fp8
-  if (type_a != ScalarType::Float8_e4m3fn || type_b != ScalarType::Float8_e4m3fn) {
-    return false;
-  }
-
-  // 1 scales, 1 recipes for each input
-  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
-    return false;
-  }
-
-  // Need {Blockwise_1x128, float} for A, {Blockwise_128x128, float} for B
-  if (recipe_a[0] != expected_recipe_a) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float) return false;
-  if (recipe_b[0] != expected_recipe_b) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float) return false;
-
-  return true;
-}
-
-/**
- * Both inputs must be fp8
- * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
- */
-bool check_mxfp8_recipe(c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
-  // both types must be fp8
-  if (type_a != ScalarType::Float8_e4m3fn || type_b != ScalarType::Float8_e4m3fn) {
-    return false;
-  }
-
-  // 1 scales, 1 recipes for each input
-  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
-    return false;
-  }
-
-  // Need {Blockwise_1x32, e8m0} for A & B
-  if (recipe_a[0] != ScalingType::BlockWise1x32) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-  if (recipe_b[0] != ScalingType::BlockWise1x32) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-
-  return true;
-}
-
-/**
- * Both inputs must be fp4
- * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
- */
-bool check_mxfp4_recipe(c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
-  // both types must be fp4
-  if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
-    return false;
-  }
-
-  // 1 scales, 1 recipes for each input
-  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
-    return false;
-  }
-
-  // Need {Blockwise_1x32, e8m0} for A & B
-  if (recipe_a[0] != ScalingType::BlockWise1x32) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-  if (recipe_b[0] != ScalingType::BlockWise1x32) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-
-  return true;
-}
-
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
+namespace scaled_blas = at::cuda::scaled;
+// using namespace scaled_blas;
+using scaled_blas::ScaledGemmImplementation;
+using scaled_blas::convert_int_to_enum;
 
 std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 9> scale_kernel_dispatch = {{
-  { "tensorwise_tensorwise", check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
-  { "rowwise_rowwise", check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
-  { "block_1x128_128x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
+  { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
+  { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
+  { "block_1x128_128x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
     ScaledGemmImplementation::BLOCK_1x128_128x128},
-  { "block_128x128_1x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise128x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
+  { "block_128x128_1x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise128x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
     ScaledGemmImplementation::BLOCK_128x128_1x128},
-  { "block_1x128_1x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
+  { "block_1x128_1x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
     ScaledGemmImplementation::BLOCK_1x128_1x128},
-  { "nvfp4_nvfp4", check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
-  { "nvfp4_nvfp4_single_scale", check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
-  { "mxfp8_mxfp8", check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
-  { "mxfp4_mxfp4", check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4}}};
+  { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
+  { "nvfp4_nvfp4_single_scale", scaled_blas::check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
+  { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
+  { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4}}};
 
 Tensor&
 _scaled_tensorwise_tensorwise(
@@ -2841,8 +2607,8 @@ _scaled_grouped_mm_cuda(
 namespace {
 
 std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2> scale_grouped_kernel_dispatch = {{
-  { "rowwise_rowwise", check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
-  { "mxfp8_mxfp8", check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}}};
+  { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
+  { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}}};
 
 } // anonymous namespace
 
