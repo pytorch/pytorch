@@ -1034,10 +1034,8 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
                     out += f"{line['filename']}:{line['line']}:{line['name']}\n"
                 out += "\n\n"
             return out
-        if capture_logs_fwd.logs is None:
-            raise AssertionError("capture_logs_fwd.logs is None")
-        if capture_logs_recompute.logs is None:
-            raise AssertionError("capture_logs_recompute.logs is None")
+        assert capture_logs_fwd.logs is not None
+        assert capture_logs_recompute.logs is not None
         raise CheckpointError(
             _checkpoint_error_template.format(
                 forward_traces=get_str_tb("original", capture_logs_fwd),
@@ -1075,14 +1073,12 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
-            if target_frame is None:
-                raise AssertionError("Internal error: target_frame reference is None")
+            assert target_frame is not None  # appease mypy
             recomp_idx = target_frame.recomp_counter[gid]
             target_frame.recomp_counter[gid] += 1
 
             if recomp_idx >= len(target_frame.weak_holders):
-                if target_frame.early_stop:
-                    raise AssertionError("Unexpected state: target_frame.early_stop is set")
+                assert not target_frame.early_stop
                 if not target_frame.forward_completed:
                     # We run into this case when early stop is not enabled and do
                     # grad within checkpoint.
@@ -1519,14 +1515,12 @@ def _checkpoint_without_reentrant_generator(
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
     if _is_compiling(fn, args, kwargs) and context_fn != noop_context_fn:
-        if (
-            not isinstance(forward_context, TorchDispatchMode)
-            or not isinstance(recompute_context, TorchDispatchMode)
-        ):
-            raise AssertionError(
-                "In torch.compile mode, `context_fn` arg passed to `torch.utils.checkpoint` "
-                "must generate a tuple of two `TorchDispatchMode`s."
-            )
+        assert (
+            isinstance(forward_context, TorchDispatchMode) and
+            isinstance(recompute_context, TorchDispatchMode)
+        ), \
+            "In torch.compile mode, `context_fn` arg passed to `torch.utils.checkpoint` " + \
+            "must generate a tuple of two `TorchDispatchMode`s."
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     device_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs(device_type=device_type)
 
