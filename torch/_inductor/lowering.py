@@ -6071,7 +6071,9 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
+def _make_reduction_inner(
+    x, *, axis, keepdims, dtype, override_return_dtype, reduction_type=None
+):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
@@ -6089,6 +6091,21 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
             kept_idx.append(i)
             kept_sizes.append(size[i])
 
+    # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
+    should_compute_logical_index = False
+    if (
+        reduction_type in ("argmax", "argmin")
+        and len(reduced_sizes) > 1
+        and is_triton(x)
+    ):
+        if isinstance(x.data, PermuteView):
+            should_compute_logical_index = True
+        elif isinstance(x.data, ir.ReinterpretView):
+            layout = x.get_layout()
+            should_compute_logical_index = (
+                layout.is_transposed() or not layout.is_contiguous()
+            )
+
     def loader(index, reduction_index):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
@@ -6100,7 +6117,21 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
             zip(kept_idx, index), zip(reduced_idx, reduction_index)
         ):
             new_index[idx] = var
-        return inner_loader(new_index)
+        value = inner_loader(new_index)
+
+        # For argmax/argmin, return tuple with logical linear index if needed
+        if should_compute_logical_index:
+            rindex = [sympy.expand(i) for i in reduction_index]
+
+            # Compute linear index in row-major order
+            # For reduction_ranges = [4, 6]: linear_index = r0 * 6 + r1
+            linear_idx = rindex[0]
+            for i in range(1, len(rindex)):
+                linear_idx = linear_idx * reduced_sizes[i] + rindex[i]
+
+            return (value, ops.index_expr(linear_idx, torch.int64))
+
+        return value
 
     if keepdims:
         new_size = list(size)
@@ -6128,6 +6159,7 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
             keepdims=keepdims,
             dtype=dtype,
             override_return_dtype=override_return_dtype,
+            reduction_type=reduction_type,
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
