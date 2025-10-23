@@ -44,6 +44,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "set_warn_on_accumulate_grad_stream_mismatch",
 ]
 
 
@@ -435,6 +436,13 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
             torch._C._autograd._saved_tensors_hooks_enable()
         else:
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
+
+
+def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
+    """Whether to warn when the AccumulateGrad node's stream does not match the stream
+    of the node that produced the incoming gradient.
+    """
+    return torch._C._set_warn_on_accumulate_grad_stream_mismatch(enabled)
 
 
 class _MultiHandle(RemovableHandle):
