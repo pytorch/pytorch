@@ -902,11 +902,11 @@ def schedule_overlap_bucketing(
         compute_overlap_multipler: Scale factor for compute time used to hide collectives. This can be used
             to address over or under aggressive overlapping.
         max_coll_distance: Maximum node distance for overlap or bucketing. Mostly intended to reduce compile time.
-        custom_runtime_estimation: Custom runtime estimation function that estimates runtime in ms for an fx node. If None, uses default estimations.
-            Today, this is limited to collectives and compute nodes.
-        enable_preserving_bucketing: Enable overlap preserving bucketing. Note: memory tracking within bucketing still WIP.
-        insert_overlap_deps: Insert overlap dependencies using control deps operator. This should only be used if the graph is being compiled with inductor,
-            or to preserve overlap for subsequent graph passes before removal of control deps prior to execution.
+        custom_runtime_estimation: Custom runtime estimation function that estimates runtime in ms for an fx node.
+            If None, uses default estimations. This is currently limited to collectives and compute nodes.
+        enable_preserving_bucketing: Enable overlap preserving bucketing. Note: memory use within bucketing still WIP.
+        insert_overlap_deps: Insert overlap dependencies using control deps operator. This should only be used if
+            graph is being compiled with inductor, or for subsequent passes before removing the ops prior to execution.
     """
     from torch._inductor.config import aten_distributed_optimizations as aten_dist_opts
 
