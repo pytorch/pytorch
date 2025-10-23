@@ -175,19 +175,7 @@ class Benchmarker:
 
             fn_args = fn_args or tuple()
             fn_kwargs = fn_kwargs or {}
-            # pyrefly: ignore  # bad-assignment
-            for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-                # Some callables take nested structures as arguments so use the
-                # flattened form to find any tensors
-                for arg_or_kwarg_leaf in pytree.tree_leaves(arg_or_kwarg):
-                    if not isinstance(arg_or_kwarg_leaf, torch.Tensor):
-                        continue
-                    if inferred_device is None:
-                        inferred_device = arg_or_kwarg_leaf.device
-                    elif arg_or_kwarg_leaf.device != inferred_device:
-                        raise ValueError(
-                            "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
-                        )
+            inferred_device = self.infer_device(*fn_args, **fn_kwargs)
 
         if inferred_device is None:
             raise ValueError(
