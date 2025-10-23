@@ -42,8 +42,11 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
+        def mm(x, y):
+            return torch.mm(x, y).sum()
+
         with DebugMode(record_torchfunction=True) as debug_mode:
-            torch.mm(x_dtensor, y_dtensor).sum()
+            eager_out = mm(x_dtensor, y_dtensor)
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
@@ -63,6 +66,19 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
         self.assertTrue(isinstance(debug_mode.operators[2], _RedistributeCall))
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
+
+        # check recording hook for compiled variant
+        with DebugMode() as debug_mode, DebugMode.record_outputs():
+            compiled_out = torch.compile(mm, backend="aot_eager")(x_dtensor, y_dtensor)
+
+        # check numerical equivalence
+        self.assertTrue(torch.equal(eager_out, compiled_out))
+        sum_op = [
+            op
+            for op in debug_mode.operators
+            if isinstance(op, _OpCall) and str(op.op) == "aten::sum"
+        ][0]
+        self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
 
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
