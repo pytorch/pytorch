@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (

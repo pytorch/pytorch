@@ -43,7 +43,8 @@ def get_group_name(n: fx.Node) -> str:
 
 
 def get_custom_estimation(
-    n: fx.Node, custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None
+    n: fx.Node,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
 ) -> float | None:
     if custom_runtime_estimation is None:
         return None
@@ -105,7 +106,8 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
 
 
 def benchmark_node_with_cache_key(
-    n: fx.Node, custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None
+    n: fx.Node,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
 ) -> tuple[float, str | None]:
     assert is_compute_node(n)
 
@@ -157,7 +159,10 @@ def benchmark_node_with_cache_key(
         return out, key
 
 
-def benchmark_node(n: fx.Node, custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None) -> float:
+def benchmark_node(
+    n: fx.Node,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+) -> float:
     return benchmark_node_with_cache_key(n, custom_runtime_estimation)[0]
 
 
@@ -310,7 +315,9 @@ class OverlapScheduler:
         for node in self.nodes:
             if is_wait_tensor(node):
                 start = node.args[0]
-                coll_time_ms = estimate_collective_time(start, custom_runtime_estimation=self.custom_runtime_estimation)
+                coll_time_ms = estimate_collective_time(
+                    start, custom_runtime_estimation=self.custom_runtime_estimation
+                )
 
                 info = CollectiveInfo(
                     start_node=start,
@@ -535,7 +542,9 @@ class OverlapScheduler:
         info = self.collective_info[node]
 
         if self.should_assume_bucketed(node):
-            latency = estimate_collective_time(node, 0, custom_runtime_estimation=self.custom_runtime_estimation)
+            latency = estimate_collective_time(
+                node, 0, custom_runtime_estimation=self.custom_runtime_estimation
+            )
             assert latency <= info.exposed_time_ms
             info.exposed_time_ms = info.exposed_time_ms - latency
 

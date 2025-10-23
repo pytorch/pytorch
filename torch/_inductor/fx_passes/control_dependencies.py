@@ -11,6 +11,7 @@ with control_deps to make dependencies explicit.
 from typing import Any
 
 import torch.fx as fx
+from torch._C import DispatchKey
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
 from torch.utils._ordered_set import OrderedSet
@@ -59,6 +60,21 @@ control_deps = ControlDeps()
 @register_fake(control_deps)
 def _(additional_deps, subgraph, *args, **kwargs):
     """Fake tensor implementation - execute the subgraph."""
+    return subgraph(*args, **kwargs)
+
+
+@control_deps.py_autograd_impl
+def _(additional_deps, subgraph, *args, **kwargs):
+    """Autograd implementation - just execute the subgraph with standard autograd."""
+    return subgraph(*args, **kwargs)
+
+
+@control_deps.py_impl(DispatchKey.CompositeExplicitAutograd)
+def _(additional_deps, subgraph, *args, **kwargs):
+    from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+    mode = _get_current_dispatch_mode()
+    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return subgraph(*args, **kwargs)
 
 
