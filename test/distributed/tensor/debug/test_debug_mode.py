@@ -528,6 +528,43 @@ class TestDTensorDebugMode(TestCase):
   [node] output: output""",
         )
 
+    def test_custom_hooks(self):
+        def numel_hook(func, types, args, kwargs, result):
+            return {"numel": result.numel()}
+
+        # test dispatch hooks
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 5)
+                self.l2 = torch.nn.Linear(5, 6)
+
+            def forward(self, x):
+                x0 = self.l1(x)
+                # local recoding hook & annotation
+                with DebugMode.record_outputs():
+                    x1 = self.l2(x0)
+                return x1, x0
+
+        x = torch.randn(4, 4, device=self.device_type)
+        mod = Foo().to(device=self.device_type)
+
+        # global logging hook
+        with DebugMode.dispatch_hooks(log_hook=numel_hook), DebugMode() as debug_mode:
+            x1, _ = mod(x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::t(t: f32[5, 4])  # {'numel': 20}
+    aten::addmm(t: f32[5], t: f32[4, 4], t: f32[4, 5])  # {'numel': 20}
+    aten::t(t: f32[6, 5])  # {'numel': 30}
+    aten::addmm(t: f32[6], t: f32[4, 5], t: f32[5, 6])  # {'numel': 24}""",
+        )
+        self.assertTrue(debug_mode.operators[0].record is None)
+        record = debug_mode.operators[3].record["output"]
+        self.assertTrue(torch.allclose(record, x1))
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
