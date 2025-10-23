@@ -1193,7 +1193,7 @@ else:
                 # because the concatenated indices should be indexed by the same root mesh tensor.
                 if dm._flatten_rank_map != flatten_rank_map:
                     raise RuntimeError(
-                        "Cannot concatenate DeviceMeshes with different root mesh tensors"
+                        "Cannot concatenate DeviceMeshes derived from different device meshs"
                     )
             concat_mesh_layout = _MeshLayout(tuple(concat_sizes), tuple(concat_strides))
             if not concat_mesh_layout.check_non_overlap():
