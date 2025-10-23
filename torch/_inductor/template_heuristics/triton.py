@@ -951,7 +951,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): FlexConfig(32, 64, 3, 4),
         }
 
-        self.flex_attn_bwd_autotune_configs_sm_100: list[FlexBwDConfig] = [
+        # Overwriting the configs omitting BLOCK_N of size 128 that cause ULFs
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
             # See Note: flex bwd configs
             FlexBwDConfig(BLOCK_M, BLOCK_N, BLOCK_N, BLOCK_M, s, 4)
             for BLOCK_M in [32, 64]
@@ -1010,10 +1011,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
-            if capability >= (10, 0) and head_dim >= 192:
-                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs_sm_100
-            else:
-                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         major, minor = capability
         if dtype == torch.float32:
