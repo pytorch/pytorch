@@ -26,6 +26,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     skip_unless_torch_gpu,
     with_comms,
@@ -470,11 +471,10 @@ class DistMathOpsTest(DTensorTestBase):
             out_req_grad: bool
 
         subtest_fails = {}
-        valid_filter = (  # noqa: E731
-            lambda cfg: (
-                not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[3:])
-            )
-        )
+
+        def valid_filter(cfg):
+            return not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[3:])
+
         subtest_cfgs = list(
             filter(
                 valid_filter,
@@ -908,6 +908,10 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
                 self.assertEqual(output_dtensor.full_tensor(), output)
 
+
+DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistMathOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()

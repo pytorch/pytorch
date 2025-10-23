@@ -107,8 +107,11 @@ def _check_for_subclass_arg(x: object) -> bool:
 def _map_to_rank_local_val(val: Any, rank: int) -> Any:
     if isinstance(val, LocalTensor):
         return val._local_tensors[rank]
-    if isinstance(val, SymInt) and isinstance(val.node, LocalIntNode):
-        return val.node._local_ints[rank]
+    if isinstance(val, SymInt):
+        if isinstance(val.node, LocalIntNode):
+            return val.node._local_ints[rank]
+        if isinstance(val.node, ConstantIntNode):
+            return val.node.val
     return val
 
 
@@ -505,7 +508,9 @@ class LocalTensor(torch.Tensor):
         local_tensors_copy = {
             r: copy.deepcopy(t, memo) for r, t in self._local_tensors.items()
         }
-        return LocalTensor(local_tensors_copy)
+        tensor_copy = LocalTensor(local_tensors_copy)
+        tensor_copy.requires_grad = self.requires_grad
+        return tensor_copy
 
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
