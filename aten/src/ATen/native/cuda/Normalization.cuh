@@ -293,7 +293,7 @@ __global__ void batch_norm_collect_statistics_kernel(
   int n = 0;
   for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
 #if defined(USE_ROCM)
-   constexpr int UNRL = 4;
+    constexpr int UNRL = 4;
     stat_accscalar_t v_[UNRL];
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x*UNRL) {
       for (int u = 0; u < UNRL; u++)
@@ -304,7 +304,7 @@ __global__ void batch_norm_collect_statistics_kernel(
           n++;
           avg += d1 / n;
           var_n += d1 * (v_[u] - avg);
-       }
+        }
       }
     }
 #else
