@@ -1852,7 +1852,7 @@ Vectorized<T> inline shift_512_8(
 
   // Control masks for shuffle operation, treating 512 bits as an
   // array of 8-bit elements, and considering pairs of neighboring
-  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // elements.  Specifically, a mask named "ctl_M_N" (M,N in [0,1], and
   // M!=N) is set so that shuffle will move element with index M from
   // input pair into element with index N in output pair, and element
   // with index M in output pair will be set to all 0s.

@@ -6894,7 +6894,7 @@ TEST_F(VulkanAPITest, slice_height_success) {
     {2, {2, 3, 40, 50}},  // 4D tensors with dim=height
     {1, {3, 40, 50}},     // 3D tensors with dim=height
     {0, {40, 50}},        // 2D tensors with dim=height
-                          // 1D tesnors don't have height dim for test
+                          // 1D tensors don't have height dim for test
   };
 
   // Act/Assert
@@ -6906,7 +6906,7 @@ TEST_F(VulkanAPITest, slice_feature_success) {
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {1, {2, 40, 13, 14}}, // 4D tensors with dim=feature(channel)
     {0, {40, 13, 14}},    // 3D tensors with dim=feature(channel)
-                          // 1D and 2D tesnors don't have feature(channel) dim for test
+                          // 1D and 2D tensors don't have feature(channel) dim for test
   };
 
   // Act/Assert
@@ -6917,7 +6917,7 @@ TEST_F(VulkanAPITest, slice_batch_success) {
   // Arrange
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {0, {40, 3, 13, 14}}, // 4D tensors with dim=batch
-                          // 1D, 2D and 3D tesnors don't have batch dim for test
+                          // 1D, 2D and 3D tensors don't have batch dim for test
   };
 
   // Act/Assert

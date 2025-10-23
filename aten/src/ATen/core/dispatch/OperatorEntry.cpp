@@ -365,7 +365,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          For autograd keys, we only use kernel from CompositeImplicitAutograd when there's no direct registration
   //          to its corresponding backend key or CompositeExplicitAutograd. See Note [CompositeExplicitAutograd and CompositeImplicitAutograd].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel() if there's registration to any of
-  //          its backends and ask backend extender to request a decicated Autograd key for the backend.
+  //          its backends and ask backend extender to request a dedicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
   //          A CompositeExplicitAutograd kernel prevents CompositeImplicitAutograd kernel being used for Autograd keys, but it doesn't
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)

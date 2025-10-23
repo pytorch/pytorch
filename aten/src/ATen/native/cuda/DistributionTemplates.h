@@ -494,7 +494,7 @@ void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gen)
       auto value = static_cast<scalar_t>(rand * range + from);
       // reverse the bounds of curand4 from (0, 1] to [0, 1)
       // Note that this method is from legacy THCTensorRandom and is likely to give
-      // you more 0-s, since, the probability of gettings 1-s is higher than 0-s and
+      // you more 0-s, since, the probability of getting 1-s is higher than 0-s and
       // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
       // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
       auto reverse_bound_value = value == to ? from : value;
