@@ -1540,24 +1540,26 @@ class SIMDScheduling(BaseScheduling):
         return reds[0].node._split_size is not None
 
     def _codegen_mix_order_reduction(self, node1, node2):
+        # decide the split size
+        nrow, ncol = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+
         if not V.graph.sizevars.statically_known_gt(
-            node1.group[1][0], node1.group[1][1]
+            nrow,
+            ncol,
         ):
             return self._codegen_mix_order_reduction(node2, node1)
 
         metrics.codegen_mix_order_reduction += 1
 
         assert V.graph.sizevars.statically_known_gt(
-            node1.group[1][0], node1.group[1][1]
+            nrow,
+            ncol,
         )
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
             node2
         )
-
-        # decide the split size
-        nrow, ncol = node1.group[1]
 
         # is_split_reduction = self._is_split_reduction(node2_reductions)
         force_split_size = node2_reductions[0].node._split_size

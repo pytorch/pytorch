@@ -127,15 +127,33 @@ class MixOrderReduction:
 
     @staticmethod
     def is_split_reduction(node: BaseSchedulerNode):
-        return isinstance(node, SchedulerNode) and isinstance(node.node, ComputedBuffer) and node.node._split_size is not None
+        return node.is_reduction() and all(
+            subnode.node._split_size is not None
+            for subnode in node.get_nodes()
+            if isinstance(subnode, SchedulerNode) and subnode.is_reduction() and isinstance(subnode.node, ComputedBuffer)
+        )
 
     @classmethod
     def get_numel_rnumel(cls, node: BaseSchedulerNode):
         if cls.is_split_reduction(node):
-            return (
-                V.graph.sizevars.simplify(sympy_product(node.node._original_ranges)),
-                V.graph.sizevars.simplify(sympy_product(node.node._original_reduction_ranges)),
-            )
+            xnumel = None
+            rnunmel = None
+            for subnode in node.get_nodes():
+                if not(isinstance(subnode, SchedulerNode) and subnode.is_reduction() and isinstance(subnode.node, ComputedBuffer)):
+                    continue
+
+                curxnumel = V.graph.sizevars.simplify(sympy_product(subnode.node._original_ranges))
+                currnumel = V.graph.sizevars.simplify(sympy_product(subnode.node._original_reduction_ranges))
+
+                if xnumel is None:
+                    xnumel = curxnumel
+                    rnumel = currnumel
+                else:
+                    assert V.graph.sizevars.statically_known_equals(xnumel, curxnumel), f"{xnumel} v.s. {curxnumel}"
+                    assert V.graph.sizevars.statically_known_equals(rnumel, currnumel), f"{rnumel} v.s. {currnumel}"
+
+            assert xnumel is not None
+            return (xnumel, rnumel)
         else:
             return node.group[1]
 
