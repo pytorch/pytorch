@@ -717,9 +717,13 @@ class RNN(RNNBase):
                 # the user believes he/she is passing in.
                 hx = self.permute_hidden(hx, sorted_indices)
 
-        assert hx is not None
+        if hx is None:
+            raise AssertionError("hidden state (hx) cannot be None")
         self.check_forward_args(input, hx, batch_sizes)
-        assert self.mode == "RNN_TANH" or self.mode == "RNN_RELU"
+        if self.mode not in ("RNN_TANH", "RNN_RELU"):
+            raise AssertionError(
+                f"Invalid RNN mode: {self.mode}. Must be 'RNN_TANH' or 'RNN_RELU'"
+            )
         if batch_sizes is None:
             if self.mode == "RNN_TANH":
                 result = _VF.rnn_tanh(
