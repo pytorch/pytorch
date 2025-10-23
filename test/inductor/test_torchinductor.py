@@ -4991,6 +4991,30 @@ class CommonTemplate:
             rtol = 1.3e-06
         self.common(fn, (x, w), atol=atol, rtol=rtol)
 
+    def test_convolution_private_api_symint(self):
+        def fn(x, w, b):
+            return torch._convolution(
+                x,
+                w,
+                b,
+                stride=[2, 2],
+                padding=[1, 1],
+                dilation=[1, 1],
+                transposed=False,
+                output_padding=[0, 0],
+                groups=1,
+                benchmark=False,
+                deterministic=False,
+                cudnn_enabled=True,
+                allow_tf32=True,
+            )
+
+        x = torch.randn(2, 3, 224, 224)
+        w = torch.randn(64, 3, 3, 3)
+        b = torch.randn(64)
+
+        self.common(fn, (x, w, b), atol=1e-3, rtol=2e-3)
+
     def test_conv3d(self):
         m = torch.nn.Sequential(
             torch.nn.Conv3d(3, 3, kernel_size=7),
