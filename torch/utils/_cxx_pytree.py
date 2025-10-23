@@ -21,13 +21,13 @@ from typing_extensions import deprecated, TypeIs
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
-    is_namedtuple as is_namedtuple,
-    is_namedtuple_class as is_namedtuple_class,
-    is_namedtuple_instance as is_namedtuple_instance,
-    is_structseq as is_structseq,
-    is_structseq_class as is_structseq_class,
-    is_structseq_instance as is_structseq_instance,
-    KeyEntry as KeyEntry,
+    is_namedtuple,
+    is_namedtuple_class,
+    is_namedtuple_instance,
+    is_structseq,
+    is_structseq_class,
+    is_structseq_instance,
+    KeyEntry,
 )
 
 
@@ -933,10 +933,7 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    if not _is_pytreespec_instance(treespec):
-        raise AssertionError(
-            f"_broadcast_to_and_flatten: Expected `treespec` to be instance of PyTreeSpec but got {type(treespec)}"
-        )
+    assert _is_pytreespec_instance(treespec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
