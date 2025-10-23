@@ -329,8 +329,8 @@ class TestCase(InductorTestCase):
         ref = func(*inps)
         self.assertTrue(torch.allclose(result, ref))
 
-        # Triton implicitly upcasts rank-0 arguments of rank 0 to float32. Check for a
-        # downcast to the original dtype.
+        # Inductor upcasts CPU arguments of rank 0 to float32. Check for a downcast to
+        # the original dtype.
         num_downcasts = code.count(f".to({triton_type(dtype)})")
         self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
 
