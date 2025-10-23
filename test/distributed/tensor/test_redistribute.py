@@ -544,11 +544,10 @@ class RedistributeTest(DTensorTestBase):
                         1,
                     )
                 else:
-                    if not self.is_local_tensor_enabled:
-                        self.assertEqual(
-                            comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
-                            1,
-                        )
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                        1,
+                    )
 
         # test 2d device mesh
         mesh_2d = DeviceMesh(
