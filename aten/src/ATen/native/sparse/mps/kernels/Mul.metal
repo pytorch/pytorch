@@ -62,7 +62,6 @@ kernel void build_row_ptr_from_sorted_rows_by_batch(
 
 template <typename T>
 kernel void spmm_bmm_coo_rows_grouped(
-    device const long*   rows      [[buffer(0)]],
     device const long*   cols      [[buffer(1)]],
     device const T*      vals      [[buffer(2)]],
     device const T*      dense     [[buffer(3)]],
@@ -73,7 +72,6 @@ kernel void spmm_bmm_coo_rows_grouped(
     uint3                ltid      [[thread_position_in_threadgroup]],
     uint3                tptg      [[threads_per_threadgroup]])
 {
-  const uint B = dims.x;
   const uint I = dims.y;
   const uint J = dims.z;
   const uint K = dims.w;
@@ -321,7 +319,6 @@ INSTANTIATE_FOR_FLOAT_TYPES(INSTANTIATE_FUSED_GATHER_MUL);
 #define INSTANTIATE_SPMM_BMM_COO_ROWS_GROUPED(DTYPE)                         \
   template [[host_name("spmm_bmm_coo_rows_grouped_" #DTYPE)]] kernel void    \
   spmm_bmm_coo_rows_grouped<DTYPE>(                                          \
-      device const long*   rows      [[buffer(0)]],                          \
       device const long*   cols      [[buffer(1)]],                          \
       device const DTYPE*  vals      [[buffer(2)]],                          \
       device const DTYPE*  dense     [[buffer(3)]],                          \

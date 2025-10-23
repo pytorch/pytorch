@@ -515,6 +515,11 @@ class TestPixelShuffle(TestCaseMPS):
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
+        def test_pixel_shuffle_large_upscale_factor():
+            with self.assertRaises(ValueError):
+                ps = nn.PixelShuffle(545460846592)
+                ps(torch.randn(2, 16, 9, 3))
+
         def test_pixel_shuffle_unshuffle_1D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
@@ -530,6 +535,7 @@ class TestPixelShuffle(TestCaseMPS):
         def test_pixel_shuffle_unshuffle_5D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
 
+        test_pixel_shuffle_large_upscale_factor()
         test_pixel_shuffle_unshuffle_1D()
         test_pixel_shuffle_unshuffle_2D()
         test_pixel_shuffle_unshuffle_3D()
@@ -1936,6 +1942,13 @@ class TestMPS(TestCaseMPS):
         run_lu_factor_ex_test(32, 2, 2, 10, 10, check_errors=True)
         # big matrix check with batch size > 1
         run_lu_factor_ex_test(256, 2, check_errors=False, atol=3e-5, rtol=5e-6)
+
+    def test_linalg_lu_factor_singular(self):
+        # Explicit singular matrix
+        A = torch.tensor([[1.0, 2.0], [2.0, 4.0]], device="mps")
+
+        with self.assertRaisesRegex(RuntimeError, "result in a division by zero"):
+            torch.linalg.lu_factor(A)
 
     def test_linalg_solve(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values

@@ -1670,7 +1670,7 @@ class aot_inductor:
 
     # If link_libtorch is False and cross_target_platform is windows,
     # a library needs to be provided to provide the shim implementations.
-    aoti_shim_library: Optional[str] = None
+    aoti_shim_library: Optional[str | list[str]] = None
     aoti_shim_library_path: Optional[str] = None
 
 
