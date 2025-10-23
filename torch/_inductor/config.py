@@ -874,7 +874,9 @@ class aten_distributed_optimizations:
     # For user-defined estimation function, pass in the function handle
     # None means use default estimations
     # TODO - need estimated and profile based version
-    custom_runtime_estimation: Optional[Callable[[torch.fx.Node], Optional[float]]] = None
+    custom_runtime_estimation: Optional[Callable[[torch.fx.Node], Optional[float]]] = (
+        None
+    )
 
 
 def parallel_compile_enabled_internally() -> bool:

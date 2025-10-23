@@ -890,7 +890,7 @@ def schedule_overlap_bucketing(
     max_in_flight_gb: float = 2.0,
     max_compute_pre_fetch: int = 5,
     collective_bucketing: bool = False,
-    insert_overlap_deps: bool = True,
+    insert_overlap_deps: bool = False,
     compute_overlap_multipler: float = 1.0,
     max_coll_distance: int = 1000,
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,

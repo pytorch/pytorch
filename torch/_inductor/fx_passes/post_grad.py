@@ -281,18 +281,19 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             schedule_overlap_bucketing,
         )
 
+        # by default, insert overlap deps within inductor
+        kwargs: dict[str, object] = {"insert_overlap_deps": True}
+
         # Read config values, only pass non-None values to use function defaults
-        config_keys = [
+        config_keys = (
             "collective_bucketing",
-            "insert_overlap_deps",
             "max_compute_pre_fetch",
             "custom_runtime_estimation",
-        ]
-        kwargs = {
-            key: val
-            for key in config_keys
-            if (val := getattr(dist_opts, key)) is not None
-        }
+            "insert_overlap_deps",
+        )
+        for key in config_keys:
+            if (val := getattr(dist_opts, key)) is not None:
+                kwargs[key] = val
 
         GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
             lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)
