@@ -900,6 +900,9 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   NSMutableArray<NSNumber*>* apparent_in_shape = nil;
   NSMutableArray<NSNumber*>* apparent_out_shape = nil;
 
+  // https://github.com/pytorch/pytorch/issues/160740
+  Tensor input_for_feed = input_t;
+
   if (dim.has_value()) {
     apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
     for (const auto i : c10::irange(num_input_dims)) {
@@ -912,6 +915,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 
     apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
     apparent_out_shape[0] = @1;
+
+    input_for_feed = input_t.reshape({num_in_elements});
   }
 
   if (output_t.numel() == 0) {
@@ -958,7 +963,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
       newCachedGraph->outputTensor_ = outputClampedTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, apparent_in_shape);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_for_feed, apparent_in_shape);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
 
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
