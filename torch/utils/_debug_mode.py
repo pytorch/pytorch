@@ -90,6 +90,9 @@ class _DebugCall:
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
 
+    def __repr__(self) -> str:
+        return self.render([])
+
 
 class _OpCall(_DebugCall):
     """Normal operator call"""
@@ -122,9 +125,6 @@ class _OpCall(_DebugCall):
     def __iter__(self):
         # for BC; tuple(self) returns (op, args, kwargs, call_depth)
         yield from [self.op, self.args, self.kwargs, self.call_depth]
-
-    def __repr__(self) -> str:
-        return self.render([])
 
 
 class _RedistributeCall(_DebugCall):
@@ -159,9 +159,6 @@ class _RedistributeCall(_DebugCall):
         yield {}
         yield self.call_depth
 
-    def __repr__(self) -> str:
-        return self.render([])
-
 
 class _NNModuleCall(_DebugCall):
     """Designates entering an nn.Module's forward method"""
@@ -172,6 +169,14 @@ class _NNModuleCall(_DebugCall):
 
     def render(self, attributes: list[str]) -> str:
         return f"[nn.Mod] {self.module_name}"
+
+    def __iter__(self):
+        yield from [
+            f"[nn.Mod] {self.module_name}",
+            (),
+            {},
+            self.call_depth,
+        ]
 
 
 class DebugMode(TorchDispatchMode):
