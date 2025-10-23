@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import torch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
-from torch import fx as fx
+from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._inductor import utils

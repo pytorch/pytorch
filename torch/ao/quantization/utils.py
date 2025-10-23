@@ -214,8 +214,7 @@ def to_underlying_dtype(qdtype):
         torch.float8_e5m2: torch.float8_e5m2,
         torch.float8_e4m3fn: torch.float8_e4m3fn,
     }
-    if qdtype not in DTYPE_MAPPING:
-        raise AssertionError("Unsupported dtype: " + str(qdtype))
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + str(qdtype)
     return DTYPE_MAPPING[qdtype]
 
 
@@ -270,24 +269,21 @@ def get_swapped_custom_module_class(
     """
     quant_type = get_quant_type(qconfig)
     class_mapping = custom_module_class_mapping.get(quant_type, {})
-    if type(custom_module) not in class_mapping:
-        raise AssertionError(
-            "did not find corresponding observed "
-            f"module class for {type(custom_module)} in mapping: {class_mapping}"
-        )
+    assert type(custom_module) in class_mapping, (
+        "did not find corresponding observed "
+        f"module class for {type(custom_module)} in mapping: {class_mapping}"
+    )
     return class_mapping[type(custom_module)]
 
 
 def activation_dtype(qconfig):
-    if qconfig is None:
-        raise AssertionError("qconfig must be provided to determine activation dtype")
+    assert qconfig is not None
     activation = qconfig.activation()
     return activation.dtype
 
 
 def weight_dtype(qconfig):
-    if qconfig is None:
-        raise AssertionError("qconfig must be provided to determine weight dtype")
+    assert qconfig is not None
     weight = qconfig.weight()
     return weight.dtype
 
@@ -381,8 +377,7 @@ def get_qconfig_dtypes(qconfig):
     r"""returns the qconfig tuple for qconfig:
     (activation_dtype, weight_dtype, activation_is_dynamic)
     """
-    if qconfig is None:
-        raise AssertionError("qconfig must be provided to extract dtypes")
+    assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
     act_is_dynamic = getattr(activation, "is_dynamic", False)
@@ -390,8 +385,7 @@ def get_qconfig_dtypes(qconfig):
 
 
 def get_quant_type(qconfig):
-    if qconfig is None:
-        raise AssertionError("qconfig must be provided to determine quant type")
+    assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
     static_dtypes = [
@@ -446,11 +440,11 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
 
             return False
 
-        if min_val > max_val:
-            raise AssertionError(f"min {min_val} should be less than max {max_val}")
+        assert min_val <= max_val, f"min {min_val} should be less than max {max_val}"
     else:
-        if torch.any(min_val > max_val):
-            raise AssertionError(f"min {min_val} should be less than max {max_val}")
+        assert torch.all(min_val <= max_val), (
+            f"min {min_val} should be less than max {max_val}"
+        )
 
     return True
 
@@ -485,15 +479,13 @@ def calculate_qmin_qmax(
 
         qrange_len = initial_quant_max - initial_quant_min + 1
         if dtype in [torch.qint8, torch.int8]:
-            if not (0 < qrange_len <= 256):
-                raise AssertionError(
-                    "quantization range should be positive and not exceed the maximum bit range (=256)."
-                )
+            assert 0 < qrange_len <= 256, (
+                "quantization range should be positive and not exceed the maximum bit range (=256)."
+            )
         elif dtype in [torch.qint32, torch.int32]:
-            if not (0 < qrange_len <= 2**32):
-                raise AssertionError(
-                    "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
-                )
+            assert 0 < qrange_len <= 2**32, (
+                "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
+            )
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
@@ -641,12 +633,12 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
     """
     # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
     # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
-    if not (quant_min <= 0 <= quant_max):
-        raise AssertionError("Used-specified quantization range must include 0.")
-    if quant_min >= quant_max:
-        raise AssertionError(
-            "qmin must be strictly less than qmax for user-specified quantization range."
-        )
+    assert quant_min <= 0 <= quant_max, (
+        "Used-specified quantization range must include 0."
+    )
+    assert quant_min < quant_max, (
+        "qmin must be strictly less than qmax for user-specified quantization range."
+    )
 
 
 # Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
@@ -818,11 +810,10 @@ def _assert_and_get_unique_device(module: torch.nn.Module) -> Any:
         )
         devices = {torch.device("cpu")}
     ""
-    if len(devices) > 1:
-        raise AssertionError(
-            "prepare only works with cpu or single-device CUDA modules, "
-            f"but got devices {devices}"
-        )
+    assert len(devices) <= 1, (
+        "prepare only works with cpu or single-device CUDA modules, "
+        f"but got devices {devices}"
+    )
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
 

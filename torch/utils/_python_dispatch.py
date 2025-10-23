@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 import contextlib
 import functools
 import warnings
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, overload, Protocol, TYPE_CHECKING, Union
+from typing import Optional, overload, Protocol, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -19,10 +18,6 @@ from torch._C import (
     _push_on_torch_dispatch_stack,
     DispatchKey,
 )
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -88,8 +83,7 @@ class TorchDispatchMode:
 
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
-            if not isinstance(_dispatch_key, torch._C.DispatchKey):
-                raise AssertionError("_dispatch_key must be a torch._C.DispatchKey")
+            assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
         self.old_dispatch_mode_flags: deque[bool] = deque()
@@ -218,24 +212,16 @@ def _get_current_dispatch_mode() -> Optional[TorchDispatchMode]:
 
 
 def _detect_infra_mode(key):
-    if key not in (
+    assert key in [
         torch._C._TorchDispatchModeKey.FUNCTIONAL,
         torch._C._TorchDispatchModeKey.PROXY,
-    ):
-        raise AssertionError(
-            f"key must be either FUNCTIONAL ({torch._C._TorchDispatchModeKey.FUNCTIONAL}) \
-                or PROXY ({torch._C._TorchDispatchModeKey.PROXY}) _TorchDispatchModeKey, \
-                    got {key}"
-        )
+    ]
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
     pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(key)
     post_dispatch_mode = torch._C._get_dispatch_mode(key)
 
-    if pre_dispatch_mode is not None and post_dispatch_mode is not None:
-        raise AssertionError(
-            "At most one of pre_dispatch_mode and post_dispatch_mode may be active"
-        )
+    assert (pre_dispatch_mode is None) or (post_dispatch_mode is None)
 
     if pre_dispatch_mode is None:
         return post_dispatch_mode
@@ -261,13 +247,10 @@ def _unset_infra_mode(key):
 
 
 def _disable_infra_mode(key):
-    if key not in (
+    assert key in (
         torch._C._TorchDispatchModeKey.FUNCTIONAL,
         torch._C._TorchDispatchModeKey.PROXY,
-    ):
-        raise AssertionError(
-            "key must be either FUNCTIONAL or PROXY _TorchDispatchModeKey"
-        )
+    )
     mode_unset = _unset_infra_mode(key)
     try:
         yield mode_unset
@@ -288,10 +271,7 @@ def _get_current_dispatch_mode_stack() -> list[TorchDispatchMode]:
 
 def _push_mode(mode: TorchDispatchMode):
     k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
-    if k is not None and k != torch._C.DispatchKey.PreDispatch:
-        raise AssertionError(
-            "mode._dispatch_key must be None or DispatchKey.PreDispatch"
-        )
+    assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:
         _push_on_torch_dispatch_stack(mode)
         return
@@ -434,7 +414,7 @@ class TensorWithFlatten(Protocol):
     @overload
     def to(
         self,
-        device: Optional[torch._prims_common.DeviceLikeType] = None,
+        device: Optional["torch._prims_common.DeviceLikeType"] = None,
         dtype: Optional[torch.types._dtype] = None,
         non_blocking: bool = False,
         copy: bool = False,
@@ -529,16 +509,14 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     # NB: Purposefully guard here to simplify the inner / outer symbols.
     # Using sym_eq() for symbolic comparison can result in an expression that's too
     # difficult to guard on, so we use == here.
-    if sub.shape != outer_size:
-        raise AssertionError(
-            f"Expected return value from {type(t)}__tensor_unflatten__() to have "
-            f"shape equal to {outer_size}, but got: {sub.shape}"
-        )
-    if sub.stride() != outer_stride:
-        raise AssertionError(
-            f"Expected return value from {type(t)}__tensor_unflatten__() to have "
-            f"stride equal to {outer_stride}, but got: {sub.stride()}"
-        )
+    assert sub.shape == outer_size, (
+        f"Expected return value from {type(t)}__tensor_unflatten__() to have "
+        f"shape equal to {outer_size}, but got: {sub.shape}"
+    )
+    assert sub.stride() == outer_stride, (
+        f"Expected return value from {type(t)}__tensor_unflatten__() to have "
+        f"stride equal to {outer_stride}, but got: {sub.stride()}"
+    )
 
     return sub
 
@@ -555,12 +533,9 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     It does this by unsafely overwriting the storage field of the output tensor
     to be the same storage as the input.
     """
-    if not isinstance(func, torch._ops.OpOverload):
-        raise AssertionError(f"func must be an OpOverload, got {type(args)}")
-    if not isinstance(args, tuple):
-        raise AssertionError(f"args must be a tuple, got {type(args)}")
-    if not isinstance(outs, (list, tuple)):
-        raise AssertionError(f"outs must be a list or tuple, got {type(args)}")
+    assert isinstance(func, torch._ops.OpOverload)
+    assert isinstance(args, tuple)
+    assert isinstance(outs, (list, tuple))
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:
@@ -581,11 +556,10 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                if type(arg) is not type(r):
-                    raise AssertionError(
-                        f"Called {str(func)} with input of type {type(arg)}\n"
-                        f"and output of type {type(ret)}. But expected types to match."
-                    )
+                assert type(arg) is type(
+                    r
+                ), f"""Called {str(func)} with input of type {type(arg)}
+and output of type {type(ret)}. But expected types to match."""
         # Need to call a non-dispatcher helper, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
         # instead, our subclass should directly have its storage swapped out.
@@ -601,8 +575,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
             for r in ret:
                 torch._functionalize_unsafe_set(r, arg)
         else:
-            if not isinstance(ret, torch.Tensor):
-                raise AssertionError(f"expected torch.Tensor, got {type(ret)}")
+            assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
             torch._functionalize_unsafe_set(ret, arg)
 
     for arg_idx, schema_arg in enumerate(schema_info.args):
@@ -646,10 +619,7 @@ def get_alias_info(func) -> SchemaInfo:
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
         torchgen_schema_str = str(func._schema)
-        if not torchgen_schema_str.startswith("aten::"):
-            raise AssertionError(
-                "Expected torchgen schema string to start with 'aten::'"
-            )
+        assert torchgen_schema_str.startswith("aten::")
         # remove the aten:: namespace, which is added by the torchscript parser,
         # and torchgen doesn't know how to handle
         torchgen_schema_str = torchgen_schema_str[6:]
@@ -712,64 +682,6 @@ def get_alias_info(func) -> SchemaInfo:
     return schema_info
 
 
-def autograd_would_have_decomposed(
-    func: torch._ops.OpOverload, flat_args: Sequence[Union[torch.Tensor, object]]
-) -> bool:
-    """
-    Suppose that an operator has CompositeImplicitAutograd decomp registered.
-    Would autograd have used this decomposition?  It will only use it if there
-    isn't an explicit backend registration for the device as well.  This function
-    will tell if this would have occurred.
-
-    Why do we need to apply these decompositions later?  When inference mode is
-    on, the autograd key is bypassed entirely, so a lower level mode cannot rely
-    on the decomposition have been applied.  It's easy to accidentally never apply
-    the decomposition, resulting in an operator showing up in a graph that
-    is unexpected.
-
-    Why do we need to AVOID applying the decomposition when autograd wouldn't
-    have decomposed?  If autograd doesn't decompose, this means in eager mode
-    we would have run the fused kernel.  It must be possible to trace this
-    fused kernel directly into the graph for fidelity with eager (NB: a user
-    has the option of then further decomposing at proxy tensor mode via
-    decomposition table, but we must preserve it to proxy mode to have the
-    choice.)
-
-    Why does functionalization need to also perform the test here?  This is
-    because some CompositeImplicitAutograd decompositions are not functional.
-    If we are eventually going to decompose, we need to do this while we can
-    still turn functionalization back on, so those decompositions get functionalized.
-    So an early decomposition in functionalization may still be necessary.  Note that
-    if proxy tensor decomposition process could turn functionalization back on, this
-    wouldn't be necessary, and maybe that is a useful thing to do anyway because
-    the decomposition table is user specified and a user could violate the functional
-    decomp requirement with a bad decomp.  If this happened, then you could always
-    pass through functionalization.
-    """
-    has_backend_registration = False
-    for a in flat_args:
-        if isinstance(a, torch.Tensor):
-            backend_key = torch._C._parse_dispatch_key(
-                torch._C._dispatch_key_for_device(a.device.type)
-            )
-            if backend_key is None:
-                raise AssertionError(
-                    "Failed to infer backend dispatch key from tensor device"
-                )
-            # TODO: use func.has_kernel_for_dispatch_key(backend_key)
-            # but this one checks py_impl and CompositeImplicitAutograd
-            # incorrectly shows up as has backend reg here
-            has_backend_registration = torch._C._dispatch_has_kernel_for_dispatch_key(
-                func.name(), backend_key
-            )
-
-            # in theory we should take all backend keys and take the highest priority one
-            # to properly mimic the dispatcher,
-            # this just grabs the first tensor and takes its device key
-            break
-    return not has_backend_registration
-
-
 # See NOTE[SchemaInfo int_tags] above.
 _TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)  # type: ignore[call-overload]
 
@@ -799,8 +711,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         if not alias_set or not x.is_write:
             return None
         # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
-        if len(alias_set) != 1:
-            raise AssertionError("Expected alias_set to contain exactly one element")
+        assert len(alias_set) == 1
         # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
         # set of size 1 on Python 3.13.
         return next(iter(alias_set))
@@ -814,10 +725,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
             i for i, a in enumerate(schema_info.args) if output_alias in a.alias_set
         ]
         # For any dispatcher op with an output alias, we expect it to map to exactly one alias in the schema's input arguments.
-        if len(arg_indices) != 1:
-            raise AssertionError(
-                "Expected exactly one argument index for the given output alias"
-            )
+        assert len(arg_indices) == 1
         idx = arg_indices[0]
         arg_info = schema_info.args[idx]
         if arg_info.name is not None and arg_info.name in new_kwargs:
@@ -843,10 +751,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         ]
         # Assumption: we have a very small number of inplace_view ops that follow a strict schema:
         # there is only a single argument that gets its metadata mutated.
-        if len(mutated_args) != 1:
-            raise AssertionError(
-                "expected exactly one mutated arg for inplace_view ops"
-            )
+        assert len(mutated_args) == 1
         # This check exists because we generally *do* want to update the metadata of any wrapper subclasses,
         # but FunctionalTensor is special: it overrides all size/stride calls to plumb to the inner tensor.
         # so we don't actually need to update the metadata (and attempting to do so causes errors)
