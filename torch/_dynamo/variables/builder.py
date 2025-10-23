@@ -1339,7 +1339,6 @@ class VariableBuilder:
             assert self_obj and isinstance(self_obj, VariableTracker), (
                 "Failed to produce a valid self obj"
             )
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
@@ -2881,6 +2880,17 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._utils
 
     if isinstance(example_value, torch.Tensor):
+        # Check if the result is a sparse tensor -
+        # We generally don't support sparse tensor so better to graph break here
+        if is_sparse_any(example_value) and (
+            not tx.export or not config.capture_sparse_compute
+        ):
+            unimplemented_v2(
+                gb_type="Attempted to wrap sparse Tensor with VariableTracker",
+                context=str(example_value),
+                explanation="torch.compile does not support sparse Tensors with VariableTracker",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
         )

@@ -883,11 +883,16 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     Raises:
         AssertionError: If the value is of an unsupported type.
     """
+    # This is almost close enough to implement in terms of _iterate_nodes()
+    # except that it needs to handle `list[sympy.Basic]` which _iterate_nodes()
+    # can't handle.
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
         # nested ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
+    elif isinstance(val, SymNode):
+        yield val.expr
     elif isinstance(val, sympy.Basic):
         yield val
     elif isinstance(val, (int, float, bool)):
@@ -908,6 +913,28 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
+
+
+def _iterate_nodes(val: Any) -> Iterator[SymNode]:
+    """
+    Recursively iterate through a value and yield all SymNodes contained
+    within it.
+    """
+    if isinstance(val, SymNode):
+        yield val
+    elif isinstance(val, py_sym_types):
+        # This allow applies to the jagged layout NestedTensor case as
+        # nested ints are not symbolic
+        if is_symbolic(val):
+            yield val.node
+    elif isinstance(val, (tuple, list, torch.Size)):
+        for s in val:
+            yield from _iterate_nodes(s)
+    elif isinstance(val, torch.Tensor):
+        yield from _iterate_nodes(val.size())
+        if not is_sparse_any(val):
+            yield from _iterate_nodes(val.stride())
+            yield from _iterate_nodes(val.storage_offset())
 
 
 def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
@@ -3182,8 +3209,8 @@ class DimConstraints:
                         self._dynamic_results.add(self._dcp.doprint(arg))
                 else:
                     self._dynamic_results.add(self._dcp.doprint(solution))
-            except (NotImplementedError, AssertionError) as e:
-                log.warning("Failed to reduce inequalities: %s", e)
+            except (NotImplementedError, AssertionError):
+                log.warning("Failed to reduce inequalities", exc_info=True)
                 for expr2 in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr2))
 
