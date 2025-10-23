@@ -4527,7 +4527,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{name} = tl.full([R0_BLOCK], {default}, tl.float32)[None, :]"
                 )
                 accumname2var[name] = self.cse.namedvar(name, dtype=torch.float)
-            self.body.writeline("for suboff in range(0, RSPLIT_SIZE, XBLOCK):")
+            self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
+            self.body.writeline("for suboff in range(0, split_size, XBLOCK):")
             with self.body.indent(offset=1):
                 self.body.writelines(
                     [

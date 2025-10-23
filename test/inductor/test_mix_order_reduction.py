@@ -92,8 +92,9 @@ class MixOrderReductionTest(TestBase):
         ],
     )
     @parametrize("swap", (False, True))
+    @parametrize("shape", ((32768, 768), (32769, 768)))
     @inductor_config.patch(split_reductions=False)
-    def test_mix_order_reduction(self, name, swap):
+    def test_mix_order_reduction(self, name, swap, shape):
         def f(x):
             if swap:
                 return reduction_fn(x, dim=0), reduction_fn(x, dim=1)
@@ -101,7 +102,7 @@ class MixOrderReductionTest(TestBase):
                 return reduction_fn(x, dim=1), reduction_fn(x, dim=0)
 
         reduction_fn = getattr(torch, name)
-        M, N = 32768, 768
+        M, N = shape
         dtype = torch.float
         x = torch.randn(M, N, dtype=dtype, device=GPU_TYPE)
 
@@ -129,8 +130,9 @@ class MixOrderReductionTest(TestBase):
             torch.float,
         ],
     )
+    @parametrize("shape", ((32768, 768), (32769, 768)))
     @inductor_config.patch(split_reductions=False)
-    def test_rms_norm_bwd(self, wdtype):
+    def test_rms_norm_bwd(self, wdtype, shape):
         def f(x, w, eps):
             orig_dtype = x.dtype
 
@@ -149,7 +151,7 @@ class MixOrderReductionTest(TestBase):
         torch.manual_seed(1337)
 
         # M, N = 1152 * 500, 384
-        M, N = 32768, 768
+        M, N = shape
         x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
         w = torch.randn(N, dtype=wdtype, device=GPU_TYPE, requires_grad=True)
         dy = torch.randn_like(x)
@@ -178,8 +180,9 @@ class MixOrderReductionTest(TestBase):
             torch.float,
         ],
     )
+    @parametrize("shape", ((32768, 768), (32769, 768)))
     @inductor_config.patch(split_reductions=False)
-    def test_layer_norm_bwd_with_bias(self, wbdtype):
+    def test_layer_norm_bwd_with_bias(self, wbdtype, shape):
         def f(x, w, b, eps):
             return F.layer_norm(x, x.shape[-1:], w.float(), b.float(), eps)
 
@@ -192,7 +195,7 @@ class MixOrderReductionTest(TestBase):
             return x.grad, w.grad, b.grad
 
         # M, N = 1152 * 500, 384
-        M, N = 32768, 768
+        M, N = shape
         xdtype = torch.float
         x = torch.randn(M, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
         w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
@@ -216,8 +219,9 @@ class MixOrderReductionTest(TestBase):
             exactly=True,
         ).run(bwd_wrapper)
 
+    @parametrize("shape", ((32768, 768), (32769, 768)))
     @inductor_config.patch(split_reductions=False)
-    def test_layer_norm_bwd_no_bias(self):
+    def test_layer_norm_bwd_no_bias(self, shape):
         def f(x, w, eps):
             return F.layer_norm(x, x.shape[-1:], w, bias=None, eps=eps)
 
@@ -229,7 +233,7 @@ class MixOrderReductionTest(TestBase):
             return x.grad, w.grad
 
         # M, N = 1152 * 500, 384
-        M, N = 32768, 768
+        M, N = shape
         xdtype = torch.float
         wbdtype = torch.float
         x = torch.randn(M, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
