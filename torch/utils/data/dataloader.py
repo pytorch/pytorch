@@ -899,7 +899,9 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 class _StatefulBaseDataLoaderIter(_BaseDataLoaderIter):
     """Base class for stateful dataloader iterators."""
 
-    def __init__(self, loader: DataLoader) -> None:
+    def __init__(
+        self, loader: DataLoader, next_iter_state: Optional[dict[str, Any]] = None
+    ) -> None:
         super().__init__(loader)
         self._sampler_iter_yielded = 0
         self._finished = False
@@ -998,12 +1000,14 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
         self._sampler_iter_yielded = state_dict[_StateKeys.SAMPLER_ITER_YIELDED]
 
         # Try to restore from either _index_sampler state_dict or _sampler_iter state_dict
-        if isinstance(self._index_sampler, Stateful) or isinstance(
-            self._sampler_iter, Stateful
-        ):
+        if isinstance(self._index_sampler, Stateful):
+            # Restore sampler and create fresh iterator from it
             _try_load_state_dict(
                 self._index_sampler, state_dict[_StateKeys.INDEX_SAMPLER_STATE]
             )
+            self._sampler_iter = iter(self._index_sampler)
+        elif isinstance(self._sampler_iter, Stateful):
+            # Only restore iterator state (sampler creates iterator, then we restore iterator)
             self._sampler_iter = iter(self._index_sampler)
             if state_dict[_StateKeys.SAMPLER_ITER_STATE] is not None:
                 _try_load_state_dict(
