@@ -35,10 +35,9 @@ def fuse_conv_bn(is_qat, conv, bn):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn(m1, b1)
     """
-    if conv.training != bn.training:
-        raise AssertionError(
-            "Conv and BN both must be in the same mode (train or eval)."
-        )
+    assert conv.training == bn.training, (
+        "Conv and BN both must be in the same mode (train or eval)."
+    )
 
     fused_module_class_map = {
         nn.Conv1d: nni.ConvBn1d,
@@ -47,18 +46,13 @@ def fuse_conv_bn(is_qat, conv, bn):
     }
 
     if is_qat:
-        if bn.num_features != conv.out_channels:
-            raise AssertionError(
-                "Output channel of Conv2d must match num_features of BatchNorm2d."
-            )
-        if not bn.affine:
-            raise AssertionError(
-                "Only support fusing BatchNorm2d with affine set to True"
-            )
-        if not bn.track_running_stats:
-            raise AssertionError(
-                "Only support fusing BatchNorm2d with tracking_running_stats set to True"
-            )
+        assert bn.num_features == conv.out_channels, (
+            "Output channel of Conv2d must match num_features of BatchNorm2d"
+        )
+        assert bn.affine, "Only support fusing BatchNorm2d with affine set to True"
+        assert bn.track_running_stats, (
+            "Only support fusing BatchNorm2d with tracking_running_stats set to True"
+        )
         fused_module_class = fused_module_class_map.get((type(conv)), None)
         if fused_module_class is not None:
             return fused_module_class(conv, bn)
@@ -87,10 +81,9 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn_relu(m1, b1, r1)
     """
-    if not (conv.training == bn.training == relu.training):
-        raise AssertionError(
-            "Conv and BN both must be in the same mode (train or eval)."
-        )
+    assert conv.training == bn.training == relu.training, (
+        "Conv and BN both must be in the same mode (train or eval)."
+    )
     fused_module: Optional[type[nn.Sequential]] = None
     if is_qat:
         map_to_fused_module_train = {
@@ -98,18 +91,13 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
             nn.Conv2d: nni.ConvBnReLU2d,
             nn.Conv3d: nni.ConvBnReLU3d,
         }
-        if bn.num_features != conv.out_channels:
-            raise AssertionError(
-                "Output channel of Conv2d must match num_features of BatchNorm2d"
-            )
-        if not bn.affine:
-            raise AssertionError(
-                "Only support fusing BatchNorm2d with affine set to True"
-            )
-        if not bn.track_running_stats:
-            raise AssertionError(
-                "Only support fusing BatchNorm2d with tracking_running_stats set to True"
-            )
+        assert bn.num_features == conv.out_channels, (
+            "Output channel of Conv must match num_features of BatchNorm"
+        )
+        assert bn.affine, "Only support fusing BatchNorm with affine set to True"
+        assert bn.track_running_stats, (
+            "Only support fusing BatchNorm with tracking_running_stats set to True"
+        )
         fused_module = map_to_fused_module_train.get(type(conv), None)
         if fused_module is not None:
             return fused_module(conv, bn, relu)
@@ -146,24 +134,18 @@ def fuse_linear_bn(is_qat, linear, bn):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_linear_bn(m1, b1)
     """
-    if linear.training != bn.training:
-        raise AssertionError(
-            "Linear and BN both must be in the same mode (train or eval)."
-        )
+    assert linear.training == bn.training, (
+        "Linear and BN both must be in the same mode (train or eval)."
+    )
 
     if is_qat:
-        if bn.num_features != linear.out_features:
-            raise AssertionError(
-                "Output features of Linear must match num_features of BatchNorm1d"
-            )
-        if not bn.affine:
-            raise AssertionError(
-                "Only support fusing BatchNorm1d with affine set to True"
-            )
-        if not bn.track_running_stats:
-            raise AssertionError(
-                "Only support fusing BatchNorm1d with tracking_running_stats set to True"
-            )
+        assert bn.num_features == linear.out_features, (
+            "Output features of Linear must match num_features of BatchNorm1d"
+        )
+        assert bn.affine, "Only support fusing BatchNorm1d with affine set to True"
+        assert bn.track_running_stats, (
+            "Only support fusing BatchNorm1d with tracking_running_stats set to True"
+        )
         return nni.LinearBn1d(linear, bn)
     else:
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
@@ -185,10 +167,9 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
         >>> # xdoctest: +SKIP
         >>> m2 = fuse_convtranspose_bn(m1, b1)
     """
-    if convt.training != bn.training:
-        raise AssertionError(
-            "ConvTranspose and BN both must be in the same mode (train or eval)."
-        )
+    assert convt.training == bn.training, (
+        "ConvTranspose and BN both must be in the same mode (train or eval)."
+    )
 
     if is_qat:
         raise Exception(  # noqa: TRY002
@@ -243,8 +224,7 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
         _DEFAULT_OP_LIST_TO_FUSER_METHOD, additional_fuser_method_mapping
     )
     fuser_method = all_mappings.get(op_list, None)
-    if fuser_method is None:
-        raise AssertionError(f"did not find fuser method for: {op_list} ")
+    assert fuser_method is not None, f"did not find fuser method for: {op_list} "
     return fuser_method
 
 
@@ -309,6 +289,5 @@ def get_fuser_method_new(
         fuser_method = fuser_method_mapping.get(op_pattern)
         if fuser_method is not None:
             break
-    if fuser_method is None:
-        raise AssertionError(f"did not find fuser method for: {op_pattern} ")
+    assert fuser_method is not None, f"did not find fuser method for: {op_pattern} "
     return fuser_method
