@@ -4845,6 +4845,7 @@ class CPUReproTests(TestCase):
             actual, code = run_and_get_cpp_code(compiled_fn, x)
             self.assertEqual(expected, actual)
             # 1 generated vec kernel
+            raise RuntimeError(code)
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
             # Check that both main and tail loops are vectorized
             FileCheck().check_count(
@@ -4895,6 +4896,7 @@ class CPUReproTests(TestCase):
             actual, code = run_and_get_cpp_code(compiled_fn, x)
             self.assertEqual(expected, actual)
             # 1 generated vec kernel
+            raise RuntimeError(code)
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
             # Check that both main and tail loops are vectorized
             FileCheck().check_count(
