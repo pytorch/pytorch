@@ -21,6 +21,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Type.h>
 
 namespace c10 {
@@ -59,10 +60,7 @@ class Registry {
   Registry(bool warning = true) : registry_(), priority_(), warning_(warning) {}
   ~Registry() = default;
 
-  void Register(
-      const SrcType& key,
-      Creator creator,
-      const RegistryPriority priority = REGISTRY_DEFAULT) {
+  void Register(const SrcType& key, Creator creator, const RegistryPriority priority = REGISTRY_DEFAULT) {
     std::lock_guard<std::mutex> lock(register_mutex_);
     // The if statement below is essentially the same as the following line:
     // TORCH_CHECK_EQ(registry_.count(key), 0) << "Key " << key
@@ -74,25 +72,21 @@ class Registry {
       auto cur_priority = priority_[key];
       if (priority > cur_priority) {
 #ifdef DEBUG
-        std::string warn_msg =
-            "Overwriting already registered item for key " + KeyStrRepr(key);
+        std::string warn_msg = "Overwriting already registered item for key " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", warn_msg.c_str());
 #endif
         registry_[key] = creator;
         priority_[key] = priority;
       } else if (priority == cur_priority) {
-        std::string err_msg =
-            "Key already registered with the same priority: " + KeyStrRepr(key);
+        std::string err_msg = "Key already registered with the same priority: " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", err_msg.c_str());
         if (terminate_) {
           std::exit(1);
         } else {
-          throw std::runtime_error(err_msg);
+          TORCH_CHECK(false, err_msg);
         }
       } else if (warning_) {
-        std::string warn_msg =
-            "Higher priority item already registered, skipping registration of " +
-            KeyStrRepr(key);
+        std::string warn_msg = "Higher priority item already registered, skipping registration of " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", warn_msg.c_str());
       }
     } else {
@@ -101,11 +95,10 @@ class Registry {
     }
   }
 
-  void Register(
-      const SrcType& key,
-      Creator creator,
-      const std::string& help_msg,
-      const RegistryPriority priority = REGISTRY_DEFAULT) {
+  void Register(const SrcType& key,
+                Creator creator,
+                const std::string& help_msg,
+                const RegistryPriority priority = REGISTRY_DEFAULT) {
     Register(key, creator, priority);
     help_message_[key] = help_msg;
   }
@@ -169,20 +162,18 @@ class Registry {
 template <class SrcType, class ObjectPtrType, class... Args>
 class Registerer {
  public:
-  explicit Registerer(
-      const SrcType& key,
-      Registry<SrcType, ObjectPtrType, Args...>* registry,
-      typename Registry<SrcType, ObjectPtrType, Args...>::Creator creator,
-      const std::string& help_msg = "") {
+  explicit Registerer(const SrcType& key,
+                      Registry<SrcType, ObjectPtrType, Args...>* registry,
+                      typename Registry<SrcType, ObjectPtrType, Args...>::Creator creator,
+                      const std::string& help_msg = "") {
     registry->Register(key, creator, help_msg);
   }
 
-  explicit Registerer(
-      const SrcType& key,
-      const RegistryPriority priority,
-      Registry<SrcType, ObjectPtrType, Args...>* registry,
-      typename Registry<SrcType, ObjectPtrType, Args...>::Creator creator,
-      const std::string& help_msg = "") {
+  explicit Registerer(const SrcType& key,
+                      const RegistryPriority priority,
+                      Registry<SrcType, ObjectPtrType, Args...>* registry,
+                      typename Registry<SrcType, ObjectPtrType, Args...>::Creator creator,
+                      const std::string& help_msg = "") {
     registry->Register(key, creator, help_msg, priority);
   }
 
@@ -210,50 +201,35 @@ class Registerer {
 // dllexport are mixed, but the warning is fine and linker will be properly
 // exporting the symbol. Same thing happens in the gflags flag declaration and
 // definition caes.
-#define C10_DECLARE_TYPED_REGISTRY(                                      \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                     \
-  C10_API ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*  \
-  RegistryName();                                                        \
-  typedef ::c10::Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__> \
-      Registerer##RegistryName
+#define C10_DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, PtrType, ...)     \
+  C10_API ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName(); \
+  typedef ::c10::Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__> Registerer##RegistryName
 
-#define TORCH_DECLARE_TYPED_REGISTRY(                                     \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                      \
-  TORCH_API ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
-  RegistryName();                                                         \
-  typedef ::c10::Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>  \
-      Registerer##RegistryName
+#define TORCH_DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, PtrType, ...)     \
+  TORCH_API ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName(); \
+  typedef ::c10::Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__> Registerer##RegistryName
 
-#define C10_DEFINE_TYPED_REGISTRY(                                         \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                       \
-  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
-  RegistryName() {                                                         \
-    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
-        registry = new ::c10::                                             \
-            Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();       \
-    return registry;                                                       \
+#define C10_DEFINE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, PtrType, ...)          \
+  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() { \
+    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry =         \
+        new ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();                 \
+    return registry;                                                                        \
   }
 
-#define C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                            \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                          \
-  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*    \
-  RegistryName() {                                                            \
-    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*      \
-        registry =                                                            \
-            new ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>( \
-                false);                                                       \
-    return registry;                                                          \
+#define C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(RegistryName, SrcType, ObjectType, PtrType, ...) \
+  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() {        \
+    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry =                \
+        new ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>(false);                   \
+    return registry;                                                                               \
   }
 
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.
-#define C10_REGISTER_TYPED_CREATOR(RegistryName, key, ...)                  \
-  static Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
-      key, RegistryName(), ##__VA_ARGS__);
+#define C10_REGISTER_TYPED_CREATOR(RegistryName, key, ...) \
+  static Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)(key, RegistryName(), ##__VA_ARGS__);
 
-#define C10_REGISTER_TYPED_CREATOR_WITH_PRIORITY(                           \
-    RegistryName, key, priority, ...)                                       \
-  static Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+#define C10_REGISTER_TYPED_CREATOR_WITH_PRIORITY(RegistryName, key, priority, ...) \
+  static Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)(        \
       key, priority, RegistryName(), ##__VA_ARGS__);
 
 #define C10_REGISTER_TYPED_CLASS(RegistryName, key, ...)                    \
@@ -263,66 +239,52 @@ class Registerer {
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                \
       ::c10::demangle_type<__VA_ARGS__>());
 
-#define C10_REGISTER_TYPED_CLASS_WITH_PRIORITY(                             \
-    RegistryName, key, priority, ...)                                       \
-  static Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
-      key,                                                                  \
-      priority,                                                             \
-      RegistryName(),                                                       \
-      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                \
+#define C10_REGISTER_TYPED_CLASS_WITH_PRIORITY(RegistryName, key, priority, ...) \
+  static Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)(      \
+      key,                                                                       \
+      priority,                                                                  \
+      RegistryName(),                                                            \
+      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                     \
       ::c10::demangle_type<__VA_ARGS__>());
 
 // C10_DECLARE_REGISTRY and C10_DEFINE_REGISTRY are hard-wired to use
 // std::string as the key type, because that is the most commonly used cases.
 #define C10_DECLARE_REGISTRY(RegistryName, ObjectType, ...) \
-  C10_DECLARE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
+  C10_DECLARE_TYPED_REGISTRY(RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
 #define TORCH_DECLARE_REGISTRY(RegistryName, ObjectType, ...) \
-  TORCH_DECLARE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
+  TORCH_DECLARE_TYPED_REGISTRY(RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
 #define C10_DEFINE_REGISTRY(RegistryName, ObjectType, ...) \
-  C10_DEFINE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
+  C10_DEFINE_TYPED_REGISTRY(RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
 #define C10_DEFINE_REGISTRY_WITHOUT_WARNING(RegistryName, ObjectType, ...) \
-  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                               \
-      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
+  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
 #define C10_DECLARE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
-  C10_DECLARE_TYPED_REGISTRY(                                      \
-      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
+  C10_DECLARE_TYPED_REGISTRY(RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 #define TORCH_DECLARE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
-  TORCH_DECLARE_TYPED_REGISTRY(                                      \
-      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
+  TORCH_DECLARE_TYPED_REGISTRY(RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 #define C10_DEFINE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
-  C10_DEFINE_TYPED_REGISTRY(                                      \
-      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
+  C10_DEFINE_TYPED_REGISTRY(RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
-#define C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING( \
-    RegistryName, ObjectType, ...)                  \
-  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(        \
-      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
+#define C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING(RegistryName, ObjectType, ...) \
+  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 // C10_REGISTER_CREATOR and C10_REGISTER_CLASS are hard-wired to use std::string
 // as the key
 // type, because that is the most commonly used cases.
-#define C10_REGISTER_CREATOR(RegistryName, key, ...) \
-  C10_REGISTER_TYPED_CREATOR(RegistryName, #key, __VA_ARGS__)
+#define C10_REGISTER_CREATOR(RegistryName, key, ...) C10_REGISTER_TYPED_CREATOR(RegistryName, #key, __VA_ARGS__)
 
 #define C10_REGISTER_CREATOR_WITH_PRIORITY(RegistryName, key, priority, ...) \
-  C10_REGISTER_TYPED_CREATOR_WITH_PRIORITY(                                  \
-      RegistryName, #key, priority, __VA_ARGS__)
+  C10_REGISTER_TYPED_CREATOR_WITH_PRIORITY(RegistryName, #key, priority, __VA_ARGS__)
 
-#define C10_REGISTER_CLASS(RegistryName, key, ...) \
-  C10_REGISTER_TYPED_CLASS(RegistryName, #key, __VA_ARGS__)
+#define C10_REGISTER_CLASS(RegistryName, key, ...) C10_REGISTER_TYPED_CLASS(RegistryName, #key, __VA_ARGS__)
 
 #define C10_REGISTER_CLASS_WITH_PRIORITY(RegistryName, key, priority, ...) \
-  C10_REGISTER_TYPED_CLASS_WITH_PRIORITY(                                  \
-      RegistryName, #key, priority, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS_WITH_PRIORITY(RegistryName, #key, priority, __VA_ARGS__)
 
 } // namespace c10
 
