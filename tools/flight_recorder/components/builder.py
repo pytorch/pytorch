@@ -373,6 +373,20 @@ def build_collectives(
 
     return tracebacks, collectives, nccl_calls
 
+def transform_ft(details: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    replicas = int(os.environ.get("REPLICAS", "1"))
+    for dump in details.values():
+        rank = dump["rank"]
+        for key, pg_config in dump["pg_config"]:
+            if pg_config["desc"] == "default_pg":
+                ranks = eval(pg_config["ranks"])
+                replica_id = rank // replicas
+                first_rank = replica_id * replicas
+                new_ranks = [r + first_rank for r in ranks]
+                dump["rank"]["pg_config"][key]["ranks"] = new_ranks
+
+
+    return details
 
 def build_db(
     details: dict[str, dict[str, Any]], args: argparse.Namespace, version: str
