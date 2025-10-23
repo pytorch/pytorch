@@ -917,9 +917,9 @@ class CachingAutotuner(KernelInterface):
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
         benchmark_kwargs = (
-            {"rep": 40, "is_vetted_benchmarking": True}
-            if self.device_props.type == "cuda"
-            else {}
+            {}
+            if self.device_props.type == "cpu"
+            else {"rep": 40, "is_vetted_benchmarking": True}
         )
         return benchmarker.benchmark(
             fn=kernel_call,
