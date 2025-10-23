@@ -177,12 +177,7 @@ class Benchmarker:
             fn_kwargs = fn_kwargs or {}
             inferred_device = self.infer_device(*fn_args, **fn_kwargs)
 
-        if inferred_device is None:
-            raise ValueError(
-                "Can't safely infer the device type of `fn` with no device types"
-                " in `fn_args` or `fn_kwargs` and `device` not explicitly provided!"
-                " You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
-            )
+        assert isinstance(inferred_device, torch.device)
 
         fn_args = fn_args or tuple()
         fn_kwargs = fn_kwargs or {}
