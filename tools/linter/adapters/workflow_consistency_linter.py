@@ -158,4 +158,3 @@ if __name__ == "__main__":
                     print_lint_message(
                         path, job_dict, sync_tag, baseline_path, baseline_job_id
                     )
-                    break
