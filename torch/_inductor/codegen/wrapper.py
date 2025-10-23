@@ -140,20 +140,20 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
 
 def codegen_reinterpret_view_helper(data):
     """
-    Collapse a chain of (StorageBox | ReinterpretView) wrappers if every layer
+    Collapse a chain of (ReinterpretView <- TensorBox| StorageBox)... <- buffer wrappers if every layer
     has the same offset as the innermost (base) buffer.
 
     Returns:
         (size, stride, offset, dtype, collapsible: bool)
     """
     if isinstance(data, ir.Buffer):
-        lay = data.layout
+        lay = data.get_layout()
         return lay.size, lay.stride, lay.offset, lay.dtype, True
 
     layouts: list[Any] = []
     cur = data
     while isinstance(cur, (ir.TensorBox, ir.StorageBox, ir.ReinterpretView)):
-        lay = getattr(cur, "layout", None)
+        lay = cur.get_layout()
         if lay is None:
             return None, None, None, None, False
         layouts.append(lay)
@@ -164,10 +164,11 @@ def codegen_reinterpret_view_helper(data):
 
     # All wrapper offsets must match base offset to be collapsible
     for lay in layouts:
-        if lay.offset != cur.layout.offset:
+        if lay.offset != cur.get_layout().offset:
             return None, None, None, None, False
 
-    return cur.layout.size, cur.layout.stride, cur.layout.offset, cur.layout.dtype, True
+    base_lay = cur.get_layout()
+    return base_lay.size, base_lay.stride, base_lay.offset, base_lay.dtype, True
 
 
 # TODO: Move to a well known place
@@ -3249,6 +3250,15 @@ class PythonWrapperCodegen(CodeGen):
             assert isinstance(box, ir.StorageBox), type(box)
             input_buffer = box.data
             assert isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)), type(input_buffer)
+            if isinstance(input_buffer, ir.ReinterpretView):
+                def unwrap_views(target) -> ir.Buffer:
+                    if isinstance(target, ir.BaseView):
+                        return unwrap_views(target.unwrap_view())
+                    if isinstance(target, ir.MutableBox):
+                        return unwrap_views(target.data)
+                    assert isinstance(target, ir.Buffer), type(target)
+                    return target
+                input_buffer = unwrap_views(input_buffer)
             self.codegen_allocation(input_buffer)
             self.writeline(ReinterpretLine(self, input_buffer, buffer, layout))
             return

@@ -1954,13 +1954,16 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             return
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
+        input2 = torch.randn(*B, in_features).to(dtype=torch.float32)
+        input3 = torch.randn(*B, out_features).to(dtype=torch.float32)
 
         other = torch.randn(*B, out_features).to(dtype=dtype)
-        # Avoid hitting qlinear inplace sum fusion
         if input_3d:
             other2 = torch.randn(B[0] * B[1], out_features).to(dtype=dtype)
         else:
             other2 = torch.randn(1, *B, out_features).to(dtype=dtype)
+
+        other_clone = other.clone()
 
         class M(torch.nn.Module):
             def __init__(self, bias, input_3d):
@@ -1973,7 +1976,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
             def forward(self, x, other, other2):
                 res = self.epilogue(self.linear(x) + other)
-                # Avoid hitting qlinear inplace sum fusion
                 if self.input_3d:
                     other2 = other2.view(2, other2.size(0) // 2, other2.size(1))
                 else:
@@ -1981,10 +1983,28 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 res = self.epilogue2(self.linear2(res) + other2)
                 return res
 
+        class M2(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self.epilogue2 = _get_epilogue(epilogue)
+
+            def forward(self, x0, x1, other):
+                # test qlinear sum -> qlinear sum
+                res = self.epilogue(self.linear(x0) + other)
+                res = self.epilogue2(self.linear2(x1) + res)
+                return res
+
         counters.clear()
         ref_quantized_mod = _generate_qdq_quantized_model(
             M(bias=bias, input_3d=input_3d).eval(),
             (input, other, other2),
+        )
+        ref_quantized_mod2 = _generate_qdq_quantized_model(
+            M2(bias=bias).eval(),
+            (input2, input3, other_clone),
         )
         atol, rtol = 5e-2, 5e-2
         with (
@@ -1994,6 +2014,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ):
             ref_res = ref_quantized_mod(input, other, other2)
             cfn = torch.compile(ref_quantized_mod)
+            ref_res2 = ref_quantized_mod2(input2, input3, other_clone)
+            cfn2 = torch.compile(ref_quantized_mod2)
+
             res = cfn(input, other, other2)
             self.assertEqual(
                 res,
@@ -2003,7 +2026,18 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 equal_nan=True,
                 exact_dtype=True,
             )
-            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+
+            res2 = cfn2(input2, input3, other_clone)
+            self.assertEqual(
+                res2,
+                ref_res2,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=True,
+                exact_dtype=True,
+            )
+
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 4)
             self.assertEqual(
                 counters["inductor"]["cpp_epilogue_fusion_counter"],
                 0,
