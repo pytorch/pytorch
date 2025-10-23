@@ -686,8 +686,23 @@ void MPSHeapAllocatorImpl::freeInactiveBuffers() {
 }
 
 void MPSHeapAllocatorImpl::emptyCache() {
-  std::lock_guard<std::recursive_mutex> lock(m_mutex);
-  release_cached_buffers();
+  @autoreleasepool {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+    // First free any buffers pending completion
+    // This is critical to prevent memory leaks between epochs/batches
+    freeInactiveBuffers();
+
+    // Then release the cached buffers
+    release_cached_buffers();
+  }
+
+  // Drain autoreleased Metal objects by creating and destroying another pool
+  @autoreleasepool {
+    // Second pass: free any buffers that were autoreleased in the first pass. Double pass ensures no memory leaks
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    freeInactiveBuffers();
+  }
 }
 
 ssize_t MPSHeapAllocatorImpl::getLowWatermarkValue() {
