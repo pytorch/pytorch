@@ -494,6 +494,40 @@ class TestDTensorDebugMode(TestCase):
   [node] output: output""",  # NOQA: B950
         )
 
+    def test_fx_annotate_in_graph(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x = x + 2
+                with torch.fx.traceback.annotate({"region": "foo"}):
+                    x = x @ y
+                    x = x + 2
+                x = x * 2
+                return x
+
+        mod = Foo()
+        x, y = torch.randn(4, 4), torch.randn(4, 8)
+        with torch.fx.traceback.preserve_node_meta():
+            gm = torch.export.export(mod, (x, y)).module()
+
+        debug_mode = DebugMode()
+        debug_mode.run_graph(gm, x, y)
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [node] x: placeholder
+  [node] y: placeholder
+  [node] _guards_fn: call_module[_guards_fn](x, y)
+  [node] add: call_function[aten::add.Tensor](x, 2)
+      aten::add.Tensor(t: f32[4, 4], 2)
+  [node] matmul: call_function[aten::matmul](add, y)  # {"region": foo}
+      aten::mm(t: f32[4, 4], t: f32[4, 8])
+  [node] add_1: call_function[aten::add.Tensor](matmul, 2)  # {"region": foo}
+      aten::add.Tensor(t: f32[4, 8], 2)
+  [node] mul: call_function[aten::mul.Tensor](add_1, 2)
+      aten::mul.Tensor(t: f32[4, 8], 2)
+  [node] output: output""",
+        )
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 

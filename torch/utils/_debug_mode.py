@@ -209,7 +209,7 @@ class _FXNodeCall(_DebugCall):
         node = self.node
 
         if node.op in ["placeholder", "output"]:
-            return f"[node] {node.name}: {node.op}"
+            node_str = f"[node] {node.name}: {node.op}"
         else:
             args_str = ", ".join(str(n) for n in node.args)
             if node.kwargs:
@@ -219,9 +219,21 @@ class _FXNodeCall(_DebugCall):
             else:
                 kwargs_str = ""
             target_str = _op_to_str(node.target)
-            return (
+            node_str = (
                 f"[node] {node.name}: {node.op}[{target_str}]({args_str}{kwargs_str})"
             )
+
+        if (
+            "custom" in self.node.meta
+            and isinstance((custom := self.node.meta["custom"]), dict)
+            and all(isinstance(x, str) for x in custom.keys())
+        ):
+            log_str = ", ".join(f'"{k}": {v}' for k, v in custom.items())
+            log_str = f"  # {{{log_str}}}"
+        else:
+            log_str = ""
+
+        return f"{node_str}{log_str}"
 
 
 class _DebugInterpreter(torch.fx.Interpreter):
