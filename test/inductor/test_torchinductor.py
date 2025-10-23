@@ -5017,11 +5017,9 @@ class CommonTemplate:
 
         model = ConvModel().to(self.device).eval()
         x = torch.randn(2, 3, 224, 224, device=self.device)
-        with torch.no_grad():
-            expected = model(x)
+        expected = model(x)
         compiled_model = torch.compile(model, backend="inductor", dynamic=True)
-        with torch.no_grad():
-            actual = compiled_model(x)
+        actual = compiled_model(x)
 
         torch.testing.assert_close(actual, expected, atol=1e-05, rtol=1e-05)
 
