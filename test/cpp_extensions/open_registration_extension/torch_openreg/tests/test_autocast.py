@@ -8,8 +8,7 @@ class TestAutocast(TestCase):
     def test_autocast_with_unsupported_type(self):
         with self.assertWarnsRegex(
             UserWarning,
-            "In openreg autocast, but the target dtype is not supported."
-            "openreg Autocast only supports dtypes of torch.bfloat16, torch.float16 currently.",
+            "In openreg autocast, but the target dtype torch.float32 is not supported.",
         ):
             with torch.autocast(device_type="openreg", dtype=torch.float32):
                 _ = torch.ones(10)
