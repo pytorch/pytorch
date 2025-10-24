@@ -491,6 +491,44 @@ inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
 #endif
 }
 
+template <typename scalar_t>
+inline c10::complex<scalar_t> _nan_to_num_replace(
+    c10::complex<scalar_t> a,
+    c10::complex<scalar_t> nan_replacement,
+    c10::complex<scalar_t> pos_inf_replacement,
+    c10::complex<scalar_t> neg_inf_replacement) {
+  if (!std::isfinite(a.real()) || !std::isfinite(a.imag())) {
+    scalar_t new_real = 0;
+    scalar_t new_imag = 0;
+    if (at::_isnan(a.real())) {
+      new_real += nan_replacement.real();
+      new_imag += nan_replacement.imag();
+    } else if (a.real() == std::numeric_limits<scalar_t>::infinity()) {
+      new_real += pos_inf_replacement.real();
+      new_imag += pos_inf_replacement.imag();
+    } else if (a.real() == -std::numeric_limits<scalar_t>::infinity()) {
+      new_real += neg_inf_replacement.real();
+      new_imag += neg_inf_replacement.imag();
+    } else {
+      new_real += a.real();
+    }
+    if (at::_isnan(a.imag())) {
+      new_real -= nan_replacement.imag();
+      new_imag += nan_replacement.real();
+    } else if (a.imag() == std::numeric_limits<scalar_t>::infinity()) {
+      new_real -= pos_inf_replacement.imag();
+      new_imag += pos_inf_replacement.real();
+    } else if (a.imag() == -std::numeric_limits<scalar_t>::infinity()) {
+      new_real -= neg_inf_replacement.imag();
+      new_imag += neg_inf_replacement.real();
+    } else {
+      new_imag += a.imag();
+    }
+    return c10::complex<scalar_t> {new_real, new_imag};
+  }
+  return a;
+}
+
 static void nan_to_num_kernel(
     TensorIteratorBase& iter,
     std::optional<double> nan,
@@ -513,6 +551,30 @@ static void nan_to_num_kernel(
       return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
     });
   });
+}
+
+static void nan_to_num_complex_args_kernel(
+    TensorIteratorBase& iter,
+    std::optional<complex<double>> nan,
+    std::optional<complex<double>> pos_inf,
+    std::optional<complex<double>> neg_inf) {
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
+      using value_t = c10::scalar_value_type<scalar_t>::type;
+      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(scalar_t(0.0, 0.0)));
+      scalar_t pos_inf_replacement = pos_inf.has_value()
+          ? static_cast<scalar_t>(pos_inf.value())
+          : scalar_t(std::numeric_limits<value_t>::max(), 0.0);
+      scalar_t neg_inf_replacement = neg_inf.has_value()
+          ? static_cast<scalar_t>(neg_inf.value())
+          : scalar_t(std::numeric_limits<value_t>::lowest(), 0.0);
+      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
+      });
+    });
+  } else {
+    TORCH_CHECK(false, "nan_to_num does not work with complex nan, pos_inf, or neg_inf and non-complex tensors. Expected complex tensor, but got ", iter.dtype());
+  }
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
@@ -819,6 +881,7 @@ REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel)
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel)
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel)
 REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel)
+REGISTER_DISPATCH(nan_to_num_complex_stub, &CPU_CAPABILITY::nan_to_num_complex_args_kernel)
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel)
 REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel)
 REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel)
