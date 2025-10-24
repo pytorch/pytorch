@@ -1235,75 +1235,18 @@ class BuiltinVariable(VariableTracker):
                 # scenario is to de-sugar eagerly.
                 fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
 
-            if fn is operator.getitem:
-
-                def select(tensor, dim, item):
-                    return tensor.call_method(
-                        tx,
-                        "select",
-                        [
-                            variables.ConstantVariable.create(dim),
-                            item,
-                        ],
-                        {},
-                    )
-
-                def can_remove_tensor_arg(t):
-                    example_value = t.proxy.node.meta.get("example_value")
-                    is_batched = (
-                        example_value is not None
-                        and hasattr(example_value, "_is_batched")
-                        and example_value._is_batched()
-                    )
-                    return not is_batched
-
-                if isinstance(args[1], SymNodeVariable):
-                    # Standard indexing will force specialization due to
-                    # __index__.  Rewrite as a regular torch op which will
-                    # trace fine
-                    return select(args[0], 0, args[1])
-
-                elif isinstance(args[1], TensorVariable) and can_remove_tensor_arg(
-                    args[1]
-                ):
-                    idx = args[1].call_method(tx, "item", [], {})
-                    # Apply torch.select at current_dim (removes this dimension)
-                    return select(args[0], 0, idx)
-
-                # Handle tuple of args
-                elif isinstance(args[1], TupleVariable):
-                    # Decompose into sequential operations, tracking dimension changes
-                    index_items = args[1].items
-
-                    result = args[0]
-                    dims_removed = 0  # Track how many dimensions have been removed
-
-                    for original_dim, item in enumerate(index_items):
-                        # Current dimension in the result tensor
-                        current_dim = original_dim - dims_removed
-
-                        if isinstance(item, variables.SliceVariable):
-                            # Slicing keeps the dimension
-                            result = variables.BuiltinVariable(
-                                operator.getitem
-                            ).call_function(tx, [result, item], {})
-
-                        else:
-                            if isinstance(item, SymNodeVariable):
-                                result = select(result, current_dim, item)
-                            elif isinstance(
-                                item, TensorVariable
-                            ) and can_remove_tensor_arg(item):
-                                idx = item.call_method(tx, "item", [], {})
-                                # Apply torch.select at current_dim (removes this dimension)
-                                result = select(result, current_dim, idx)
-                            else:
-                                # Regular scalar index (also removes dimension)
-                                result = variables.BuiltinVariable(
-                                    operator.getitem
-                                ).call_function(tx, [result, item], {})
-                            dims_removed += 1
-                    return result
+            if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                # Standard indexing will force specialization due to
+                # __index__.  Rewrite as a regular torch op which will
+                # trace fine
+                fn, args = (
+                    torch.select,
+                    [
+                        args[0],
+                        variables.ConstantVariable.create(0),
+                        args[1],
+                    ],
+                )
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
