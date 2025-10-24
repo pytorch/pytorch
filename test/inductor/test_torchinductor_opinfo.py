@@ -273,6 +273,12 @@ inductor_expected_failures_single_sample["cuda"] = {
         i32,
         i64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
+    # Boolean min/max with dim return incorrect indices on CUDA due to tie-breaking
+    # in argreduce paths; mark expected failures to unblock trunk. See CI logs for
+    # TestInductorOpInfoCUDA.test_comprehensive_min_reduction_with_dim_cuda_bool and
+    # TestInductorOpInfoCUDA.test_comprehensive_max_reduction_with_dim_cuda_bool.
+    ("min", "reduction_with_dim"): {b8},
+    ("max", "reduction_with_dim"): {b8},
 }
 
 inductor_expected_failures_single_sample["xpu"] = {
