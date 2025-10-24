@@ -44,19 +44,19 @@ access.
 
 PyTorch Symmetric Memory unlocks three new capabilities:
 
-- Customized communication patterns: Increased flexibility in kernel writing
+- **Customized communication patterns**: Increased flexibility in kernel writing
 allows developers to write custom kernels that implement their custom
 computations and communications, directly tailored to the need of the
 application. It will also be straightforward to add support for new data types
 along with the special compute that those data types might require, even if it’s
 not present yet in the standard libraries.
 
-- In-kernel compute-comm fusion: Device-initiated communication capability
+- **In-kernel compute-comm fusion**: Device-initiated communication capability
 allows developers to write kernels with both computation and communication
 instructions, allowing for the fusion of computation and data movement in the
 smallest possible granularity.
 
-- Low-latency remote access: Network transport protocols like RDMA enhance the
+- **Low-latency remote access**: Network transport protocols like RDMA enhance the
 performance of symmetric memory in networked environments by enabling direct,
 high-speed, and low-latency communication between processors and memory. RDMA
 eliminates the overhead associated with the traditional network stack and CPU
@@ -73,7 +73,8 @@ The PyTorch SymmMem programming model involves two key elements:
 - creating symmetric tensors
 - creating SymmMem kernels
 
-To create symmetric tensors, one can use the `torch.distributed._symmetric_memory` package:
+To create symmetric tensors, one can use the
+`torch.distributed._symmetric_memory` package:
 
 ```python
 import torch.distributed._symmetric_memory as symm_mem
@@ -82,11 +83,18 @@ t = symm_mem.empty(128, device="cuda")
 hdl = symm_mem.rendezvous(t, group)
 ```
 
-Then, collectives can be called on these tensors. For example, to perform a one-shot all-reduce:
+Then, collectives can be called on these tensors. For example, to perform a
+one-shot all-reduce:
 
 ```python
+# Most SymmMem ops are under the torch.ops.symm_mem namespace
 torch.ops.symm_mem.one_shot_all_reduce(t, “sum”, group)
 ```
+
+Please note that `torch.ops.symm_mem` is an "op namespace" instead of a python
+module. Therefore, you can't import it by `import torch.ops.symm_mem`, neither
+can you import an op by `from torch.ops.symm_mem import one_shot_all_reduce`.
+You can call the op directly as in the example above. 
 
 ## Write your own kernel
 
@@ -149,15 +157,15 @@ def one_shot_all_reduce_kernel(
     block_start = pid * BLOCK_SIZE
 
     while block_start < numel:
-        # Each thread processes 128 bits.
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
         mask = offsets < numel
-
         acc = tl.zeros((BLOCK_SIZE,), dtype=tl.bfloat16)
+
         for i in tl.static_range(world_size):
             buffer_rank = buf_tuple[i]
             x = tl.load(buffer_rank + offsets, mask=mask)
             acc += x
+
         tl.store(output_ptr + offsets, acc, mask=mask)
         block_start += tl.num_programs(axis=0) * BLOCK_SIZE
 
