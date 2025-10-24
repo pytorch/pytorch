@@ -1227,7 +1227,6 @@ def _unflatten_model_state_dict(
     if not state_dict:
         return {}
 
-    # pyrefly: ignore  # no-matching-overload
     if isinstance(next(iter(state_dict.keys())), nn.Module):
         warnings.warn(
             "Passing model_state_dict as a ``Dict[nn.Module, Dict[str, Any]]``"

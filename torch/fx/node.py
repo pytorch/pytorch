@@ -385,6 +385,7 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put before this node. Must be a member of the same graph.
         """
+        # pyrefly: ignore  # missing-attribute
         self._prepend(x)
 
     @compatibility(is_backward_compatible=True)
@@ -396,6 +397,7 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
         """
+        # pyrefly: ignore  # missing-attribute
         self._next._prepend(x)
 
     @property

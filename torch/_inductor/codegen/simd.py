@@ -965,7 +965,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def active_range_trees(self) -> list[IterationRangesRoot]:
         return [
-            # pyrefly: ignore  # missing-argument
             t
             for t in self.range_trees
             # pyrefly: ignore  # missing-argument
