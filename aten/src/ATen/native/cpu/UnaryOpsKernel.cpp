@@ -531,7 +531,14 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return (static_cast<scalar_t>(1)) / std::sqrt(a);
+          auto rsqrt_scalar = [](auto x) -> decltype(x) {
+            if constexpr (c10::is_reduced_floating_point_v<scalar_t>) {
+              return std::rsqrt(x);
+            } else {
+              return (static_cast<scalar_t>(1)) / std::sqrt(x);
+            }
+          };
+          return rsqrt_scalar(a);
         },
         [=](Vectorized<scalar_t> a) { return a.rsqrt(); });
   });
