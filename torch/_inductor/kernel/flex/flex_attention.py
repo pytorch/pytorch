@@ -347,8 +347,16 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
-        cur_kernel_options.setdefault("USE_TMA", False)
+        # USE TMA = false by default, except for document_mask when B=1 or when M/N >= 8192
+        batch_size = V.graph.sizevars.evaluate_expr(Bq)
+        M = V.graph.sizevars.evaluate_expr(seq_len_q)
+        N = V.graph.sizevars.evaluate_expr(seq_len_kv)
+        if batch_size == 1:
+            cur_kernel_options.setdefault("USE_TMA", True)
+        elif M >= 8192 or N >= 8192:
+            cur_kernel_options.setdefault("USE_TMA", True)
+        else:
+            cur_kernel_options.setdefault("USE_TMA", False)
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
