@@ -1583,6 +1583,16 @@ class SIMDScheduling(BaseScheduling):
         kernel.rsplit_size = split_size
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+
+        # allocate workspace for this kernel
+        _, ws_name, ws_off = kernel.args.workspace(
+            len(kernel.saved_partial_accumulate)
+            * kernel.numels["r0_"]
+            * ((kernel.numels["x"] + kernel.rsplit_size - 1) // kernel.rsplit_size),
+            False,
+            dtype=torch.float,
+        )
+        assert ws_off == 0, f"{ws_off=}"
         with kernel:
             kernel.codegen_body()
         with V.set_kernel_handler(kernel):
@@ -1618,7 +1628,7 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
             V.graph.wrapper_code.writeline(
-                f"{buffer_name} = workspace_0[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
+                f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
             )
 
         kernel.deallocate_workspaces()
