@@ -1,6 +1,5 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
-# ruff: noqa: TCH001,TCH002
 # flake8: noqa: B950
 
 from __future__ import annotations
@@ -15,12 +14,13 @@ from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
-from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
 if TYPE_CHECKING:
     from onnxscript.values import Opset
+
+    from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
 
 aten = torch.ops.aten
 
