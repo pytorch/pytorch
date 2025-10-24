@@ -193,7 +193,15 @@ class TestCppExtensionJIT(common.TestCase):
             },
         ]
         if IS_LINUX:
-            lib_python = f"-lpython{sys.version_info.major}.{sys.version_info.minor}"
+            # In the case of virtual environment python .so library will be located at paths
+            # returned by python config in ldflags.
+            result = subprocess.run(
+                ["python3-config", "--ldflags"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            lib_python = f"{result.stdout.strip()} -lpython{sys.version_info.major}.{sys.version_info.minor}"
             cases.append(
                 {
                     # Testing that we link with all potentially required dependencies.
