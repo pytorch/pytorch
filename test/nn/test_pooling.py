@@ -1021,6 +1021,7 @@ torch.cuda.synchronize()
         c = out.size(1)
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
+    @expectedFailureMPS  # MPS doesn't have native adaptive_avg_pool3d implementation
     @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_adaptive_avg_pool3d_reduced_precision(self, device, dtype):
