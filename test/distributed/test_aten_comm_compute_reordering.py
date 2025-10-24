@@ -44,9 +44,22 @@ device_type = str(get_devtype())
 
 def apply_reordering_and_get_graph(graph, out_li) -> None:
     gm = graph.owning_module
+    from torch._inductor.config import aten_distributed_optimizations as dist_opts
     from torch._inductor.fx_passes.overlap_scheduling import schedule_overlap_bucketing
 
-    schedule_overlap_bucketing(gm)
+    # Read config values, only pass non-None values to use function defaults
+    kwargs: dict[str, object] = {}
+    config_keys = (
+        "collective_bucketing",
+        "max_compute_pre_fetch",
+        "custom_runtime_estimation",
+        "insert_overlap_deps",
+    )
+    for key in config_keys:
+        if (val := getattr(dist_opts, key)) is not None:
+            kwargs[key] = val
+
+    schedule_overlap_bucketing(gm, **kwargs)
     gm.graph.lint()
     out_li.append(str(gm.graph))
 
