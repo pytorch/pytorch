@@ -51,8 +51,8 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
+    has_pointwise_use,
     is_gpu,
-    is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -1511,7 +1511,7 @@ def should_prefer_unfused_addmm(match):
         return False
 
     output = match.output_node()
-    return all(is_pointwise_use(use) for use in output.users)
+    return any(has_pointwise_use(use) for use in output.users)
 
 
 @register_graph_pattern(
