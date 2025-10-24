@@ -66,7 +66,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
-        self.group = kwargs.get("group", None)
+        self.group = kwargs.get("group")
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -535,6 +535,23 @@ class TestScheduleLowering(TestCase):
             {
                 "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
                 "comms": ["0UNSHARD", "0F0", "0F1", "0B0", "0B1", "0RESHARD"],
+            },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0UNSHARD",
+                    "1UNSHARD",
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1F1",
+                    "1B0",
+                    "1B1",
+                    "1RESHARD",
+                    "0B0",
+                    "0B1",
+                    "0RESHARD",
+                ],
             },
         ],
     )
