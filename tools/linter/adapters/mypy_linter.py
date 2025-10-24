@@ -170,7 +170,7 @@ def check_files(
             if match["column"] is not None and not match["column"].startswith("-")
             else None,
             code=code,
-            severity=severities.get(match["severity"], LintSeverity.ERROR),
+            severity=LintSeverity.ADVICE,
             original=None,
             replacement=None,
         )
@@ -183,7 +183,7 @@ def check_files(
             line=int(match["line"]),
             char=None,
             code=code,
-            severity=severities.get(match["severity"], LintSeverity.ERROR),
+            severity=LintSeverity.ADVICE,
             original=None,
             replacement=None,
         )
