@@ -5921,12 +5921,9 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(torch.float32)
-    def test_offline_tuning_append_to_existing_file(self, device, dtype):
+    def test_offline_tuning_append_to_existing_file_tunableop(self, device, dtype):
         """If an offline tuning untuned file already exists,
         new untuned GEMMs should be appended (not overwritten).
-
-        This test verifies the fix for the bug where untuned files were being
-        overwritten instead of appended to when recording was restarted.
         """
 
         with self._tunableop_ctx():
@@ -5941,7 +5938,6 @@ class TestLinalg(TestCase):
             untuned_filename = get_tunableop_untuned_filename()
 
             # Seed the existing untuned file with 1 entry
-            # Format: OperatorSignature,ParameterSignature
             seed_lines = [
                 "GemmTunableOp_float_NT,nt_768_1024_512"
             ]
@@ -5956,8 +5952,7 @@ class TestLinalg(TestCase):
             initial_count = len(initial_lines)
             self.assertGreater(initial_count, 0)  # we seeded 1 entry
 
-            # Perform a matmul with different dimensions to generate a new untuned entry
-            # Use dimensions that are likely to be different from the seeded entry
+            # Perform a matmul with different dimensions
             A = torch.randn(41, 59, device=device, dtype=dtype)
             B = torch.randn(59, 31, device=device, dtype=dtype)
             _ = torch.matmul(A, B)
