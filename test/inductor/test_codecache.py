@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
+    skipIfMPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -1216,6 +1217,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+    @skipIfMPS(msg="FlexAttention not implemented on MPS.")
     @requires_gpu()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
