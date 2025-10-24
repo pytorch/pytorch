@@ -1,9 +1,10 @@
+import functools
 import inspect
 import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -21,6 +22,55 @@ MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
+    from torch._inductor import config
+
+    if config.test_configs.distort_benchmarking_result == "":
+        return fn
+
+    def distort(
+        ms: list[float] | tuple[float] | float,
+    ) -> list[float] | tuple[float] | float:
+        if isinstance(ms, (list, tuple)):
+            return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
+
+        distort_method = config.test_configs.distort_benchmarking_result
+        assert isinstance(ms, float)
+        if distort_method == "inverse":
+            return 1.0 / ms if ms else 0.0
+        elif distort_method == "random":
+            import random
+
+            return random.random()
+        else:
+            raise RuntimeError(f"Unrecognized distort method {distort_method}")
+
+    @functools.wraps(fn)
+    def wrapper(
+        *args: list[Any], **kwargs: dict[str, Any]
+    ) -> list[float] | tuple[float] | float:
+        ms = fn(*args, **kwargs)
+
+        return distort(ms)
+
+    return wrapper
+
+
+def may_ban_benchmarking() -> None:
+    if torch._inductor.config.deterministic:
+        raise RuntimeError("""In the deterministic mode of Inductor, we will avoid those
+        benchmarkings that would cause non deterministic results. Only benchmarkings in the vetted
+        scenarios are allowed. Example include autotuning for triton configs of pointwise kernels.
+
+        When you see this exception, you can do one of the following two things:
+        1. if the benchmarking you are doing does not introduce any non-determinism, you can just
+        add is_vetted_benchmarking=True to you benchmark_gpu call. That would solve the issue.
+
+        2. if the benchmarking you are doing indeed introduces non-determinism, you'll need to disable
+        such feature in deterministic mode or find an alternative implementation that is deterministic.
+        """)
 
 
 def time_and_count(
@@ -73,6 +123,7 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
+        # pyrefly: ignore  # bad-assignment
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
@@ -144,8 +195,15 @@ class TritonBenchmarker(Benchmarker):
             raise NotImplementedError("requires Triton") from e
         return do_bench
 
+    @may_distort_benchmarking_result
     @time_and_count
-    def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
+    # pyrefly: ignore  # bad-override
+    def benchmark_gpu(
+        self: Self,
+        _callable: Callable[[], Any],
+        is_vetted_benchmarking: bool = False,
+        **kwargs: Any,
+    ) -> float:
         """Benchmark the GPU callable, `_callable`, and return the runtime, in milliseconds.
 
         Arguments:
@@ -162,6 +220,9 @@ class TritonBenchmarker(Benchmarker):
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
         do_bench_params = inspect.signature(self.triton_do_bench).parameters
         for kwarg in list(kwargs.keys()):
             if kwarg not in do_bench_params:
@@ -204,6 +265,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             ]
         )
 
+    @may_distort_benchmarking_result
     @time_and_count
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
@@ -213,9 +275,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
         return_mode: str = "min",
-        grad_to_none: Optional[list[torch.Tensor]] = None,
+        grad_to_none: list[torch.Tensor] | None = None,
+        is_vetted_benchmarking: bool = False,
         **kwargs: Any,
-    ) -> Union[float, list[float]]:
+    ) -> float | list[float]:
         """Benchmark a GPU callable using a custom benchmarking implementation.
 
         Arguments:
@@ -237,12 +300,18 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         "all" (returns all measurements).
         - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
         before each benchmark iteration.
+        - is_vetted_benchmarking: in deterministic mode, we only allow
+        benchmarking in vetted cases.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:
         - If return_mode="min": The minimum runtime of `_callable`, in milliseconds.
         - If return_mode="all": List of all runtime measurements, in milliseconds.
         """
+
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 

@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 
 class TestLRScheduler(TestCase):
@@ -77,7 +77,7 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [
                 {"params": self.net.conv1.parameters()},
-                {"params": self.net.conv2.parameters(), "lr": 0.5},
+                {"params": self.net.conv2.parameters(), "lr": torch.tensor(0.5)},
             ],
             lr=0.05,
         )
@@ -368,6 +368,16 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_raise_error_when_last_epoch_is_greater_than_0_and_initial_lr_is_not_specified(
+        self,
+    ):
+        optimizer = SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
+        with self.assertRaisesRegex(
+            KeyError,
+            r"param \'initial_lr\' is not specified in param_groups\[0\] when resuming scheduler with last_epoch >= 0",
+        ):
+            StepLR(optimizer, step_size=3, gamma=0.1, last_epoch=1)
 
     def test_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
@@ -700,6 +710,15 @@ class TestLRScheduler(TestCase):
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
 
+    def test_reduce_lr_on_plateau_preserves_lr_type(self):
+        # Ensures that tensor lrs are preserved, preventing recompilations.
+        types = [type(group["lr"]) for group in self.opt.param_groups]
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", patience=0)
+        scheduler.step(1.0)
+        scheduler.step(2.0)  # Triggers scheduler._reduce_lr
+        for group, type_ in zip(self.opt.param_groups, types):
+            self.assertEqual(type(group["lr"]), type_)
+
     def test_sequentiallr1(self):
         epochs = 19
         schedulers = [None] * 2
@@ -811,6 +830,27 @@ class TestLRScheduler(TestCase):
         single_targets = constant_lr_target + exponential_lr_target + step_lr_target
         targets = [single_targets, [x * 10 for x in single_targets]]
         self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_sequentiallr_does_not_alias_lr_and_initial_lr(self):
+        # The TestLRScheduler object uses self.opt to avoid instantiating a new optimizer for each test.
+        # self.opt has a float lr, and we need to use a Tensor lr to ensure that a former SequentialLR bug is fixed.
+        # For more context, see https://github.com/pytorch/pytorch/issues/162359
+        old_opt = self.opt
+        lr = torch.tensor(2.0)
+        self.opt = SGD(self.net.parameters(), lr=lr)
+        milestone = 4
+        epochs = 8
+        start, end = 0.1, 0.8
+
+        schedulers = [
+            LinearLR(self.opt, start, end, total_iters=milestone),
+            LinearLR(self.opt, end, start, total_iters=epochs - milestone),
+        ]
+        targets = [[0.2, 0.55, 0.9, 1.25, 1.6, 1.25, 0.9, 0.55]]
+
+        scheduler = SequentialLR(self.opt, schedulers, milestones=[milestone])
+        self._test(scheduler, targets, epochs)
+        self.opt = old_opt
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
@@ -1469,7 +1509,7 @@ class TestLRScheduler(TestCase):
             14.0 / 3,
             29.0 / 6,
         ]
-        deltas = [2 * i for i in range(0, 2)]
+        deltas = [2 * i for i in range(2)]
         base_lrs = [1 + delta for delta in deltas]
         max_lrs = [5 + delta for delta in deltas]
         lr_targets = [[x + delta for x in lr_base_target] for delta in deltas]
@@ -2402,6 +2442,7 @@ class TestLRScheduler(TestCase):
             partial(CyclicLR, base_lr=0.01, max_lr=0.1),
             partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
             partial(CosineAnnealingWarmRestarts, T_0=20),
+            partial(SWALR, swa_lr=0.01),
         ],
     )
     @parametrize("weights_only", [True, False])
@@ -2489,7 +2530,7 @@ class TestLRScheduler(TestCase):
         ],
     )
     def test_constant_initial_lr(self, LRClass):
-        # Test that the initial learning rate is constant
+        # Test that the initial learning rate is constant and that it does not alias base_lrs
         lr = torch.as_tensor(0.1)
         opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
         sch = LRClass(opt)
@@ -2503,6 +2544,7 @@ class TestLRScheduler(TestCase):
             for group, ori_group in zip(opt.param_groups, ori_param_groups):
                 self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
                 self.assertEqual(sch.base_lrs, [0.1])
+                self.assertIsNot(sch.base_lrs[0], group["initial_lr"])
 
     def test_constant_initial_params_cyclelr(self):
         # Test that the initial learning rate is constant

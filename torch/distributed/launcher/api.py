@@ -6,10 +6,12 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import os
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
@@ -69,6 +71,10 @@ class LaunchConfig:
         local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
         event_log_handler: name of the event logging handler as registered in
           `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
+                                that match _any_ of the filter strings.
+        duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
+                                that match _any_ of the filter strings.
 
 
     .. note::
@@ -95,6 +101,9 @@ class LaunchConfig:
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
     numa_options: Optional[NumaOptions] = None
+    signals_to_handle: str = "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
+    duplicate_stdout_filters: Optional[list[str]] = None
+    duplicate_stderr_filters: Optional[list[str]] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -211,20 +220,22 @@ def launch_agent(
 
     logger.info(
         "Starting elastic_operator with launch configs:\n"
-        "  entrypoint         : %(entrypoint)s\n"
-        "  min_nodes          : %(min_nodes)s\n"
-        "  max_nodes          : %(max_nodes)s\n"
-        "  nproc_per_node     : %(nproc_per_node)s\n"
-        "  run_id             : %(run_id)s\n"
-        "  rdzv_backend       : %(rdzv_backend)s\n"
-        "  rdzv_endpoint      : %(rdzv_endpoint)s\n"
-        "  rdzv_configs       : %(rdzv_configs)s\n"
-        "  max_restarts       : %(max_restarts)s\n"
-        "  monitor_interval   : %(monitor_interval)s\n"
-        "  log_dir            : %(log_dir)s\n"
-        "  metrics_cfg        : %(metrics_cfg)s\n"
-        "  event_log_handler  : %(event_log_handler)s\n"
-        "  numa_options       : %(numa_options)s\n",
+        "  entrypoint               : %(entrypoint)s\n"
+        "  min_nodes                : %(min_nodes)s\n"
+        "  max_nodes                : %(max_nodes)s\n"
+        "  nproc_per_node           : %(nproc_per_node)s\n"
+        "  run_id                   : %(run_id)s\n"
+        "  rdzv_backend             : %(rdzv_backend)s\n"
+        "  rdzv_endpoint            : %(rdzv_endpoint)s\n"
+        "  rdzv_configs             : %(rdzv_configs)s\n"
+        "  max_restarts             : %(max_restarts)s\n"
+        "  monitor_interval         : %(monitor_interval)s\n"
+        "  log_dir                  : %(log_dir)s\n"
+        "  metrics_cfg              : %(metrics_cfg)s\n"
+        "  event_log_handler        : %(event_log_handler)s\n"
+        "  numa_options             : %(numa_options)s\n",
+        "  duplicate_stdout_filters : %(duplicate_stdout_filters)s\n",
+        "  duplicate_stderr_filters : %(duplicate_stderr_filters)s\n",
         {
             "entrypoint": entrypoint_name,
             "min_nodes": config.min_nodes,
@@ -240,6 +251,9 @@ def launch_agent(
             "metrics_cfg": config.metrics_cfg,
             "event_log_handler": config.event_log_handler,
             "numa_options": config.numa_options,
+            "signals_to_handle": config.signals_to_handle,
+            "duplicate_stdout_filters": config.duplicate_stdout_filters,
+            "duplicate_stderr_filters": config.duplicate_stderr_filters,
         },
     )
 
@@ -255,6 +269,9 @@ def launch_agent(
 
     master_addr, master_port = _get_addr_and_port(rdzv_parameters)
 
+    # Set the signals to handle in the environment variable
+    os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = config.signals_to_handle
+
     spec = WorkerSpec(
         role=config.role,
         local_world_size=config.nproc_per_node,
@@ -268,6 +285,8 @@ def launch_agent(
         local_addr=config.local_addr,
         event_log_handler=config.event_log_handler,
         numa_options=config.numa_options,
+        duplicate_stdout_filters=config.duplicate_stdout_filters,
+        duplicate_stderr_filters=config.duplicate_stderr_filters,
     )
 
     agent = LocalElasticAgent(

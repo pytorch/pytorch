@@ -13,22 +13,21 @@ collection support for PyTorch APIs.
 """
 
 import functools
-import sys
 import types
-from collections.abc import Iterable
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Iterable
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, TypeIs
 
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
-    is_namedtuple as is_namedtuple,
-    is_namedtuple_class as is_namedtuple_class,
-    is_namedtuple_instance as is_namedtuple_instance,
-    is_structseq as is_structseq,
-    is_structseq_class as is_structseq_class,
-    is_structseq_instance as is_structseq_instance,
-    KeyEntry as KeyEntry,
+    is_namedtuple,
+    is_namedtuple_class,
+    is_namedtuple_instance,
+    is_structseq,
+    is_structseq_class,
+    is_structseq_instance,
+    KeyEntry,
 )
 
 
@@ -368,11 +367,6 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not _is_pytreespec_instance(treespec):
-        raise TypeError(
-            f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
-        )
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
@@ -570,10 +564,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-if sys.version_info >= (3, 10):
-    TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
-else:
-    TypeAny = Union[type[Any], tuple[type[Any], ...]]
+TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -631,10 +622,7 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if isinstance(type_or_types_or_pred, (type, tuple)) or (
-        sys.version_info >= (3, 10)
-        and isinstance(type_or_types_or_pred, types.UnionType)
-    ):
+    if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
 
         def pred(x: Any) -> bool:
             return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]
@@ -713,6 +701,7 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
+    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -773,6 +762,7 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
+    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1086,6 +1076,7 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
 
 
 with python_pytree._NODE_REGISTRY_LOCK:
+    # pyrefly: ignore  # bad-assignment
     python_pytree._cxx_pytree_imported = True
     args, kwargs = (), {}  # type: ignore[var-annotated]
     for args, kwargs in python_pytree._cxx_pytree_pending_imports:

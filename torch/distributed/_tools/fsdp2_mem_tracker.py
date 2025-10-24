@@ -1,7 +1,8 @@
+from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Callable, NamedTuple, Optional, TypeVar, Union
+from typing import Any, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -230,6 +231,7 @@ class FSDPMemTracker(MemTracker):
                         " or file a github issue if you need this feature."
                     )
 
+            # pyrefly: ignore  # bad-assignment
             args, kwargs = orig_fsdp_state_pre_fw(*args, **kwargs)
 
             fsdp_state = fsdp_mod._get_fsdp_state()
@@ -363,6 +365,7 @@ class FSDPMemTracker(MemTracker):
         # `FSDPParamGroup.post_forward` because during AC these won't be called.
         # TODO(@sanketpurandare): This will need to be modified after this PR (https://github.com/pytorch/pytorch/pull/127786)
         # lands. For backward we monkey-patch the `FSDPParamGroup.pre_backward` and `FSDPParamGroup.post_backward`.
+        # pyrefly: ignore  # missing-attribute
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
@@ -371,6 +374,7 @@ class FSDPMemTracker(MemTracker):
                     fsdp_state._pre_forward_hook_handle.remove()
                     fsdp_state._post_forward_hook_handle.remove()
                     fsdp_state._pre_forward_hook_handle = (
+                        # pyrefly: ignore  # missing-attribute
                         module.register_forward_pre_hook(
                             self._fsdp_state_pre_forward(
                                 module, fsdp_state._pre_forward
@@ -379,6 +383,7 @@ class FSDPMemTracker(MemTracker):
                             with_kwargs=True,
                         )
                     )
+                    # pyrefly: ignore  # missing-attribute
                     fsdp_state._post_forward_hook_handle = module.register_forward_hook(
                         self._fsdp_state_post_forward(module, fsdp_state._post_forward),
                         prepend=False,
@@ -397,6 +402,7 @@ class FSDPMemTracker(MemTracker):
                         )
                     )
 
+        # pyrefly: ignore  # missing-attribute
         for buffer in self._root_mod.buffers():
             self._update_and_maybe_create_winfos(
                 buffer,
@@ -506,6 +512,7 @@ class FSDPMemTracker(MemTracker):
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
             # a new tensor which does not happen in eager mode, when a wait_tensor is called.
+            # pyrefly: ignore  # unsupported-operation
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
@@ -522,6 +529,7 @@ class FSDPMemTracker(MemTracker):
             _FSDPState.PRE_FW,
             _FSDPState.PRE_BW,
         ]:
+            # pyrefly: ignore  # unsupported-operation
             output_tensor = args[0]
             self._update_and_maybe_create_winfos(
                 output_tensor,
@@ -532,6 +540,7 @@ class FSDPMemTracker(MemTracker):
             func == c10d._reduce_scatter_base_.default
             and self._fsdp_state == _FSDPState.POST_BW
         ):
+            # pyrefly: ignore  # unsupported-operation
             input_tensor = args[1]
             self._update_and_maybe_create_winfos(
                 input_tensor,

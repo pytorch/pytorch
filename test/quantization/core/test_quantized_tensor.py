@@ -97,10 +97,10 @@ def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
             # found a local optima
             solutions.append((cur_min, cur_max, cur_loss))
         if loss1 < loss2:
-            cur_min, cur_max, cur_loss = cur_min + stepsize, cur_max, loss1
+            cur_min, cur_loss = cur_min + stepsize, loss1
         else:
-            cur_min, cur_max, cur_loss = cur_min, cur_max - stepsize, loss2
-    if len(solutions):
+            cur_max, cur_loss = cur_max - stepsize, loss2
+    if solutions:
         best = solutions[0]
         for solution in solutions:
             if solution[-1] < best[-1]:
@@ -1408,6 +1408,9 @@ class TestQuantizedTensor(TestCase):
             ref = param_search_greedy(x.numpy(), bit_rate=bit_width)
             self.assertEqual(y[0].numpy(), ref[0])
             self.assertEqual(y[1].numpy(), ref[1])
+
+        with self.assertRaisesRegex(ValueError, "input tensor is empty and has no data"):
+            torch.choose_qparams_optimized(torch.tensor([]), numel=0, n_bins=200, ratio=0.16, bit_width=8)
 
     def _test_pickle_checkpoint_qtensor(self, device):
         with TemporaryFileName() as fname:

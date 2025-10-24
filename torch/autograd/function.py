@@ -4,8 +4,9 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import Concatenate, deprecated, ParamSpec
+from collections.abc import Callable
+from typing import Any, Concatenate, Optional, TypeVar
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._C as _C
@@ -145,10 +146,11 @@ class FunctionCtx:
 
         """
         for tensor in tensors:
-            assert isinstance(tensor, torch.Tensor) or tensor is None, (
-                "save_for_forward expects all arguments to be tensors; you should "
-                "save non-tensors as attributes on ctx."
-            )
+            if not (isinstance(tensor, torch.Tensor) or tensor is None):
+                raise AssertionError(
+                    "save_for_forward expects all arguments to be tensors; you should "
+                    "save non-tensors as attributes on ctx."
+                )
 
         self.saved_for_forward = tensors
 
