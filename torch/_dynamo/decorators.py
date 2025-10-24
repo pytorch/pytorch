@@ -95,6 +95,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
             # pyrefly: ignore  # bad-return
             return nonrecursive_disable_wrapper
 
@@ -995,3 +996,10 @@ def error_on_graph_break(
     The default value of torch.compile's `error_on_graph_break` setting is False.
     """
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
+
+
+def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
+    """
+    Check if a method is marked as `dynamo_disable` recursively.
+    """
+    return getattr(method, "_torchdynamo_disable_recursive", None)

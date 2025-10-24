@@ -2092,6 +2092,52 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(Unsupported):
             outer_f2(inp)
 
+    def test_disable_recursive_flags(self):
+        class SimpleLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                return self.layer0(torch.sigmoid(inp))
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = SimpleLinear()
+                self.layer1 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                z = self.layer0(torch.sin(inp))
+                return self.layer1(z)
+
+        for recursive_flag in [True, False]:
+            model = SimpleModel()
+            other_model = SimpleModel()
+
+            model.forward = torch._dynamo.disable(
+                model.forward,
+                recursive=recursive_flag,
+            )
+            self.assertEqual(
+                torch._dynamo.is_dynamo_disable_recursive(model.forward),
+                recursive_flag,
+            )
+
+            other_model = torch._dynamo.disable(other_model, recursive=recursive_flag)
+            self.assertEqual(
+                torch._dynamo.is_dynamo_disable_recursive(
+                    other_model.forward
+                    if isinstance(other_model, torch.nn.Module)
+                    else other_model
+                ),
+                recursive_flag,
+            )
+
+            # check the model is compilable
+            torch.compile(model)
+            torch.compile(other_model)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

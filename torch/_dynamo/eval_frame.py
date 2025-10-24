@@ -1147,6 +1147,8 @@ class DisableContext(_TorchDynamoContext):
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
+        _fn._torchdynamo_disable_recursive = True  # type: ignore[attr-defined]
+
         return _fn
 
     def __reduce__(self) -> tuple[type[DisableContext], tuple[Any, ...]]:
