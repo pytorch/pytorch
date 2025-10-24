@@ -628,11 +628,13 @@ def unset_mode_pre_dispatch(mode_key, schema_check=False):
         assert mode_key is None
 
     def _unset_mode():
-        if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+        # NOTE: Using `is` rather than `==` to work around slow enum comparison in
+        # pybind11.
+        if mode_key is torch._C._TorchDispatchModeKey.PROXY:
             current_mode = current_mode_stack_pre_dispatch.get(0)
             mode_stack_state_for_pre_dispatch().set(0, None)
             return current_mode
-        elif mode_key == torch._C._TorchDispatchModeKey.FUNCTIONAL:
+        elif mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL:
             current_mode = current_mode_stack_pre_dispatch.get(1)
             mode_stack_state_for_pre_dispatch().set(1, None)
             return current_mode
@@ -713,13 +715,11 @@ def _len_torch_dispatch_stack_pre_dispatch():
 
 
 def _get_dispatch_mode_pre_dispatch(mode_key):
-    assert mode_key in (
-        torch._C._TorchDispatchModeKey.PROXY,
-        torch._C._TorchDispatchModeKey.FUNCTIONAL,
-    )
-    if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+    # NOTE: Using `is` rather than `==` to work around slow enum comparison in pybind11.
+    if mode_key is torch._C._TorchDispatchModeKey.PROXY:
         return mode_stack_state_for_pre_dispatch().get(0)
     else:
+        assert mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL
         return mode_stack_state_for_pre_dispatch().get(1)
 
 

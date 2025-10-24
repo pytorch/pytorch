@@ -1339,7 +1339,6 @@ class VariableBuilder:
             assert self_obj and isinstance(self_obj, VariableTracker), (
                 "Failed to produce a valid self obj"
             )
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
