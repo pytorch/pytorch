@@ -81,9 +81,13 @@ bool check_prefer_cudnn_attention() {
     return false;
   }
 #if (defined(CUDNN_VERSION) && (CUDNN_VERSION >= 90900))
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  auto major = dprops->major;
-  return (major == 9 || major == 10) && !dprops->minor;
+  try {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    auto major = dprops->major;
+    return (major == 9 || major == 10) && !dprops->minor;
+  } catch (c10::Error const& e) {
+    return false;
+  }
 #else
   return false;
 #endif
