@@ -1682,6 +1682,7 @@ def main() -> None:
             "lib/*.dylib*",
             "lib/*.dll",
             "lib/*.lib",
+            "lib/*.pdb",
         ]
         # XXX: Why not use wildcards ["lib/aotriton.images/*", "lib/aotriton.images/**/*"] here?
         aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
