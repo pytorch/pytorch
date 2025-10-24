@@ -94,7 +94,7 @@ torch.ops.symm_mem.one_shot_all_reduce(t, “sum”, group)
 Please note that `torch.ops.symm_mem` is an "op namespace" instead of a python
 module. Therefore, you can't import it by `import torch.ops.symm_mem`, neither
 can you import an op by `from torch.ops.symm_mem import one_shot_all_reduce`.
-You can call the op directly as in the example above. 
+You can call the op directly as in the example above.
 
 ## Write your own kernel
 
