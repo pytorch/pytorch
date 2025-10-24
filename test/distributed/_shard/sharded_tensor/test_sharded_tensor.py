@@ -1836,7 +1836,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         if DEVICE_TYPE == "cuda":
             # CUDA sharded tensor should return a new ShardedTensor, but same
             # local shards(no movements)
-            new_st_acc = st_acc.cuda(DEVICE_TYPE)
+            new_st_acc = st_acc.to(DEVICE_TYPE)
             self.assertTrue(st_acc is not new_st_acc)
             self.assertTrue(st_acc.local_tensor() is new_st_acc.local_tensor())
 

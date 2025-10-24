@@ -33,7 +33,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 if torch.accelerator.is_available():
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
-    BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+else:
+    # use cuda as default device type for testing when accelerator is not available
+    DEVICE_TYPE = "cuda"
+BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 
 # Example ShardingPlanner that chunks every parameter in the module
