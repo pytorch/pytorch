@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 
+#include <iostream>
 #include <vector>
 
 static void stateful_conv1d(benchmark::State& state) {
@@ -66,6 +67,8 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
                "Batch Size",
                "Width",
                "Optimized"});
+
+    std::cout << "Generating sizes\n";
 
   for (size_t input_channels = 32; input_channels < 256; input_channels *= 2) {
     for (size_t output_channels = 32; output_channels < 256; output_channels *= 2) {
