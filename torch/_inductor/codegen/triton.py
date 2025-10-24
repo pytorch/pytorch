@@ -1998,7 +1998,7 @@ class CooperativeReductionWorkspaceCache:
         cached = self.ready_for_reuse.get(nbytes)
         if cached:
             return cached.popleft()
-        ws_name, ws_offset = self.args.workspace(nbytes, False)
+        ws_name, _, ws_offset = self.args.workspace(nbytes, False)
         self.current_loop.append((nbytes, ws_name, ws_offset))
         return (ws_name, ws_offset)
 
@@ -4875,15 +4875,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Convert the TritonKernel from Inductor SIMD IR to triton code, including inductor triton heuristics, imports,
         metadata, and benchmarking infra.
         """
-
-        if self.mix_order_reduction:
-            self.args.workspace(
-                len(self.saved_partial_accumulate)
-                * self.numels["r0_"]
-                * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size),
-                False,
-                dtype=torch.float,
-            )
 
         code = IndentedBuffer()
 
