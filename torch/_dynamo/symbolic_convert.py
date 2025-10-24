@@ -3138,7 +3138,7 @@ class InstructionTranslatorBase(
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(SliceVariable(items))
+        self.push(SliceVariable(items, tx=self))
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
