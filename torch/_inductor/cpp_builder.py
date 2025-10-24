@@ -1147,10 +1147,16 @@ def _get_torch_related_args(
     else:
         libraries_dirs = []
         if config.aot_inductor.cross_target_platform == "windows":
-            assert config.aot_inductor.aoti_shim_library, (
+            aoti_shim_library = config.aot_inductor.aoti_shim_library
+
+            assert aoti_shim_library, (
                 "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
             )
-            libraries.append(config.aot_inductor.aoti_shim_library)
+            if isinstance(aoti_shim_library, str):
+                libraries.append(aoti_shim_library)
+            else:
+                assert isinstance(aoti_shim_library, list)
+                libraries.extend(aoti_shim_library)
 
     if config.aot_inductor.cross_target_platform == "windows":
         assert config.aot_inductor.aoti_shim_library_path, (

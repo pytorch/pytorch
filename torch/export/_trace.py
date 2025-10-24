@@ -9,7 +9,7 @@ import sys
 import time
 import warnings
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
@@ -67,7 +67,7 @@ from torch._functorch._aot_autograd.utils import (
 )
 from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
-    aot_export_module,
+    aot_export_joint_with_descriptors,
 )
 from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
@@ -856,6 +856,54 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
+def _aot_export_joint_with_descriptors(
+    stack,
+    mod,
+    args,
+    *,
+    kwargs,
+    decompositions,
+    fake_params_buffers,
+    _record_nn_module_stack=True,
+):
+    from torch._functorch._aot_autograd.graph_compile import aot_stage2_export
+    from torch._functorch._aot_autograd.input_output_analysis import (
+        create_graph_signature,
+    )
+
+    joint_with_descriptors = aot_export_joint_with_descriptors(
+        stack,
+        mod,
+        args,
+        kwargs=kwargs,
+        decompositions=decompositions,
+        _record_nn_module_stack=_record_nn_module_stack,
+    )
+    # Convert JointWithDescriptors to graph module and ViewAndMutationMeta
+    gm, fw_metadata = aot_stage2_export(
+        joint_with_descriptors._aot_state,
+        joint_with_descriptors._aot_graph_capture,
+    )
+
+    assert isinstance(gm, torch.fx.GraphModule)
+
+    # Create GraphSignature from the metadata
+    graph_signature = create_graph_signature(
+        gm,
+        fw_metadata,
+        joint_with_descriptors.in_spec,
+        joint_with_descriptors.out_spec,
+        user_args_flat=pytree.tree_leaves((args, kwargs)),
+        params_and_buffers_flat=list(fake_params_buffers.values()),
+        param_names=joint_with_descriptors.params_spec,
+        buffer_names=joint_with_descriptors.buffers_spec,
+        trace_joint=False,
+        num_user_fw_outs=None,
+        loss_index=None,
+    )
+    return gm, graph_signature
+
+
 def _export_to_aten_ir(
     mod: torch.nn.Module,
     fake_args,
@@ -878,25 +926,29 @@ def _export_to_aten_ir(
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with (
-        torch.nn.utils.stateless._reparametrize_module(
-            mod,
-            fake_params_buffers,
-            tie_weights=True,
-            strict=True,
-            stack_weights=True,
-        ),
-        _ignore_backend_decomps(),
-        _compiling_state_context(),
-        custom_triton_ops_decomposition_ctx(),
-    ):
-        gm, graph_signature = transform(aot_export_module)(
+    with ExitStack() as stack:
+        stack.enter_context(
+            torch.nn.utils.stateless._reparametrize_module(
+                mod,
+                fake_params_buffers,
+                tie_weights=True,
+                strict=True,
+                stack_weights=True,
+            )
+        )
+        stack.enter_context(_ignore_backend_decomps())
+        stack.enter_context(_compiling_state_context())
+        stack.enter_context(custom_triton_ops_decomposition_ctx())
+        stack.enter_context(torch.no_grad())
+
+        gm, graph_signature = transform(_aot_export_joint_with_descriptors)(
+            stack,
             mod,
             fake_args,
-            trace_joint=False,
-            pre_dispatch=pre_dispatch,
-            decompositions=decomp_table,
             kwargs=fake_kwargs,
+            decompositions=decomp_table,
+            fake_params_buffers=fake_params_buffers,
+            _record_nn_module_stack=True,
         )
 
     def _maybe_fixup_gm_and_output_node_meta(old_gm, new_gm):
@@ -1579,7 +1631,7 @@ def _export_to_aten_ir_make_fx(
     produce_guards_callback=None,
     transform=lambda x: x,
 ) -> ATenExportArtifact:
-    def _make_fx_helper(mod, args, kwargs, **flags):
+    def _make_fx_helper(stack, mod, args, kwargs, **flags):
         kwargs = kwargs or {}
 
         named_parameters = dict(mod.named_parameters(remove_duplicate=False))
@@ -1797,18 +1849,20 @@ def _export_to_aten_ir_make_fx(
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with (
-        torch.nn.utils.stateless._reparametrize_module(
-            mod,
-            fake_params_buffers,
-            tie_weights=True,
-            strict=True,
-            stack_weights=True,
-        ),
-        _ignore_backend_decomps(),
-        _compiling_state_context(),
-    ):
+    with ExitStack() as stack:
+        stack.enter_context(
+            torch.nn.utils.stateless._reparametrize_module(
+                mod,
+                fake_params_buffers,
+                tie_weights=True,
+                strict=True,
+                stack_weights=True,
+            )
+        )
+        stack.enter_context(_ignore_backend_decomps())
+        stack.enter_context(_compiling_state_context())
         gm, graph_signature = transform(_make_fx_helper)(
+            stack,
             mod,
             fake_args,
             trace_joint=False,
@@ -1893,7 +1947,7 @@ def _non_strict_export(
     module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = {}
 
     def _tuplify_outputs(aot_export):
-        def _aot_export_non_strict(mod, args, kwargs=None, **flags):
+        def _aot_export_non_strict(stack, mod, args, *, kwargs=None, **flags):
             kwargs = kwargs or {}
 
             class Wrapper(torch.nn.Module):
@@ -1937,8 +1991,8 @@ def _non_strict_export(
                     wrapped_mod, new_preserved_call_signatures, module_call_specs
                 )
             with ctx:
-                gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
-                log.debug("Exported program from AOTAutograd:\n%s", gm)
+                gm, sig = aot_export(stack, wrapped_mod, args, kwargs=kwargs, **flags)
+            log.debug("Exported program from AOTAutograd:\n%s", gm)
 
             sig.parameters = pytree.tree_map(_strip_root, sig.parameters)
             sig.buffers = pytree.tree_map(_strip_root, sig.buffers)
@@ -2017,7 +2071,9 @@ def _non_strict_export(
             _fakify_module_inputs(fake_args, fake_kwargs, fake_mode),
             _override_builtin_ops(),
         ):
-            aten_export_artifact = _to_aten_func(  # type: ignore[operator]
+            # _to_aten_func is _export_to_aten_ir when using the default non-strict export
+            # We need to pass positional args correctly
+            aten_export_artifact = _to_aten_func(
                 patched_mod,
                 new_fake_args,
                 new_fake_kwargs,
