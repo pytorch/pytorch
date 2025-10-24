@@ -761,7 +761,7 @@ void OSSProxyExecutor::call_function(
               tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
           tensor_list.push_back(*tensor);
         }
-        stack[arg_index] = tensor_list;
+        stack[arg_index] = std::move(tensor_list);
         break;
       }
       case DynamicArgType::ListOptionalTensorType: {
@@ -781,7 +781,7 @@ void OSSProxyExecutor::call_function(
             optional_tensor_list.emplace_back(std::nullopt);
           }
         }
-        stack[arg_index] = optional_tensor_list;
+        stack[arg_index] = std::move(optional_tensor_list);
         break;
       }
       case DynamicArgType::ListIntType: {
@@ -790,7 +790,7 @@ void OSSProxyExecutor::call_function(
         for (int j = 0; j < length; j++) {
           vals.push_back(flatten_int_args[int_id++]);
         }
-        stack[arg_index] = vals;
+        stack[arg_index] = std::move(vals);
         break;
       }
       default:
