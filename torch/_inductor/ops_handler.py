@@ -288,6 +288,14 @@ class OpsHandler(Generic[T]):
         # See [Note: Inductor bucketize op]
         raise NotImplementedError
 
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: T,
+    ) -> None:
+        raise NotImplementedError
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # The following ops have semantics that correspond exactly to the torch
     # operation with the same corresponding name.
