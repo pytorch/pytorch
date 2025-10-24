@@ -3,6 +3,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <c10/core/impl/GPUTrace.h>
 
 #include <array>
 #include <atomic>
@@ -14,12 +15,11 @@ namespace c10::openreg {
 namespace {
 
 // Global stream state and constants
-static c10::once_flag init_flag;
-
-static DeviceIndex num_devices = -1;
-static constexpr int kStreamsPerPoolBits = 5;
-static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
-static constexpr int kStreamTypeBits = 2;
+c10::once_flag init_flag;
+DeviceIndex num_devices = -1;
+constexpr int kStreamsPerPoolBits = 5;
+constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
+constexpr int kStreamTypeBits = 2;
 
 /*
  * The stream pools are lazily initialized when the first queue is requested
@@ -27,16 +27,16 @@ static constexpr int kStreamTypeBits = 2;
  * a queue is requested, the next queue in the pool to be returned in a
  * round-robin fashion, see Note [Stream Management].
  */
-static std::deque<c10::once_flag> device_flags;
-static std::vector<std::array<
-    std::array<orStream_t, kStreamsPerPool>,
-    c10::openreg::max_compile_time_stream_priorities>>
-    streams;
-static std::deque<
-    std::array<std::atomic<uint32_t>, max_compile_time_stream_priorities>>
-    priority_counters;
+std::deque<c10::once_flag> device_flags;
+std::vector<std::array<
+  std::array<orStream_t, kStreamsPerPool>,
+  c10::openreg::max_compile_time_stream_priorities>>
+  streams;
+std::deque<
+  std::array<std::atomic<uint32_t>, max_compile_time_stream_priorities>>
+  priority_counters;
 
-static thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
+thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
 /*
  * Note [StreamId assignment]
@@ -81,10 +81,10 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   return stream << static_cast<int16_t>(s);
 }
 
-static inline StreamIdType streamIdType(StreamId s) {
+inline StreamIdType streamIdType(StreamId s) {
   // Externally allocated streams have their id being the orStream_ptr
   // so the last bit will be 0
-  if (!(s & 1)) {
+  if (!(s & 1) && s) {
     return StreamIdType(StreamIdType::EXT);
   }
 
@@ -92,12 +92,12 @@ static inline StreamIdType streamIdType(StreamId s) {
   auto st = static_cast<StreamIdType>((s >> 1) & mask_for_type);
   TORCH_CHECK(
       st == StreamIdType::DEFAULT || st == StreamIdType::NORMAL,
-      "invalid StreamId: ",
+      "invalid StreamIdType: ",
       s);
   return st;
 }
 
-static inline size_t streamIdIndex(StreamId s) {
+inline size_t streamIdIndex(StreamId s) {
   return static_cast<size_t>(
       (s >> (kStreamTypeBits + 1)) & ((1 << kStreamsPerPoolBits) - 1));
 }
@@ -111,25 +111,28 @@ StreamId makeStreamId(StreamIdType st, size_t si) {
       (static_cast<StreamId>(st) << 1) | 1;
 }
 
-static void initGlobalStreamState() {
+void initGlobalStreamState() {
   num_devices = device_count();
   device_flags.resize(num_devices);
   streams.resize(num_devices);
   priority_counters.resize(num_devices);
 }
 
-static void initSingleDeviceStream(
-    int priority,
-    DeviceIndex device_index,
-    int i) {
+void initSingleDeviceStream(
+  int priority,
+  DeviceIndex device_index,
+  int i) {
+  // LITERALINCLUDE START: OPENREG INIT SINGLE DEVICE STREAM
   auto& stream = streams[device_index][priority][i];
 
+  DeviceGuard device_guard{Device(DeviceType::PrivateUse1, device_index)};
   OPENREG_CHECK(orStreamCreateWithPriority(&stream, 0, priority));
   priority_counters[device_index][priority] = 0;
+  // LITERALINCLUDE END: OPENREG INIT SINGLE DEVICE STREAM
 }
 
 // Creates stream pools for the specified device. It should be call only once.
-static void initDeviceStreamState(DeviceIndex device_index) {
+void initDeviceStreamState(DeviceIndex device_index) {
   for (const auto i : c10::irange(kStreamsPerPool)) {
     for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
       initSingleDeviceStream(p, device_index, i);
@@ -137,7 +140,7 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   }
 }
 
-static void initOpenRegStreamsOnce() {
+void initOpenRegStreamsOnce() {
   c10::call_once(init_flag, initGlobalStreamState);
 
   if (current_streams) {
@@ -153,9 +156,24 @@ static void initOpenRegStreamsOnce() {
   }
 }
 
-static uint32_t get_idx(std::atomic<uint32_t>& counter) {
-  auto raw_idx = counter++;
-  return raw_idx % kStreamsPerPool;
+inline void check_device(DeviceIndex device_index) {
+  TORCH_CHECK(
+      device_index >= 0 && device_index < num_devices,
+      "Device index value ",
+      static_cast<int>(device_index),
+      " is out of index range [0, ",
+      static_cast<int>(num_devices),
+      ")");
+}
+
+uint32_t get_idx(std::atomic<uint32_t>& counter, int pri_idx) {
+  // Round-robin index within pool. For priority class DEFAULT (0), skip 0 which is
+  // reserved for the true default stream; only return non-default streams here.
+  auto raw = counter++;
+  if (pri_idx == static_cast<int>(StreamIdType::DEFAULT)) {
+    return 1 + (raw % (kStreamsPerPool - 1));
+  }
+  return raw % kStreamsPerPool;
 }
 
 OpenRegStream OpenRegStreamForId(DeviceIndex device_index, StreamId stream_id) {
@@ -206,7 +224,7 @@ OpenRegStream getStreamFromPool(const int priority, DeviceIndex device_index) {
       device_flags[device_index], initDeviceStreamState, device_index);
   auto pri_idx =
       std::clamp(priority, 0, max_compile_time_stream_priorities - 1);
-  const auto idx = get_idx(priority_counters[device_index][pri_idx]);
+  const auto idx = get_idx(priority_counters[device_index][pri_idx], pri_idx);
   auto id_type = static_cast<StreamIdType>(pri_idx);
   return OpenRegStreamForId(device_index, makeStreamId(id_type, idx));
 }
@@ -217,18 +235,21 @@ OpenRegStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   return getStreamFromPool(priority, device);
 }
 
+// LITERALINCLUDE START: OPENREG GET EXTERNAL STREAM
 OpenRegStream getStreamFromExternal(
-    orStream_t ext_stream,
-    DeviceIndex device_index) {
+  orStream_t ext_stream,
+  DeviceIndex device_index) {
   return OpenRegStreamForId(
       device_index, reinterpret_cast<int64_t>(ext_stream));
 }
+// LITERALINCLUDE END: OPENREG GET EXTERNAL STREAM
 
 OpenRegStream getDefaultOpenRegStream(DeviceIndex device_index) {
   initOpenRegStreamsOnce();
   if (device_index == -1) {
     device_index = current_device();
   }
+  check_device(device_index);
   return OpenRegStreamForId(
       device_index, makeStreamId(StreamIdType::DEFAULT, 0));
 }
@@ -238,13 +259,16 @@ OpenRegStream getCurrentOpenRegStream(DeviceIndex device_index) {
   if (device_index == -1) {
     device_index = current_device();
   }
+  check_device(device_index);
   return OpenRegStreamForId(device_index, current_streams[device_index]);
 }
 
+// LITERALINCLUDE START: OPENREG SET CURRENT STREAM
 void setCurrentOpenRegStream(OpenRegStream stream) {
   initOpenRegStreamsOnce();
   current_streams[stream.device_index()] = stream.id();
 }
+// LITERALINCLUDE END: OPENREG SET CURRENT STREAM
 
 std::ostream& operator<<(std::ostream& stream, const OpenRegStream& s) {
   return stream << s.unwrap();
