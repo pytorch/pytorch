@@ -122,7 +122,7 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
 
-def get_triton_reductoin_function(reduction_type):
+def get_triton_reduction_function(reduction_type):
     use_helper = reduction_type in ("any", "max", "min", "prod")
     module = "triton_helpers" if use_helper else "tl"
     if reduction_type in ("max", "min"):
@@ -3571,7 +3571,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
-            triton_reduction_fn = get_triton_reductoin_function(reduction_type)
+            triton_reduction_fn = get_triton_reduction_function(reduction_type)
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
             if reduction_type == "dot":
@@ -4548,7 +4548,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     combine_fn = ir.get_reduction_combine_fn(
                         partial_accum.reduction_type, torch.float
                     )
-                    triton_reduction_function = get_triton_reductoin_function(
+                    triton_reduction_function = get_triton_reduction_function(
                         partial_accum.reduction_type,
                     )
                     newval = self.cse.generate(
