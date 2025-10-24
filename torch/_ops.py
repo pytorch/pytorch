@@ -521,19 +521,14 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
-        def wrapper():
-            flat_args = _to_flat_tuple(args, kwargs)
-            if torch.overrides.has_torch_function(flat_args):
-                return torch.overrides.handle_torch_function(
-                    self, flat_args, *args, **kwargs
-                )
-
-            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return self.dispatch(
-                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
+        flat_args = _to_flat_tuple(args, kwargs)
+        if torch.overrides.has_torch_function(flat_args):
+            return torch.overrides.handle_torch_function(
+                self, flat_args, *args, **kwargs
             )
 
-        return wrapper()
+        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
     # NOTE [HigherOrderOprator Schema]
     # Each invocation of a HigherOrderOperator (hop) should have its own schema because
@@ -633,11 +628,13 @@ def unset_mode_pre_dispatch(mode_key, schema_check=False):
         assert mode_key is None
 
     def _unset_mode():
-        if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+        # NOTE: Using `is` rather than `==` to work around slow enum comparison in
+        # pybind11.
+        if mode_key is torch._C._TorchDispatchModeKey.PROXY:
             current_mode = current_mode_stack_pre_dispatch.get(0)
             mode_stack_state_for_pre_dispatch().set(0, None)
             return current_mode
-        elif mode_key == torch._C._TorchDispatchModeKey.FUNCTIONAL:
+        elif mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL:
             current_mode = current_mode_stack_pre_dispatch.get(1)
             mode_stack_state_for_pre_dispatch().set(1, None)
             return current_mode
@@ -718,13 +715,11 @@ def _len_torch_dispatch_stack_pre_dispatch():
 
 
 def _get_dispatch_mode_pre_dispatch(mode_key):
-    assert mode_key in (
-        torch._C._TorchDispatchModeKey.PROXY,
-        torch._C._TorchDispatchModeKey.FUNCTIONAL,
-    )
-    if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+    # NOTE: Using `is` rather than `==` to work around slow enum comparison in pybind11.
+    if mode_key is torch._C._TorchDispatchModeKey.PROXY:
         return mode_stack_state_for_pre_dispatch().get(0)
     else:
+        assert mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL
         return mode_stack_state_for_pre_dispatch().get(1)
 
 
@@ -1414,7 +1409,7 @@ class _HigherOrderNamespace(types.ModuleType):
 
     def __getattr__(self, name: str) -> HigherOrderOperator:
         # Following _OpNamespace.__getattr__, we cache the op on this object.
-        op = _higher_order_ops.get(name, None)
+        op = _higher_order_ops.get(name)
         if op is None:
             raise AttributeError(
                 f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"

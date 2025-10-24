@@ -420,6 +420,7 @@ class LambdaLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
+                # pyrefly: ignore  # unsupported-operation
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -539,6 +540,7 @@ class MultiplicativeLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
+                # pyrefly: ignore  # unsupported-operation
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -1215,6 +1217,7 @@ class SequentialLR(LRScheduler):
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
         for idx, s in enumerate(self._schedulers):
+            # pyrefly: ignore  # unsupported-operation
             state_dict["_schedulers"][idx] = s.state_dict()
 
         return state_dict
@@ -1557,6 +1560,7 @@ class ChainedScheduler(LRScheduler):
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
         for idx, s in enumerate(self._schedulers):
+            # pyrefly: ignore  # unsupported-operation
             state_dict["_schedulers"][idx] = s.state_dict()
 
         return state_dict

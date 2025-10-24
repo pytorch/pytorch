@@ -93,6 +93,7 @@ class FakeTensorProp(torch.fx.Interpreter):
             if (shape_env := self._mode.shape_env) and (
                 symbol_to_path := compute_unbacked_bindings(shape_env, result)
             ):
+                # pyrefly: ignore  # unbound-name
                 n.meta["unbacked_bindings"] = symbol_to_path
 
         return result
