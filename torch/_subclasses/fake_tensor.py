@@ -2674,7 +2674,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
         # If there's a Python meta, prefer that over the decomposition
-        from torch._decomp import meta_table as meta_table
+        from torch._decomp import meta_table
 
         if (
             func not in meta_table
