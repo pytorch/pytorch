@@ -14,6 +14,7 @@ from torch.distributed.fsdp import FSDPModule
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
+from torch.utils.hooks import RemovableHandle
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
 
@@ -366,13 +367,27 @@ class FSDPMemTracker(MemTracker):
         # TODO(@sanketpurandare): This will need to be modified after this PR (https://github.com/pytorch/pytorch/pull/127786)
         # lands. For backward we monkey-patch the `FSDPParamGroup.pre_backward` and `FSDPParamGroup.post_backward`.
         # pyrefly: ignore  # missing-attribute
+
+        # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
+        # the _MultiHandlers object will only need to be grabbed once.
+        unique_handlers: dict[RemovableHandle, bool] = {}
+        for module in self._root_mod.modules():
+            if isinstance(module, FSDPModule):
+                fsdp_state = module._get_fsdp_state()
+                if fsdp_param_group := fsdp_state._fsdp_param_group:
+                    if not unique_handlers.get(fsdp_state._pre_forward_hook_handle):
+                        unique_handlers[fsdp_state._pre_forward_hook_handle] = True
+                    if not unique_handlers.get(fsdp_state._post_forward_hook_handle):
+                        unique_handlers[fsdp_state._post_forward_hook_handle] = True
+        # call remove on the handles once
+        for f_hook_handle in unique_handlers.keys():
+            f_hook_handle.remove()
+
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
-                    fsdp_state._pre_forward_hook_handle.remove()
-                    fsdp_state._post_forward_hook_handle.remove()
                     fsdp_state._pre_forward_hook_handle = (
                         # pyrefly: ignore  # missing-attribute
                         module.register_forward_pre_hook(
