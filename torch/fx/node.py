@@ -658,7 +658,7 @@ class Node(_NodeBase):
     def replace_all_uses_with(
         self,
         replace_with: "Node",
-        delete_user_cb: Callable[["Node"], bool] = lambda user: True,
+        delete_user_cb: Optional[Callable[["Node"], bool]] = None,
         *,
         propagate_meta: bool = False,
     ) -> list["Node"]:
@@ -686,32 +686,18 @@ class Node(_NodeBase):
             )
             for k, v in self.meta.items():
                 replace_with.meta[k] = v
-        to_process = list(self.users)
-        skipped = []
-        m = self.graph.owning_module
+        to_process = [*self.users]
+        replace_hooks = getattr(self.graph.owning_module, "_replace_hooks", None)
+        result = []
         for use_node in to_process:
-            if not delete_user_cb(use_node):
-                skipped.append(use_node)
+            if delete_user_cb is not None and not delete_user_cb(use_node):
                 continue
-
-            def maybe_replace_node(n: Node) -> Node:
-                if n == self:
-                    return replace_with
-                else:
-                    return n
-
-            if getattr(m, "_replace_hooks", None):
-                for replace_hook in m._replace_hooks:
+            result.append(use_node)
+            if replace_hooks:
+                for replace_hook in replace_hooks:
                     replace_hook(old=self, new=replace_with.name, user=use_node)
-
-            new_args = _fx_map_arg(use_node.args, maybe_replace_node)
-            new_kwargs = _fx_map_arg(use_node.kwargs, maybe_replace_node)
-            assert isinstance(new_args, tuple)
-            assert isinstance(new_kwargs, dict)
-            use_node._update_args_kwargs(new_args, new_kwargs)
-
-        assert len(self.users) - len(skipped) == 0
-        return [n for n in to_process if n not in skipped]
+            use_node._replace_input_with(self, replace_with)
+        return result
 
     @compatibility(is_backward_compatible=False)
     def is_impure(self, impure_random: bool = True) -> bool:
@@ -842,19 +828,12 @@ class Node(_NodeBase):
             new_input (Node): The new input node to replace ``old_input``.
         """
 
-        def maybe_replace_node(n: Node) -> Node:
-            return new_input if n == old_input else n
-
         m = self.graph.owning_module
         if getattr(m, "_replace_hooks", None):
             for replace_hook in m._replace_hooks:
                 replace_hook(old=old_input, new=new_input.name, user=self)
 
-        new_args = _fx_map_arg(self.args, maybe_replace_node)
-        new_kwargs = _fx_map_arg(self.kwargs, maybe_replace_node)
-        assert isinstance(new_args, tuple)
-        assert isinstance(new_kwargs, dict)
-        self._update_args_kwargs(new_args, new_kwargs)
+        self._replace_input_with(old_input, new_input)
 
     def _rename(self, candidate: str) -> None:
         if candidate == self.name:
