@@ -314,6 +314,8 @@ aten::lift.out
 aten::lift_fresh
 aten::linalg_vector_norm
 aten::linalg_vector_norm.out
+aten::linear_cross_entropy
+aten::linear_cross_entropy_backward
 aten::log
 aten::log.out
 aten::log10

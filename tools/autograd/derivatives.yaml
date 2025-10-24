@@ -2022,6 +2022,12 @@
              + binary_cross_entropy_with_logits_target_backward(target_t, self_p, target_p, weight, pos_weight, at::Reduction::None),
            reduction)"
 
+- name: linear_cross_entropy(Tensor input, Tensor weight, Tensor target, Tensor? bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, str chunking_strategy="auto") -> Tensor
+  input: std::get<0>(linear_cross_entropy_backward_symint(grad, input, weight, target, bias, reduction, ignore_index, label_smoothing, chunking_strategy))
+  weight: std::get<1>(linear_cross_entropy_backward_symint(grad, input, weight, target, bias, reduction, ignore_index, label_smoothing, chunking_strategy))
+  bias: std::get<2>(linear_cross_entropy_backward_symint(grad, input, weight, target, bias, reduction, ignore_index, label_smoothing, chunking_strategy)).value_or(at::Tensor())
+
+
 - name: embedding(Tensor weight, Tensor indices, SymInt padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
   weight: embedding_backward_symint(grad, indices, weight.sym_size(0), padding_idx, scale_grad_by_freq, sparse)
