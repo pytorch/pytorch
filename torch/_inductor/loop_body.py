@@ -132,6 +132,14 @@ class LoopBody:
 
         self.indexing = None
 
+    def get_original_num_rdims(self) -> int:
+        assert self.has_partial_accumulate
+        node = self.root_block.graph.find_nodes(
+            op="call_method", target="partial_accumulate"
+        )[0]
+        meta = node.args[-1]
+        return meta["num_reduction_dims"]
+
     def extract_pw_from_reduction(self):
         self.root_block = self.root_block.extract_pw_from_reduction()
         self.has_partial_accumulate = True
@@ -553,9 +561,12 @@ class LoopBodyBlock:
         buf = store.args[1]
         ops = store.args[0]
 
+        extra_meta = {
+            "num_reduction_dims": len(self.body.reduce_vars),
+        }
         with self.graph.inserting_after(store):
             self.graph.call_method(
-                "partial_accumulate", (ops, buf, reduction_type, red_arg)
+                "partial_accumulate", (ops, buf, reduction_type, red_arg, extra_meta)
             )
         self.graph.erase_node(store)
         self.graph.erase_node(red)

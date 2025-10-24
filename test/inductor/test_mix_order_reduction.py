@@ -92,18 +92,28 @@ class MixOrderReductionTest(TestBase):
     )
     @parametrize("swap", (False, True))
     @parametrize("split_reductions", (False, True))
-    @parametrize("shape", ((32768, 768), (32769, 768)))
+    @parametrize("shape", ((32768, 768), (32769, 768), (32, 1024, 768)))
     def test_mix_order_reduction(self, name, swap, split_reductions, shape):
+        # torch.prod does not accept tuple for dim argument
+        if name == "prod" and len(shape) == 3:
+            self.skipTest("Invalid combination")
+
         def f(x):
+            def outer_red():
+                if len(shape) == 3:
+                    return reduction_fn(x, dim=(0, 1))
+                else:
+                    assert len(shape) == 2
+                    return reduction_fn(x, dim=0)
+
             if swap:
-                return reduction_fn(x, dim=0), reduction_fn(x, dim=1)
+                return outer_red(), reduction_fn(x, dim=-1)
             else:
-                return reduction_fn(x, dim=1), reduction_fn(x, dim=0)
+                return reduction_fn(x, dim=-1), outer_red()
 
         reduction_fn = getattr(torch, name)
-        M, N = shape
         dtype = torch.float
-        x = torch.randn(M, N, dtype=dtype, device=GPU_TYPE)
+        x = torch.randn(shape, dtype=dtype, device=GPU_TYPE)
 
         opt_f = torch.compile(
             f,

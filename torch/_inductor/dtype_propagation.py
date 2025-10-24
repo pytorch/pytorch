@@ -253,6 +253,7 @@ class DtypePropagationOpsHandler:
         name: str,
         reduction_type: str,
         value: DTypeArg,
+        extra_meta: dict[str, Any],
     ) -> None:
         return None
 

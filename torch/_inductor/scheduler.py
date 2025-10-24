@@ -330,9 +330,8 @@ class MixOrderReduction:
             index_name = index_names[0]
             index_expr = loop_body.indexing_exprs[index_name]
             var_ranges = loop_body.var_ranges
-            if len(var_ranges) != 2:
-                return False
 
+            # assumes the final symbol is for reduction
             var_symbols = list(var_ranges.keys())
             stride_vars = V.graph.sizevars.stride_vars(
                 index_expr,
@@ -1491,8 +1490,12 @@ class SchedulerNode(BaseSchedulerNode):
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
     def swap_pw_red_dimension(self) -> None:
-        assert len(self._body.sizes[0]) == 2
-        self.apply_new_loop_order([1, 0])
+        num_rdims = self._body.get_original_num_rdims()
+        num_pwdims = len(self._body.iter_vars) - num_rdims
+        pwdims = tuple(range(num_pwdims))
+        rdims = tuple(range(num_pwdims, num_pwdims + num_rdims))
+
+        self.apply_new_loop_order(rdims + pwdims)
         assert len(self.group[1]) == 2
         self.group = self.group[0], (self.group[1][1], self.group[1][0])
 
