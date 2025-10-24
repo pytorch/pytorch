@@ -366,9 +366,9 @@ def run_single_backend_FA(
     mask_kwargs,
     backend: str,
 ) -> ExperimentResults:
-    assert backend in ["fav2", "fav3", "fakv"]
+    assert backend in ["fav3", "fakv"]
     # Generate callable for specific backend.
-    if backend in ["fav2", "fav3"]:
+    if backend in ["fav3"]:
         FA = generate_FA_callable(
             config.attn_type, config.shape, config.dtype, backend, **mask_kwargs
         )
@@ -483,7 +483,7 @@ def run_single_experiment(
                 mask_kwargs,
                 backend,
             )
-        else:  # sdpa
+        else:  # sdpa (also supports fav2)
             results[backend] = run_single_backend_sdpa(
                 config,
                 query,
@@ -565,7 +565,8 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
     softmax_flops = M * N * 2  # Not counting online softmax overhead
     o_flops = M * D * N * 2
     # Not counting split k overhead
-    total_flops = B * Hq * (qk_flops + softmax_flops + o_flops) * (1 - results.sparsity)
+    sparsity = results.sparsity if results.sparsity is not None else 0.0
+    total_flops = B * Hq * (qk_flops + softmax_flops + o_flops) * (1 - sparsity)
     return total_flops / results.fwd_time / 1e6  # in TFLOPs/
 
 
@@ -884,11 +885,7 @@ def generate_FA_callable(
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
-    if backend == "fav2":
-        # Use PyTorch's built-in Flash Attention via SDPA
-        flash_attn_func = None  # We'll define this below using SDPA
-        flash_attn_varlen_func = None
-    elif backend == "fav3":
+    if backend == "fav3":
         try:
             from flash_attn.flash_attn_interface import (
                 flash_attn_func,
@@ -1202,96 +1199,46 @@ def _output_json_for_dashboard(
                 if device == "cpu"
                 else "unknown"
             )
+            # Create dataclasses for JSON structure
+            @dataclass
+            class BenchmarkInfo:
+                name: str
+                mode: Optional[str]
+                dtype: str
+                extra_info: dict[str, Any]
 
-        # Create dataclasses for JSON structure
-        @dataclass
-        class BenchmarkInfo:
-            name: str
-            mode: Optional[str]
-            dtype: str
-            extra_info: dict[str, Any]
+            @dataclass
+            class ModelInfo:
+                name: str
+                type: str
+                origins: list[str]
+                extra_info: dict[str, Any]
 
-        @dataclass
-        class ModelInfo:
-            name: str
-            type: str
-            origins: list[str]
-            extra_info: dict[str, Any]
+            @dataclass
+            class MetricInfo:
+                name: str
+                unit: str
+                benchmark_values: list[float]
+                target_value: Optional[float]
 
-        @dataclass
-        class MetricInfo:
-            name: str
-            unit: str
-            benchmark_values: list[float]
-            target_value: Optional[float]
-
-        @dataclass
-        class BenchmarkRecord:
-            benchmark: BenchmarkInfo
-            model: ModelInfo
-            metric: MetricInfo
-        
-        # Benchmark extra info
-        benchmark_extra_info={
-            "input_config": input_config,
-            "device": device,
-            "arch": device_arch,
-            "operator_name": backend,
-            "attn_type": config.attn_type,
-            "shape": str(config.shape),
-            "max_autotune": config.max_autotune,
-        },
-        # Add record for forward latency
-        record_fwd_latency = BenchmarkRecord(
-            benchmark=BenchmarkInfo(
-                name=benchmark_name,
-                mode=mode,
-                dtype=dtype,
-                extra_info=benchmark_extra_info,
-            ),
-            model=ModelInfo(
-                name=test_name+str(config.shape),
-                type="attention-benchmark",
-                origins=["pytorch"],
-                extra_info={
-                    "operator_name": backend,
-                    "attn_type": config.attn_type,
-                },
-            ),
-            metric=MetricInfo(
-                name="forward latency",
-                unit="us",
-                benchmark_values=[results.fwd_time],
-                target_value=None,
-            ),
-        )
-        records.append(asdict(record_fwd_latency))
-
-        # Add record for forward memory bandwidth (if available)
-        if config.cal_bandwidth and results.sparsity is not None:
-            record_fwd_bandwidth = BenchmarkRecord(
-                benchmark=BenchmarkInfo(
-                    name=benchmark_name,
-                    mode=mode,
-                    dtype=dtype,
-                    extra_info=benchmark_extra_info,
-                ),
-                model=ModelInfo(
-                    name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
-                    extra_info={"operator_name": backend,}
-                ),
-                metric=MetricInfo(
-                    name="memory bandwidth",
-                    unit="TB/s",
-                    benchmark_values=[calculate_bandwidth(config, results, "fwd")],
-                    target_value=None,
-                ),
-            )
-            records.append(asdict(record_fwd_bandwidth))
-
-        # Add record for forward TFLOPS (if available)
-        if config.cal_bandwidth:
-            record_fwd_tflops = BenchmarkRecord(
+            @dataclass
+            class BenchmarkRecord:
+                benchmark: BenchmarkInfo
+                model: ModelInfo
+                metric: MetricInfo
+            
+            # Benchmark extra info
+            benchmark_extra_info={
+                "input_config": input_config,
+                "device": device,
+                "arch": device_arch,
+                "operator_name": backend,
+                "attn_type": config.attn_type,
+                "shape": str(config.shape),
+                "max_autotune": config.max_autotune,
+            },
+            # Add record for forward latency
+            record_fwd_latency = BenchmarkRecord(
                 benchmark=BenchmarkInfo(
                     name=benchmark_name,
                     mode=mode,
@@ -1304,40 +1251,89 @@ def _output_json_for_dashboard(
                     origins=["pytorch"],
                     extra_info={
                         "operator_name": backend,
-                    }
+                        "attn_type": config.attn_type,
+                    },
                 ),
                 metric=MetricInfo(
-                    name="tflops",
-                    unit="TFLOPS/s",
-                    benchmark_values=[calculate_tflops(config, results)],
-                    target_value=None,
-                ),
-            )
-            records.append(asdict(record_fwd_tflops))
-
-        # Add record for backward latency (if available)
-        if config.calculate_bwd_time and results.bwd_time is not None:
-            record_bwd_latency = BenchmarkRecord(
-                benchmark=BenchmarkInfo(
-                    name=benchmark_name,
-                    mode=mode,
-                    dtype=dtype,
-                    extra_info=benchmark_extra_info,
-                ),
-                model=ModelInfo(
-                    name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
-                    extra_info={
-                        "operator_name": backend,
-                },
-                ),
-                metric=MetricInfo(
-                    name="backward latency",
+                    name="forward latency",
                     unit="us",
-                    benchmark_values=[results.bwd_time],
+                    benchmark_values=[results.fwd_time],
                     target_value=None,
                 ),
             )
-            records.append(asdict(record_bwd_latency))
+            records.append(asdict(record_fwd_latency))
+
+            # Add record for forward memory bandwidth (if available)
+            if config.cal_bandwidth:
+                record_fwd_bandwidth = BenchmarkRecord(
+                    benchmark=BenchmarkInfo(
+                        name=benchmark_name,
+                        mode=mode,
+                        dtype=dtype,
+                        extra_info=benchmark_extra_info,
+                    ),
+                    model=ModelInfo(
+                        name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
+                        extra_info={"operator_name": backend,}
+                    ),
+                    metric=MetricInfo(
+                        name="memory bandwidth",
+                        unit="TB/s",
+                        benchmark_values=[calculate_bandwidth(config, results, "fwd")],
+                        target_value=None,
+                    ),
+                )
+                records.append(asdict(record_fwd_bandwidth))
+
+            # Add record for forward TFLOPS (if available)
+            if config.cal_bandwidth:
+                record_fwd_tflops = BenchmarkRecord(
+                    benchmark=BenchmarkInfo(
+                        name=benchmark_name,
+                        mode=mode,
+                        dtype=dtype,
+                        extra_info=benchmark_extra_info,
+                    ),
+                    model=ModelInfo(
+                        name=test_name+str(config.shape),
+                        type="attention-benchmark",
+                        origins=["pytorch"],
+                        extra_info={
+                            "operator_name": backend,
+                        }
+                    ),
+                    metric=MetricInfo(
+                        name="tflops",
+                        unit="TFLOPS/s",
+                        benchmark_values=[calculate_tflops(config, results)],
+                        target_value=None,
+                    ),
+                )
+                records.append(asdict(record_fwd_tflops))
+
+            # Add record for backward latency (if available)
+            if config.calculate_bwd_time and results.bwd_time is not None:
+                record_bwd_latency = BenchmarkRecord(
+                    benchmark=BenchmarkInfo(
+                        name=benchmark_name,
+                        mode=mode,
+                        dtype=dtype,
+                        extra_info=benchmark_extra_info,
+                    ),
+                    model=ModelInfo(
+                        name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
+                        extra_info={
+                            "operator_name": backend,
+                    },
+                    ),
+                    metric=MetricInfo(
+                        name="backward latency",
+                        unit="us",
+                        benchmark_values=[results.bwd_time],
+                        target_value=None,
+                    ),
+                )
+                records.append(asdict(record_bwd_latency))
 
     # Write all records to the output file
     with open(output_file, "w", encoding="utf-8") as f:
