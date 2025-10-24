@@ -432,19 +432,47 @@ def random_split(
     distributed in round-robin fashion to the lengths
     until there are no remainders left.
 
-    Optionally fix the generator for reproducible results, e.g.:
-
-    Example:
-        >>> # xdoctest: +SKIP
-        >>> generator1 = torch.Generator().manual_seed(42)
-        >>> generator2 = torch.Generator().manual_seed(42)
-        >>> random_split(range(10), [3, 7], generator=generator1)
-        >>> random_split(range(30), [0.3, 0.3, 0.4], generator=generator2)
+    Optionally fix the generator for reproducible results.
 
     Args:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
+
+    Returns:
+        list[Subset[_T]]: List of Subset datasets
+
+    Example::
+
+        >>> import torch
+        >>> from torch.utils.data import random_split
+        >>>
+        >>> # Example 1: Split using absolute lengths
+        >>> dataset = range(10)
+        >>> train_set, val_set = random_split(dataset, [7, 3])
+        >>> len(train_set), len(val_set)
+        (7, 3)
+        >>>
+        >>> # Example 2: Split using fractions
+        >>> dataset = range(100)
+        >>> train, val, test = random_split(dataset, [0.8, 0.1, 0.1])
+        >>> len(train), len(val), len(test)
+        (80, 10, 10)
+        >>>
+        >>> # Example 3: Reproducible splits with generator
+        >>> gen = torch.Generator().manual_seed(42)
+        >>> train, val = random_split(range(10), [0.7, 0.3], generator=gen)
+        >>> len(train), len(val)
+        (7, 3)
+        >>>
+        >>> # Practical use: Combine with DataLoader
+        >>> # from torch.utils.data import DataLoader
+        >>> # train_loader = DataLoader(train, batch_size=32, shuffle=True)
+        >>> # val_loader = DataLoader(val, batch_size=32, shuffle=False)
+
+    Note:
+        The subsets are instances of :class:`~torch.utils.data.Subset`,
+        which reference the original dataset by index.
     """
     if math.isclose(sum(lengths), 1) and sum(lengths) <= 1:
         subset_lengths: list[int] = []
