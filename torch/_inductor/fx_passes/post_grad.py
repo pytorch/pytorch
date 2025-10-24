@@ -1541,8 +1541,7 @@ def should_prefer_unfused_addmm(match):
         inp_val = inp.meta["val"]
         mat1_val = mat1.meta["val"]
         mat2_val = mat2.meta["val"]
-        ans = not _cublaslt_can_fuse_bias_epilogue(inp_val, mat1_val, mat2_val)
-        return ans
+        return not _cublaslt_can_fuse_bias_epilogue(inp_val, mat1_val, mat2_val)
 
 
 @register_graph_pattern(
