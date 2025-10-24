@@ -61,7 +61,7 @@ def insert_deferred_runtime_asserts(
     """
     During tracing, we may have discovered that some data-dependent values
     had runtime assert on them; e.g., torch.empty(x.item()) induces a runtime
-    that x.item() >= 0.  This asserts can happen unpredictably during fake
+    that x.item() >= 0.  These asserts can happen unpredictably during fake
     tensor propagation, so we cannot conveniently insert them into the FX graph
     when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
     pass insert them into the graph as proper tests.

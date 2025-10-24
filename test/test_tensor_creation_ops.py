@@ -1200,6 +1200,13 @@ class TestTensorCreation(TestCase):
         res = torch.cat(xs, dim=-1)
         ref = torch.cat(xs_cpu, dim=-1)
         self.assertEqual(res, ref)
+        xs = [torch.randn(16, 15, 15, device=device, dtype=dtype) for _ in range(130)]
+        xs[128] = torch.randn(15, 15, 15, device=device, dtype=dtype)
+        xs[129] = torch.randn(17, 15, 15, device=device, dtype=dtype)
+        xs_cpu = [x.cpu() for x in xs]
+        res = torch.cat(xs, dim=0)
+        ref = torch.cat(xs_cpu, dim=0)
+        self.assertEqual(res, ref)
 
     @dtypes(torch.float)
     @largeTensorTest("16GB")
@@ -3498,7 +3505,7 @@ class TestRandomTensorCreation(TestCase):
                 else:
                     t.uniform_(from_, to_)
                     range_ = to_ - from_
-                    if not (dtype == torch.bfloat16) and not (
+                    if dtype != torch.bfloat16 and not (
                             dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
                         delta = alpha * range_
                         double_t = t.to(torch.double)
