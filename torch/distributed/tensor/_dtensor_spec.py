@@ -107,7 +107,7 @@ class DTensorSpec:
         # follow default left-to-right device order if shard_order is not specified
         tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
         mesh_ndim = len(placements)
-        for mesh_dim in range(0, mesh_ndim):
+        for mesh_dim in range(mesh_ndim):
             # shard_order doesn't work with _StridedShard
             if isinstance(placements[mesh_dim], _StridedShard):
                 return ()
