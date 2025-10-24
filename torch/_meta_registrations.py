@@ -1787,7 +1787,7 @@ def _padding_check_valid_input(input, padding, *, dim):
         for d in range(1, input_dim):
             valid_batch_mode = valid_batch_mode and input.size(d) != 0
     else:
-        for d in range(0, input_dim):
+        for d in range(input_dim):
             valid_non_batch_mode = valid_non_batch_mode and input.size(d) != 0
 
     # allow empty batch size but not other dimensions.
@@ -5307,7 +5307,7 @@ def grid_sampler_3d_backward(
 
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
-    dtype = kwargs.get("dtype", None)
+    dtype = kwargs.get("dtype")
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype

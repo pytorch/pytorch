@@ -235,7 +235,11 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
-            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_cache_entry_list,
+                _debug_get_precompile_entries,
+            )
+            from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
             message = (
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
@@ -243,6 +247,17 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                 + f"function name: '{frame.f_code.co_name}', "
                 + f"line number: {frame.f_lineno}"
             )
+            cache_entries = _debug_get_cache_entry_list(frame.f_code)
+            if cache_entries:
+                reasons = get_and_maybe_log_recompilation_reasons(
+                    cache_entries[0], frame, skip_logging=True
+                )
+                if reasons:
+                    failures = textwrap.indent("\n".join(reasons), "- ")
+                    guard_failure_details = (
+                        f"triggered by the following guard failure(s):\n{failures}"
+                    )
+                    message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
             precompile_entries = _debug_get_precompile_entries(frame.f_code)
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
@@ -753,8 +768,10 @@ class _TorchDynamoContext:
                             fn, result.dynamo, ignore_inlined_sources=False
                         )
                         self._package.install(result.backends)
-                    except RuntimeError as e:
-                        log.warning("Failed to load entry from dynamo cache: %s", e)
+                    except RuntimeError:
+                        log.warning(
+                            "Failed to load entry from dynamo cache", exc_info=True
+                        )
                         self._package.initialize(fn, None, ignore_inlined_sources=False)
 
         fn = innermost_fn(fn)
@@ -847,6 +864,14 @@ class _TorchDynamoContext:
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
+                # We shouldn't compile inside kernel invocation.
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if (
+                        tracing_context.fake_mode is not None
+                        and tracing_context.fake_mode.in_kernel_invocation
+                    ):
+                        return fn(*args, **kwargs)
+                # Skip nested compile - just inline the function
                 if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
@@ -1240,7 +1265,7 @@ def argument_names(
         # signature. Assign names as {varargs}_0, {varargs}_1, ...
         assert fullargspec.varargs is not None, "More arguments than expected"
         input_strs += [
-            f"{fullargspec.varargs}_{i}" for i in range(0, len(args) - len(input_strs))
+            f"{fullargspec.varargs}_{i}" for i in range(len(args) - len(input_strs))
         ]
     elif len(args) < len(fullargspec.args):
         # 3. If there are fewer arguments in `args` than `fullargspec.args`,
@@ -1530,7 +1555,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         }
 
         self.new_args = []
-        for i in range(0, len(flat_args)):
+        for i in range(len(flat_args)):
             arg = super().placeholder(f"arg{i}", (), {})
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
@@ -1682,6 +1707,39 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
         )
 
 
+def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -> None:
+    supported_types = [
+        torch.Tensor,
+        torch.SymInt,
+        torch.SymFloat,
+        torch.SymBool,
+        torch._C.ScriptObject,
+        _IntWrapper,
+    ] + list(common_constant_types)
+
+    def is_supported_type(val: Any) -> bool:
+        return isinstance(val, tuple(supported_types))
+
+    value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
+    # We only check that the outputs are not None. Inputs can be None.
+    for v in flat_values:
+        if not is_supported_type(v):
+            if error_type == UserErrorType.INVALID_INPUT and v is None:
+                continue
+
+            raise UserError(
+                error_type,
+                f"It looks like one of the {value_type}s with type `{type(v)}` "
+                "is not supported or pytree-flattenable. \n"
+                f"Exported graphs {value_type}s can only contain the "
+                f"following supported types: {supported_types}. \n"
+                "If you are using a custom class object, "
+                "please register a pytree_flatten/unflatten function "
+                "using `torch.utils._pytree.register_pytree_node` or "
+                "`torch.export.register_dataclass`.",
+            )
+
+
 def rewrite_signature(
     f_sig: inspect.Signature,
     graph: torch.fx.GraphModule,
@@ -1695,40 +1753,6 @@ def rewrite_signature(
     flat_args_dynamic_dims: list[set[int]],
 ) -> torch.fx.GraphModule:
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
-
-    def check_user_input_output(
-        flat_values: list[Any], error_type: UserErrorType
-    ) -> None:
-        supported_types = [
-            torch.Tensor,
-            torch.SymInt,
-            torch.SymFloat,
-            torch.SymBool,
-            torch._C.ScriptObject,
-            _IntWrapper,
-        ] + list(common_constant_types)
-
-        def is_supported_type(val: Any) -> bool:
-            return isinstance(val, tuple(supported_types))
-
-        value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
-        # We only check that the outputs are not None. Inputs can be None.
-        for v in flat_values:
-            if not is_supported_type(v):
-                if error_type == UserErrorType.INVALID_INPUT and v is None:
-                    continue
-
-                raise UserError(
-                    error_type,
-                    f"It looks like one of the {value_type}s with type `{type(v)}` "
-                    "is not supported or pytree-flattenable. \n"
-                    f"Exported graphs {value_type}s can only contain the "
-                    f"following supported types: {supported_types}. \n"
-                    "If you are using a custom class object, "
-                    "please register a pytree_flatten/unflatten function "
-                    "using `torch.utils._pytree.register_pytree_node` or "
-                    "`torch.export.register_dataclass`.",
-                )
 
     check_user_input_output(flat_args, UserErrorType.INVALID_INPUT)
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
