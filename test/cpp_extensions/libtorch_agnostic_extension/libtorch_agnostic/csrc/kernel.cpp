@@ -565,4 +565,27 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_stream", &boxed_test_stream);
   m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
 }
+
+std::vector<Tensor> my__foreach_mul(HeaderOnlyArrayRef<Tensor> self, HeaderOnlyArrayRef<Tensor> other) {
+  const auto num_args = 2;
+  StableIValue stack[num_args];
+  stack[0] = from(self);
+  stack[1] = from(other);
+  aoti_torch_call_dispatcher("aten::_foreach_mul", "ScalarList", stack);
+  return to<std::vector<Tensor>>(stack[0]);
+}
+
+void boxed_my__foreach_mul(StableIValue* stack, uint64_t num_args, uint64_t) {
+  auto res = my__foreach_mul(to<HeaderOnlyArrayRef<Tensor>>(stack[0]), to<HeaderOnlyArrayRef<Tensor>>(stack[1]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("my__foreach_mul(Tensor[] self, Tensor[] other) -> Tensor[]");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("my__foreach_mul", &boxed_my__foreach_mul);
+}
+
 #endif // LAE_USE_CUDA

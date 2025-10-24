@@ -367,6 +367,19 @@ if not IS_WINDOWS:
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
 
+        def test_my__foreach_mul(self, device):
+            import libtorch_agnostic
+
+            N = 5
+            tensors = [torch.rand(2, 5, device=device) for _ in range(N)]
+            others = [torch.rand(2, 5, device=device) for _ in range(N)]
+
+            result = libtorch_agnostic.ops.my__foreach_mul(tensors, others)
+            expected = torch._foreach_mul(tensors, others)
+
+            for result_t, expected_t in zip(result, expected):
+                self.assertEqual(result_t, expected_t)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
