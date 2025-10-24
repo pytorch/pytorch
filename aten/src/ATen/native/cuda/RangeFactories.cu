@@ -105,6 +105,11 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
+        // Guard endpoints: write them exactly, avoid zero multipliers
+        // This should compile to predicated selects rather than actual branching
+        if (ind == 0)            return scalar_start;
+        if (ind == steps - 1)    return scalar_end;
+
         if (ind < halfway) {
           return scalar_start + (step * ind);
         }

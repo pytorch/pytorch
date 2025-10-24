@@ -554,7 +554,17 @@ def _efficient_attention_backward_flop(
     )
 
 
+@register_flop_formula(aten._fft_r2c)
+def rfft_flop(x_shape, *args, out_shape=None, **kwargs) -> int:
+    """Count flops for rfft (batched, 1D over the last dimension)."""
+    from math import log2
+    n = x_shape[-1]
+    batch_size = prod(x_shape[:-1])
+    return int(batch_size * 2.5 * n * log2(n))
+
+
 flop_registry = {
+    aten._fft_r2c: rfft_flop,
     aten.mm: mm_flop,
     aten.addmm: addmm_flop,
     aten.bmm: bmm_flop,
