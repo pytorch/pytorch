@@ -356,6 +356,8 @@ class LocalElasticAgent(SimpleElasticAgent):
             log_line_prefixes=log_line_prefixes,
             start_method=self._start_method,
             numa_options=spec.numa_options,
+            duplicate_stdout_filters=spec.duplicate_stdout_filters,
+            duplicate_stderr_filters=spec.duplicate_stderr_filters,
         )
 
         return self._pcontext.pids()

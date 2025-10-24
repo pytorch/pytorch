@@ -102,7 +102,7 @@ S = TypeVar("S", bound="StorageWeakRefWrapper")
 if torch.backends.cuda.is_built():
     from torch._C import (
         _cuda_CUDAAllocator_AllocatorState as AllocatorState,
-        _set_cached_tensors_enabled as _set_cached_tensors_enabled,
+        _set_cached_tensors_enabled,
     )
 else:
 

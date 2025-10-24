@@ -77,16 +77,12 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_methods,
     str_methods,
     tensortype_to_dtype,
 )
-from .base import (
-    AsPythonConstantNotImplementedError,
-    raise_type_error_exc,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .dicts import (
     ConstDictVariable,
@@ -1564,14 +1560,14 @@ class BuiltinVariable(VariableTracker):
 
                 try:
                     # Only supports certain function types
-                    user_func_variable = variables.UserFunctionVariable(bound_method)
+                    user_func_variable = VariableTracker.build(tx, bound_method)
                 except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
                     log.warning("Failed to create UserFunctionVariable", exc_info=True)
                     return
 
                 # Inline the user function
-                return tx.inline_user_function_return(user_func_variable, [arg], {})
+                return user_func_variable.call_function(tx, [arg], {})
         elif isinstance(arg, (variables.ExceptionVariable,)):
             if len(arg.args) == 0:
                 value = f"{arg.exc_type}"
@@ -1953,17 +1949,28 @@ class BuiltinVariable(VariableTracker):
                 or len(kwargs) != 1
                 or "value" not in kwargs
             ):
-                raise_type_error_exc(
-                    tx, f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
+                raise_args_mismatch(
+                    tx,
+                    f"{user_cls.__name__}.fromkeys",
+                    "1 args and 1 kwargs (`value`)",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
-            raise_type_error_exc(tx, "fromkeys expected at least 1 arguments, got 0")
+            raise_args_mismatch(
+                tx,
+                f"{user_cls.__name__}.fromkeys",
+                "at least 1 args",
+                f"{len(args)} args",
+            )
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
         if len(args) != 2:
-            raise_type_error_exc(
-                tx, f"fromkeys expected at most 2 arguments, got {len(args)}"
+            raise_args_mismatch(
+                tx,
+                f"{user_cls.__name__}.fromkeys",
+                "2 args",
+                f"{len(args)} args",
             )
         arg, value = args
         DictVariableType = (
@@ -2061,9 +2068,11 @@ class BuiltinVariable(VariableTracker):
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
             if not (len(kwargs) == 1 and "strict" in kwargs):
-                raise_type_error_exc(
+                raise_args_mismatch(
                     tx,
-                    f"zip() should only have 'strict' keyword argument, but ({len(kwargs)} given)",
+                    "zip",
+                    "1 kwargs (`strict`)",
+                    f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", False)
         args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
