@@ -1,26 +1,15 @@
 # mypy: allow-untyped-defs
 
-import functools
 import logging
 
 import torch
 from torch.fx._compatibility import compatibility
+from torch.fx._utils import _dummy_wrapper
 
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["regional_inductor"]
-
-
-# standalone_inductor returns a callable class object - this does not sit well
-# with Fx graph node op call_function which expects a function. So this is just
-# a wrapper function to make Fx graph codegen happy.
-def _dummy_wrapper(fn):
-    @functools.wraps(fn)
-    def inner(*args, **kwargs):
-        return fn(*args, **kwargs)
-
-    return inner
 
 
 def _partition_by_supported_nodes(gm, supported_ops, prefix):
