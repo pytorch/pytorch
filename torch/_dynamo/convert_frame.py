@@ -176,6 +176,8 @@ except ModuleNotFoundError:
 
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.utils.weak import WeakIdKeyDictionary
 
     from .backends.registry import CompilerFn

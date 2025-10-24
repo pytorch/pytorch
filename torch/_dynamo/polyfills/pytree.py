@@ -7,7 +7,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
-from collections.abc import Callable
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
