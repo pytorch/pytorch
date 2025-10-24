@@ -16,6 +16,11 @@
   then:
   - "module: pt2-dispatcher"
 - any:
+  - "vllm-compile"
+  then:
+  - "module: vllm"
+  - "oncall: pt2"
+- any:
   - "module: vmap"
   then:
   - "module: functorch"
@@ -29,8 +34,6 @@
   - "module: dynamo"
 - any:
   - "module: flex attention"
-  then:
-  - "module: higher order operators"
 - any:
   - "module: aotinductor"
   then:
