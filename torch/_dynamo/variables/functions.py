@@ -52,6 +52,7 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
+    StepUnsupported,
     unimplemented_v2,
     Unsupported,
 )
@@ -78,6 +79,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    raise_type_error_exc,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1319,8 +1321,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def const_getattr(self, tx, name):
         if name == "__name__":
-            return self.fn_name.as_python_constant()
+            return self.get_name()
+        if name == "__code__":
+            return self.get_code()
+        if name == "__defaults__":
+            d = getattr(self, "defaults", None)
+            return d.as_python_constant() if d else None
         return super().const_getattr(tx, name)
+
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
+        if name == "__code__":
+            return variables.ConstantVariable.create(hasattr(self, "code"))
+        if name == "__defaults__":
+            return variables.ConstantVariable.create(hasattr(self, "defaults"))
+        return super().call_obj_hasattr(tx, name)
 
     def has_self(self):
         return False
@@ -1527,6 +1541,8 @@ class SkipFunctionVariable(VariableTracker):
             raise SkipFrame(
                 f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
             )
+        elif self.value is torch._dynamo.step_unsupported:
+            raise StepUnsupported
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -2090,8 +2106,8 @@ class PolyfilledFunctionVariable(VariableTracker):
             return self.call_function(tx, args, kwargs)
 
         method = getattr(self.fn, name, None)
-        assert method is not None, f"Member {name} not found in {self.fn}"
-        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        if not (method or is_function(method)):
+            raise_type_error_exc(tx, f"Cannot find callable {name} in {self.fn}")
         options = {}
         if self.source:
             options["source"] = AttrSource(self.source, name)
@@ -2450,7 +2466,11 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
             )
 
         if self.rank == 1:
-            assert len(args) + len(kwargs) == 4
+            if len(args) + len(kwargs) != 4:
+                raise_type_error_exc(
+                    tx,
+                    f"TMA metadata rank=1 requires exactly 4 arguments, got {len(args) + len(kwargs)}",
+                )
             dims = [
                 kwargs["dim"] if "dim" in kwargs else args[1],
             ]
@@ -2458,7 +2478,11 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
                 kwargs["block_dim"] if "block_dim" in kwargs else args[2],
             ]
         else:
-            assert len(args) + len(kwargs) == 6
+            if len(args) + len(kwargs) != 6:
+                raise_type_error_exc(
+                    tx,
+                    f"TMA metadata rank=2 requires exactly 6 arguments, got {len(args) + len(kwargs)}",
+                )
             dims = [
                 kwargs["dim1"] if "dim1" in kwargs else args[1],
                 kwargs["dim0"] if "dim0" in kwargs else args[2],

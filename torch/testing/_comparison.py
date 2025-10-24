@@ -92,7 +92,9 @@ def default_tolerances(
                 f"Expected a torch.Tensor or a torch.dtype, but got {type(input)} instead."
             )
     dtype_precisions = dtype_precisions or _DTYPE_PRECISIONS
-    rtols, atols = zip(*[dtype_precisions.get(dtype, (0.0, 0.0)) for dtype in dtypes])
+    rtols, atols = zip(
+        *[dtype_precisions.get(dtype, (0.0, 0.0)) for dtype in dtypes], strict=True
+    )
     return max(rtols), max(atols)
 
 
@@ -1219,6 +1221,7 @@ def originate_pairs(
     else:
         for pair_type in pair_types:
             try:
+                # pyrefly: ignore  # bad-instantiation
                 return [pair_type(actual, expected, id=id, **options)]
             # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
             # inputs. Thus, we try the next pair type.

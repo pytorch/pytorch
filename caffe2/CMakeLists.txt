@@ -243,8 +243,8 @@ configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
   COPYONLY)
 
 # Generate header with version info
-configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h.in"
-  "${TORCH_SRC_DIR}/csrc/api/include/torch/version.h"
+configure_file("${TORCH_SRC_DIR}/headeronly/version.h.in"
+  "${TORCH_SRC_DIR}/headeronly/version.h"
   @ONLY)
 
 set(GENERATED_CXX_TORCH
@@ -607,6 +607,12 @@ if(USE_CUDA)
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
+  if(NOT WIN32)
+    set_source_files_properties(
+      ${TORCH_ROOT}/aten/src/ATen/cuda/CUDAGreenContext.cpp
+      PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
+    )
+  endif()
   set_source_files_properties(
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
     PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
@@ -904,15 +910,6 @@ if(USE_LLVM AND LLVM_FOUND)
     support core analysis executionengine instcombine
     scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
-  if(APPLE)
-    set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/unexported_symbols.lds")
-    set_target_properties(torch_cpu PROPERTIES LINK_DEPENDS ${LINKER_SCRIPT})
-    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,-unexported_symbols_list,${LINKER_SCRIPT}")
-  elseif(UNIX)
-    set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/version_script.lds")
-    set_target_properties(torch_cpu PROPERTIES LINK_DEPENDS ${LINKER_SCRIPT})
-    target_link_libraries(torch_cpu PRIVATE "-Wl,--version-script=${LINKER_SCRIPT}")
-  endif()
 endif(USE_LLVM AND LLVM_FOUND)
 
 # This is required for older versions of CMake, which don't allow

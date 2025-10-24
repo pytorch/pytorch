@@ -58,9 +58,10 @@ from ..utils import (
     istype,
     list_methods,
     proxy_args_kwargs,
+    raise_args_mismatch,
     tuple_methods,
 )
-from .base import VariableTracker
+from .base import raise_type_error_exc, VariableTracker
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
@@ -589,20 +590,25 @@ class ComptimeVariable(VariableTracker):
         from ..comptime import ComptimeContext
 
         # TODO: support an expression form as well
-
-        assert not kwargs
         # Second argument is runtime lambda, ignored
-        assert len(args) <= 2
+        if kwargs or len(args) > 2:
+            raise_args_mismatch(
+                tx,
+                "comptime()",
+                "at most 2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
             fn.get_function()(ComptimeContext(tx))
         elif isinstance(fn, NestedUserFunctionVariable):
             # We have to manually bind the freevars ourselves
             code = fn.get_code()
-            assert not fn.closure, (
-                "comptime function must not have free variables, "
-                f"but these variables were free: {code.co_freevars}"
-            )
+            if fn.closure:
+                raise_type_error_exc(
+                    tx,
+                    f"comptime function must not have free variables, but these variables were free: {code.co_freevars}",
+                )
             func = types.FunctionType(
                 code,
                 fn.f_globals,
@@ -946,7 +952,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
         elif name == "mark_non_differentiable":
-            assert len(kwargs) == 0
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
 
@@ -974,7 +981,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             )
 
         if not self.inference:
-            assert self.source and not kwargs
+            if kwargs or not self.source:
+                raise_type_error_exc(
+                    tx, "save_for_backward() requires a source and no keyword arguments"
+                )
             tx.output.side_effects.track_save_for_backward(self, args)
 
         # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
@@ -1220,7 +1230,10 @@ class MethodWrapperVariable(VariableTracker):
         if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
             args[0], variables.TensorVariable
         ):
-            assert len(args) == 1 and len(kwargs) == 0
+            if not (len(args) == 1 and len(kwargs) == 0):
+                raise_type_error_exc(
+                    tx, "tensor attribute getter takes exactly one argument"
+                )
 
             return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
 
@@ -1425,7 +1438,7 @@ class NumpyVariable(VariableTracker):
     def get_constant_collection_for_func(cls, fn):
         mod = fn.__module__.split(".")
         assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
-        return np_constant_collections_map.get(fn, None)
+        return np_constant_collections_map.get(fn)
 
     def call_function(
         self,
@@ -1579,7 +1592,7 @@ class StringFormatVariable(VariableTracker):
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
         }
         codegen(variables.ConstDictVariable(kwargs))
-        codegen.extend_output(create_call_function_ex(True))
+        codegen.extend_output(create_call_function_ex(True, False))
 
 
 class DebuggingVariable(VariableTracker):
@@ -1930,7 +1943,7 @@ class RandomVariable(VariableTracker):
 class WeakRefVariable(VariableTracker):
     @staticmethod
     def build(tx, weakref_value, **options):
-        source = options.get("source", None)
+        source = options.get("source")
         callback = weakref_value.__callback__
         callback_source = source and AttrSource(source, "__callback__")
         callback_vt = VariableTracker.build(tx, callback, callback_source)

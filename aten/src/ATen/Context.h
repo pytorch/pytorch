@@ -19,6 +19,7 @@
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/detail/XLAHooksInterface.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -38,6 +39,12 @@ namespace at {
 class Tensor;
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
+
+enum class CuBLASReductionOption : uint8_t {
+  AllowReducedPrecisionWithSplitK = 0,
+  DisallowReducedPrecisionAllowSplitK = 1,
+  DisallowReducedPrecisionDisallowSplitK = 2,
+};
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
@@ -82,6 +89,8 @@ class TORCH_API Context {
       return at::detail::getHIPHooks();
     } else if (opt_device_type == at::kHPU) {
       return at::detail::getHPUHooks();
+    } else if (opt_device_type == at::kXLA) {
+      return at::detail::getXLAHooks();
     } else {
       TORCH_CHECK(
           false,
@@ -190,7 +199,7 @@ class TORCH_API Context {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::IPU);
   }
   static bool hasXLA() {
-    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::XLA);
+    return detail::getXLAHooks().hasXLA();
   }
   static bool hasXPU() {
     return detail::getXPUHooks().hasXPU();
@@ -220,15 +229,15 @@ class TORCH_API Context {
   bool userEnabledMkldnn() const;
   void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
-  void setBenchmarkCuDNN(bool);
+  void setBenchmarkCuDNN(bool /*b*/);
   int benchmarkLimitCuDNN() const;
-  void setBenchmarkLimitCuDNN(int);
+  void setBenchmarkLimitCuDNN(int /*b*/);
   bool immediateMiopen() const;
-  void setImmediateMiopen(bool);
+  void setImmediateMiopen(bool /*b*/);
   bool deterministicCuDNN() const;
-  void setDeterministicCuDNN(bool);
+  void setDeterministicCuDNN(bool /*b*/);
   bool deterministicMkldnn() const;
-  void setDeterministicMkldnn(bool);
+  void setDeterministicMkldnn(bool /*b*/);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -246,32 +255,32 @@ class TORCH_API Context {
   void setSDPPriorityOrder(const std::vector<int64_t>& order);
   std::array<at::SDPBackend, at::num_sdp_backends> sDPPriorityOrder();
 
-  void setSDPUseFlash(bool);
+  void setSDPUseFlash(bool /*e*/);
   bool userEnabledFlashSDP() const;
 
-  void setSDPUseMemEfficient(bool);
+  void setSDPUseMemEfficient(bool /*e*/);
   bool userEnabledMemEfficientSDP() const;
 
-  void setSDPUseMath(bool);
+  void setSDPUseMath(bool /*e*/);
   bool userEnabledMathSDP() const;
 
-  void setSDPUseCuDNN(bool);
+  void setSDPUseCuDNN(bool /*e*/);
   bool userEnabledCuDNNSDP() const;
 
-  void setAllowFP16BF16ReductionMathSDP(bool);
+  void setAllowFP16BF16ReductionMathSDP(bool /*e*/);
   bool allowFP16BF16ReductionMathSDP() const;
 
-  void setSDPUseOverrideable(bool);
+  void setSDPUseOverrideable(bool /*e*/);
   bool userEnabledOverrideableSDP() const;
 
   at::LinalgBackend linalgPreferredBackend() const;
-  void setLinalgPreferredBackend(at::LinalgBackend);
+  void setLinalgPreferredBackend(at::LinalgBackend /*b*/);
 
   at::BlasBackend blasPreferredBackend();
-  void setBlasPreferredBackend(at::BlasBackend);
+  void setBlasPreferredBackend(at::BlasBackend /*b*/);
 
   at::ROCmFABackend getROCmFAPreferredBackend();
-  void setROCmFAPreferredBackend(at::ROCmFABackend);
+  void setROCmFAPreferredBackend(at::ROCmFABackend /*b*/);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -304,9 +313,9 @@ class TORCH_API Context {
 
   bool deterministicAlgorithms() const;
   bool deterministicAlgorithmsWarnOnly() const;
-  void setDeterministicAlgorithms(bool, bool);
+  void setDeterministicAlgorithms(bool /*b*/, bool /*warn_only*/);
   bool deterministicFillUninitializedMemory() const;
-  void setDeterministicFillUninitializedMemory(bool);
+  void setDeterministicFillUninitializedMemory(bool /*b*/);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -350,19 +359,23 @@ class TORCH_API Context {
       Float32Op op,
       Float32Precision p);
   bool allowTF32CuDNN(std::optional<Float32Op> op = std::nullopt) const;
-  void setAllowTF32CuDNN(bool);
+  void setAllowTF32CuDNN(bool /*b*/);
   bool allowTF32OneDNN() const;
-  void setAllowTF32OneDNN(bool);
+  void setAllowTF32OneDNN(bool /*b*/);
   bool allowTF32CuBLAS() const;
-  void setAllowTF32CuBLAS(bool);
+  void setAllowTF32CuBLAS(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
-  bool allowFP16ReductionCuBLAS() const;
-  void setAllowFP16ReductionCuBLAS(bool);
-  bool allowBF16ReductionCuBLAS() const;
-  void setAllowBF16ReductionCuBLAS(bool);
+  CuBLASReductionOption allowFP16ReductionCuBLAS() const;
+  void setAllowFP16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
+  CuBLASReductionOption allowBF16ReductionCuBLAS() const;
+  void setAllowBF16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
   bool allowFP16AccumulationCuBLAS() const;
-  void setAllowFP16AccumulationCuBLAS(bool);
+  void setAllowFP16AccumulationCuBLAS(bool /*b*/);
 
   // Matmuls can use a so-called "persistent" kernel which launches one CUDA
   // block for each SM on the GPU, and each block then iterates over multiple
@@ -374,7 +387,7 @@ class TORCH_API Context {
   // to make matmuls target only a subset of the SMs, so they can fully schedule
   // even next to a comms kernel, and only be a few percent slower.
   std::optional<int32_t> _SMCarveout_EXPERIMENTAL() const;
-  void _setSMCarveout_EXPERIMENTAL(std::optional<int32_t>);
+  void _setSMCarveout_EXPERIMENTAL(std::optional<int32_t> /*c*/);
 
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
@@ -395,7 +408,7 @@ class TORCH_API Context {
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
-  void setAllowFP16ReductionCPU(bool);
+  void setAllowFP16ReductionCPU(bool /*b*/);
 
   // Preserved for BC
   void lazyInitCUDA() {
@@ -452,8 +465,10 @@ class TORCH_API Context {
       : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
-  bool allow_fp16_reduction_cublas = true;
-  bool allow_bf16_reduction_cublas = true;
+  CuBLASReductionOption allow_fp16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  CuBLASReductionOption allow_bf16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   bool allow_fp16_accumulation_cublas = false;
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;

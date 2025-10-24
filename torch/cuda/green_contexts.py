@@ -4,8 +4,8 @@ import torch
 _GreenContext = object
 SUPPORTED = False
 
-if hasattr(torch._C, "GreenContext"):
-    _GreenContext = torch._C.GreenContext  # type: ignore[misc]
+if hasattr(torch._C, "_CUDAGreenContext"):
+    _GreenContext = torch._C._CUDAGreenContext  # type: ignore[misc]
     SUPPORTED = True
 
 
@@ -31,12 +31,12 @@ class GreenContext(_GreenContext):
 
     # Note that these functions are bypassed by we define them here
     # for Sphinx documentation purposes
-    def make_current(self) -> None:
+    def set_context(self) -> None:
         r"""Make the green context the current context."""
-        return super().make_current()  # type: ignore[misc]
+        return super().set_context()  # type: ignore[misc]
 
-    def pop_current(self) -> None:
+    def pop_context(self) -> None:
         r"""Assuming the green context is the current context, pop it from the
         context stack and restore the previous context.
         """
-        return super().pop_current()  # type: ignore[misc]
+        return super().pop_context()  # type: ignore[misc]
