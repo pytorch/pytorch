@@ -1,3 +1,45 @@
+r"""
+Symmetric Memory
+================
+
+This module provides symmetric memory allocation and communication primitives for
+distributed training. Symmetric memory enables efficient peer-to-peer (P2P)
+communication between GPUs by allowing direct access to memory on remote devices.
+
+Key Features:
+    - **Zero-copy P2P access**: Access remote GPU memory directly without staging through host memory
+    - **Backend support**: Multiple backends including NVSHMEM, CUDA, and NCCL
+    - **Fused collectives**: High-performance fused operations like all-gather+matmul and matmul+reduce-scatter
+    - **Low-contention operations**: Collectives optimized for overlap with computation
+
+Basic Usage:
+    The typical workflow for using symmetric memory:
+
+    1. Allocate a tensor using :func:`empty`::
+
+        import torch.distributed._symmetric_memory as symm_mem
+        tensor = symm_mem.empty((1024, 1024), dtype=torch.float32, device="cuda")
+
+    2. Establish symmetric memory across processes using :func:`rendezvous`::
+
+        symm_mem_obj = symm_mem.rendezvous(tensor, group)
+
+    3. Use the symmetric memory object to access remote buffers::
+
+        remote_buf = symm_mem_obj.get_buffer(remote_rank, shape, dtype)
+        symm_mem_obj.barrier()  # Synchronize across all ranks
+
+Backend Configuration:
+    Set the backend before allocating symmetric memory::
+
+        symm_mem.set_backend("NVSHMEM")  # or "CUDA" or "NCCL"
+
+See Also:
+    - :func:`empty`: Allocate a symmetric memory tensor
+    - :func:`rendezvous`: Establish symmetric memory across processes
+    - :func:`set_backend`: Configure the backend for symmetric memory
+"""
+
 from __future__ import annotations
 
 import math
@@ -22,11 +64,30 @@ _group_name_to_store: dict[str, c10d.Store] = {}
 
 
 def enable_symm_mem_for_group(group_name: str) -> None:
-    """
-    Enables symmetric memory for a process group.
+    r"""enable_symm_mem_for_group(group_name) -> None
+
+    Enables symmetric memory for a process group. This function sets up the
+    necessary infrastructure to allow symmetric memory operations within the
+    specified process group.
+
+    This function is idempotent - calling it multiple times for the same group
+    has no additional effect. The function is automatically called by
+    :func:`get_symm_mem_workspace` and :func:`rendezvous`, so users typically
+    do not need to call it directly.
 
     Args:
-        group_name (str): the name of the process group.
+        group_name (str): The name of the process group for which to enable
+            symmetric memory. This must be a valid process group that has been
+            previously created via :func:`torch.distributed.new_group` or the
+            default ``"0"`` for the world group.
+
+    Example::
+
+        >>> import torch.distributed as dist
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> # Assuming distributed environment is initialized
+        >>> dist.init_process_group(backend="nccl")
+        >>> symm_mem.enable_symm_mem_for_group("0")  # Enable for world group
     """
     if group_name in _group_name_to_store:
         return
@@ -74,11 +135,28 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
 
 
 def is_symm_mem_enabled_for_group(group_name: str) -> bool:
-    """
-    Check if symmetric memory is enabled for a process group.
+    r"""is_symm_mem_enabled_for_group(group_name) -> bool
+
+    Check if symmetric memory has been enabled for a process group.
+
+    This function returns ``True`` if :func:`enable_symm_mem_for_group` has been
+    called for the specified group, either explicitly or implicitly via other
+    symmetric memory operations.
 
     Args:
-        group_name (str): the name of the process group.
+        group_name (str): The name of the process group to check.
+
+    Returns:
+        bool: ``True`` if symmetric memory is enabled for the group, ``False`` otherwise.
+
+    Example::
+
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> symm_mem.is_symm_mem_enabled_for_group("0")
+        False
+        >>> symm_mem.enable_symm_mem_for_group("0")
+        >>> symm_mem.is_symm_mem_enabled_for_group("0")
+        True
     """
     if _is_test_mode:
         return _mocked_group_names is None or group_name in _mocked_group_names
@@ -89,18 +167,48 @@ _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
 
 
 def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
-    """
-    Get the symmetric memory workspace associated with the process group. If
-    ``min_size`` is greater than the workspace associated with ``group_name``,
-    the workspace will be re-allocated and re-rendezvous'd.
+    r"""get_symm_mem_workspace(group_name, min_size) -> _SymmetricMemory
+
+    Get or allocate a symmetric memory workspace for a process group.
+
+    This function returns a workspace buffer that can be used for temporary
+    symmetric memory operations. The workspace is shared across all operations
+    within the group and is automatically resized if a larger size is requested.
+
+    .. warning::
+        During CUDA graph capture, the workspace cannot be resized. You must
+        pre-allocate the workspace with sufficient size before initiating
+        graph capture by calling this function with the maximum required size.
 
     Args:
-        group_name (str): the name of the process group.
-        min_size (int): the size requirement for the workspace in bytes.
+        group_name (str): The name of the process group. Use ``"0"`` for the
+            default world group.
+        min_size (int): The minimum required workspace size in bytes. If the
+            current workspace is smaller than this, it will be reallocated.
 
     Returns:
-        _SymmetricMemory: the symmetric memory workspace associated with the
-        group.
+        _SymmetricMemory: A symmetric memory object that provides access to
+            the workspace buffer. This object can be used to get remote buffers
+            and perform synchronization via barriers.
+
+    Raises:
+        RuntimeError: If the requested size is larger than the current workspace
+            during CUDA graph capture.
+
+    Example::
+
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> # Allocate 1MB workspace
+        >>> workspace = symm_mem.get_symm_mem_workspace("0", 1024 * 1024)
+        >>> # Access a buffer on the current rank
+        >>> buf = workspace.get_buffer(
+        ...     workspace.rank,
+        ...     shape=(256, 256),
+        ...     dtype=torch.float32
+        ... )
+
+    See Also:
+        :func:`empty`: For allocating non-workspace symmetric memory tensors
     """
     enable_symm_mem_for_group(group_name)
 
@@ -1862,24 +1970,67 @@ def empty(  # type: ignore[misc]
     dtype: _dtype | None = None,
     device: _device | None = None,
 ) -> torch.Tensor:
-    r"""
-    empty(*size, *, dtype=None, device=None) -> Tensor
+    r"""empty(*size, *, dtype=None, device=None) -> Tensor
 
-    Similar to :func:`torch.empty()`. The returned tensor can be used by
-    :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
-    symmetric memory tensor among participating processes.
+    Allocates a tensor in symmetric memory that can be accessed by all processes
+    in a distributed group.
+
+    This function is similar to :func:`torch.empty`, but allocates the tensor in
+    a special memory region that enables efficient peer-to-peer (P2P) access across
+    GPUs. The returned tensor must be used with :func:`rendezvous` to establish
+    symmetric memory semantics before it can be accessed by remote processes.
+
+    .. note::
+        The backend for symmetric memory allocation is determined by the current
+        setting. Use :func:`set_backend` before calling this function to configure
+        the desired backend (``"NVSHMEM"``, ``"CUDA"``, or ``"NCCL"``).
+
+    .. warning::
+        Once a symmetric memory tensor has been allocated, the backend cannot be
+        changed. The backend setting is global and persists across all subsequent
+        allocations until the process terminates.
 
     Args:
-        size (int...): a sequence of integers defining the shape of the output tensor.
-            Can be a variable number of arguments or a collection like a list or tuple.
+        size (int...): A sequence of integers defining the shape of the output tensor.
+            Can be a variable number of arguments (e.g., ``empty(2, 3)``) or a
+            collection like a list or tuple (e.g., ``empty([2, 3])``).
 
     Keyword args:
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
-        device (:class:`torch.device`, optional): the desired device of returned tensor.
-            Default: if ``None``, uses the current device for the default tensor type
-            (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
-            for CPU tensor types and the current CUDA device for CUDA tensor types.
+        dtype (:class:`torch.dtype`, optional): The desired data type of the returned
+            tensor. Default: if ``None``, uses the global default dtype (see
+            :func:`torch.set_default_dtype`).
+        device (:class:`torch.device`, optional): The desired device of the returned
+            tensor. Default: if ``None``, uses the current device. For CUDA tensors,
+            this will be the current CUDA device.
+
+    Returns:
+        Tensor: An uninitialized tensor allocated in symmetric memory with the
+            specified shape, dtype, and device.
+
+    Example::
+
+        >>> import torch.distributed as dist
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> # Initialize distributed environment
+        >>> dist.init_process_group(backend="nccl")
+        >>> # Set backend before allocation
+        >>> symm_mem.set_backend("CUDA")
+        >>> # Allocate symmetric memory tensor
+        >>> tensor = symm_mem.empty(1024, 1024, dtype=torch.float32, device="cuda")
+        >>> # Initialize with data
+        >>> tensor.fill_(dist.get_rank())
+        >>> # Establish symmetric memory
+        >>> symm_mem_obj = symm_mem.rendezvous(tensor, group=dist.group.WORLD)
+        >>> # Now remote processes can access this tensor
+        >>> if dist.get_rank() == 0:
+        ...     # Rank 0 accesses rank 1's tensor
+        ...     remote_buf = symm_mem_obj.get_buffer(1, (1024, 1024), torch.float32)
+        ...     print(remote_buf[0, 0])  # Should print 1.0
+
+    See Also:
+        - :func:`rendezvous`: Establish symmetric memory across processes
+        - :func:`set_backend`: Configure the symmetric memory backend
+        - :func:`torch.empty`: Standard PyTorch tensor allocation
     """
     if len(size) == 1 and isinstance(size[0], Sequence):
         size = tuple(size[0])
@@ -1903,18 +2054,92 @@ def empty(  # type: ignore[misc]
 def rendezvous(
     tensor: torch.Tensor, group: Union[str, ProcessGroup]
 ) -> _SymmetricMemory:
-    r"""
-    rendezvous(tensor, group) -> _SymmetricMemory
+    r"""rendezvous(tensor, group) -> _SymmetricMemory
 
-    Establish a symmetric memory tensor among participating processes. This is
-    a collective operation.
+    Establishes symmetric memory for a tensor across all processes in a group.
+
+    This is a collective operation that must be called by all processes in the
+    group with tensors of identical shape and dtype. After this call completes,
+    each process can access the tensor data from any other process in the group
+    via the returned :class:`_SymmetricMemory` object.
+
+    The function performs a barrier to ensure all processes have made their local
+    tensor accessible before returning. This synchronization ensures that subsequent
+    remote access operations are safe.
+
+    .. warning::
+        This is a collective operation. All ranks in the group must call this
+        function, otherwise the program will hang waiting for all participants.
+
+    .. note::
+        The tensor must have been allocated using :func:`empty`. Regular PyTorch
+        tensors allocated with :func:`torch.empty` cannot be used with this function.
 
     Args:
-        tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
-            It must be allocated via :func:`torch._distributed._symmetric_memory.empty()`. The shape,
-            dtype, and device type must be identical across all participating processes.
-        group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
-            participating processes. This can be either a group name or a process group object.
+        tensor (Tensor): The local tensor to establish as symmetric memory. Must
+            have been allocated via :func:`empty`. All processes in the group must
+            provide tensors with identical shape, dtype, and device type.
+        group (Union[str, ProcessGroup]): The process group over which to establish
+            symmetric memory. Can be either:
+
+            - A group name string (e.g., ``"0"`` for the world group)
+            - A :class:`torch.distributed.ProcessGroup` object
+
+    Returns:
+        _SymmetricMemory: A symmetric memory object that provides:
+
+            - ``rank`` (int): The rank of the current process within the group
+            - ``world_size`` (int): The total number of processes in the group
+            - ``get_buffer(rank, shape, dtype, offset=0)``: Access a remote tensor
+            - ``barrier(channel=0)``: Synchronize all processes in the group
+
+    Example::
+
+        >>> import torch
+        >>> import torch.distributed as dist
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>>
+        >>> # Initialize process group
+        >>> dist.init_process_group(backend="nccl")
+        >>> rank = dist.get_rank()
+        >>> world_size = dist.get_world_size()
+        >>>
+        >>> # Allocate and initialize symmetric memory tensor
+        >>> tensor = symm_mem.empty((256, 256), dtype=torch.float32, device="cuda")
+        >>> tensor.fill_(rank * 100)  # Each rank fills with unique value
+        >>>
+        >>> # Establish symmetric memory
+        >>> symm_mem_obj = symm_mem.rendezvous(tensor, group=dist.group.WORLD)
+        >>>
+        >>> # Access remote tensor from next rank
+        >>> next_rank = (rank + 1) % world_size
+        >>> remote_tensor = symm_mem_obj.get_buffer(
+        ...     next_rank, shape=(256, 256), dtype=torch.float32
+        ... )
+        >>> print(f"Rank {rank} sees rank {next_rank}'s value: {remote_tensor[0, 0]}")
+        >>> # Output: Rank 0 sees rank 1's value: 100.0
+        >>>
+        >>> # Synchronize all ranks
+        >>> symm_mem_obj.barrier()
+
+    Example with subgroups::
+
+        >>> # Create subgroups for data parallelism
+        >>> ranks = list(range(dist.get_world_size()))
+        >>> subgroup_size = dist.get_world_size() // 2
+        >>> subgroup_0 = dist.new_group(ranks[:subgroup_size])
+        >>> subgroup_1 = dist.new_group(ranks[subgroup_size:])
+        >>>
+        >>> # Each subgroup establishes its own symmetric memory
+        >>> subgroup = subgroup_0 if rank < subgroup_size else subgroup_1
+        >>> tensor = symm_mem.empty((128, 128), dtype=torch.float32, device="cuda")
+        >>> symm_mem_obj = symm_mem.rendezvous(tensor, group=subgroup)
+        >>> # Now each process can access tensors only within its subgroup
+
+    See Also:
+        - :func:`empty`: Allocate tensors in symmetric memory
+        - :func:`get_symm_mem_workspace`: Get workspace for temporary operations
+        - :class:`torch.distributed.ProcessGroup`: Process group documentation
     """
     from torch._C._distributed_c10d import ProcessGroup
 
@@ -1930,10 +2155,27 @@ def rendezvous(
 
 
 def is_nvshmem_available() -> bool:
-    r"""
-    is_nvshmem_available() -> bool
+    r"""is_nvshmem_available() -> bool
 
-    Check if NVSHMEM is available in current build and on current system.
+    Check if NVSHMEM support is available.
+
+    This function checks both whether PyTorch was built with NVSHMEM support
+    and whether the current system has the necessary NVSHMEM runtime libraries.
+
+    Returns:
+        bool: ``True`` if NVSHMEM is available and can be used as a backend,
+            ``False`` otherwise.
+
+    Example::
+
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> if symm_mem.is_nvshmem_available():
+        ...     symm_mem.set_backend("NVSHMEM")
+        ... else:
+        ...     symm_mem.set_backend("CUDA")  # Fallback to CUDA backend
+
+    See Also:
+        :func:`set_backend`: Set the symmetric memory backend
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
@@ -1946,37 +2188,126 @@ def is_nvshmem_available() -> bool:
 
 
 def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
-    r"""
-    Set the backend for symmetric memory allocation. This is a global setting
-    and affects all subsequent calls to
-    :func:`torch._distributed._symmetric_memory.empty()`.  Note that the backend
-    cannot be changed once a symmetric memory tensor has been allocated.
+    r"""set_backend(name) -> None
+
+    Set the backend for symmetric memory allocation.
+
+    This is a global setting that determines how symmetric memory is allocated
+    and accessed. The backend must be set before the first call to :func:`empty`,
+    as it cannot be changed after symmetric memory has been allocated.
+
+    Available backends:
+        - ``"NVSHMEM"``: Uses NVIDIA SHMEM library for optimal performance on
+          systems with NVLink or NVSwitch. Requires NVSHMEM libraries to be
+          installed. Check availability with :func:`is_nvshmem_available`.
+        - ``"CUDA"``: Uses CUDA IPC (Inter-Process Communication) for P2P access.
+          Works on systems with CUDA-capable GPUs and P2P access enabled. This is
+          a good fallback when NVSHMEM is not available.
+        - ``"NCCL"``: Uses NCCL's built-in symmetric memory support. Available on
+          newer NCCL versions.
+
+    .. warning::
+        This function must be called before any symmetric memory tensors are
+        allocated. Once a tensor has been allocated with :func:`empty`, the
+        backend setting is locked and cannot be changed for the lifetime of
+        the process.
 
     Args:
-        backend (str): the backend for symmetric memory allocation. Currently,
-        only "NVSHMEM", "CUDA", "NCCL" are supported.
+        name (str): The backend name. Must be one of ``"NVSHMEM"``, ``"CUDA"``,
+            or ``"NCCL"``.
+
+    Raises:
+        RuntimeError: If attempting to change the backend after symmetric memory
+            has already been allocated.
+        ValueError: If the specified backend name is not recognized.
+
+    Example::
+
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> # Set backend before any allocation
+        >>> symm_mem.set_backend("CUDA")
+        >>> # Now allocate tensors
+        >>> tensor = symm_mem.empty(1024, 1024, dtype=torch.float32, device="cuda")
+
+    Example with availability check::
+
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> # Choose backend based on availability
+        >>> if symm_mem.is_nvshmem_available():
+        ...     print("Using NVSHMEM backend for best performance")
+        ...     symm_mem.set_backend("NVSHMEM")
+        ... else:
+        ...     print("NVSHMEM not available, falling back to CUDA")
+        ...     symm_mem.set_backend("CUDA")
+
+    See Also:
+        - :func:`empty`: Allocate symmetric memory tensors
+        - :func:`get_backend`: Query the current backend setting
+        - :func:`is_nvshmem_available`: Check NVSHMEM availability
     """
     _SymmetricMemory.set_backend(name)
 
 
 def get_backend(device: _device) -> str | None:
-    r"""
-    Get the backend for symmetric memory allocation for a given device. If not
-    found, return None.
+    r"""get_backend(device) -> str | None
+
+    Get the symmetric memory backend configured for a device.
+
+    Returns the name of the backend (``"NVSHMEM"``, ``"CUDA"``, or ``"NCCL"``)
+    that is currently configured for symmetric memory allocation on the specified
+    device. If no backend has been configured yet, returns ``None``.
 
     Args:
-        device (class:`torch.device` or str): the device for which to get the
-        backend.
+        device (torch.device or str): The device to query. Can be a device object
+            (e.g., ``torch.device("cuda:0")``) or a device string (e.g., ``"cuda"``).
+
+    Returns:
+        str or None: The backend name if configured, ``None`` otherwise.
+
+    Example::
+
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> # Before setting backend
+        >>> symm_mem.get_backend("cuda")
+        None
+        >>> # After setting backend
+        >>> symm_mem.set_backend("CUDA")
+        >>> symm_mem.get_backend("cuda")
+        'CUDA'
+
+    See Also:
+        :func:`set_backend`: Configure the symmetric memory backend
     """
     return _SymmetricMemory.get_backend(torch.device(device))
 
 
 def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
-    r"""
-    Get the MemPool allocator for symmetric memory for a given device.
+    r"""get_mempool_allocator(device) -> CUDAPluggableAllocator
+
+    Get the memory pool allocator used for symmetric memory.
+
+    Returns the CUDA memory pool allocator that manages symmetric memory
+    allocations for the specified device. This allocator can be used to
+    configure memory pool behavior or query allocation statistics.
+
     Args:
-        device (class:`torch.device` or str): the device for which to get the
-        MemPool allocator.
+        device (torch.device or str): The device for which to get the memory
+            pool allocator.
+
+    Returns:
+        CUDAPluggableAllocator: The memory pool allocator for symmetric memory
+            on the specified device.
+
+    Example::
+
+        >>> import torch.distributed._symmetric_memory as symm_mem
+        >>> symm_mem.set_backend("CUDA")
+        >>> allocator = symm_mem.get_mempool_allocator("cuda:0")
+        >>> # Use allocator to query memory stats or configure pool behavior
+
+    See Also:
+        - :func:`empty`: Allocate symmetric memory tensors
+        - :func:`set_backend`: Configure the backend
     """
     return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
