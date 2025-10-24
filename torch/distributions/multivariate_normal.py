@@ -126,7 +126,7 @@ class MultivariateNormal(Distribution):
     # pyrefly: ignore  # bad-override
     arg_constraints = {
         "loc": constraints.real_vector,
-        "covariance_matrix": constraints.positive_definite,
+        "covariance_matrix": constraints.positive_semidefinite,
         "precision_matrix": constraints.positive_definite,
         "scale_tril": constraints.lower_cholesky,
     }
