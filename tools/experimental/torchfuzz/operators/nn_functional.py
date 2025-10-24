@@ -1175,4 +1175,3 @@ class MultiHeadAttentionForwardOperator(Operator):
 )"""
 
         return code
->>>>>>> af576acd74f (wip)
