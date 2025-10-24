@@ -103,7 +103,15 @@ class SuperVariable(VariableTracker):
             codegen.extend_output(create_call_function(1, False))
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
-        assert self.objvar, "1-arg super not implemented"
+        if not self.objvar:
+            unimplemented_v2(
+                gb_type="1-arg super not implemented",
+                context="",
+                explanation="Dynamo failed to trace attribute `{name}` accessed "
+                f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
+                "because only one argument of super() is not yet supported.",
+                hints=[],
+            )
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
