@@ -431,7 +431,6 @@ class TestPySymInt(TestCase):
         res_xor = a0 ^ b0
         self.assertEqual(res_xor, 0b0110)
         self.assertIsInstance(res_xor, torch.SymInt, msg=type(res_xor))
-        print(f"shape_env.guards[0][0] {shape_env.guards[0][0]}")
         self.assertExpectedInline(
             str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_xor(s97, s26), 6)"""
         )
