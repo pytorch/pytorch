@@ -66,7 +66,7 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
 } // namespace
 
 void registerHandler(const std::string& name, HandlerFunc f) {
-  return getHandlerRegistry().registerHandler(name, std::move(f));
+  getHandlerRegistry().registerHandler(name, std::move(f));
 }
 
 HandlerFunc getHandler(const std::string& name) {

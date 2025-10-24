@@ -297,7 +297,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "append");
     if (!fn) {
-      return Store::append(key, value);
+      Store::append(key, value);
+      return;
     }
     // Call function with a py::bytes object for the value.
     fn(key, toPyBytes(value));
@@ -330,7 +331,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "multi_set");
     if (!fn) {
-      return Store::multiSet(keys, values);
+      Store::multiSet(keys, values);
+      return;
     }
 
     fn(keys, toPyBytes(values));
@@ -720,17 +722,17 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_check_reducer_finalized",
-          [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          [](::c10d::Reducer& reducer) { reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_reset_state",
-          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
+          [](::c10d::Reducer& reducer) { reducer.reset_state(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_update_process_group",
           [](::c10d::Reducer& reducer,
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
-            return reducer.update_process_group(std::move(new_process_group));
+            reducer.update_process_group(std::move(new_process_group));
           },
           py::call_guard<py::gil_scoped_release>());
 
@@ -991,7 +993,8 @@ This class does not support ``__members__`` property.)");
   module.def(
       "_set_allow_inflight_collective_as_graph_input",
       [](bool value) {
-        return ::c10d::set_allow_inflight_collective_as_graph_input(value);
+        ::c10d::set_allow_inflight_collective_as_graph_input(value);
+        return;
       },
       py::arg("value"));
 
@@ -1003,13 +1006,15 @@ This class does not support ``__members__`` property.)");
   module.def(
       "_unregister_process_group",
       [](const std::string& group_name) {
-        return ::c10d::unregister_process_group(group_name);
+        ::c10d::unregister_process_group(group_name);
+        return;
       },
       py::arg("group_name"));
 
   // Remove all process groups from the native registry
   module.def("_unregister_all_process_groups", []() {
-    return ::c10d::unregister_all_process_groups();
+    ::c10d::unregister_all_process_groups();
+    return;
   });
 
 #ifdef USE_NVSHMEM
@@ -2526,7 +2531,7 @@ communication mechanism.
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = std::nullopt,
               py::arg("wait_all_ranks") = false,
@@ -2589,7 +2594,7 @@ communication mechanism.
               "_set_default_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const ::c10d::ProcessGroup::BackendType& backendType) {
-                return self->setDefaultBackend(backendType);
+                self->setDefaultBackend(backendType);
               },
               py::arg("backend_type"),
               py::call_guard<py::gil_scoped_release>())
@@ -3034,7 +3039,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,

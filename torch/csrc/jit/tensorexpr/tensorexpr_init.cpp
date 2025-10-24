@@ -466,7 +466,7 @@ void initTensorExprBindings(PyObject* module) {
       .def("vectorize_inner_loops", &LoopNest::vectorizeInnerLoops)
       .def(
           "prepare_for_codegen",
-          [](LoopNest& self) { return self.prepareForCodegen(); },
+          [](LoopNest& self) { self.prepareForCodegen(); },
           py::return_value_policy::reference)
       .def(
           "get_loop_body_for",
@@ -638,7 +638,7 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "compress_buffer",
           [](BufHandle& buf, const StmtPtr& stmt) {
-            return LoopNest::compressBuffer(buf.node(), stmt);
+            LoopNest::compressBuffer(buf.node(), stmt);
           },
           py::return_value_policy::reference)
       .def_static(

@@ -139,7 +139,7 @@ Weights::Weights(
       };
 
   auto loadAndInsertParamsBuffers = [&](const auto& tensorName, bool isUsed) {
-    return loadAndInsert(
+    loadAndInsert(
         std::string(tensorName), stateDictPathPrefix, stateDictPaths, isUsed);
   };
 
