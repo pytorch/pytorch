@@ -657,21 +657,6 @@ float2 bool_to_float(bool b) {
 }
 
 template <typename T>
-static T conj(T a) {
-  return a;
-}
-
-template <>
-half2 conj(half2 a) {
-  return half2(a.x, -a.y);
-}
-
-template <>
-float2 conj(float2 a) {
-  return float2(a.x, -a.y);
-}
-
-template <typename T>
 static T calc_H_irc(
     device T* A,
     uint32_t A_stride_r,
@@ -684,7 +669,7 @@ static T calc_H_irc(
   T I_val = bool_to_float<T>(r == c);
   T tau_val = tau[i * tau_stride];
 
-  T A_ci = conj(A[c * A_stride_r + i * A_stride_c]);
+  T A_ci = c10::metal::conj(A[c * A_stride_r + i * A_stride_c]);
   T A_ri = A[r * A_stride_r + i * A_stride_c];
 
   T c_eq_i = bool_to_float<T>(c == i);
