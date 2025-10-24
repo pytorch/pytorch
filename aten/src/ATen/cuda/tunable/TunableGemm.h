@@ -326,4 +326,28 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>> {
   }
 };
 
+template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
+class ScaledGemmMxFp8TunableOp : public TunableOp<ScaledGemmParams<CT>> {
+ public:
+  ScaledGemmMxFp8TunableOp() {
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
+
+#ifdef USE_ROCM
+    for (auto&& [name, op] : GetHipBlasLtScaledGemmMxFp8TypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
+      this->RegisterOp(std::move(name), std::move(op));
+    }
+#endif
+
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
+  }
+
+  std::string Signature() override {
+    return fmt::sprintf("ScaledGemmMxFp8TunableOp_%s_%s_%s_%c%c",
+      TypeName<AT>(AT{}),
+      TypeName<BT>(BT{}),
+      TypeName<CT>(CT{}),
+      BlasOpToString(ALayout), BlasOpToString(BLayout));
+  }
+};
+
 } // namespace at::cuda::tunable

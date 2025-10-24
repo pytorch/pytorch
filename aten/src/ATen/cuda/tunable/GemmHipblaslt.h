@@ -10,7 +10,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
-
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
@@ -657,86 +656,16 @@ auto GetHipBlasLtTypeStringAndOps() {
   hipblasLtHandle_t handle;
   TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
 
-  bool use_mx_fp8_enum = false;
-#if ROCM_VERSION >= 70000
-  if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<CT>>) {
-    // For ScaledGemmParams, enumerate with mx-fp8 scale mode
-    use_mx_fp8_enum = true;
-  }
-#endif
-  std::vector<hipblasLtMatmulHeuristicResult_t> all_heuristic_results;
-  std::set<int> unique_algo_indices;  // Track unique algorithms by index
-  if (use_mx_fp8_enum) {
-#if ROCM_VERSION >= 70000
-    std::vector<hipblasLtMatmulHeuristicResult_t> all_heuristic_results;
-    
-    // Query multiple representative sizes
-    std::vector<int64_t> representative_sizes = {128, 512, 1024, 2048};
-    
-    for (auto size : representative_sizes) {
-      int64_t dummy_m = size, dummy_n = size, dummy_k = size;
-      
-      // Create matmul descriptor with mx-fp8 scale mode
-      HipBlasLtMatmulDescriptor matmul_desc(computeType, HIP_R_32F);
-      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, transa_outer);
-      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, transb_outer);
-      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
-      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
-      
-      // Create matrix layouts for this size
-      hipblasLtMatrixLayout_t mat_a, mat_b, mat_c;
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_a, a_datatype,
-          transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k,
-          transa_outer == HIPBLAS_OP_N ? dummy_k : dummy_m,
-          transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_b, b_datatype,
-          transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n,
-          transb_outer == HIPBLAS_OP_N ? dummy_n : dummy_k,
-          transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_c, in_out_datatype, dummy_m, dummy_n, dummy_m));
-      
-      // Query algorithms for this size
-      hipblasLtMatmulPreference_t pref;
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceCreate(&pref));
-      size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceSetAttribute(
-          pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_size, sizeof(workspace_size)));
-      
-      int returnedAlgoCount = 0;
-      std::vector<hipblasLtMatmulHeuristicResult_t> size_results(100);
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulAlgoGetHeuristic(
-          handle, matmul_desc.descriptor(), mat_a, mat_b, mat_c, mat_c,
-          pref, 100, size_results.data(), &returnedAlgoCount));
-      
-      // ADD ALL ALGORITHMS - no deduplication!
-      // TunableOp will naturally handle any duplicates through timing
-      for (int i = 0; i < returnedAlgoCount; i++) {
-        all_heuristic_results.push_back(size_results[i]);
-      }
-      
-      TUNABLE_LOG2("├── Query size ", size, " returned ", returnedAlgoCount, " algorithms");
-      
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceDestroy(pref));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
-    }
-    
-    heuristic_result = std::move(all_heuristic_results);
-    TUNABLE_LOG1("├── Total algorithms from all sizes: ", heuristic_result.size());
-#endif
-  } else {
-    TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
-        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
-        transa_outer,
-        transb_outer,
-        a_datatype,
-        b_datatype,
-        in_out_datatype,
-        in_out_datatype,
-        computeType,
-        heuristic_result));
-  }
+  TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
+      hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+      transa_outer,
+      transb_outer,
+      a_datatype,
+      b_datatype,
+      in_out_datatype,
+      in_out_datatype,
+      computeType,
+      heuristic_result));
 
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
@@ -772,6 +701,94 @@ template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
 auto GetHipBlasLtScaledGemmTypeStringAndOps() {
   return GetHipBlasLtTypeStringAndOps<AT, BT, CT, ALayout, BLayout, ScaledGemmParams<CT>>();
 }
+
+#if ROCM_VERSION >= 70000
+template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
+auto GetHipBlasLtScaledGemmMxFp8TypeStringAndOps() {
+  using ParamsT = ScaledGemmParams<CT>;
+  hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
+  hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
+  auto a_datatype = HipDataTypeFor<AT>();
+  auto b_datatype = HipDataTypeFor<BT>();
+  auto in_out_datatype = HipDataTypeFor<CT>();
+
+  hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+  if (at::globalContext().allowTF32CuBLAS()) {
+    computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
+  }
+
+  hipblasLtHandle_t handle;
+  TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
+
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;
+  std::vector<int64_t> representative_sizes = {128, 256, 384, 512, 768, 1024, 2048};
+
+  for (auto size : representative_sizes) {
+    int64_t dummy_m = size;
+    int64_t dummy_n = size;
+    int64_t dummy_k = size;
+
+    HipBlasLtMatmulDescriptor matmul_desc(computeType, HIP_R_32F);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, transa_outer);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, transb_outer);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+
+    hipblasLtMatrixLayout_t mat_a, mat_b, mat_c;
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_a, a_datatype,
+        transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k,
+        transa_outer == HIPBLAS_OP_N ? dummy_k : dummy_m,
+        transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_b, b_datatype,
+        transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n,
+        transb_outer == HIPBLAS_OP_N ? dummy_n : dummy_k,
+        transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_c, in_out_datatype, dummy_m, dummy_n, dummy_m));
+
+    hipblasLtMatmulPreference_t pref;
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceCreate(&pref));
+    size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceSetAttribute(
+        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_size, sizeof(workspace_size)));
+
+    int returned_algo_count = 0;
+    std::vector<hipblasLtMatmulHeuristicResult_t> size_results(100);
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulAlgoGetHeuristic(
+        handle,
+        matmul_desc.descriptor(),
+        mat_a,
+        mat_b,
+        mat_c,
+        mat_c,
+        pref,
+        static_cast<int>(size_results.size()),
+        size_results.data(),
+        &returned_algo_count));
+
+    for (int i = 0; i < returned_algo_count; ++i) {
+      auto algo = size_results[i].algo;
+      int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
+      auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
+      std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%d_mxfp8", algo_index);
+      ret.emplace_back(std::move(type_string), std::move(callable));
+    }
+
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceDestroy(pref));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
+  }
+
+  TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
+  return ret;
+}
+#else
+template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
+auto GetHipBlasLtScaledGemmMxFp8TypeStringAndOps() {
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<ScaledGemmParams<CT>>>>> ret;
+  return ret;
+}
+#endif
 
 #undef TORCH_HIPBLASLT_CHECK
 
