@@ -1,17 +1,24 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
+import unittest
 
 import torch
 import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
+from torch._guards import detect_fake_mode
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfTorchDynamo,
+)
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -36,7 +43,29 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 #   f) disallow nested regional compile
 
 
-def aot_eager_regional_inductor():
+def aot_eager_regional_inductor(serialize=False):
+    if serialize:
+
+        def regional_inductor_pickle(gm, *example_args):
+            result = regional_inductor(gm, *example_args)
+            serialized = GraphPickler.dumps(result)
+
+            fake_mode = detect_fake_mode(example_args)
+            assert fake_mode is not None
+            # Serialize and deserialize the result to confirm pickling works
+            # Use a fresh tracing context on the new process
+            context = torch._guards.TracingContext(fake_mode)
+            with torch._guards.tracing(context):
+                result = GraphPickler.loads(serialized, fake_mode)
+                assert isinstance(result, torch.fx.GraphModule)
+                result.recompile()
+                return result
+
+        return aot_autograd(
+            fw_compiler=regional_inductor_pickle,
+            bw_compiler=regional_inductor_pickle,
+        )
+
     return aot_autograd(
         fw_compiler=regional_inductor,
         bw_compiler=regional_inductor,
@@ -44,8 +73,10 @@ def aot_eager_regional_inductor():
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
+@instantiate_parametrized_tests
 class RegionalInductorTests(torch._inductor.test_case.TestCase):
-    def test_simple(self):
+    @parametrize("serialize", [False, True])
+    def test_simple(self, serialize):
         def fn(x, y):
             sin = torch.sin(x)
 
@@ -56,7 +87,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             return torch.sin(add)
 
         opt_fn = torch.compile(
-            fn, backend=aot_eager_regional_inductor(), fullgraph=True
+            fn, backend=aot_eager_regional_inductor(serialize=serialize), fullgraph=True
         )
         x = torch.randn(10, requires_grad=True)
         y = torch.randn(10, requires_grad=True)
@@ -65,7 +96,8 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
         self.assertEqual(len(codes), 2)
 
-    def test_repeated_blocks(self):
+    @parametrize("serialize", [False, True])
+    def test_repeated_blocks(self, serialize):
         def fn(x, y):
             sin = torch.sin(x)
 
@@ -86,7 +118,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         mod = Mod()
 
         opt_mod = torch.compile(
-            mod, backend=aot_eager_regional_inductor(), fullgraph=True
+            mod,
+            backend=aot_eager_regional_inductor(serialize=serialize),
+            fullgraph=True,
         )
         x = torch.randn(10, requires_grad=True)
         y = torch.randn(10, requires_grad=True)
@@ -96,7 +130,8 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         _, codes = run_fw_bw_and_get_code(lambda: opt_mod(x, y))
         self.assertEqual(len(codes), 4)
 
-    def test_invoke_subgraph(self):
+    @parametrize("serialize", [False, True])
+    def test_invoke_subgraph(self, serialize):
         # Checks that get_attr nodes custom metadata is propagated
         @torch.compiler.nested_compile_region
         def gn(x):
@@ -109,15 +144,21 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             return torch.sigmoid(z)
 
         opt_fn = torch.compile(
-            fn, backend=aot_eager_regional_inductor(), fullgraph=True
+            fn, backend=aot_eager_regional_inductor(serialize=serialize), fullgraph=True
         )
         x = torch.randn(10, requires_grad=True)
 
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         self.assertEqual(len(codes), 2)
 
-    def test_invoke_subgraph_inner(self):
+    @parametrize("serialize", [False, True])
+    def test_invoke_subgraph_inner(self, serialize):
         # Checks that the inductor regions are searched recursively.
+
+        # TODO: GraphPickler does not recompile nested subgraphs?
+        if serialize:
+            raise unittest.SkipTest("GraphPickler doesn't recompile nested subgraphs")
+
         @torch.compiler.nested_compile_region
         def gn(x):
             with fx_traceback.annotate({"compile_with_inductor": 0}):
@@ -131,7 +172,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             return torch.sigmoid(x)
 
         opt_fn = torch.compile(
-            fn, backend=aot_eager_regional_inductor(), fullgraph=True
+            fn, backend=aot_eager_regional_inductor(serialize=serialize), fullgraph=True
         )
         x = torch.randn(10, requires_grad=True)
 
@@ -141,7 +182,14 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(codes), 2)
 
     @requires_cuda_and_triton
-    def test_flex_attention(self):
+    @parametrize("serialize", [False, True])
+    def test_flex_attention(self, serialize):
+        if serialize:
+            # TODO: Fixed in next PR
+            raise unittest.SkipTest(
+                "FlexAttentionBackward isn't marked cacheable even though it is"
+            )
+
         def _squared(score, b, h, m, n):
             return score * score
 
@@ -170,7 +218,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 
         opt_fn = torch.compile(
             fn,
-            backend=aot_eager_regional_inductor(),
+            backend=aot_eager_regional_inductor(serialize),
             fullgraph=True,
         )
 
@@ -179,7 +227,13 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(codes), 2)
 
     @requires_cuda_and_triton
-    def test_selective_ac_flex(self):
+    @parametrize("serialize", [False, True])
+    def test_selective_ac_flex(self, serialize):
+        if serialize:
+            raise unittest.SkipTest(
+                "FlexAttentionBackward isn't marked cacheable even though it is"
+            )
+
         class FlexAttentionModule(torch.nn.Module):
             def __init__(self, hidden_size, num_heads):
                 super().__init__()
