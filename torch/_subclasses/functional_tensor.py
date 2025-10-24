@@ -8,6 +8,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Optional, Union
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
@@ -504,6 +505,22 @@ class FunctionalTensorMode(TorchDispatchMode):
                         torch.Tensor, wrap, outs_unwrapped
                     )
                 else:
+                    # [Note] annotation: Explicitly sync the input tensors to trigger a view replay.
+                    # We need the proxy nodes created during the replay to have the same stack trace
+                    # and seq_nr as the original node.
+                    if m := torch._C._get_dispatch_mode(
+                        torch._C._TorchDispatchModeKey.PROXY
+                    ):
+                        flat_inputs, _ = pytree.tree_flatten([args, kwargs])
+                        for a in flat_inputs:
+                            if not isinstance(a, torch.Tensor):
+                                continue
+                            curr_node = m.tracer.tensor_tracker[
+                                torch._from_functional_tensor(args[0].elem)
+                            ].proxy.node
+                            with fx_traceback.set_current_replay_node(curr_node):
+                                torch._sync(a)
+
                     # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                     # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch

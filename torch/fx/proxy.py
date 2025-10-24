@@ -206,6 +206,20 @@ class TracerBase:
             if current_meta.get("in_grad_fn", 0) > 0:
                 annotation_log.debug("seq_nr from current_meta")
                 new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
+
+            # See [Note] annotation for more details.
+            # Overriding some node meta with the original node meta of the
+            # regenerated node.
+            replay_node: Node = fx_traceback.get_current_replay_node()
+            if replay_node is not None:
+                annotation_log.debug("seq_nr from replay_node")
+                new_seq_nr = replay_node.meta["seq_nr"]
+                node.meta["is_functional_regenerated"] = True
+                if "custom" in replay_node.meta:
+                    node.meta["custom"] = replay_node.meta.get("custom")
+                if "stack_trace" in replay_node.meta:
+                    node.meta["stack_trace"] = replay_node.meta.get("stack_trace")
+
             annotation_log.debug("Assigning new_seq_nr %s to %s", new_seq_nr, node.name)
             node.meta["seq_nr"] = new_seq_nr
 
