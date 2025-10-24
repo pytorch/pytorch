@@ -51,8 +51,8 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
-    is_gpu,
     has_pointwise_use,
+    is_gpu,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V

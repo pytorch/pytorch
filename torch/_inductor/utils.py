@@ -566,7 +566,9 @@ def has_pointwise_use(
 
     if use.op != "call_function":
         return False
-    if (not isinstance(use.target, torch._ops.OpOverload)) and (use.target is not operator.getitem):
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
         return False
 
     # Process getitem and view
