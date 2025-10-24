@@ -25,8 +25,10 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     validate_non_overlapping_shards_metadata,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -41,7 +43,8 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
 )
 
 
-TEST_MULTIACCELERATOR  = torch.accelerator.device_count() >= 2
+TEST_MULTIACCELERATOR = torch.accelerator.device_count() >= 2
+
 
 class TestShardingSpec(TestCase):
     def setUp(self):
@@ -53,7 +56,9 @@ class TestShardingSpec(TestCase):
             # default to cuda, but the test will be skipped
             self.device_type = "cuda"
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 accelerator devices are needed")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "2 accelerator devices are needed"
+    )
     def test_device_placement(self):
         # valid devices
         DevicePlacementSpec(f"{self.device_type}:0")
@@ -69,17 +74,27 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
             DevicePlacementSpec("foo:0")
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
-            DevicePlacementSpec(f"rank:0/cuda:foo")
+            DevicePlacementSpec("rank:0/cuda:foo")
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 accelerator devices are needed")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "2 accelerator devices are needed"
+    )
     def test_chunked_sharding_spec(self):
         # Test valid specs.
         ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
-        ChunkShardingSpec(0, [torch.device(f"{self.device_type}:0"), torch.device(f"{self.device_type}:1")])
+        ChunkShardingSpec(
+            0,
+            [
+                torch.device(f"{self.device_type}:0"),
+                torch.device(f"{self.device_type}:1"),
+            ],
+        )
         ChunkShardingSpec(-1, [f"{self.device_type}:0", f"{self.device_type}:1"])
-        ChunkShardingSpec(0, [f"rank:0/{self.device_type}:0", f"rank:0/{self.device_type}:1"])
+        ChunkShardingSpec(
+            0, [f"rank:0/{self.device_type}:0", f"rank:0/{self.device_type}:1"]
+        )
         ChunkShardingSpec(0, ["rank:0", "rank:1"])
         ChunkShardingSpec(0, ["rank:0/cpu", "rank:1/cpu"])
 
@@ -104,9 +119,13 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected one of"):
             ChunkShardingSpec(0, ["rank:0/random:0", f"{self.device_type}:1"])
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
-            ChunkShardingSpec(0, [f"rank:0/{self.device_type}:foo", f"{self.device_type}:1"])
+            ChunkShardingSpec(
+                0, [f"rank:0/{self.device_type}:foo", f"{self.device_type}:1"]
+            )
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 accelerator devices are needed")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "2 accelerator devices are needed"
+    )
     def test_enumerable_sharding_spec(self):
         # test valid specs
 
@@ -183,16 +202,28 @@ class TestShardingSpec(TestCase):
 
         # test invalid sharding
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
-            ShardMetadata(shard_offsets=[0], shard_sizes=[1], placement=f"{self.device_type}:foo")
+            ShardMetadata(
+                shard_offsets=[0], shard_sizes=[1], placement=f"{self.device_type}:foo"
+            )
 
         with self.assertRaisesRegex(ValueError, "same number of elements"):
-            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[1], placement=f"{self.device_type}:0")
+            ShardMetadata(
+                shard_offsets=[0, 0], shard_sizes=[1], placement=f"{self.device_type}:0"
+            )
 
         with self.assertRaisesRegex(ValueError, "shard_offsets should be >=0"):
-            ShardMetadata(shard_offsets=[-1, 0], shard_sizes=[1, 1], placement=f"{self.device_type}:0")
+            ShardMetadata(
+                shard_offsets=[-1, 0],
+                shard_sizes=[1, 1],
+                placement=f"{self.device_type}:0",
+            )
 
         with self.assertRaisesRegex(ValueError, "shard_sizes should be >= 0"):
-            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[-1, 1], placement=f"{self.device_type}:0")
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[-1, 1],
+                placement=f"{self.device_type}:0",
+            )
 
         with self.assertRaisesRegex(ValueError, "Empty shard list provided"):
             EnumerableShardingSpec([])
