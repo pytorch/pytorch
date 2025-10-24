@@ -53,7 +53,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}
     ${TORCH_ROOT}/aten/src
-    ${TORCH_ROOT}/aten/src/TH
 
     ${CMAKE_BINARY_DIR}
     ${CMAKE_BINARY_DIR}/aten/src
