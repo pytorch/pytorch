@@ -525,7 +525,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
         hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
 
-        bool is mx_fp8 = false;
+        bool is_mx_fp8 = false;
 #if ROCM_VERSION >= 70000
         if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<CT>>) {
           auto* scaled_params = static_cast<const ScaledGemmParams<CT>*>(params);
@@ -737,7 +737,7 @@ auto GetHipBlasLtTypeStringAndOps() {
         computeType,
         heuristic_result));
   }
-  
+
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
   int returned_algo_count = heuristic_result.size();
