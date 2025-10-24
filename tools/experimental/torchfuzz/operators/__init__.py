@@ -23,6 +23,7 @@ from torchfuzz.operators.nn_functional import (
     LayerNormOperator,
     LinearOperator,
     ReLUOperator,
+    ScaledDotProductAttentionOperator,
     SoftmaxOperator,
 )
 from torchfuzz.operators.registry import (
@@ -77,6 +78,7 @@ __all__ = [
     "EmbeddingOperator",
     "LinearOperator",
     "ReLUOperator",
+    "ScaledDotProductAttentionOperator",
     "SoftmaxOperator",
     "DropoutOperator",
     "LayerNormOperator",
