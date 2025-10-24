@@ -176,7 +176,9 @@ def check_files(
                 line=error["line"],
                 char=error["column"],
                 code=code,
-                severity=LintSeverity.ADVICE if error["name"] == "deprecated" else LintSeverity.ERROR,
+                severity=LintSeverity.ADVICE
+                if error["name"] == "deprecated"
+                else LintSeverity.ERROR,
                 original=None,
                 replacement=None,
             )
