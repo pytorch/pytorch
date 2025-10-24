@@ -88,7 +88,7 @@ one-shot all-reduce:
 
 ```python
 # Most SymmMem ops are under the torch.ops.symm_mem namespace
-torch.ops.symm_mem.one_shot_all_reduce(t, “sum”, group)
+torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group)
 ```
 
 Please note that `torch.ops.symm_mem` is an "op namespace" instead of a python
