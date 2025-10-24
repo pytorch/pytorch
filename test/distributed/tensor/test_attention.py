@@ -677,7 +677,6 @@ class CPFlexAttentionTest(DTensorTestBase):
         random.seed(10)
 
         # parameters for testing
-        doc_count = 28
         batch_size_list = [2, 4, 8]
         max_seq_len_list = [
             256 * self.world_size,
@@ -700,44 +699,52 @@ class CPFlexAttentionTest(DTensorTestBase):
             2 * len(batch_size_list) * len(max_seq_len_list) * len(load_balance_type)
         )
 
-        # TODO: change this for-loop to run_subtests
-        # Use a for-loop instead of run_subtests because we need to intialize the mask
-        # for each subtest. This can be baked into self._test_cp_flex_attention as
-        # a str argument denoting mask type.
-        for batch_size, max_seq_len, lb_type in itertools.product(
-            batch_size_list,
-            max_seq_len_list,
-            load_balance_type,
-        ):
-            # initialize document mask
-            lengths = [
-                (
-                    generate_random_lengths_in_chunks(
-                        max_seq_len, doc_count, chunk_size=2 * self.world_size
-                    )
-                    if lb_type == "_PerDocumentHeadTailLoadBalancer"
-                    else generate_random_lengths(max_seq_len, doc_count)
-                )
-                for _ in range(batch_size)
-            ]
-            offsets = length_to_offsets(lengths, self.device_type)
-            document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
-            block_mask = compiled_create_block_mask(
-                document_causal_mask,
-                B=batch_size,
-                H=1,
-                Q_LEN=max_seq_len,
-                KV_LEN=max_seq_len,
-                device=self.device_type,
-            )
+        self.run_subtests(
+            {
+                "batch_size": batch_size_list,
+                "max_seq_len": max_seq_len_list,
+                "lb_type": load_balance_type,
+            },
+            self._test_cp_flex_attention_document_mask,
+        )
 
-            self._test_cp_flex_attention(
-                qkv_size=max_seq_len,
-                B=batch_size,
-                lb_type=lb_type,
-                block_mask=block_mask,
-                document_lengths=lengths,
+    def _test_cp_flex_attention_document_mask(
+        self,
+        batch_size: int,
+        max_seq_len: int,
+        lb_type: str,
+    ) -> None:
+        doc_count = 28
+
+        # initialize document mask
+        lengths = [
+            (
+                generate_random_lengths_in_chunks(
+                    max_seq_len, doc_count, chunk_size=2 * self.world_size
+                )
+                if lb_type == "_PerDocumentHeadTailLoadBalancer"
+                else generate_random_lengths(max_seq_len, doc_count)
             )
+            for _ in range(batch_size)
+        ]
+        offsets = length_to_offsets(lengths, self.device_type)
+        document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
+        block_mask = compiled_create_block_mask(
+            document_causal_mask,
+            B=batch_size,
+            H=1,
+            Q_LEN=max_seq_len,
+            KV_LEN=max_seq_len,
+            device=self.device_type,
+        )
+
+        self._test_cp_flex_attention(
+            qkv_size=max_seq_len,
+            B=batch_size,
+            lb_type=lb_type,
+            block_mask=block_mask,
+            document_lengths=lengths,
+        )
 
 
 class TestCPCustomOps(DTensorTestBase):
