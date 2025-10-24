@@ -917,11 +917,16 @@ class VariableBuilder:
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif trace_rules.is_numpy(value):
             assert np
-            self.install_guards(
-                GuardBuilder.FUNCTION_MATCH
-                if callable(value)
-                else GuardBuilder.TYPE_MATCH
-            )
+            if istype(value, types.MethodType):
+                install_guard(
+                    AttrSource(self.source, "__func__").make_guard(
+                        GuardBuilder.CLOSURE_MATCH
+                    )
+                )
+            elif callable(value):
+                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            else:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
             return NumpyVariable(value, source=self.source)
         elif trace_rules.is_numpy_dtype(value):
             self.install_guards(GuardBuilder.ID_MATCH)

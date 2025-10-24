@@ -2060,9 +2060,6 @@ class GuardBuilder(GuardBuilderBase):
             val, get_verbose_code_parts(code_parts, guard)
         )
 
-    def NAME_MATCH(self, guard: Guard) -> None:
-        self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)  # type: ignore[arg-type]
-
     def DUAL_LEVEL(self, guard: Guard) -> None:
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
