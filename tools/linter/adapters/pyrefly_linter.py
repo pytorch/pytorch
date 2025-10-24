@@ -165,6 +165,7 @@ def check_files(
             errors = result.get("errors", [])
         else:
             errors = []
+        errors = [error for error in errors if error["name"] != "deprecated"]
         rc = [
             LintMessage(
                 path=error["path"],

@@ -2,7 +2,6 @@ from . import parametrizations, parametrize, rnn, stateless
 from .clip_grad import (  # pyrefly: ignore  # deprecated
     _clip_grads_with_norm_ as clip_grads_with_norm_,
     _get_total_norm as get_total_norm,
-    # pyrefly: ignore  # deprecated
     clip_grad_norm,
     clip_grad_norm_,
     clip_grad_value_,
