@@ -780,7 +780,8 @@ class Optimizer:
         # UNLESS fused or capturable, see note [special device hosting for step]
         fused = False
         capturable = False
-        assert param_groups is not None
+        if param_groups is None:
+            raise AssertionError("Expected param_groups to be set")
         for pg in param_groups:
             if param_id in pg["params"]:
                 fused = pg.get("fused", False)
@@ -1057,12 +1058,18 @@ class Optimizer:
                             if not foreach or p.grad.is_sparse:
                                 p.grad.zero_()
                             else:
-                                assert per_device_and_dtype_grads is not None
+                                if per_device_and_dtype_grads is None:
+                                    raise AssertionError(
+                                        "Expected per_device_and_dtype_grads to be set"
+                                    )
                                 per_device_and_dtype_grads[p.grad.device][
                                     p.grad.dtype
                                 ].append(p.grad)
             if foreach:
-                assert per_device_and_dtype_grads is not None
+                if per_device_and_dtype_grads is None:
+                    raise AssertionError(
+                        "Expected per_device_and_dtype_grads to be set"
+                    )
                 for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
