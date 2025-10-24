@@ -432,7 +432,3 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi
-
-if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-  export BUILD_AOT_INDUCTOR_TEST=1
-fi
