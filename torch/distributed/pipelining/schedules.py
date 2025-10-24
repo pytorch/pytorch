@@ -7,7 +7,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
@@ -1157,9 +1157,18 @@ def _add_send_recv(
 
     For actions with sub-actions (OVERLAP_F_B) we ensure that all the subactions have been
     computed and the communication is ready
+
+    TODO: recv operations do not finish until the data is populated in them by NCCL,
+    as a result, we have a warmup phase re-ordering which moves the SENDs earlier for
+    all the actions before the first backward
     """
     comm_actions: dict[int, list[_Action]] = {rank: [] for rank in compute_actions}
     prev_actions: dict[int, set[_Action]] = {rank: set() for rank in compute_actions}
+
+    # This is used to handle rank 0 edge case described in TODO, we use this to delay the
+    # rank 0 recvs until later
+    rank_0_delayed_recv: deque[_Action] = deque()
+    stage_0_send_f_count: int = 0
 
     def _has_comms(action: _Action) -> bool:
         if action.computation_type == F:
@@ -1254,14 +1263,37 @@ def _add_send_recv(
                         # should we avoid that in the runtime or here?
                         comm_actions[rank].append(send)
                         prev_actions[rank].add(send)
-                        comm_actions[stage_to_rank(recv.stage_index)].append(recv)
-                        prev_actions[stage_to_rank(recv.stage_index)].add(recv)
+                        # Track SEND_F on rank 0 only for stage 0 (which doesn't need recv)
+                        if send.computation_type == SEND_F and send.stage_index == 0:
+                            stage_0_send_f_count += 1
+
+                        recv_rank = stage_to_rank(recv.stage_index)
+                        # Check if send is going to rank 0 and if it's a forward recv
+                        if (
+                            recv_rank == 0
+                            and recv.computation_type == RECV_F
+                            and stage_0_send_f_count < len(comm_actions) - 1
+                        ):
+                            # Delay the recv on rank 0
+                            rank_0_delayed_recv.append(recv)
+                        else:
+                            comm_actions[recv_rank].append(recv)
+                            prev_actions[recv_rank].add(recv)
+                    if (
+                        rank == 0
+                        and rank_0_delayed_recv
+                        and stage_0_send_f_count >= len(comm_actions) - 1
+                    ):
+                        recv = rank_0_delayed_recv.popleft()
+                        comm_actions[0].append(recv)
+                        prev_actions[0].add(recv)
 
             compute_actions[rank].pop(0)
             if len(compute_actions[rank]) == 0:
                 del compute_actions[rank]
             progress = True
         assert progress, "Malformed compute schedule, can't schedule sends/recvs"
+
     return comm_actions
 
 

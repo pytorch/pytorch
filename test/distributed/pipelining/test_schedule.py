@@ -686,18 +686,15 @@ class TestScheduleLowering(TestCase):
                     ],
                     1: [
                         "1RECV_F0",
-                        # interesting that this gets scheduled up front, is that expected?
                         "1RECV_F1",
                         "1F0",
                         "2F0",
                         "2SEND_F0",
                         "1F1",
-                        # ditto
                         "2RECV_B0",
                         "2F1",
                         "2SEND_F1",
                         "2B0",
-                        # ditto
                         "2RECV_B1",
                         "1B0",
                         "1SEND_B0",
@@ -750,6 +747,7 @@ class TestScheduleLowering(TestCase):
             stage_to_rank=test_info["stage_to_rank"],
             num_stages=test_info["num_stages"],
         )
+        # from torch.distributed.pipelining.schedules import _dump_chrometrace
         # _dump_chrometrace(simulated_schedule, "lowered_comms.json")
         # print(_format_pipeline_order(simulated_schedule))
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
