@@ -1040,7 +1040,7 @@ class VariableBuilder:
                     explanation="Directly using invoke_subgraph is not supported. Use nested_compile_region",
                     hints=[],
                 )
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):
             self.install_guards(GuardBuilder.ID_MATCH)
