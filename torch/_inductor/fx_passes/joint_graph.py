@@ -6,7 +6,7 @@ import operator
 import typing
 from collections import Counter
 from collections.abc import Sequence
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch._guards
@@ -31,13 +31,17 @@ from ..pattern_matcher import (
     KeywordArg,
     Match,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     stable_topological_sort,
 )
 from .decompose_mem_bound_mm import check_device
 from .replace_random import replace_random_passes
 
+
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="joint_graph_passes"
+)
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
@@ -513,6 +517,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             invoke_quant_replacement = graph.call_function(
                 torch._higher_order_ops.invoke_quant,
                 (subgraph, *args),
+                # pyrefly: ignore  # bad-argument-type
                 kwargs,
             )
             invoke_quant_replacement.meta.update(subgraph.meta)
@@ -588,12 +593,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
             constant_fold_uniform_value
         )
 
-    if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
-        )
-        count += 1
-
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(
@@ -629,6 +628,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         device=KeywordArg("device"),
         requires_grad=KeywordArg("requires_grad"),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=patterns,
 )
 def fix_iota_device(match: Match, length, start, step, dtype, device, requires_grad):
@@ -682,6 +682,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
         ),
         KeywordArg("dtype2"),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=patterns,
 )
 def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtype):
@@ -699,8 +700,8 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 
 
 def definitely_equal(
-    old_sizes: Sequence[Union[torch.SymInt, int]],
-    new_sizes: Sequence[Union[torch.SymInt, torch.fx.Node, int]],
+    old_sizes: Sequence[torch.SymInt | int],
+    new_sizes: Sequence[torch.SymInt | torch.fx.Node | int],
 ) -> bool:
     """
     Leverage guard_or_true/false to compare if two lists of int/symint are equal.
@@ -744,6 +745,7 @@ def definitely_equal(
 
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=patterns,
 )
 def pointless_view(match: Match, arg, size):
@@ -761,6 +763,7 @@ def pointless_view(match: Match, arg, size):
         CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
         KeywordArg("size2"),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=patterns,
 )
 def pointless_view_pair(match: Match, arg, size1, size2):
@@ -781,6 +784,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
         CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
         KeywordArg("perm2"),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=patterns,
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
@@ -801,6 +805,7 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
         Arg(),
         Arg(),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=patterns,
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
@@ -814,6 +819,7 @@ def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
         and statically_known_true(mat1.meta["val"].shape[0] == 1)
         and statically_known_true(mat2.meta["val"].shape[0] == 1)
     ):
+        # pyrefly: ignore  # bad-argument-type
         match.replace_by_example(repl, [mat1, mat2])
 
 
@@ -894,7 +900,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         if dtype is not None:
             inp = inp.to(dtype)
 
-        sign: Union[int, float, torch.Tensor]
+        sign: int | float | torch.Tensor
         if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
@@ -903,14 +909,17 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        # pyrefly: ignore  # unsupported-operation
         return (inp - max_) * (sign * other)
 
+    # pyrefly: ignore  # bad-argument-type
     match.replace_by_example(repl, [inp, other])
 
 
 for reverse, to_dtype in itertools.product((False, True), repeat=2):
     register_graph_pattern(
         _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(mul_softmax_pattern)
@@ -921,7 +930,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         if dtype is not None:
             inp = inp.to(dtype)
 
-        sign: Union[int, float, torch.Tensor]
+        sign: int | float | torch.Tensor
         if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
@@ -930,14 +939,17 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        # pyrefly: ignore  # unsupported-operation
         return (inp - max_) / (sign * other)
 
+    # pyrefly: ignore  # bad-argument-type
     match.replace_by_example(repl, [inp, other])
 
 
 for to_dtype in (False, True):
     register_graph_pattern(
         _partial_softmax_pattern(aten.div.Tensor, to_dtype=to_dtype),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(div_softmax_pattern)

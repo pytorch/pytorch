@@ -22,6 +22,63 @@ if has_triton():
     import triton
     from triton import language as tl
 
+    import torch
+
+    def _get_strange_configs() -> list[triton.Config]:
+        if torch.version.hip:
+            configs = [
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 16,
+                        "BLOCK_SIZE_N": 16,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
+                        "matrix_instr_nonkdim": 16,
+                        "waves_per_eu": 3,
+                        "kpack": 2,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 128,
+                        "BLOCK_SIZE_N": 64,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
+                        "matrix_instr_nonkdim": 16,
+                        "waves_per_eu": 3,
+                        "kpack": 2,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+            ]
+        else:
+            configs = [
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 16,
+                        "BLOCK_SIZE_N": 16,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 128,
+                        "BLOCK_SIZE_N": 64,
+                        "BLOCK_SIZE_K": 32,
+                        "GROUP_SIZE_M": 8,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+            ]
+        return configs
+
     # Define here so that multiple tests can take advantage of it
     @triton.jit
     def add_kernel(
@@ -855,7 +912,7 @@ if has_triton():
         b_ptrs = b_ptr + (offs_k[:, None] + offs_bn[None, :])
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+        for k in range(tl.cdiv(K, BLOCK_SIZE_K)):
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
             accumulator = tl.dot(a, b, accumulator)

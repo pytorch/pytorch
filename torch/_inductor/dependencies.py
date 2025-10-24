@@ -22,7 +22,6 @@ from .utils import (
     get_dtype_size,
     reduction_num_outputs,
     sympy_index_symbol,
-    sympy_str,
     sympy_subs,
     VarRanges,
 )
@@ -71,7 +70,9 @@ class Dep(abc.ABC):
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
+    # pyrefly: ignore  # bad-override
     name: str
+    # pyrefly: ignore  # bad-override
     index: sympy.Expr
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
@@ -150,7 +151,7 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert OrderedSet(order) == OrderedSet(range(0, self.num_vars))
+        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
         return order
 
     def get_offset(self) -> sympy.Expr:
@@ -307,11 +308,13 @@ class MemoryDep(Dep):
 
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
+    # pyrefly: ignore  # bad-override
     name: str
     mode: Optional[str] = None
 
     # depends on the entire buffer
     @property
+    # pyrefly: ignore  # bad-override
     def index(self) -> sympy.Expr:
         raise NotImplementedError("StarDep does not have an index")
 
@@ -360,6 +363,7 @@ class StarDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
     # Fake dependency on unused buffer
+    # pyrefly: ignore  # bad-override
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
@@ -376,6 +380,7 @@ class WeakDep(Dep):
         return OrderedSet()
 
     @property
+    # pyrefly: ignore  # bad-override
     def index(self) -> sympy.Expr:
         raise NotImplementedError("WeakDep does not have an index")
 
@@ -554,26 +559,23 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         }
         return self._normalize(index, var_ranges)
 
-    def load(self, name: str, index: sympy.Expr) -> str:
+    def load(self, name: str, index: sympy.Expr) -> None:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
-        return f"load({name}, {sympy_str(index)})"
 
-    def load_seed(self, name: str, index: int) -> str:
+    def load_seed(self, name: str, index: int) -> None:
         assert isinstance(index, int)
-        return self.load(name, sympy.Integer(index))
+        self.load(name, sympy.Integer(index))
 
     def store(
         self, name: str, index: sympy.Expr, value: str, mode: Optional[str] = None
-    ) -> str:
+    ) -> None:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
-        return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: str) -> str:
-        return self.store(name, index, f"store_reduction({value})")
+    def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:
+        self.store(name, index, f"store_reduction({value})")
 
-    def index_expr(self, index: sympy.Expr, dtype: Optional[torch.dtype]) -> str:
+    def index_expr(self, index: sympy.Expr, dtype: Optional[torch.dtype]) -> None:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
-        return f"index_expr({sympy_str(index)}, {dtype})"
 
     def bucketize(
         self,
@@ -666,8 +668,11 @@ def extract_read_writes(
         range_vars = [*itertools.chain.from_iterable(args)]
 
     return ReadWrites(
+        # pyrefly: ignore  # missing-attribute
         OrderedSet(inner._reads),
+        # pyrefly: ignore  # missing-attribute
         OrderedSet(inner._writes),
+        # pyrefly: ignore  # missing-attribute
         inner._index_exprs,
         range_vars,
         var_ranges,

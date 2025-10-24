@@ -223,7 +223,7 @@ inline DispatchKey backendToDispatchKey(Backend b) {
     case Backend::PrivateUse1:
       return DispatchKey::PrivateUse1;
     default:
-      throw std::runtime_error("Unknown backend");
+      TORCH_CHECK(false, "Unknown backend");
   }
 }
 

@@ -292,6 +292,7 @@ class WeakIdKeyDictionary(MutableMapping):
             if o is not None:
                 return o, value
 
+    # pyrefly: ignore  # bad-override
     def pop(self, key, *args):
         self._dirty_len = True
         return self.data.pop(self.ref_type(key), *args)  # CHANGED
@@ -308,7 +309,7 @@ class WeakIdKeyDictionary(MutableMapping):
                 dict = type({})(dict)
             for key, value in dict.items():
                 d[self.ref_type(key, self._remove)] = value  # CHANGED
-        if len(kwargs):
+        if kwargs:
             self.update(kwargs)
 
     def __ior__(self, other):
