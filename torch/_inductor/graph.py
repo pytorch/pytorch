@@ -511,7 +511,7 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
-        # state used by for Kernel.workspace
+        # state used by for KernelArgs.workspace
         self.workspace_id = itertools.count()
 
         # track the current placeholder index that we are processing
