@@ -33,8 +33,6 @@
   then:
   - "module: dynamo"
 - any:
-  - "module: flex attention"
-- any:
   - "module: aotinductor"
   then:
   - "oncall: export"
