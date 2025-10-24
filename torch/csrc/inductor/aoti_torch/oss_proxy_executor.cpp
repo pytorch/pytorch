@@ -267,6 +267,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             " but got ",
             serialized_arg_type);
         std::vector<double> ret;
+        ret.reserve(serialized_arg_val);
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<double>());
         }
@@ -281,6 +282,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             " but got ",
             serialized_arg_type);
         std::vector<bool> ret;
+        ret.reserve(serialized_arg_val);
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<bool>());
         }
@@ -291,12 +293,14 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
               index, DynamicArgType::ListIntType, serialized_arg_val.size());
         } else if (serialized_arg_type == "as_floats") {
           std::vector<double> ret;
+          ret.reserve(serialized_arg_val);
           for (const auto& arg : serialized_arg_val) {
             ret.push_back(arg);
           }
           stack.at(index) = std::move(ret);
         } else if (serialized_arg_type == "as_bools") {
           std::vector<bool> ret;
+          ret.reserve(serialized_arg_val);
           for (const auto& arg : serialized_arg_val) {
             ret.push_back(arg);
           }
@@ -315,6 +319,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
                      at::ListType::ofOptionalTensors())) {
         if (serialized_arg_type == "as_optional_tensors") {
           std::vector<std::string> list_item_types;
+          list_item_types.reserve(serialized_arg_val);
           for (const auto& arg : serialized_arg_val) {
             list_item_types.push_back(arg.begin().key());
           }
@@ -346,6 +351,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             " but got ",
             serialized_arg_type);
         std::vector<std::string> ret;
+        ret.reserve(serialized_arg_val);
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<std::string>());
         }
@@ -749,6 +755,7 @@ void OSSProxyExecutor::call_function(
       }
       case DynamicArgType::ListTensorType: {
         std::vector<at::Tensor> tensor_list;
+        tensor_list.reserve(length);
         for (int j = 0; j < length; j++) {
           at::Tensor const* tensor =
               tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
@@ -758,12 +765,13 @@ void OSSProxyExecutor::call_function(
         break;
       }
       case DynamicArgType::ListOptionalTensorType: {
-        std::vector<std::optional<at::Tensor>> optional_tensor_list;
         auto& list_item_types = dynamic_arg.list_item_types;
         TORCH_CHECK(
             list_item_types.has_value(),
             "Could not find list of item types for optional tensor list input");
 
+        std::vector<std::optional<at::Tensor>> optional_tensor_list;
+        optional_tensor_list.reserve(list_item_types.value().size());
         for (const std::string& item_type : list_item_types.value()) {
           if (item_type == "as_tensor") {
             at::Tensor* tensor = tensor_handle_to_tensor_pointer(
