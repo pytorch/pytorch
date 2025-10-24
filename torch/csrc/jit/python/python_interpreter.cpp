@@ -1,23 +1,10 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/operator.h>
-
-#include <pybind11/pybind11.h>
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/python_engine.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/jit/python/pybind.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 

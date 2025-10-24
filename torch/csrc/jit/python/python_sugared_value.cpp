@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
 #include <ATen/core/interned_strings.h>
-#include <c10/core/ScalarType.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -9,14 +8,11 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/utils/pybind.h>
-#include <climits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
-
-#include <Python.h>
 
 namespace torch::jit {
 

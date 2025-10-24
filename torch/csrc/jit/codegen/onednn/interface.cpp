@@ -8,8 +8,6 @@
 #include <torch/csrc/jit/codegen/onednn/layout_propagation.h>
 #include <torch/csrc/jit/codegen/onednn/prepare_binary.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/decompose_ops.h>
-#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>

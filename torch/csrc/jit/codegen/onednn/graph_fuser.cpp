@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/codegen/onednn/graph_fuser.h>
-#include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 namespace torch::jit::fuser::onednn {
 
