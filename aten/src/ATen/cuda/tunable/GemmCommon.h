@@ -93,6 +93,11 @@ inline const char* BLASTypeName(Float8_e5m2fnuz v) {
   return "bf8_fnuz_r";
 }
 
+template<> 
+inline const char* BLASTypeName(Float8_e8m0fnu v) {
+  return "e8m0_r";
+}
+
 template <>
 inline const char* BLASTypeName(c10::complex<double> v) {
   return "f64_r";
@@ -136,6 +141,10 @@ inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
     }
     case c10::ScalarType::Float8_e5m2fnuz: {
       BLASType = "bf8_fnuz_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e8m0fnu: {
+      BLASType = "e8m0_r";
       break;
     }
     case c10::ScalarType::ComplexFloat:{

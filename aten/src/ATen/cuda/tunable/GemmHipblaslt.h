@@ -1,6 +1,5 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
-
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
@@ -82,7 +81,11 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
 // Return a dummy value to satisfy linker.
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
+#if ROCM_VERSION >= 70000
+  return HIP_R_8F_UE8M0;
+#else
   return static_cast<hipDataType>(500);
+#endif
 }
 
 template <>
@@ -520,6 +523,20 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
         hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
         hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
+
+bool is_mx_fp8 = false;
+#if ROCM_VERSION >= 70000
+        if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<CT>>) {
+          auto* scaled_params = static_cast<const ScaledGemmParams<CT>*>(params);
+          
+          if(scaled_params->a_scale_dtype == c10::ScalarType::Float8_e8m0fnu && scaled_params->b_scale_dtype == c10::ScalarType::Float8_e8m0fnu) {
+            is_mx_fp8 = true;
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+          }
+        }
+#endif
+      if(!is_mx_fp8) {
         if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
 #if defined(HIPBLASLT_OUTER_VEC)
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
@@ -534,6 +551,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
           b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
 #endif
         }
+      }
         matmul.setAttribute(a_scale_ptr_desc, mat1_scale_ptr);
         matmul.setAttribute(b_scale_ptr_desc, mat2_scale_ptr);
       }
@@ -637,7 +655,77 @@ auto GetHipBlasLtTypeStringAndOps() {
 
   hipblasLtHandle_t handle;
   TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
-  TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
+
+  bool use_mx_fp8_enum = false;
+#if ROCM_VERSION >= 70000
+  if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<CT>>) {
+    // For ScaledGemmParams, enumerate with mx-fp8 scale mode
+    use_mx_fp8_enum = true;
+  }
+#endif
+  std::vector<hipblasLtMatmulHeuristicResult_t> all_heuristic_results;
+  std::set<int> unique_algo_indices;  // Track unique algorithms by index
+  if (use_mx_fp8_enum) {
+#if ROCM_VERSION >= 70000
+    std::vector<hipblasLtMatmulHeuristicResult_t> all_heuristic_results;
+    
+    // Query multiple representative sizes
+    std::vector<int64_t> representative_sizes = {128, 512, 1024, 2048};
+    
+    for (auto size : representative_sizes) {
+      int64_t dummy_m = size, dummy_n = size, dummy_k = size;
+      
+      // Create matmul descriptor with mx-fp8 scale mode
+      HipBlasLtMatmulDescriptor matmul_desc(computeType, HIP_R_32F);
+      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, transa_outer);
+      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, transb_outer);
+      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+      matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+      
+      // Create matrix layouts for this size
+      hipblasLtMatrixLayout_t mat_a, mat_b, mat_c;
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_a, a_datatype,
+          transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k,
+          transa_outer == HIPBLAS_OP_N ? dummy_k : dummy_m,
+          transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k));
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_b, b_datatype,
+          transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n,
+          transb_outer == HIPBLAS_OP_N ? dummy_n : dummy_k,
+          transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n));
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_c, in_out_datatype, dummy_m, dummy_n, dummy_m));
+      
+      // Query algorithms for this size
+      hipblasLtMatmulPreference_t pref;
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceCreate(&pref));
+      size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceSetAttribute(
+          pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_size, sizeof(workspace_size)));
+      
+      int returnedAlgoCount = 0;
+      std::vector<hipblasLtMatmulHeuristicResult_t> size_results(100);
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulAlgoGetHeuristic(
+          handle, matmul_desc.descriptor(), mat_a, mat_b, mat_c, mat_c,
+          pref, 100, size_results.data(), &returnedAlgoCount));
+      
+      // ADD ALL ALGORITHMS - no deduplication!
+      // TunableOp will naturally handle any duplicates through timing
+      for (int i = 0; i < returnedAlgoCount; i++) {
+        all_heuristic_results.push_back(size_results[i]);
+      }
+      
+      TUNABLE_LOG2("├── Query size ", size, " returned ", returnedAlgoCount, " algorithms");
+      
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceDestroy(pref));
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
+      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
+    }
+    
+    heuristic_result = std::move(all_heuristic_results);
+    TUNABLE_LOG1("├── Total algorithms from all sizes: ", heuristic_result.size());
+#endif
+  } else {
+    TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
         hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
         transa_outer,
         transb_outer,
@@ -647,6 +735,8 @@ auto GetHipBlasLtTypeStringAndOps() {
         in_out_datatype,
         computeType,
         heuristic_result));
+  }
+  
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
   int returned_algo_count = heuristic_result.size();
