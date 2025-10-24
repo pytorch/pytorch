@@ -201,7 +201,7 @@ class TestUtils(TestCase):
         self.assertTrue(type(ret) is float)
 
 
-instantiate_device_type_tests(TestUtils, globals())
+instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

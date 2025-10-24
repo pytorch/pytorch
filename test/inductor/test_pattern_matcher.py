@@ -746,6 +746,9 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 1, 3)
 
+    # called in test_gpu_cpp_wrapper
+    test_cat_slice_cat_xpu = test_cat_slice_cat_cuda
+
     def test_pointless_view_pair(self):
         def f(x):
             x = aten.view.default(x, [3, 5, 7])

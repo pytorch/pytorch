@@ -268,10 +268,13 @@ class ForeachTests(TestCase):
             ),
         )
 
-    # called in test_cuda_cpp_wrapper.py
+    # called in test_gpu_cpp_wrapper.py
     @requires_gpu
     def test_foreach_cpp_wrapper_cuda(self):
         self._test_single_list(op=torch._foreach_add)
+
+    # called in test_gpu_cpp_wrapper.py
+    test_foreach_cpp_wrapper_xpu = test_foreach_cpp_wrapper_cuda
 
     @requires_gpu
     @all_ops
@@ -697,6 +700,11 @@ class ForeachTests(TestCase):
         )
 
         self.check_model_gpu(fn, inputs)
+
+    # called in test_gpu_cpp_wrapper.py
+    test_enable_dynamic_shapes_cpp_wrapper_xpu = (
+        test_enable_dynamic_shapes_cpp_wrapper_cuda
+    )
 
     @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
     @bin_ops
