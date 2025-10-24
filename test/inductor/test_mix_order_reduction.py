@@ -131,6 +131,22 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @inductor_config.patch(split_reductions=False)
+    def test_multi_workspace_allocation(self):
+        def f(x, y):
+            return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
+
+        x = torch.randn(128 * 15, 128, device=GPU_TYPE)
+        y = torch.randn(256 * 15, 256, device=GPU_TYPE)
+
+        self.check_numeric(f, (x, y))
+        expected_mix_order_reduction = (
+            0 if not inductor_config.triton.mix_order_reduction else 2
+        )
+        self.assertEqual(
+            expected_mix_order_reduction, metrics.codegen_mix_order_reduction
+        )
+
     @parametrize(
         "wdtype",
         [

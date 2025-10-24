@@ -1566,7 +1566,7 @@ class KernelArgs:
 
     def workspace(
         self, nelem: sympy.Expr, zero_fill: bool, dtype: torch.dtype = torch.uint8
-    ) -> tuple[str, int]:
+    ) -> tuple[str, str, int]:
         """
         Allocate or extend a workspace buffer of nelem elements.
 
@@ -1583,10 +1583,13 @@ class KernelArgs:
         Args:
             nelem (sympy.Expr): The number of elements to allocate.
             zero_fill (bool): Whether to initialize the buffer to zero.
+            dtype (torch.dtype): the dtype of the workspace tensor
 
         Returns:
-            Tuple[str, int]: A tuple containing:
+            Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
+                - "workspace_{i}": agraph level unique identifier for
+                    the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """
         arg = WorkspaceArg(
@@ -1600,13 +1603,13 @@ class KernelArgs:
             if WorkspaceArg.can_join(existing_arg, arg):
                 offset = existing_arg.count
                 self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
-                return existing_arg.inner_name, offset
+                return existing_arg.inner_name, existing_arg.outer_name, offset
             assert (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
             ), existing_arg
         self.workspace_args.append(arg)
-        return arg.inner_name, 0
+        return arg.inner_name, arg.outer_name, 0
 
     def semaphores(self, min_size: sympy.Expr) -> str:
         """
