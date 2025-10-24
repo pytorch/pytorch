@@ -28,6 +28,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DEVICE_TO_INT, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .wrapper import (
+    codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
     PythonWrapperCodegen,
@@ -1778,6 +1779,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Returns a newly-created, temporary RAII tensor handle containing the
         reinterpreted tensor data.  Callers of this function are responsible for saving
         the handle if persistent access is needed."""
+
+        d_size, d_stride, d_offset, d_dtype, collapsible = codegen_reinterpret_view_helper(data)
+
         dim = str(len(size))
         original_offset = offset
         offset = self.codegen_sizevar(offset)
@@ -1823,26 +1827,31 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
-        if (
-            size == data.layout.size
-            and stride == data.layout.stride
-            and original_offset == data.layout.offset
-        ):
-            # pure dtypeview
-            if dtype is not None and dtype != data.dtype:
+        # New: use collapsed info (matches python logic)
+        collapsed = collapsible and original_offset == d_offset
+        if collapsed:
+            same_layout = (size == d_size and stride == d_stride)
+            base_dtype = d_dtype
+        else:
+            same_layout = (
+                size == data.layout.size
+                and stride == data.layout.stride
+                and original_offset == data.layout.offset
+            )
+            base_dtype = data.dtype
+
+        if same_layout:
+            # pure dtype view or simple handle dup
+            if dtype is not None and dtype != base_dtype:
                 final_tensor_str, tmp_call_strs = create_dtypeview_call(data.get_name())
             else:
                 final_tensor_str, tmp_call_strs = create_new_tensor_handle()
             call_strs.extend(tmp_call_strs)
         else:
-            # firstly create reinterpretview
+            # need reinterpret
             final_tensor_str = create_reinterpret_call()
-
-            if dtype is not None and dtype != data.dtype:
-                # wrap it with dtypeview
-                final_tensor_str, tmp_call_strs = create_dtypeview_call(
-                    final_tensor_str
-                )
+            if dtype is not None and dtype != base_dtype:
+                final_tensor_str, tmp_call_strs = create_dtypeview_call(final_tensor_str)
                 call_strs.extend(tmp_call_strs)
 
         for line in call_strs:

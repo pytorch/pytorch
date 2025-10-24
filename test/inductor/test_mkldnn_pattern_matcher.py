@@ -2341,6 +2341,57 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
+    def _qlinear_sum_test_helper(
+        self,
+        inputs,
+        device="cpu",
+        int8_mixed_bf16=False,
+        matcher_check_fn=None,
+        bias=True,
+        is_dynamic=False,
+        is_qat=False,
+        quantization_with_autocast=False,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, use_bias)
+                self.linear2 = torch.nn.Linear(4, 4, use_bias)
+
+            def forward(self, x, other):
+                # test qlinear sum -> qlinear sum
+                res = self.linear(x) + other
+                res = self.linear2(x) + res
+                return res
+
+        mod = M(bias).eval().to(device=device)
+        assert isinstance(inputs, tuple)
+
+        def __convert_tensor_to_device(input, device):
+            return input.to(device=device) if isinstance(input, torch.Tensor) else input
+
+        inputs = tuple(__convert_tensor_to_device(input, device) for input in inputs)
+
+        def _default_matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+            )
+
+        self._test_common(
+            mod,
+            inputs,
+            matcher_check_fn=(
+                matcher_check_fn
+                if matcher_check_fn is not None
+                else _default_matcher_check_fn
+            ),
+            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+            check_quantization=True,
+            is_qat=is_qat,
+            is_dynamic=is_dynamic,
+            quantization_with_autocast=quantization_with_autocast,
+        )
+
     def _qlinear_test_helper(
         self,
         inputs,
@@ -3055,6 +3106,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_qat=is_qat,
             is_dynamic=is_dynamic,
         )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qlinear_sum_cpu(self):
+        r"""
+        This testcase will quantize a single Linear Module.
+        """
+        for bias in [True, False]:
+            for int8_mixed_bf16 in [True, False]:
+                self._qlinear_sum_test_helper(
+                    (torch.randn((2, 2, 4)), torch.randn(2, 2, 4)),
+                    bias=bias,
+                    int8_mixed_bf16=int8_mixed_bf16
+                )
 
     def _test_qlinear_fp8_inductor_cpu_helper(self, qlinear_op, post_op="none"):
         dtype = torch.float8_e4m3fn
