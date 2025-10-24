@@ -100,7 +100,6 @@ try:
 except ImportError:
     has_pytest = False
 
-
 SEED = 1234
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
@@ -133,6 +132,14 @@ TEST_IN_SUBPROCESS = False
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
+
+def is_navi3_arch():
+    if torch.cuda.is_available():
+        prop = torch.cuda.get_device_properties(0)
+        gfx_arch = prop.gcnArchName.split(":")[0]
+        if gfx_arch in NAVI3_ARCH:
+            return True
+    return False
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -692,7 +699,7 @@ class parametrize(_TestParametrizer):
             return f"{name}{idx}"
 
     def _default_subtest_name(self, idx, values):
-        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values)])
+        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values, strict=True)])
 
     def _get_subtest_name(self, idx, values, explicit_name=None):
         if explicit_name:
@@ -736,7 +743,7 @@ class parametrize(_TestParametrizer):
                     raise RuntimeError(f'Expected # values == # arg names, but got: {len(values)} '
                                        f'values and {len(self.arg_names)} names for test "{test.__name__}"')
 
-                param_kwargs = dict(zip(self.arg_names, values))
+                param_kwargs = dict(zip(self.arg_names, values, strict=True))
 
                 test_name = self._get_subtest_name(idx, values, explicit_name=maybe_name)
 
@@ -2094,6 +2101,21 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if IS_WINDOWS:  # noqa: F821
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
+def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
+    def dec_fn(fn):
+        reason = f"skipIfWindowsXPU: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS and torch.xpu.is_available():  # noqa: F821
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -3681,7 +3703,7 @@ class TestCase(expecttest.TestCase):
             n_compressed_dims, n_plain_dims = size[-1 - dense_dims] // blocksize1, size[-2 - dense_dims] // blocksize0
         blocknnz = nnz // (blocksize0 * blocksize1)
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
-        sparse_tensors_it = map(list, zip(*sparse_tensors))
+        sparse_tensors_it = map(list, zip(*sparse_tensors, strict=True))
 
         values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize, *dense_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
@@ -5833,3 +5855,26 @@ def skipIfPythonVersionMismatch(predicate):
                 raise unittest.SkipTest("Python version mismatch")
         return wrap_fn
     return dec_fn
+
+# Decorator to patch multiple test class members for the duration of the subtest
+def patch_test_members(updates: dict[str, Any]):
+    def decorator(test_func):
+        @wraps(test_func)
+        def wrapper(self, *args, **kwargs):
+            # Store the original values of the specified members
+            original_values = {member: getattr(self, member) for member in updates}
+
+            # Update the members before running the subtest
+            for member, value in updates.items():
+                setattr(self, member, value)
+
+            # Run the test function, allowing subtests to run
+            try:
+                return test_func(self, *args, **kwargs)
+            finally:
+                # Restore the original values of the specified members after the subtest finishes
+                for member, original_value in original_values.items():
+                    setattr(self, member, original_value)
+
+        return wrapper
+    return decorator
