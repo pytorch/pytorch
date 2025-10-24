@@ -69,10 +69,10 @@ void multilabel_margin_loss_forward_out_frame(
   using accscalar_t = at::acc_type<scalar_t, false>;
   const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
   const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
-  scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
+  scalar_t* is_target_data = is_target.mutable_data_ptr<scalar_t>();
 
   if (reduction != Reduction::None || output.dim() == 0) {
-    scalar_t* output_data = output.data_ptr<scalar_t>();
+    scalar_t* output_data = output.mutable_data_ptr<scalar_t>();
 
     accscalar_t sum = 0;
 

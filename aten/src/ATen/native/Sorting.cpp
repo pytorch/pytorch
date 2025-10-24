@@ -619,8 +619,8 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   Tensor out = at::empty({}, self.options());
 
   AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in.scalar_type(), "median_cpu", [&] {
-    scalar_t* op = out.data_ptr<scalar_t>();
-    scalar_t* first = in.data_ptr<scalar_t>();
+    scalar_t* op = out.mutable_data_ptr<scalar_t>();
+    scalar_t* first = in.mutable_data_ptr<scalar_t>();
     scalar_t* last = first + size;
 
     // For torch.median, if there are nan values return nan
