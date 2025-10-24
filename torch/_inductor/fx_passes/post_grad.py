@@ -284,7 +284,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # by default, insert overlap deps within inductor
         kwargs: dict[str, object] = {"insert_overlap_deps": True}
 
-        # Read config values, only pass non-None values to use function defaults
         config_keys = (
             "collective_bucketing",
             "max_compute_pre_fetch",
@@ -296,7 +295,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 kwargs[key] = val
 
         GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
-            lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)
+            lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)  # type: ignore[arg-type]
         )
 
     # Keep these last, since they introduce mutation. Look at
