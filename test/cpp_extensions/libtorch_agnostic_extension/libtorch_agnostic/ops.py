@@ -333,3 +333,17 @@ def my_new_zeros_dtype_variant(t) -> Tensor:
     Returns: New zeros tensor
     """
     return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)
+
+
+def my__foreach_mul(tensors, others) -> list[Tensor]:
+    """
+    Returns a list of tensors that are the results of pointwise multiplying
+    tensors and others.
+
+    Args:
+        tensors: list of tensors
+        others: list of tensors (with the same corresponding shapes as tensors)
+
+    Returns: list of multiplied tensors
+    """
+    return torch.ops.libtorch_agnostic.my__foreach_mul.default(tensors, others)
