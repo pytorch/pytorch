@@ -367,11 +367,6 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not _is_pytreespec_instance(treespec):
-        raise TypeError(
-            f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
-        )
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
@@ -938,7 +933,10 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert _is_pytreespec_instance(treespec)
+    if not _is_pytreespec_instance(treespec):
+        raise AssertionError(
+            f"_broadcast_to_and_flatten: Expected `treespec` to be instance of PyTreeSpec but got {type(treespec)}"
+        )
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)

@@ -67,6 +67,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     ShapeEnv,
     Specialization,
+    uninteresting_files,
 )
 from torch.fx.node import Target
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -1866,7 +1867,7 @@ class OutputGraph(OutputGraphCommon):
                 _get_source_debug_name(var.source) for var in potential_side_effects
             ]
 
-            if len(side_effect_refs):
+            if side_effect_refs:
                 warnings.warn(
                     f"While exporting, we found certain side effects happened in the model.forward. "
                     f"Here are the list of potential sources you can double check: {side_effect_refs}"
@@ -2187,35 +2188,6 @@ class OutputGraph(OutputGraphCommon):
                 ),
             )
             self.call_cleanup_hooks()
-            old_fake_mode = self.tracing_context.fake_mode
-            assert old_fake_mode is not None
-            if not self.export:
-                import torch._functorch.config as _config
-
-                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
-
-                # T165177: We're swapping out the FakeTensorMode here but
-                # reusing the old ShapeEnv. We need to make sure that if we
-                # convert any already-known Tensors they get the same FakeTensor
-                # as before.
-                backend_fake_mode.fake_tensor_converter = old_fake_mode.fake_tensor_converter
-
-                # Also since we're swapping out our FakeTensorMode we need to
-                # tell our existing tracked FakeTensors that they now belong to
-                # the new mode (otherwise it gets confused when the cache
-                # returns old FakeTensors).
-                for t in self.tracked_fakes:
-                    if isinstance(t.fake, FakeTensor):
-                        t.fake.fake_mode = backend_fake_mode
-
-                # TODO(voz): Ostensibily, this should be scoped and
-                # restore back to old_fake_mode, but doing so currently violates
-                # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-                self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
@@ -2251,8 +2223,7 @@ class OutputGraph(OutputGraphCommon):
             )
 
             counters["stats"]["unique_graphs"] += 1
-            assert old_fake_mode.shape_env is not None
-            if specializations := old_fake_mode.shape_env.specializations:
+            if specializations := self.tracing_context.fake_mode.shape_env.specializations:
                 specialization_guards = []
                 specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
                 sources = [a.source for a in self.graphargs]
@@ -3185,11 +3156,18 @@ class SubgraphTracer(fx.Tracer):
                 if not tx.is_co_filename_from_nn_modules():
                     frame_summaries.append(tx.frame_summary())
                 tx = getattr(tx, "parent", None)
+
+            filtered_frame_summaries = [
+                frame
+                for frame in frame_summaries
+                if frame.filename not in uninteresting_files()
+            ]
+
             # Reverse the frame_summaries, such that the innermost frame is at the last
-            frame_summaries.reverse()
+            filtered_frame_summaries.reverse()
 
             # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(frame_summaries).format()
+            msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
         if (
@@ -3743,7 +3721,7 @@ class SubgraphTracer(fx.Tracer):
             if v1 != v2
         ]
 
-        if len(mutated_inputs):
+        if mutated_inputs:
             mutated_nodes = [input_nodes[i] for i in mutated_inputs]
             msg = f"Input mutation detected at {mutated_nodes}"
             return MutationInfo(True, msg)
