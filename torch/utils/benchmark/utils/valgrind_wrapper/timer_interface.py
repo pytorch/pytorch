@@ -640,7 +640,7 @@ class _ValgrindWrapper:
                         stat_log=stat_log,
                         bindings=self._bindings_module))
 
-                run_loop_cmd = ["python", script_file]
+                run_loop_cmd = [sys.executable, script_file]
             else:
                 if collect_baseline:
                     raise AssertionError("collect_baseline must be False for non-Python timers")
