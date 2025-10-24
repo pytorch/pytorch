@@ -107,6 +107,30 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
     @skipIfRocm
+    def test_mempool_tensor_w_collective(self) -> None:
+        """
+        Test the effectiveness of MemPool on tensor factory ops.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            tensor = torch.ones(numel, dtype=dtype, device=self.device)
+
+        symm_mem.rendezvous(tensor, group=group_name)
+        dist.all_reduce(tensor)
+        self.assertEqual(
+            tensor, torch.ones(numel, dtype=dtype, device=self.device) * self.world_size
+        )
+
+    @skipIfRocm
     def test_mempool_compute_ops(self) -> None:
         """
         Apply MemPool context to a compute op that creates input to collective.
