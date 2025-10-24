@@ -2077,22 +2077,6 @@ def forward(self, l_x_):
         self.assertEqual(count, 1)
         self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
 
-    def test_dynamic_slicing_invalid(self):
-        def g(x, y):
-            return x[y : x.shape[0]]
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Dynamic slicing with Tensor arguments",
-        ):
-            torch._dynamo.export(
-                g,
-                aten_graph=True,
-            )(
-                torch.randn(4, 5),
-                torch.tensor(2),
-            )
-
     @config.patch(capture_scalar_outputs=True)
     def test_dynamic_slicing_simple(self):
         def f(x):

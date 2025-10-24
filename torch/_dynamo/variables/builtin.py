@@ -1745,7 +1745,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_slice(self, tx: "InstructionTranslator", *args):
-        return variables.SliceVariable(args)
+        return variables.SliceVariable(args, tx)
 
     def _dyn_proxy(self, tx: "InstructionTranslator", *args, **kwargs):
         from .builder import wrap_fx_proxy
