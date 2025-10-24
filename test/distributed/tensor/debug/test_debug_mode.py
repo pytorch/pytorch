@@ -73,11 +73,13 @@ class TestDTensorDebugMode(TestCase):
 
         # check numerical equivalence
         self.assertTrue(torch.equal(eager_out, compiled_out))
-        sum_op = next(iter(
-            op
-            for op in debug_mode.operators
-            if isinstance(op, _OpCall) and str(op.op) == "aten::sum"
-        ))
+        sum_op = next(
+            iter(
+                op
+                for op in debug_mode.operators
+                if isinstance(op, _OpCall) and str(op.op) == "aten::sum"
+            )
+        )
         self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
 
     def test_debug_string_inside_context(self):
