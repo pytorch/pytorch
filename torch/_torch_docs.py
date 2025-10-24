@@ -2817,6 +2817,13 @@ Or, if :attr:`max` is ``None`` there is no upper bound.
     If :attr:`min` is greater than :attr:`max` :func:`torch.clamp(..., min, max) <torch.clamp>`
     sets all elements in :attr:`input` to the value of :attr:`max`.
 
+.. note::
+    When :attr:`min` or :attr:`max` are scalars that fall outside the representable
+    range of :attr:`input`, the bounds are saturated to the closest value that can be
+    expressed by :attr:`input`'s dtype (including ``+/-inf`` when supported). This
+    fail-safe saturation is consistent across CPU, CUDA, and MPS backends and avoids
+    raising overflow errors for clamping operations.
+
 Args:
     {input}
     min (Number or Tensor, optional): lower-bound of the range to be clamped to

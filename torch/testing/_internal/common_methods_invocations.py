@@ -6402,6 +6402,26 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
     yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
 
+    # Test scalar bounds saturation for reduced-precision dtypes
+    # When scalar bounds exceed the representable range, they should saturate rather than overflow
+    if dtype in (torch.float16, torch.bfloat16):
+        finfo = torch.finfo(dtype)
+        # Scalar bounds that exceed dtype range - should saturate to dtype limits
+        huge_max = finfo.max * 2.0
+        huge_min = finfo.min * 2.0
+
+        # Test both bounds exceeding range
+        yield SampleInput(make_arg(shape), args=(huge_min, huge_max))
+        # Test only min exceeding range
+        yield SampleInput(make_arg(shape), args=(huge_min, None))
+        # Test only max exceeding range
+        yield SampleInput(make_arg(shape), args=(None, huge_max))
+        # Test infinite bounds (should leave tensor unchanged)
+        yield SampleInput(make_arg(shape), args=(float('-inf'), float('inf')))
+        # Test NaN bounds (should propagate NaN)
+        yield SampleInput(make_arg(shape), args=(float('nan'), huge_max))
+        yield SampleInput(make_arg(shape), args=(huge_min, float('nan')))
+
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
 
