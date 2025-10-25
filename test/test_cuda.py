@@ -4222,6 +4222,7 @@ class TestCudaMallocAsync(TestCase):
                 ss = torch.cuda.memory._snapshot()
 
                 trace_plot(ss)
+                trace_plot(ss, filter_freed=True)
                 segment_plot(ss)
                 text = json.dumps(ss)
 
