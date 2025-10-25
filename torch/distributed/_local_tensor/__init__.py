@@ -189,9 +189,9 @@ def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
     if isinstance(any_v, int):
         return _combine_int_rank_results(rank_results)
 
-    assert all(
-        v == any_v for v in rank_results.values()
-    ), "Non Tensor or int rank results must be equal for all ranks"
+    assert all(v == any_v for v in rank_results.values()), (
+        "Non Tensor or int rank results must be equal for all ranks"
+    )
 
     return any_v
 
@@ -447,15 +447,15 @@ class LocalTensor(torch.Tensor):
         # Assert that all tensors have the same dtype, layout and dispatch keys. Due
         # to uneven sharding, it is possible that tensors will have different shapes.
         for local_tensor in it:
-            assert (
-                dtype == local_tensor.dtype
-            ), "Tensors representing LocalTensor shards must have the same dtype"
-            assert (
-                layout == local_tensor.layout
-            ), "Tensors representing LocalTensor shards must have the same layout"
-            assert extra_dispatch_keys == _get_extra_dispatch_keys(
-                local_tensor
-            ), "Tensors representing LocalTensor shards must have the same set of extra dispatch keys"
+            assert dtype == local_tensor.dtype, (
+                "Tensors representing LocalTensor shards must have the same dtype"
+            )
+            assert layout == local_tensor.layout, (
+                "Tensors representing LocalTensor shards must have the same layout"
+            )
+            assert extra_dispatch_keys == _get_extra_dispatch_keys(local_tensor), (
+                "Tensors representing LocalTensor shards must have the same set of extra dispatch keys"
+            )
 
         # Compute shape/stride.  We allow for non-SPMD'ness here
         local_shapes: dict[int, dict[int, int]] = defaultdict(
@@ -539,9 +539,9 @@ class LocalTensor(torch.Tensor):
         outer_size: torch.Size,
         outer_stride: tuple[int, ...],
     ) -> "LocalTensor":
-        assert (
-            flatten_spec is not None
-        ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        assert flatten_spec is not None, (
+            "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        )
         local_tensors = inner_tensors["_local_tensors"]
         return LocalTensor(local_tensors)
 
@@ -565,9 +565,9 @@ class LocalTensor(torch.Tensor):
                 local_tensor = arg
                 break
 
-        assert (
-            local_tensor is not None
-        ), "At least one of the arguments must be a LocalTensor"
+        assert local_tensor is not None, (
+            "At least one of the arguments must be a LocalTensor"
+        )
 
         # Check for unrecognized tensor subclasses (but allow regular tensors and scalars)
         has_unrecognized_types = _check_for_subclass(flat_args)
@@ -651,9 +651,9 @@ class LocalTensor(torch.Tensor):
         it = iter(self._local_tensors.values())
         t1 = next(it)
         for t2 in it:
-            assert torch.equal(
-                t1, t2
-            ), "LocalTensor shards must be the same to reconcile"
+            assert torch.equal(t1, t2), (
+                "LocalTensor shards must be the same to reconcile"
+            )
         cl = t1.clone().detach()
         cl.requires_grad_(self.requires_grad)
         return cl
@@ -747,9 +747,9 @@ class LocalTensorMode(TorchDispatchMode):
         # For LocalTensors, verify they have compatible ranks
         for a in flat_args:
             if isinstance(a, LocalTensor):
-                assert (
-                    a._ranks <= self.ranks
-                ), f"Input LocalTensor {a} and LocalTensorMode must be configured for the same ranks"
+                assert a._ranks <= self.ranks, (
+                    f"Input LocalTensor {a} and LocalTensorMode must be configured for the same ranks"
+                )
 
         if func.namespace == "c10d":
             if func is torch.ops.c10d.allreduce_.default:

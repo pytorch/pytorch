@@ -391,12 +391,12 @@ def _local_reduce_scatter_tensor_coalesced_(
 
         # For each tensor, perform the reduction operation
         for input_tensor, output_tensor in zip(input_tensors, output_tensors):
-            assert isinstance(
-                input_tensor, LocalTensor
-            ), "Input tensor must be a LocalTensor"
-            assert isinstance(
-                output_tensor, LocalTensor
-            ), "Output tensor must be a LocalTensor"
+            assert isinstance(input_tensor, LocalTensor), (
+                "Input tensor must be a LocalTensor"
+            )
+            assert isinstance(output_tensor, LocalTensor), (
+                "Output tensor must be a LocalTensor"
+            )
             # Collect tensors from the specified ranks in this group
             group_inputs = []
             for rank in group_ranks:
@@ -441,9 +441,9 @@ def _local_all_gather_(
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
     for i in range(len(output_tensors)):
-        assert isinstance(
-            output_tensors[i], LocalTensor
-        ), "Output tensor must be a LocalTensor"
+        assert isinstance(output_tensors[i], LocalTensor), (
+            "Output tensor must be a LocalTensor"
+        )
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -480,9 +480,9 @@ def _local_allgather_into_tensor_coalesced_(
 
     # Each output tensor should be sized to hold all gathered inputs
     # outputs[i] will contain all inputs[i] from all ranks
-    assert len(output_tensors) == len(
-        input_tensors
-    ), f"Number of outputs ({len(output_tensors)}) must match number of inputs ({len(input_tensors)})"
+    assert len(output_tensors) == len(input_tensors), (
+        f"Number of outputs ({len(output_tensors)}) must match number of inputs ({len(input_tensors)})"
+    )
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -491,12 +491,12 @@ def _local_allgather_into_tensor_coalesced_(
 
         # For each input/output pair
         for input_tensor, output_tensor in zip(input_tensors, output_tensors):
-            assert isinstance(
-                input_tensor, LocalTensor
-            ), "Input tensor must be a LocalTensor"
-            assert isinstance(
-                output_tensor, LocalTensor
-            ), "Output tensor must be a LocalTensor"
+            assert isinstance(input_tensor, LocalTensor), (
+                "Input tensor must be a LocalTensor"
+            )
+            assert isinstance(output_tensor, LocalTensor), (
+                "Output tensor must be a LocalTensor"
+            )
             # Gather input_tensor from all ranks into output_tensor
             # The output should be a concatenation of all inputs along the first dimension
             gathered_tensors = []
@@ -608,14 +608,14 @@ def _local_alltoall_(
         # In alltoall, rank i sends input_tensors[j] to rank j and receives into output_tensors[i] from rank j
         for i, rank_i in enumerate(group_ranks):
             output_tensor = output_tensors[i]
-            assert isinstance(
-                output_tensor, LocalTensor
-            ), "Output tensor must be a LocalTensor"
+            assert isinstance(output_tensor, LocalTensor), (
+                "Output tensor must be a LocalTensor"
+            )
             for j, rank_j in enumerate(group_ranks):
                 input_tensor = input_tensors[j]
-                assert isinstance(
-                    input_tensor, LocalTensor
-                ), "Input tensor must be a LocalTensor"
+                assert isinstance(input_tensor, LocalTensor), (
+                    "Input tensor must be a LocalTensor"
+                )
                 # Rank i's j-th input tensor goes to rank j's i-th output tensor
                 source_tensor = input_tensor._local_tensors[rank_i]
                 output_tensor._local_tensors[rank_j].copy_(source_tensor)

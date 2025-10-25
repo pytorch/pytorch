@@ -86,9 +86,9 @@ class Shard(Placement):
             few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
             This is because collectives usually require equal size tensor inputs
         """
-        assert (
-            self.dim <= tensor.ndim
-        ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+        assert self.dim <= tensor.ndim, (
+            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+        )
 
         # chunk tensor over dimension `dim` into n slices
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
@@ -622,9 +622,9 @@ class _StridedShard(Shard):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> tuple[list[torch.Tensor], list[int]]:
-        assert (
-            self.dim <= tensor.ndim
-        ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+        assert self.dim <= tensor.ndim, (
+            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+        )
 
         # Essentially _StridedShard express the right-to-left sharding in the
         # reversed order. Here we perform first_split as the virtual "right" sharding,
