@@ -1597,6 +1597,7 @@ def main() -> None:
         "networkx>=2.5.1",
         "jinja2",
         "fsspec>=0.8.5",
+        "tabulate",
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
