@@ -923,6 +923,8 @@ class VariableBuilder:
                         GuardBuilder.CLOSURE_MATCH
                     )
                 )
+            elif inspect.isclass(value):
+                self.install_guards(GuardBuilder.CLASS_MATCH)
             elif callable(value):
                 self.install_guards(GuardBuilder.FUNCTION_MATCH)
             else:
@@ -1258,7 +1260,10 @@ class VariableBuilder:
                 source=self.source,
             )
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
-            self.install_guards(GuardBuilder.CLASS_MATCH)
+            if inspect.isclass(value):
+                self.install_guards(GuardBuilder.CLASS_MATCH)
+            elif inspect.isfunction(value):
+                self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
         elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1321,7 +1326,7 @@ class VariableBuilder:
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.CLASS_MATCH)
+            self.install_guards(GuardBuilder.MODULE_MATCH)
             result = PythonModuleVariable(
                 value,
                 source=self.source,
@@ -1406,7 +1411,7 @@ class VariableBuilder:
                 # self.__class__ manually.
                 # For other cases, this is a userdefined class, so install an
                 # ID_MATCH even if its a global variable.
-                self.install_guards(GuardBuilder.ID_MATCH)
+                self.install_guards(GuardBuilder.CLASS_MATCH)
 
             return UserDefinedClassVariable(
                 value,
