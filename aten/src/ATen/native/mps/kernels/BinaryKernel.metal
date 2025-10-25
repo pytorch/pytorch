@@ -225,7 +225,7 @@ struct nextafter_functor {
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(::metal::precise::sqrt(a * a + b * b));
+    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
   }
 };
 
