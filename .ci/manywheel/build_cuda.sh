@@ -29,6 +29,10 @@ if [[ -z "$EXTRA_CAFFE2_CMAKE_FLAGS" ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
 fi
 
+# Detect architecture
+ARCH=$(uname -m)
+echo "Building for architecture: $ARCH"
+
 # Determine CUDA version and architectures to build for
 #
 # NOTE: We should first check `DESIRED_CUDA` when determining `CUDA_VERSION`,
@@ -57,26 +61,48 @@ case ${CUDA_VERSION} in
     #removing sm_50-sm_60 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
     #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
     12.8)
-        TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
+        if [[ "$ARCH" == "aarch64" ]]; then
+            TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
+        else
+            TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
+        fi
         ;;
     12.9)
-        TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
-        # WAR to resolve the ld error in libtorch build with CUDA 12.9
-        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-            TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
+        if [[ "$ARCH" == "aarch64" ]]; then
+            TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
+        else
+            TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+            # WAR to resolve the ld error in libtorch build with CUDA 12.9
+            if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
+                TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
+            fi
         fi
         ;;
     13.0)
-        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+        if [[ "$ARCH" == "aarch64" ]]; then
+            TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;11.0;12.0+PTX"
+            # ARM-specific CUDA 13 optimizations
+            echo "Enabling ARM-specific CUDA 13 optimizations"
+            export TORCH_NVCC_FLAGS="-compress-mode=size"
+            export BUILD_BUNDLE_PTXAS=1
+        else
+            TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+        fi
         ;;
     12.6)
-        TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
+        if [[ "$ARCH" == "aarch64" ]]; then
+            TORCH_CUDA_ARCH_LIST="8.0;9.0"
+        else
+            TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
+        fi
         ;;
     *)
         echo "unknown cuda version $CUDA_VERSION"
         exit 1
         ;;
 esac
+
+echo "TORCH_CUDA_ARCH_LIST set to: $TORCH_CUDA_ARCH_LIST"
 
 export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 echo "${TORCH_CUDA_ARCH_LIST}"
@@ -242,6 +268,51 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
 else
     echo "Unknown cuda version $CUDA_VERSION"
     exit 1
+fi
+
+# Add ARM-specific library dependencies
+if [[ "$ARCH" == "aarch64" ]]; then
+    echo "Adding ARM-specific library dependencies"
+    
+    # ARM Compute Library (if available)
+    if [[ -d "/acl/build" ]]; then
+        echo "Adding ARM Compute Library"
+        DEPS_LIST+=(
+            "/acl/build/libarm_compute.so"
+            "/acl/build/libarm_compute_graph.so"
+        )
+        DEPS_SONAME+=(
+            "libarm_compute.so"
+            "libarm_compute_graph.so"
+        )
+    fi
+    
+    # ARM system libraries
+    DEPS_LIST+=(
+        "/lib64/libgomp.so.1"
+        "/usr/lib64/libgfortran.so.5"
+    )
+    DEPS_SONAME+=(
+        "libgomp.so.1"
+        "libgfortran.so.5"
+    )
+    
+    # NVPL libraries (ARM optimized BLAS/LAPACK)
+    if [[ -d "/usr/local/lib" && -f "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0" ]]; then
+        echo "Adding NVPL libraries for ARM"
+        DEPS_LIST+=(
+            "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0"
+            "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0"
+            "/usr/local/lib/libnvpl_lapack_core.so.0"
+            "/usr/local/lib/libnvpl_blas_core.so.0"
+        )
+        DEPS_SONAME+=(
+            "libnvpl_lapack_lp64_gomp.so.0"
+            "libnvpl_blas_lp64_gomp.so.0"
+            "libnvpl_lapack_core.so.0"
+            "libnvpl_blas_core.so.0"
+        )
+    fi
 fi
 
 # run_tests.sh requires DESIRED_CUDA to know what tests to exclude
