@@ -102,7 +102,9 @@ class FakeTensorTest(TestCase):
         real_tensor = torch.randn(2, 3, device="cpu")
 
         with FakeTensorMode():
-            with self.assertRaisesRegex(NotImplementedError, "deepcopy() is not supported"):
+            with self.assertRaisesRegex(
+                    NotImplementedError, "deepcopy() is not supported"
+            ):
                 copy.deepcopy(real_tensor)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
