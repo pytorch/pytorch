@@ -535,7 +535,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         skip_signature_check=True,
     )
     def dict_unflatten(
-        metadata: tuple[list[_VT], tuple[list[_KT], list[_KT]], tuple[_KT, ...]],
+        metadata: tuple[list[_KT], list[_KT]],
         values: Iterable[_VT],
         /,
     ) -> dict[_KT, _VT]:
