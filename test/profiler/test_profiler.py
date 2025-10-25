@@ -1157,6 +1157,111 @@ class TestProfiler(TestCase):
 
         self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_kineto_profiler_matrix_multiplication_kernel_count(self):
+        """Test that Kineto profiler correctly records matrix multiplication kernel count without duplication"""
+        torch.set_default_device("cuda")
+        torch.set_default_dtype(torch.bfloat16)
+
+        a = torch.randn(1024, 1024)
+        b = torch.randn(1024, 1024)
+
+        @torch.inference_mode()
+        def matrix_mul_func():
+            return a @ b
+
+        def bench_kineto_and_verify_kernel_count(fn, num_tests: int):
+            flush_l2_size = int(8e9 // 4)
+
+            schedule = torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=1)
+            profiler = torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA], schedule=schedule
+            )
+
+            with profiler:
+                for i in range(2):
+                    for _ in range(num_tests):
+                        torch.empty(
+                            flush_l2_size, dtype=torch.int, device="cuda"
+                        ).zero_()
+                        fn()
+                    profiler.step()
+
+            events = profiler.events()
+            self.assertGreater(len(events), 0, "Profiler should capture events")
+
+            matmul_kernel_count = 0
+            matmul_kernel_names = []
+
+            for event in events:
+                event_name = event.name.lower()
+                if any(
+                    pattern in event_name
+                    for pattern in [
+                        "gemm",
+                        "sgemm",
+                        "dgemm",
+                        "hgemm",
+                        "bgemm",
+                        "nvjet_tst",
+                        "ampere_sgemm",
+                        "ampere_hgemm",
+                        "volta_sgemm",
+                        "volta_hgemm",
+                        "turing_sgemm",
+                        "turing_hgemm",
+                        "cijk",
+                        "cutlass_",
+                        "sm80_xmma",
+                        "sm86_xmma",
+                        "sm89_xmma",
+                    ]
+                ):
+                    matmul_kernel_count += 1
+                    matmul_kernel_names.append(event.name)
+
+            if matmul_kernel_count != num_tests:
+                print(
+                    f"Expected {num_tests} matrix multiplication kernels, got {matmul_kernel_count}"
+                )
+                print("Found kernel names:")
+                for name in set(matmul_kernel_names):
+                    count = matmul_kernel_names.count(name)
+                    print(f"  {name}: {count} times")
+
+            self.assertEqual(
+                matmul_kernel_count,
+                num_tests,
+                f"Matrix multiplication kernels should be recorded exactly {num_tests} times, "
+                f"but found {matmul_kernel_count} recordings. "
+                f"This suggests kernel over-recording issue. "
+                f"Kernel names found: {set(matmul_kernel_names)}",
+            )
+
+            avg_table = profiler.key_averages().table(
+                sort_by="cuda_time_total", max_name_column_width=50
+            )
+            self.assertIsInstance(avg_table, str)
+            self.assertGreater(len(avg_table), 0)
+
+            return matmul_kernel_count
+
+        kernel_count_10 = bench_kineto_and_verify_kernel_count(matrix_mul_func, 10)
+
+        kernel_count_5 = bench_kineto_and_verify_kernel_count(matrix_mul_func, 5)
+
+        self.assertEqual(
+            kernel_count_10,
+            10,
+            "Should record exactly 10 kernels for 10 function calls",
+        )
+        self.assertEqual(
+            kernel_count_5, 5, "Should record exactly 5 kernels for 5 function calls"
+        )
+
+        torch.cuda.empty_cache()
+
     def test_export_stacks(self):
         with _profile(
             with_stack=True,

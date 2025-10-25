@@ -835,6 +835,11 @@ class profile(_KinetoProfile):
         """
         Signals the profiler that the next profiling step has started.
         """
+        if ProfilerActivity.CUDA in self.activities:
+            sync_event = torch.cuda.Event()
+            sync_event.record()
+            sync_event.synchronize()
+
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         prev_action = self.current_action
