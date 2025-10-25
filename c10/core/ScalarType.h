@@ -137,22 +137,6 @@ inline ScalarType toQIntType(ScalarType t) {
   }
 }
 
-inline ScalarType toUnderlying(ScalarType t) {
-  switch (t) {
-    case ScalarType::QUInt8:
-    case ScalarType::QUInt4x2:
-      [[fallthrough]];
-    case ScalarType::QUInt2x4:
-      return ScalarType::Byte;
-    case ScalarType::QInt8:
-      return ScalarType::Char;
-    case ScalarType::QInt32:
-      return ScalarType::Int;
-    default:
-      return t;
-  }
-}
-
 inline bool isSignedType(ScalarType t) {
 #define CASE_ISSIGNED(name)     \
   case ScalarType::name:        \
