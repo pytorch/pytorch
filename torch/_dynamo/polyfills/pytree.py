@@ -542,4 +542,4 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         original_keys, sorted_keys = metadata
         d = dict.fromkeys(original_keys)
         d.update(zip(sorted_keys, values))
-        return d
+        return d  # type: ignore[return-value]
