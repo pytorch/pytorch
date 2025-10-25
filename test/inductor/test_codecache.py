@@ -61,7 +61,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
-    skipIfMPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -74,7 +73,10 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     requires_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 try:
@@ -1217,8 +1219,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
-    @skipIfMPS(msg="FlexAttention not implemented on MPS.")
-    @requires_gpu()
+    @requires_gpu_and_triton
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @with_tf32_off
@@ -2955,7 +2956,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2996,7 +2997,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -3057,7 +3058,7 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_triton()
-    @requires_gpu()
+    @requires_gpu_and_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -3160,7 +3161,7 @@ class TestRemoteAOTAutogradCache(TestCase):
         for k in global_stats.fx_graph.cache.keys():
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
@@ -3235,7 +3236,7 @@ class TestUtils(TestCase):
 
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
-    @requires_gpu()
+    @requires_gpu_and_triton
     @config.patch(
         {
             "coordinate_descent_tuning": True,
