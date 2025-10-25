@@ -5734,6 +5734,141 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         self.assertEqual(flex_output, sdpa_output, atol=1e-3, rtol=1e-3)
 
+    @supported_platform
+    def test_pytree_flatten_unflatten(self, device):
+        """Test that BlockMask can be correctly flattened and unflattened using class methods."""
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # Create a BlockMask with various attributes set
+        block_mask = create_block_mask(
+            causal_mask, B=2, H=4, Q_LEN=512, KV_LEN=512, device=device
+        )
+
+        # Flatten and unflatten using class methods
+        tensors, context = block_mask._flatten()
+        reconstructed_mask = BlockMask._unflatten(tensors, context)
+
+        # Verify the reconstructed mask has the same attributes
+        self.assertEqual(reconstructed_mask.shape, block_mask.shape)
+        self.assertEqual(reconstructed_mask.sparsity(), block_mask.sparsity())
+
+        # Verify all tensor attributes are equal (using _TENSOR_ATTRS)
+        for attr_name in BlockMask._TENSOR_ATTRS:
+            original_value = getattr(block_mask, attr_name)
+            reconstructed_value = getattr(reconstructed_mask, attr_name)
+
+            if original_value is None:
+                self.assertIsNone(
+                    reconstructed_value,
+                    f"Tensor attribute {attr_name} should be None but got {reconstructed_value}",
+                )
+            else:
+                self.assertIsInstance(
+                    original_value,
+                    torch.Tensor,
+                    f"Expected {attr_name} to be a Tensor",
+                )
+                self.assertTrue(
+                    torch.equal(original_value, reconstructed_value),
+                    f"Tensor attribute {attr_name} not equal after reconstruction",
+                )
+
+        # Verify all context attributes are equal (using _CONTEXT_ATTRS)
+        for attr_name in BlockMask._CONTEXT_ATTRS:
+            original_value = getattr(block_mask, attr_name)
+            reconstructed_value = getattr(reconstructed_mask, attr_name)
+
+            self.assertEqual(
+                original_value,
+                reconstructed_value,
+                f"Context attribute {attr_name} not equal after reconstruction",
+            )
+
+    @supported_platform
+    def test_pytree_flatten_with_keys(self, device):
+        """Test that BlockMask._flatten_with_keys works correctly for tracing."""
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask, B=2, H=4, Q_LEN=512, KV_LEN=512, device=device
+        )
+
+        tensors_with_keys, context_with_keys = block_mask._flatten_with_keys()
+
+        self.assertEqual(len(tensors_with_keys), len(BlockMask._TENSOR_ATTRS))
+        self.assertEqual(len(context_with_keys), len(BlockMask._CONTEXT_ATTRS))
+
+        from torch.utils._pytree import GetAttrKey
+
+        for key, tensor in tensors_with_keys:
+            self.assertIsInstance(key, GetAttrKey)
+            self.assertIsNotNone(key)
+
+        for key, value in context_with_keys:
+            self.assertIsInstance(key, GetAttrKey)
+            self.assertIsNotNone(key)
+
+    @supported_platform
+    def test_pytree_preserves_new_attributes(self, device):
+        """
+        Test that BlockMask._TENSOR_ATTRS and _CONTEXT_ATTRS are correctly defined
+        and that flatten/unflatten preserves all attributes in these lists.
+
+        """
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask, B=2, H=4, Q_LEN=512, KV_LEN=512, device=device
+        )
+
+        # Flatten and unflatten using class methods
+        tensors, context = block_mask._flatten()
+        reconstructed_mask = BlockMask._unflatten(tensors, context)
+
+        # Verify the number of tensors and context values matches the attribute lists
+        self.assertEqual(
+            len(tensors),
+            len(BlockMask._TENSOR_ATTRS),
+            "Number of tensors should match _TENSOR_ATTRS length",
+        )
+        self.assertEqual(
+            len(context),
+            len(BlockMask._CONTEXT_ATTRS),
+            "Number of context values should match _CONTEXT_ATTRS length",
+        )
+
+        # Verify all attributes from the lists exist and are equal after reconstruction
+        for attr_name in BlockMask._TENSOR_ATTRS + BlockMask._CONTEXT_ATTRS:
+            self.assertTrue(
+                hasattr(reconstructed_mask, attr_name),
+                f"Reconstructed mask missing attribute: {attr_name}",
+            )
+            original_value = getattr(block_mask, attr_name)
+            reconstructed_value = getattr(reconstructed_mask, attr_name)
+
+            if isinstance(original_value, torch.Tensor):
+                self.assertTrue(
+                    torch.equal(original_value, reconstructed_value),
+                    f"Tensor attribute {attr_name} not equal after reconstruction",
+                )
+            elif original_value is None:
+                self.assertIsNone(
+                    reconstructed_value,
+                    f"Attribute {attr_name} should be None but got {reconstructed_value}",
+                )
+            else:
+                self.assertEqual(
+                    original_value,
+                    reconstructed_value,
+                    f"Attribute {attr_name} not equal after reconstruction",
+                )
+
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
