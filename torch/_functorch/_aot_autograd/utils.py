@@ -251,6 +251,13 @@ def is_with_effects(node):
         and node.target == torch.ops.higher_order.with_effects
     )
 
+def is_cond_op(node):
+    """Check if a node is a torch.cond call."""
+    from torch._higher_order_ops.cond import cond_op
+    return (
+        node.op == "call_function"
+        and node.target is cond_op
+    )
 
 def is_with_effects_op(node, op):
     return is_with_effects(node) and node.args[1] == op
@@ -278,6 +285,16 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     num_forward_tokens = len(fw_metadata.tokens)
     num_backward_tokens = fw_metadata.num_backward_tokens
 
+    def is_token_node(node):
+        """Check if a node represents a token that should be replaced."""
+        if not hasattr(node, 'op'):
+            return False
+        if node.op == "placeholder":
+            return 'token' in node.name.lower()
+        elif node.op == "get_attr":
+            return '_tensor_constant' in str(node.target)
+        return False
+
     def rewrite_with_effects_input_token(module, node):
         with module.graph.inserting_before(node):
             new_token_node = module.graph.call_function(
@@ -292,10 +309,16 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
 
     def rewrite_output(module, node, output_token_nodes, other_output_args):
         for output_token_node in output_token_nodes:
-            assert (
-                output_token_node.op == "call_function"
-                and output_token_node.target == operator.getitem
-                and output_token_node.args[1] == 0
+            is_valid_token = ((output_token_node.op == "call_function"
+                    and output_token_node.target == operator.getitem
+                    and len(output_token_node.args) >= 2
+                    and output_token_node.args[1] == 0)
+                or (output_token_node.op == "get_attr"
+                    and "_tensor_constant" in str(output_token_node.target)))
+
+            assert is_valid_token, (
+                f"Token output node has unexpected structure: "
+                f"op={output_token_node.op}, target={output_token_node.target}"
             )
         with module.graph.inserting_before(node):
             module.graph.call_function(
@@ -304,51 +327,78 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
             )
             node.args = (other_output_args,)
 
-    def do(module, subgraph, expected_num_erased):
-        num_erased_inputs = 0
-        num_erased_outs = 0
+    def process_nodes(module):
         input_nodes = []
         input_token_nodes = set()
+        current_module_input_token_nodes = set()
         with_effect_nodes = []
         output_token_nodes = []
-        other_output_nodes = []
+        current_module_output_token_nodes = []
+        current_other_output_nodes = []
         for node in module.graph.nodes:
             if node.op == "placeholder":
                 input_nodes.append(node)
             elif is_with_effects(node):
                 with_effect_nodes.append(node)
-                if node.args[0] in input_nodes:
+                if is_token_node(node.args[0]):
                     input_token_nodes.add(node.args[0])
+                    current_module_input_token_nodes.add(node.args[0])
                     rewrite_with_effects_input_token(module, node)
+            elif is_cond_op(node) and len(node.args) >= 3:
+                true_submodule = module.get_submodule(node.args[1].target)
+                true_input_token_nodes, true_output_token_nodes = process_nodes(true_submodule)
+                input_token_nodes.update(true_input_token_nodes)
+                output_token_nodes.extend(true_output_token_nodes)
+                true_submodule.recompile()
+                false_submodule = module.get_submodule(node.args[2].target)
+                false_input_token_nodes, false_output_token_nodes = process_nodes(false_submodule)
+                input_token_nodes.update(false_input_token_nodes)
+                output_token_nodes.extend(false_output_token_nodes)
+                false_submodule.recompile()
+                if len(false_input_token_nodes) > 0 or len(true_input_token_nodes) > 0:
+                    for node in input_nodes:
+                        desc = node.meta.get("desc")
+                        if desc is not None and "TokenAOTInput" in type(desc).__name__:
+                             module.graph.erase_node(node)
             elif node.op == "output":
                 outs = node.args[0]
-                for out in outs:
+                output_descs = node.meta.get('desc')
+                for idx, out in enumerate(outs):
                     if (
+                        output_descs
+                        and idx < len(output_descs)
+                        and "TokenAOTOutput" in type(output_descs[idx]).__name__):
+                            current_module_output_token_nodes.append(out)
+                    elif (
                         isinstance(out, torch.fx.node.Node)
                         and out.op == "call_function"
                         and out.target == operator.getitem
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
-                        # pyrefly: ignore  # missing-attribute
-                        output_token_nodes.append(out)
+                        current_module_output_token_nodes.append(out)
                     else:
-                        other_output_nodes.append(out)
+                        current_other_output_nodes.append(out)
 
-                rewrite_output(module, node, output_token_nodes, other_output_nodes)
-                num_erased_outs = len(output_token_nodes)
+                rewrite_output(module, node, current_module_output_token_nodes, current_other_output_nodes)
+                output_token_nodes.extend(current_module_output_token_nodes)
 
-        for input_token_node in input_token_nodes:
-            module.graph.erase_node(input_token_node)
+        for current_module_input_token_node in current_module_input_token_nodes:
+            module.graph.erase_node(current_module_input_token_node)
 
+        return input_token_nodes, output_token_nodes
+
+    def do(module, subgraph, expected_num_erased):
+        num_erased_inputs = 0
+        num_erased_outs = 0
+        input_token_nodes, output_token_nodes = process_nodes(module)
         num_erased_inputs = len(input_token_nodes)
-
+        num_erased_outs = len(output_token_nodes)
         assert num_erased_inputs == expected_num_erased, (
             f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased}"
         )
         assert num_erased_outs == expected_num_erased, (
-            f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}"
-        )
+            f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}")
 
         module.recompile()
 

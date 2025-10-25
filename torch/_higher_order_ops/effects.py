@@ -10,6 +10,7 @@ from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.node import has_side_effect
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -83,6 +84,7 @@ class WithEffects(HigherOrderOperator):
 
 
 with_effects = WithEffects()
+has_side_effect(with_effects)
 
 
 def has_aliasing(op: OpType):
@@ -165,7 +167,11 @@ def with_effects_fake(
     *args: tuple[Any, ...],
     **kwargs: dict[str, Any],
 ) -> tuple[torch.Tensor, ...]:
-    with mode:
+    from unittest import mock
+
+    # Allow real tensor arguments when the token is a FakeTensor but other args might be real
+    # This happens when a GraphModule with a FakeTensor token executes with real inputs
+    with mode, mock.patch.object(mode, "allow_non_fake_inputs", True):
         result = with_effects_dense(token, op, *args, **kwargs)
         return result
 
@@ -184,8 +190,6 @@ def with_effects_proxy(
     proxy_token = mode.tracer.unwrap_proxy(token)
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
-
-    from torch.fx.node import has_side_effect
 
     # To avoid the being DCEed by graph.eliminate_dead_code if they.
     # don't have output or their outputs are not used.
