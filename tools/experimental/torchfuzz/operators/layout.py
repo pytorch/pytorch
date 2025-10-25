@@ -671,7 +671,8 @@ class StackOperator(LayoutOperatorBase):
         if not isinstance(output_spec, TensorSpec):
             return False
         # Stack creates a new dimension, so output must have at least one dimension
-        return len(output_spec.size) > 0
+        # Also, no dimension can be 0 since that would require stacking 0 tensors
+        return len(output_spec.size) > 0 and 0 not in output_spec.size
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for stack operation."""
