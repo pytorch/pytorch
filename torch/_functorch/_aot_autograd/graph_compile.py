@@ -113,6 +113,52 @@ aten = torch.ops.aten
 DispatchReturn = tuple[Callable, ViewAndMutationMeta]
 
 
+@dataclasses.dataclass
+class Stage2aPartitionOutput:
+    """Output from the partition stage (stage2a) of the autograd compiler."""
+
+    fw_module: torch.fx.GraphModule
+    bw_module: torch.fx.GraphModule
+    num_fw_outs_saved_for_bw: int
+    num_symints_saved_for_bw: int
+    indices_of_inps_to_detach: list[int]
+    adjusted_flat_args: list[Any]
+
+
+@dataclasses.dataclass
+class Stage2bForwardCompileOutput:
+    """Output from the forward compilation stage (stage2b) of the autograd compiler."""
+
+    fwd_output_strides: Optional[list[Optional[tuple[int, ...]]]]
+    compiled_fw_func: Callable
+
+
+@dataclasses.dataclass
+class Stage2bBackwardCompileOutput:
+    """Output from the backward compilation stage (stage2b) of the autograd compiler."""
+
+    lazy_backward_info: AutogradLazyBackwardCompileInfo
+    compiled_bw_func: Optional[Callable]
+
+
+@dataclasses.dataclass
+class Stage2cMakeAutogradFunctionInput:
+    """Input to the stage2c make autograd function stage."""
+
+    aot_config: AOTConfig
+    flat_args: list[Any]
+    fw_metadata: ViewAndMutationMeta
+    maybe_subclass_meta: Optional[SubclassMeta]
+    wrappers: list[CompilerWrapper]
+    compiled_fw_func: Callable
+    compiled_bw_func: Optional[Callable]
+    lazy_backward_info: AutogradLazyBackwardCompileInfo
+    try_save_cache_entry: Optional[Callable]
+    entry: Optional[GenericAOTAutogradCacheEntry]
+    indices_of_inps_to_detach: list[int]
+    num_symints_saved_for_bw: int
+
+
 def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]:
     """
     Wrappers that run on every dispatch function
@@ -353,12 +399,13 @@ def aot_stage2_inference(
     assert isinstance(fw_module, GraphModule)
     _apply_tensorify_python_scalars(fw_module)
 
-    compiled_fw = _aot_stage2b_inference_compile(
+    # Create the stage 2 compiler
+    compiler = Stage2Compiler(aot_config, fw_metadata, maybe_subclass_meta)
+
+    # Stage 2b: Inference compile
+    compiled_fw = compiler.stage2b_inference_compile(
         fw_module,
         updated_flat_args,  # type: ignore[arg-type]
-        maybe_subclass_meta,
-        fw_metadata,
-        aot_config,
     )
 
     entry = _cache_inference_info(
@@ -370,9 +417,8 @@ def aot_stage2_inference(
         wrappers,
     )
 
-    return _aot_stage2c_make_inference_function(
-        aot_config,
-        fw_metadata,
+    # Stage 2c: Make inference function
+    return compiler.stage2c_make_inference_function(
         compiled_fw,
         wrappers,
         entry,
@@ -1483,6 +1529,143 @@ def _log_fw_bw_graphs(
     return fw_module_str, bw_module_str
 
 
+class Stage2Compiler:
+    """
+    A class that organizes the stage 2 compilation pipeline into distinct phases.
+    Each method represents a stage in the compilation process with dataclass inputs/outputs.
+    """
+
+    def __init__(
+        self,
+        aot_config: AOTConfig,
+        fw_metadata: ViewAndMutationMeta,
+        maybe_subclass_meta: Optional[SubclassMeta],
+    ):
+        self.aot_config = aot_config
+        self.fw_metadata = fw_metadata
+        self.maybe_subclass_meta = maybe_subclass_meta
+
+    def stage2a_partition(
+        self,
+        fx_g: torch.fx.GraphModule,
+        joint_inputs: Union[list[Any], tuple[list[Any], list[Any]]],
+    ) -> Stage2aPartitionOutput:
+        """
+        Partition the joint graph into a forward graph and a backward graph.
+        """
+        result = _aot_stage2a_partition(
+            fx_g, joint_inputs, self.maybe_subclass_meta, self.fw_metadata, self.aot_config
+        )
+        return Stage2aPartitionOutput(
+            fw_module=result[0],
+            bw_module=result[1],
+            num_fw_outs_saved_for_bw=result[2],
+            num_symints_saved_for_bw=result[3],
+            indices_of_inps_to_detach=result[4],
+            adjusted_flat_args=result[5],
+        )
+
+    def stage2b_fw_compile(
+        self,
+        fw_module: torch.fx.GraphModule,
+        adjusted_flat_args: list[Any],
+        num_fw_outs_saved_for_bw: int,
+    ) -> Stage2bForwardCompileOutput:
+        """
+        Compile the forward graph.
+        """
+        result = _aot_stage2b_fw_compile(
+            fw_module,
+            adjusted_flat_args,
+            self.maybe_subclass_meta,
+            self.fw_metadata,
+            num_fw_outs_saved_for_bw,
+            self.aot_config,
+        )
+        return Stage2bForwardCompileOutput(
+            fwd_output_strides=result[0],
+            compiled_fw_func=result[1],
+        )
+
+    def stage2b_bw_compile(
+        self,
+        bw_module: torch.fx.GraphModule,
+        fwd_output_strides: Optional[list[Optional[tuple[int, ...]]]],
+        num_symints_saved_for_bw: int,
+    ) -> Stage2bBackwardCompileOutput:
+        """
+        Compile the backward graph.
+        """
+        result = _aot_stage2b_bw_compile(
+            bw_module,
+            self.maybe_subclass_meta,
+            self.fw_metadata,
+            fwd_output_strides,
+            num_symints_saved_for_bw,
+            self.aot_config,
+        )
+        return Stage2bBackwardCompileOutput(
+            lazy_backward_info=result[0],
+            compiled_bw_func=result[1],
+        )
+
+    def stage2b_inference_compile(
+        self,
+        fw_module: torch.fx.GraphModule,
+        updated_flat_args: list[Any],
+    ) -> Callable:
+        """
+        Compile the inference graph.
+        """
+        return _aot_stage2b_inference_compile(
+            fw_module,
+            updated_flat_args,
+            self.maybe_subclass_meta,
+            self.fw_metadata,
+            self.aot_config,
+        )
+
+    def stage2c_make_inference_function(
+        self,
+        compiled_fw: Callable,
+        wrappers: list[CompilerWrapper],
+        entry: Optional[GenericAOTAutogradCacheEntry],
+    ) -> tuple[Callable, ViewAndMutationMeta]:
+        """
+        Make the final inference function.
+        """
+        return _aot_stage2c_make_inference_function(
+            self.aot_config,
+            self.fw_metadata,
+            compiled_fw,
+            wrappers,
+            entry,
+        )
+
+    def stage2c_make_autograd_function(
+        self,
+        stage2c_input: Stage2cMakeAutogradFunctionInput,
+    ) -> tuple[Callable, ViewAndMutationMeta]:
+        """
+        Make the final autograd function.
+        """
+        compiled_fn = _aot_stage2c_make_autograd_function(
+            stage2c_input.aot_config,
+            stage2c_input.flat_args,
+            stage2c_input.fw_metadata,
+            stage2c_input.maybe_subclass_meta,
+            stage2c_input.wrappers,
+            stage2c_input.compiled_fw_func,
+            stage2c_input.compiled_bw_func,
+            stage2c_input.lazy_backward_info,
+            stage2c_input.try_save_cache_entry,
+            stage2c_input.entry,
+            stage2c_input.indices_of_inps_to_detach,
+            stage2c_input.num_symints_saved_for_bw,
+        )
+        return compiled_fn
+
+
 def _aot_stage2a_partition(
     fx_g: torch.fx.GraphModule,
     joint_inputs: Union[list[Any], tuple[list[Any], list[Any]]],
@@ -1891,74 +2074,71 @@ def aot_stage2_autograd(
 
     _apply_tensorify_python_scalars(fx_g)
 
-    (
-        fw_module,
-        bw_module,
-        num_fw_outs_saved_for_bw,
-        num_symints_saved_for_bw,
-        _indices_of_inps_to_detach,
-        adjusted_flat_args,
-    ) = _aot_stage2a_partition(
+    # Create the stage 2 compiler
+    compiler = Stage2Compiler(aot_config, fw_metadata, maybe_subclass_meta)
+
+    # Stage 2a: Partition
+    partition_output = compiler.stage2a_partition(
         fx_g,
         aot_graph_capture.updated_flat_args,
-        maybe_subclass_meta,
-        fw_metadata,
-        aot_config,
     )
 
     fw_module_str, bw_module_str = _log_fw_bw_graphs(
-        fw_module, bw_module, maybe_subclass_meta, fw_metadata, aot_config
-    )
-
-    fwd_output_strides, compiled_fw_func = _aot_stage2b_fw_compile(
-        fw_module,
-        adjusted_flat_args,
+        partition_output.fw_module,
+        partition_output.bw_module,
         maybe_subclass_meta,
         fw_metadata,
-        num_fw_outs_saved_for_bw,
         aot_config,
     )
 
-    lazy_backward_info, compiled_bw_func = _aot_stage2b_bw_compile(
-        bw_module,
-        maybe_subclass_meta,
-        fw_metadata,
-        fwd_output_strides,
-        num_symints_saved_for_bw,
-        aot_config,
+    # Stage 2b: Forward compile
+    fw_compile_output = compiler.stage2b_fw_compile(
+        partition_output.fw_module,
+        partition_output.adjusted_flat_args,
+        partition_output.num_fw_outs_saved_for_bw,
+    )
+
+    # Stage 2b: Backward compile
+    bw_compile_output = compiler.stage2b_bw_compile(
+        partition_output.bw_module,
+        fw_compile_output.fwd_output_strides,
+        partition_output.num_symints_saved_for_bw,
     )
 
     try_save_cache_entry, entry = _cache_autograd_info(
         aot_config,
         aot_state.flat_args,
-        compiled_fw_func,
-        compiled_bw_func,
+        fw_compile_output.compiled_fw_func,
+        bw_compile_output.compiled_bw_func,
         fw_module_str,
         bw_module_str,
         joint_graph_str,
         aot_graph_capture.wrappers,
         maybe_subclass_meta,
         fw_metadata,
-        num_fw_outs_saved_for_bw,
-        _indices_of_inps_to_detach,
-        num_symints_saved_for_bw,
-        bw_module,
+        partition_output.num_fw_outs_saved_for_bw,
+        partition_output.indices_of_inps_to_detach,
+        partition_output.num_symints_saved_for_bw,
+        partition_output.bw_module,
     )
 
-    return _aot_stage2c_make_autograd_function(
-        aot_config,
-        aot_state.flat_args,
-        fw_metadata,
-        maybe_subclass_meta,
-        aot_graph_capture.wrappers,
-        compiled_fw_func,
-        compiled_bw_func,
-        lazy_backward_info,
-        try_save_cache_entry,
-        entry,
-        _indices_of_inps_to_detach,
-        num_symints_saved_for_bw,
+    # Stage 2c: Make autograd function
+    stage2c_input = Stage2cMakeAutogradFunctionInput(
+        aot_config=aot_config,
+        flat_args=aot_state.flat_args,
+        fw_metadata=fw_metadata,
+        maybe_subclass_meta=maybe_subclass_meta,
+        wrappers=aot_graph_capture.wrappers,
+        compiled_fw_func=fw_compile_output.compiled_fw_func,
+        compiled_bw_func=bw_compile_output.compiled_bw_func,
+        lazy_backward_info=bw_compile_output.lazy_backward_info,
+        try_save_cache_entry=try_save_cache_entry,
+        entry=entry,
+        indices_of_inps_to_detach=partition_output.indices_of_inps_to_detach,
+        num_symints_saved_for_bw=partition_output.num_symints_saved_for_bw,
     )
+
+    return compiler.stage2c_make_autograd_function(stage2c_input)
 
 
 def _aot_stage2c_make_autograd_function(
