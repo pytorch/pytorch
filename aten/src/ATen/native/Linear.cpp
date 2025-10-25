@@ -805,7 +805,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   std::vector<SymInt> rsizes;  // rsizes: sizes of the result
   p1.reserve(input1.dim());
   p2.reserve(input2.dim());
-  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
+  rsizes.reserve(input1.dim() + input2.dim() - static_cast<int64_t>(dims1.size()));
   SymInt size1 = 1; // number of non-contracted elements in input1
   SymInt size2 = 1; // number of non-contracted elements in input2
 

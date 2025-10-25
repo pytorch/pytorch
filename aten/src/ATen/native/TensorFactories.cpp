@@ -1382,7 +1382,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   // use no-initialization Fischer-Yates variant
   // https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_.22inside-out.22_algorithm
   for (int64_t i = 0; i < n; i++) {
-    int64_t z = (int64_t)(generator->random64() % (i + 1));
+    int64_t z = static_cast<int64_t>(generator->random64() % (i + 1));
     r__data[i * r__stride_0] = i;
     r__data[i * r__stride_0] = r__data[z * r__stride_0];
     r__data[z * r__stride_0] = i;
