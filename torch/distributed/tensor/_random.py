@@ -43,7 +43,8 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     else:
         # TODO: Logs way too much
         warnings.warn(
-            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
+            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return False
 
@@ -72,7 +73,8 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     if not is_rng_supported_mesh(device_mesh):
         warnings.warn(
             "DTensor manual_seed() may not have complete support "
-            f"on {device_mesh.device_type} device mesh"
+            f"on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return
 

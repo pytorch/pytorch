@@ -108,7 +108,8 @@ def get_complete(
 
     warnings.warn(
         "No complete tensor found in the group! Returning the first one. "
-        "This may cause issues when your weights are not on CPU."
+        "This may cause issues when your weights are not on CPU.",
+        stacklevel=2,
     )
     assert len(group) > 0
     return next(iter(group))

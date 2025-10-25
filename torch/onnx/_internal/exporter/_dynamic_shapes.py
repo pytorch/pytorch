@@ -271,7 +271,8 @@ def create_rename_mapping(
                 if input.shape[dim].value in rename_mapping:
                     warnings.warn(
                         f"# The axis name: {custom_name} will not be used, since it shares "
-                        f"the same shape constraints with another axis: {rename_mapping[input.shape[dim].value]}."
+                        f"the same shape constraints with another axis: {rename_mapping[input.shape[dim].value]}.",
+                        stacklevel=2,
                     )
                     continue
                 rename_mapping[input.shape[dim].value] = custom_name

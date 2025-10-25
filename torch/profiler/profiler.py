@@ -512,7 +512,10 @@ def schedule(
         wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
     ), "Invalid profiler schedule arguments"
     if warmup == 0:
-        warn("Profiler won't be using warmup, this can skew profiler results")
+        warn(
+            "Profiler won't be using warmup, this can skew profiler results",
+            stacklevel=2,
+        )
     return schedule_fn
 
 
@@ -930,7 +933,8 @@ class ExecutionTraceObserver(_ITraceObserver):
                 fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
             except Exception as e:
                 warn(
-                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}"
+                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
+                    stacklevel=2,
                 )
                 return None
             fp.close()
@@ -1015,7 +1019,10 @@ class ExecutionTraceObserver(_ITraceObserver):
                 try:
                     os.mkdir(resource_dir)
                 except Exception:
-                    warn(f"Execution trace exception when creating {resource_dir}")
+                    warn(
+                        f"Execution trace exception when creating {resource_dir}",
+                        stacklevel=2,
+                    )
                     return None
             else:
                 return None
@@ -1031,7 +1038,8 @@ class ExecutionTraceObserver(_ITraceObserver):
                 resource_dir = self.get_resources_dir()
             except Exception as e:
                 warn(
-                    f"Execution trace exception when generating resource directory: {e}"
+                    f"Execution trace exception when generating resource directory: {e}",
+                    stacklevel=2,
                 )
                 return
             if not resource_dir:
@@ -1066,7 +1074,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             try:
                 _save_triton_kernels()
             except Exception as e:
-                warn(f"Execution trace failed to save kernels: {e}")
+                warn(f"Execution trace failed to save kernels: {e}", stacklevel=2)
 
             _remove_execution_trace_observer()
             if self.output_file_path.endswith("gz"):

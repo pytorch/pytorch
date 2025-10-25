@@ -60,10 +60,10 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
     """
     if WARN_FOR_UNFUSED_KERNELS:
         if not can_use_efficient_attention(params):
-            warn("Efficient attention can't be used because:")
+            warn("Efficient attention can't be used because:", stacklevel=2)
             can_use_efficient_attention(params, True)
         if not can_use_flash_attention(params):
-            warn("Flash attention can't be used because:")
+            warn("Flash attention can't be used because:", stacklevel=2)
             can_use_flash_attention(params, True)
 
 

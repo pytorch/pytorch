@@ -137,7 +137,8 @@ def call_func_at_runtime_with_args(
             warnings.warn(
                 "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale.",
+                stacklevel=2,
             )
             out = normalize_as_list(f(*args))
     return out

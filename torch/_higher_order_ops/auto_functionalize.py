@@ -518,7 +518,8 @@ def do_auto_functionalize(
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
-            "Please consider using a different name for this argument to avoid potential issues."
+            "Please consider using a different name for this argument to avoid potential issues.",
+            stacklevel=2,
         )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
@@ -691,7 +692,8 @@ def do_auto_functionalize_v2(
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
-            "Please consider using a different name for this argument to avoid potential issues."
+            "Please consider using a different name for this argument to avoid potential issues.",
+            stacklevel=2,
         )
     all_basis_unwrapped = ctx.unwrap_tensors(all_bases)
 

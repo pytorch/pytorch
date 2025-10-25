@@ -182,7 +182,8 @@ class ModTracker:
                 warnings.formatwarning = custom_formatwarning
                 warnings.warn(
                     "The module hierarchy tracking maybe be messed up."
-                    " Please file a bug to PyTorch, if it is the case."
+                    " Please file a bug to PyTorch, if it is the case.",
+                    stacklevel=2,
                 )
             if name not in self.parents:
                 self._active_module_cnt[name] = 1

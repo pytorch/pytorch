@@ -602,6 +602,7 @@ def _private_register_pytree_node(
             warnings.warn(
                 f"{cls} is already registered as pytree node. "
                 "Overwriting the previous registration.",
+                stacklevel=2,
             )
 
         node_def = NodeDef(cls, flatten_fn, unflatten_fn, flatten_with_keys_fn)

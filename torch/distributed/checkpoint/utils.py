@@ -461,7 +461,8 @@ def _api_bc_check(func):
         if len(args) == 2:
             warnings.warn(
                 f"The argument order of {func.__name__} has been changed. "
-                "Please check the document to avoid future breakages."
+                "Please check the document to avoid future breakages.",
+                stacklevel=2,
             )
             sig = inspect.signature(func)
             kwonlyargs = [

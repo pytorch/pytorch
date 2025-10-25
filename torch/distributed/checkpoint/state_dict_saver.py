@@ -182,7 +182,8 @@ def save(
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process.",
+            stacklevel=2,
         )
 
     with _profile():
@@ -414,7 +415,8 @@ def _save_state_dict(
             warnings.warn(
                 "The function definition for SavePlanner.set_up_planner has been updated"
                 " to include the storage_meta argument. Please update your implementation"
-                " to include this parameter."
+                " to include this parameter.",
+                stacklevel=2,
             )
             planner.set_up_planner(state_dict, distW.is_coordinator)  # type: ignore[call-arg, arg-type]
         else:

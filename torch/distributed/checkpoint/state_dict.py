@@ -290,6 +290,7 @@ def _verify_options(
             "will be removed in 2.5. This feature can be achieved by manually "
             "filtering out the state_dict returned from get_state_dict.",
             FutureWarning,
+            stacklevel=2,
         )
     if optim_only and not optims:
         raise RuntimeError(
@@ -1234,6 +1235,7 @@ def _unflatten_model_state_dict(
             "feature, please preprocessing the model_state_dict to achieve the "
             "same functionality.",
             FutureWarning,
+            stacklevel=2,
         )
         cast_state_dict = cast(dict[nn.Module, dict[str, ValueType]], state_dict)
         new_state_dict: dict[str, ValueType] = {}

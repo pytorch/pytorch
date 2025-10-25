@@ -121,6 +121,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     "module for further information about the project."
                 ),
                 UserWarning,
+                stacklevel=2,
             )
             cls._PROTOTYPE_WARNING_SHOWN = True
 

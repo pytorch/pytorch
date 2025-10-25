@@ -491,6 +491,7 @@ class SWALR(LRScheduler):
                 "To get the last learning rate computed by the scheduler, "
                 "please use `get_last_lr()`.",
                 UserWarning,
+                stacklevel=2,
             )
         # Set in `LRScheduler._initial_step()`
         step = self._step_count - 1

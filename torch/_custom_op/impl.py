@@ -55,6 +55,7 @@ def warn_deprecated():
         "torch._custom_op is deprecated and will be removed in PyTorch 2.6, please "
         "use the equivalent torch.library API instead.",
         DeprecationWarning,
+        stacklevel=2,
     )
 
 

@@ -909,7 +909,8 @@ def _interpolate_warning(interpolate_mode):
         "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
         "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
         "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
-        "We recommend using opset 11 and above for models using this operator."
+        "We recommend using opset 11 and above for models using this operator.",
+        stacklevel=2,
     )
 
 
@@ -1236,7 +1237,8 @@ def __interpolate_helper(
             if not is_scalar:
                 warnings.warn(
                     "Cannot verify if the output_size is a scalar "
-                    "while exporting interpolate. Assuming that it is not a scalar."
+                    "while exporting interpolate. Assuming that it is not a scalar.",
+                    stacklevel=2,
                 )
 
         if is_scalar:
@@ -1577,7 +1579,8 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     # in training.
     warnings.warn(
         f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
-        f"is set to {op_mode_text}. Exporting with {op_mode_text}."
+        f"is set to {op_mode_text}. Exporting with {op_mode_text}.",
+        stacklevel=2,
     )
 
 

@@ -463,7 +463,8 @@ def random_split(
             if length == 0:
                 warnings.warn(
                     f"Length of split at index {i} is 0. "
-                    f"This might result in an empty dataset."
+                    f"This might result in an empty dataset.",
+                    stacklevel=2,
                 )
 
     # Cannot verify that dataset is Sized

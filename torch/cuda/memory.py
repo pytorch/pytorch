@@ -492,6 +492,7 @@ def reset_max_memory_allocated(device: "Device" = None) -> None:
         "torch.cuda.reset_max_memory_allocated now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
         FutureWarning,
+        stacklevel=2,
     )
     return reset_peak_memory_stats(device=device)
 
@@ -518,6 +519,7 @@ def reset_max_memory_cached(device: "Device" = None) -> None:
         "torch.cuda.reset_max_memory_cached now calls torch.cuda.reset_peak_memory_stats, "
         "which resets /all/ peak memory stats.",
         FutureWarning,
+        stacklevel=2,
     )
     return reset_peak_memory_stats(device=device)
 

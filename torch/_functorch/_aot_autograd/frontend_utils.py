@@ -321,5 +321,6 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
             warnings.warn(
                 f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
                 "Such attributes must be registered as buffers using the `register_buffer` API "
-                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer).",
+                stacklevel=2,
             )
