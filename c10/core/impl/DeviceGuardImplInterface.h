@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/DeviceCapability.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
@@ -192,6 +193,15 @@ struct C10_API DeviceGuardImplInterface {
   virtual DeviceIndex deviceCount() const noexcept = 0;
 
   /**
+   * Get the following capabilities of the current device:
+   * (1) Data type support
+   * Returns DeviceCapability object.
+   */
+  virtual DeviceCapability getDeviceCapability(Device /*unused*/) const {
+    TORCH_CHECK(false, "Backend doesn't support getting device capabilities.");
+  }
+
+  /**
    * Return true if all the work previously enqueued on the stream for
    * asynchronous execution has completed running on the device.
    */
@@ -289,6 +299,10 @@ struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
   }
   DeviceIndex deviceCount() const noexcept override {
     return 1;
+  }
+
+  DeviceCapability getDeviceCapability(Device /*unused*/) const override {
+    return DeviceCapability();
   }
 
   // Event-related functions
