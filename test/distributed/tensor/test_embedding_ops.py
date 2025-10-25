@@ -13,6 +13,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -227,6 +228,10 @@ class TestEmbeddingOp(DTensorTestBase):
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
 
+
+TestEmbeddingOpWithLocalTensor = create_local_tensor_test_class(
+    TestEmbeddingOp,
+)
 
 if __name__ == "__main__":
     run_tests()
