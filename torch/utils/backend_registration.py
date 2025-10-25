@@ -253,7 +253,8 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
         """
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
             # pyrefly: ignore [not-iterable]
-            *args, **kwargs
+            *args,
+            **kwargs,
         )
         if ex.device.type == custom_backend_name:
             # pyrefly: ignore [not-iterable]

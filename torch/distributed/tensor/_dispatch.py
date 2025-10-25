@@ -80,8 +80,9 @@ def found_inf_reduce_handler(
     )
     # pyrefly: ignore [bad-argument-type]
     found_inf_dtensor = dtensor.DTensor(
-        # pyrefly: ignore [unexpected-keyword]
-        local_tensor=target_tensor, spec=spec, requires_grad=False
+        local_tensor=target_tensor,  # pyrefly: ignore [unexpected-keyword]
+        spec=spec,  # pyrefly: ignore [unexpected-keyword]
+        requires_grad=False,  # pyrefly: ignore [unexpected-keyword]
     )
     found_inf = found_inf_dtensor.full_tensor()
     target_tensor.copy_(found_inf)
