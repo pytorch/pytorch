@@ -24,9 +24,9 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, Callable, NewType, Optional, TYPE_CHECKING
+from typing import Any, NewType, Optional, TYPE_CHECKING
 from typing_extensions import Never
 
 import torch
