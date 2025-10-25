@@ -1,6 +1,7 @@
 """Torchfuzz operators module."""
 
 from torchfuzz.operators.arg import ArgOperator
+from torchfuzz.operators.argsort import ArgsortOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.index_select import IndexSelectOperator
@@ -71,6 +72,7 @@ __all__ = [
     "ItemOperator",
     "ConstantOperator",
     "ArgOperator",
+    "ArgsortOperator",
     "IndexSelectOperator",
     "ViewOperator",
     "ReshapeOperator",

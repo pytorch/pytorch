@@ -3,6 +3,7 @@
 from typing import Optional
 
 from torchfuzz.operators.arg import ArgOperator
+from torchfuzz.operators.argsort import ArgsortOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.index_select import IndexSelectOperator
@@ -90,6 +91,7 @@ class OperatorRegistry:
         self.register(NonzeroOperator())
         self.register(MaskedSelectOperator())
         self.register(IndexSelectOperator())
+        self.register(ArgsortOperator())
         self.register(ItemOperator())
         self.register(UniqueOperator())
 
