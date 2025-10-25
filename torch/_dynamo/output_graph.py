@@ -32,10 +32,10 @@ import sys
 import traceback
 import warnings
 import weakref
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, TypeVar
 
 import sympy
@@ -463,6 +463,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
     def __init__(
         self,
         output_graph_guards_state: OutputGraphGuardsState,
+        import_sources: Optional[dict[str, str]] = None,
         shape_env: Optional[ShapeEnv] = None,
         export_metadata: Optional[ExportMetaData] = None,
         tracked_fakes_id_to_source: Optional[dict[int, list[Source]]] = None,
@@ -485,6 +486,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
         )
 
+        self.import_sources = import_sources or {}
         # The following fields are currently known to be used by clients.
         # In particular, we need:
         # - shape_env, for building guards
@@ -2123,6 +2125,15 @@ class OutputGraph(OutputGraphCommon):
                 # while creating the graph module because self.graph and root
                 # are out of sync. This only happens for `get_attr` nodes, so
                 # here we clean up the get_attr nodes that are unused.
+                for attr in dir(root):
+                    subgraph = getattr(root, attr)
+                    if isinstance(subgraph, fx.GraphModule):
+                        insert_deferred_runtime_asserts(
+                            subgraph,
+                            self.shape_env,
+                            name,
+                            export=self.export,
+                        )
                 self.remove_unused_get_attr_nodes()
                 insert_deferred_runtime_asserts(
                     fx.GraphModule(root, self.graph),

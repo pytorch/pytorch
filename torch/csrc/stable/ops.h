@@ -9,8 +9,9 @@
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/macros/Macros.h>
 
-namespace torch::stable {
+HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 // We expect this to be the stable version of the empty_like op that takes in
 // no kwargs (device, dtype, layout, memory_format). We will add kwargs
@@ -244,4 +245,4 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
-} // namespace torch::stable
+HIDDEN_NAMESPACE_END(torch, stable)
