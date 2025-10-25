@@ -16,8 +16,8 @@ import re
 import sys
 import types
 from collections import Counter
-from collections.abc import Iterable
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet

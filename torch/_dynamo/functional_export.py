@@ -4,7 +4,8 @@ import logging
 import traceback
 import types
 from collections import namedtuple
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 

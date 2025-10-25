@@ -33,8 +33,8 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
