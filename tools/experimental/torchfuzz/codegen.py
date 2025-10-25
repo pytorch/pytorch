@@ -205,12 +205,23 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                "torch.clamp",
+                "torch.cumsum",
                 # Tensor shape operations
                 "torch.Tensor.view",
                 "torch.reshape",
                 "torch.flatten",
                 "torch.squeeze",
                 "torch.unsqueeze",
+                "torch.split",
+                "torch.chunk",
+                "torch.expand",
+                "torch.cat",
+                "torch.stack",
+                # Indexing operations
+                "torch.gather",
+                "torch.index_select",
+                "torch.argsort",
                 # Matrix operations
                 "torch.mm",
                 "torch.addmm",
