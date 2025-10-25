@@ -78,7 +78,7 @@ def print_lint_message(
 
     lint_message = LintMessage(
         path=str(path),
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         line=line_number,
         char=None,
         code="WORKFLOWSYNC",

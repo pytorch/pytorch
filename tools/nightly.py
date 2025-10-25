@@ -311,7 +311,7 @@ class Venv:
             python=python,
             capture_output=True,
         ).stdout
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         candidates = list(map(Path, filter(None, map(str.strip, output.splitlines()))))
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
@@ -481,7 +481,7 @@ class Venv:
         cmd = [str(python), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         return subprocess.run(
             cmd,
             check=check,
@@ -533,7 +533,7 @@ class Venv:
         cmd = [str(self.bindir / "uv"), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         return subprocess.run(
             cmd,
             check=check,
@@ -941,7 +941,7 @@ def _move_single(
 
 def _copy_files(listing: list[Path], source_dir: Path, target_dir: Path) -> None:
     for src in listing:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         _move_single(src, source_dir, target_dir, shutil.copy2, "Copying")
 
 
