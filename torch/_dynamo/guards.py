@@ -2010,6 +2010,9 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
+        val = self.get(guard.name)
+        if inspect.isclass(val):
+            raise AssertionError(f"{guard.name} is a class, use CLASS_MATCH guard")
         return self.id_match_unchecked(guard, recompile_hint)
 
     def id_match_unchecked(
