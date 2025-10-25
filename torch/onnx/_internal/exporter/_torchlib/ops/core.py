@@ -1,16 +1,22 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
-# ruff: noqa: TCH001,TCH002
 
 from __future__ import annotations
 
 import operator
+from typing import TYPE_CHECKING
 
 from onnxscript.onnx_opset import opset18 as op
 
 import torch
-from torch.onnx._internal.exporter._torchlib._tensor_typing import TReal, TRealOrUInt8
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
+
+
+if TYPE_CHECKING:
+    from torch.onnx._internal.exporter._torchlib._tensor_typing import (
+        TReal,
+        TRealOrUInt8,
+    )
 
 
 aten = torch.ops.aten
