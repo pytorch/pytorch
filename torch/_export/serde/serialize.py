@@ -11,6 +11,7 @@ import keyword
 import logging
 import math
 import operator
+import re
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
@@ -519,26 +520,12 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 
     assert has_triton(), "triton required to serialize triton kernels"
     from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
 
     assert isinstance(node.kwargs["kernel_idx"], int)
     kernel = torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.get_kernel(
         node.kwargs["kernel_idx"]
     )
-
-    kNumWarpsDefault = 4
-
-    # currently we only support specialization of
-    # num_warps -- so search for the entry that
-    # matches the value from the associated kernel
-    if isinstance(kernel, Autotuner):
-        assert len(kernel.configs) == 1
-        num_warps = kernel.configs[0].num_warps
-        assert kernel.configs[0].num_ctas == 1, (
-            "serialization only supports num_ctas == 1"
-        )
-        kernel = kernel.fn
-    else:
-        num_warps = kNumWarpsDefault
 
     if hasattr(kernel, "device_caches"):
         caches = kernel.device_caches
@@ -552,16 +539,102 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     else:
         raise AssertionError(f"kernel caches not found for kernel {kernel.__name__}")
 
-    # can also get num_warps, num_ctas, etc. from here ig
     if len(cache.keys()) == 1:
         return kernel, next(iter(cache.values()))
+
+    is_autotuner = isinstance(kernel, Autotuner)
+    actual_kernel = kernel.fn if is_autotuner else kernel
+
+    has_constexprs = (
+        isinstance(actual_kernel, JITFunction)
+        and hasattr(actual_kernel, "constexprs")
+        and len(actual_kernel.constexprs) > 0
+    )
+
+    if has_constexprs:
+        constexpr_vals = {}
+        for constexpr_idx in actual_kernel.constexprs:
+            if constexpr_idx < len(actual_kernel.arg_names):
+                param_name = actual_kernel.arg_names[constexpr_idx]
+                kwargs_dict = node.kwargs.get("kwargs", {})
+                if param_name in kwargs_dict:
+                    constexpr_vals[param_name] = kwargs_dict[param_name]
+
+        expected_values = [
+            constexpr_vals[actual_kernel.arg_names[idx]]
+            for idx in actual_kernel.constexprs
+            if actual_kernel.arg_names[idx] in constexpr_vals
+        ]
+
+        matching_entries = []
+        for sig_key, cache_entry in cache.items():
+            constexpr_matches = re.findall(
+                r"\('constexpr',\s*(-?\d+(?:\.\d+)?)\)", sig_key
+            )
+            if constexpr_matches:
+                constexpr_values = []
+                for match in constexpr_matches:
+                    if "." in match:
+                        constexpr_values.append(float(match))
+                    else:
+                        constexpr_values.append(int(match))
+
+                if constexpr_values == expected_values:
+                    matching_entries.append((sig_key, cache_entry))
     else:
-        for cache_entry in cache.values():
-            if cache_entry.metadata.num_warps == num_warps:
-                return kernel, cache_entry
+        matching_entries = list(cache.items())
+
+    if len(matching_entries) == 1:
+        return kernel, matching_entries[0][1]
+
+    if len(matching_entries) > 1:
+        if is_autotuner:
+            for sig_key, cache_entry in matching_entries:
+                entry_metadata = cache_entry.metadata
+                for config in kernel.configs:
+                    metadata_matches = True
+
+                    if hasattr(config, "num_warps") and hasattr(
+                        entry_metadata, "num_warps"
+                    ):
+                        if config.num_warps != entry_metadata.num_warps:
+                            metadata_matches = False
+                            continue
+
+                    if hasattr(config, "num_stages") and hasattr(
+                        entry_metadata, "num_stages"
+                    ):
+                        if config.num_stages != entry_metadata.num_stages:
+                            metadata_matches = False
+                            continue
+
+                    if hasattr(config, "num_ctas") and hasattr(
+                        entry_metadata, "num_ctas"
+                    ):
+                        if config.num_ctas != entry_metadata.num_ctas:
+                            metadata_matches = False
+                            continue
+
+                    if metadata_matches:
+                        return kernel, cache_entry
+
+            raise AssertionError(
+                f"Multiple cache entries found for autotuned kernel {kernel.__name__} "
+                f"{'with same constexpr values' if has_constexprs else 'with no constexpr'} "
+                f"and couldn't disambiguate using configs. "
+                f"Available entries: {[(key, entry.metadata.num_warps if hasattr(entry.metadata, 'num_warps') else 'N/A') for key, entry in matching_entries]}"
+            )
+
         raise AssertionError(
-            f"couldn't find a kernel cache entry with metadata matching the autotuner configs for kernel {kernel.__name__}"
+            f"Multiple cache entries found for non-autotuned kernel {kernel.__name__} "
+            f"{'with same constexpr values' if has_constexprs else 'with no constexpr'}. "
+            f"This should not happen. Available cache keys: {[key for key, _ in matching_entries]}"
         )
+
+    raise AssertionError(
+        f"couldn't find a kernel cache entry with metadata matching the autotuner configs for kernel {kernel.__name__}. "
+        f"Available cache keys: {list(cache.keys())}"
+    )
 
 
 @final
@@ -767,8 +840,13 @@ class GraphModuleSerializer(metaclass=Final):
                     i += 1
 
                 assert isinstance(node.kwargs["grid"], list)
+
+                kernel_name_with_hash = (
+                    f"{kernel.fn.__name__}_{kernel_cache_metadata.hash}"
+                )
                 kwargs_new = {
-                    "name": kernel.fn.__name__,
+                    "name": kernel_name_with_hash,
+                    "symbol_name": kernel.fn.__name__,
                     "grid": node.kwargs["grid"][0],
                     "output_indices": output_indices,
                     "num_warps": kernel_cache_metadata.num_warps,
