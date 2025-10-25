@@ -32,8 +32,8 @@ import types
 import typing
 import unittest
 from collections import defaultdict, OrderedDict
-from collections.abc import Iterable, KeysView, Sequence
-from typing import Any, Callable, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable, KeysView, Sequence
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int

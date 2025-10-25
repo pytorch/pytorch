@@ -14362,12 +14362,12 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_householder_product
+    CPU, CUDA, MPS: linalg_householder_product
 
 - func: linalg_householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CPU, CUDA: linalg_householder_product_out
+    CPU, CUDA, MPS: linalg_householder_product_out
 
 - func: linalg_inv_ex(Tensor A, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   python_module: linalg
