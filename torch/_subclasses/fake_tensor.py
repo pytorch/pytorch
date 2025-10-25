@@ -35,7 +35,7 @@ from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedte
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
-from torch._prims_common import suggest_memory_format, check_contiguous_sizes_strides
+from torch._prims_common import check_contiguous_sizes_strides, suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
     assert_metadata_eq,

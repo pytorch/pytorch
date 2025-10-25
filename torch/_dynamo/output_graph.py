@@ -2223,7 +2223,10 @@ class OutputGraph(OutputGraphCommon):
             )
 
             counters["stats"]["unique_graphs"] += 1
-            if specializations := self.tracing_context.fake_mode.shape_env.specializations:
+            if (
+                specializations
+                := self.tracing_context.fake_mode.shape_env.specializations
+            ):
                 specialization_guards = []
                 specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
                 sources = [a.source for a in self.graphargs]
