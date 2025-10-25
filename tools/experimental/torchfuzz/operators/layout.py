@@ -400,3 +400,73 @@ class UnsqueezeOperator(LayoutOperatorBase):
             dim = len(output_spec.size) - 1
 
         return f"{output_name} = torch.unsqueeze({input_names[0]}, dim={dim})"
+
+
+class SplitOperator(LayoutOperatorBase):
+    """Operator for torch.split() operation."""
+
+    def __init__(self):
+        """Initialize SplitOperator."""
+        super().__init__("split")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.split"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Split can produce any tensor output."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Split can produce any tensor with at least one dimension
+        return len(output_spec.size) > 0
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input spec for split operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("SplitOperator can only produce TensorSpec outputs")
+
+        # torch.split() splits a tensor along a dimension
+        # We'll use split_size_or_sections as an integer (split_size)
+        # The output will be one of the chunks from the split
+
+        # Choose a random dimension to split along
+        if len(output_spec.size) == 0:
+            raise ValueError("Cannot split a scalar tensor")
+
+        split_dim = random.randint(0, len(output_spec.size) - 1)
+
+        # Choose a random number of chunks (at least 2)
+        num_chunks = random.randint(2, 4)
+
+        # Calculate input size: input will have split_dim with size = output_size * num_chunks
+        # (or slightly larger to account for uneven splits)
+        input_size = list(output_spec.size)
+        input_size[split_dim] = output_spec.size[split_dim] * num_chunks
+
+        # Create input tensor spec
+        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
+        input_stride = fuzz_valid_stride(tuple(input_size))
+
+        return [
+            TensorSpec(
+                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+            )
+        ]
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for split operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("SplitOperator can only produce TensorSpec outputs")
+
+        # Choose a random dimension to split along
+        split_dim = random.randint(0, len(output_spec.size) - 1)
+
+        # Use output size along split_dim as the split_size
+        split_size = output_spec.size[split_dim]
+
+        # Generate the split and select the first chunk
+        return f"{output_name} = torch.split({input_names[0]}, {split_size}, dim={split_dim})[0]"
