@@ -2125,6 +2125,15 @@ class OutputGraph(OutputGraphCommon):
                 # while creating the graph module because self.graph and root
                 # are out of sync. This only happens for `get_attr` nodes, so
                 # here we clean up the get_attr nodes that are unused.
+                for attr in dir(root):
+                    subgraph = getattr(root, attr)
+                    if isinstance(subgraph, fx.GraphModule):
+                        insert_deferred_runtime_asserts(
+                            subgraph,
+                            self.shape_env,
+                            name,
+                            export=self.export,
+                        )
                 self.remove_unused_get_attr_nodes()
                 insert_deferred_runtime_asserts(
                     fx.GraphModule(root, self.graph),
