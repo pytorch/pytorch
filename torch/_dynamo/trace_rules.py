@@ -36,8 +36,9 @@ import traceback
 import types
 import unittest
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch._inductor.test_operators

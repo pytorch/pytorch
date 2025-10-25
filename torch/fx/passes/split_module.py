@@ -95,7 +95,7 @@ def split_module(
         This is a sample setup:
 
             import torch
-            from torch.fx.symbolic_trace import symbolic_trace
+            from torch.fx._symbolic_trace import symbolic_trace
             from torch.fx.graph_module import GraphModule
             from torch.fx.node import Node
             from torch.fx.passes.split_module import split_module
