@@ -1258,7 +1258,7 @@ def run_tests(argv=None):
                 # use env vars so pytest-xdist subprocesses can still access them
                 os.environ['SLOW_TESTS_FILE'] = SLOW_TESTS_FILE
         else:
-            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
+            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}', stacklevel=2)
     if DISABLED_TESTS_FILE:
         if os.path.exists(DISABLED_TESTS_FILE):
             with open(DISABLED_TESTS_FILE) as fp:
@@ -1266,7 +1266,7 @@ def run_tests(argv=None):
                 disabled_tests_dict = json.load(fp)
                 os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
         else:
-            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}')
+            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}', stacklevel=2)
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -2663,7 +2663,7 @@ class CudaMemoryLeakCheck:
                        f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
                        f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
-                warnings.warn(msg)
+                warnings.warn(msg, stacklevel=2)
             elif caching_allocator_discrepancy and driver_discrepancy:  # type: ignore[possibly-undefined]
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
@@ -2757,7 +2757,7 @@ try:
         "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
-    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning)
+    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning, stacklevel=2)
 
 # Used in check_if_enable to see if a test method should be disabled by an issue,
 # sanitizes a test method name from appended suffixes by @dtypes parametrization.
@@ -4648,7 +4648,7 @@ def download_file(url, binary=True):
         return path
     except error.URLError as e:
         msg = f"could not download test file '{url}'"
-        warnings.warn(msg, RuntimeWarning)
+        warnings.warn(msg, RuntimeWarning, stacklevel=2)
         raise unittest.SkipTest(msg) from e
 
 def find_free_port():
@@ -5744,17 +5744,17 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
         num_garbage_objs = len(garbage_objs)
         if num_garbage_objs > 0:
             warnings.warn(
-                f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?"
+                f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?", stacklevel=2
             )
             try:
                 import objgraph  # type: ignore[import-not-found,import-untyped]
                 warnings.warn(
-                    f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png"
+                    f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png", stacklevel=2
                 )
                 for g in garbage_objs[:limit]:
                     objgraph.show_backrefs([g], max_depth=10)
             except ImportError:
-                warnings.warn("`pip install objgraph` to enable memory leak debugging")
+                warnings.warn("`pip install objgraph` to enable memory leak debugging", stacklevel=2)
 
     finally:
         gc.set_debug(0)

@@ -1152,6 +1152,7 @@ def create_block_mask(
         warnings.warn(
             "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future.",
             DeprecationWarning,
+            stacklevel=2,
         )
         return torch.compile(create_block_mask)(
             mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE

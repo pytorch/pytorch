@@ -704,7 +704,8 @@ class TS2FXGraphConverter:
         # In a sense, the converter now becomes an stateful interpreter
         warnings.warn(
             "Converting aten::append.t, which is a inplace mutation of the list. "
-            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!"
+            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!",
+            stacklevel=2,
         )
 
         args = tuple(self.get_fx_value_by_ir_value(inp) for inp in node.inputs())
@@ -1471,7 +1472,8 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
                 if k not in ep.state_dict:
                     warnings.warn(
-                        f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram."
+                        f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram.",
+                        stacklevel=2,
                     )
                     ep.state_dict[k] = tensor
 

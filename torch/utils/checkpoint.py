@@ -83,7 +83,7 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
 def check_backward_validity(inputs: Iterable[Any]) -> None:
     if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn(
-            "None of the inputs have requires_grad=True. Gradients will be None"
+            "None of the inputs have requires_grad=True. Gradients will be None", stacklevel=2
         )
 
 
@@ -144,7 +144,7 @@ def _infer_device_type(*args):
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
             "detected, it will be prioritized; otherwise, the first device encountered will be selected.)"
-            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}"
+            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}", stacklevel=2
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
@@ -565,7 +565,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
-            "details on the differences between the two variants."
+            "details on the differences between the two variants.", stacklevel=2
         )
         use_reentrant = True
 

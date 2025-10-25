@@ -2137,7 +2137,8 @@ def alert_not_deterministic(caller: str):
                 f"{caller} does not have a deterministic implementation, but you set "
                 f"'torch.use_deterministic_algorithms(True, warn_only=True)'. "
                 f"You can file an issue at https://github.com/pytorch/pytorch/issues "
-                f"to help us prioritize adding deterministic support for this operation."
+                f"to help us prioritize adding deterministic support for this operation.",
+                stacklevel=2,
             )
         else:
             torch._check(

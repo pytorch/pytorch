@@ -74,7 +74,8 @@ def parallelize_module(  # type: ignore[return]
     if parallelize_plan is None:
         warnings.warn(
             "No parallelize_plan is provided and auto-parallel is not supported "
-            "at the moment, so this parallelize_module call will do nothing."
+            "at the moment, so this parallelize_module call will do nothing.",
+            stacklevel=2,
         )
         return module
 
@@ -108,7 +109,8 @@ def parallelize_module(  # type: ignore[return]
                 warnings.warn(
                     f"Parallelize plan key '{module_path}' could not be resolved: "
                     f"no submodule matching token '{token}' in module {module}, "
-                    f"skipping this plan entry."
+                    f"skipping this plan entry.",
+                    stacklevel=2,
                 )
                 continue
 
