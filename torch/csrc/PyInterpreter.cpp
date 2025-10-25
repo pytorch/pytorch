@@ -663,14 +663,6 @@ static c10::ArrayRef<T> get_set_cached_attr(
 
   size_t new_size = py::len(obj);
 
-  // We do the smallvector optimization here: any time the new_size is <=5,
-  // we always allocate our buffer to size 5, so that if the next resize
-  // is also to <=5 elements, we don't need to reallocate.
-  // Note: I tried removing this optimization and tripped ASAN
-  // in a batchnorm kernel here:
-  // https://pipelinesghubeus21.actions.githubusercontent.com/mBh68xKhi8LyM7tp3vECvYXNFvuV4gyVGgmYCteuEZP9JH92QN/_apis/pipelines/1/runs/3373307/signedlogcontent/790?urlExpires=2023-09-15T21%3A13%3A51.4327798Z&urlSigningMethod=HMACV1&urlSignature=tDeX7ZqaARVU5NNwyr5yYqqkWq3A2j4z8FFdqYwGr0Q%3D@lint-ignore
-  // We should fix this instead.
-  bool needs_resize = false;
   // We need to resize if:
   // (1) we haven't allocated our buffer at all yet
   // (2) Our buffer size is different from the new size
@@ -678,7 +670,8 @@ static c10::ArrayRef<T> get_set_cached_attr(
   //     is always allocated to at least size 5, and any resizes
   //     within the <= 5 regime to not require a reallocation).
   auto is_smallvector = curr_size <= 5;
-  needs_resize = !is_buffer_allocated || (is_smallvector && new_size > 5) ||
+  bool needs_resize = !is_buffer_allocated ||
+      (is_smallvector && new_size > 5) ||
       (!is_smallvector && curr_size != new_size);
   if (needs_resize) {
     // If our current buffer is not the right size (either because we haven't
