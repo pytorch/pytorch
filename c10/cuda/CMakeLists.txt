@@ -28,7 +28,6 @@ endif()
 set(C10_CUDA_SRCS
     CUDAAllocatorConfig.cpp
     CUDACachingAllocator.cpp
-    CUDADeviceAssertionHost.cpp
     CUDAException.cpp
     CUDAFunctions.cpp
     CUDAMallocAsyncAllocator.cpp
@@ -41,7 +40,6 @@ set(C10_CUDA_SRCS
 set(C10_CUDA_HEADERS
     CUDAAllocatorConfig.h
     CUDACachingAllocator.h
-    CUDADeviceAssertionHost.h
     CUDAException.h
     CUDAFunctions.h
     CUDAGuard.h
