@@ -373,7 +373,7 @@ struct TORCH_API SymbolicShape {
   // Unranked shape constructor.
   SymbolicShape() : dims_(std::nullopt) {}
 
-  // Known rank but unknown dimentions.
+  // Known rank but unknown dimensions.
   SymbolicShape(std::optional<size_t> rank) : dims_(std::nullopt) {
     if(!rank) {
       return;
@@ -884,9 +884,9 @@ struct TORCH_API ListType
 
   // global singleton
   // Given an inner type T and an identifier,
-  // this function wil return the global singleton type pointer
+  // this function will return the global singleton type pointer
   // the type List<T>.
-  // The extra "identifier" argument is needed beccause we have multiple container types
+  // The extra "identifier" argument is needed because we have multiple container types
   // that all re-use this function (List<T>, array<T, N>, etc.)
   static TypePtr get(const std::string& identifier, TypePtr inner);
 

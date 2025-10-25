@@ -733,7 +733,7 @@ TORCH_LIBRARY_IMPL(_, FuncTorchBatched, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  // still legacy b/c teturns multiple tensors
+  // still legacy b/c returns multiple tensors
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("split_with_sizes_copy", split_with_sizes_copy_batching_rule);

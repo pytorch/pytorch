@@ -39,7 +39,7 @@ void check_mkldnn_binary_fusion_inputs(
 inline std::vector<int64_t> padding_r(
     IntArrayRef padding, IntArrayRef output_padding)
 {
-  // ConvTranpose padding adjustment
+  // ConvTranspose padding adjustment
   //
   // PyTorch uses padding/output_padding:
   //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
