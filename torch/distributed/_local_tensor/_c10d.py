@@ -1,7 +1,7 @@
 import functools
 import math
 import operator
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 from torch._C import ScriptObject
@@ -97,6 +97,10 @@ def _prepare_collective_groups(
     return ranks, group_offsets, offset
 
 
+# NB: There are two flavors of the collectives: regular and functional. Regular collectives
+# allocate outputs to write the result to, accept process group and support async ops (return
+# work object). Functional collectives expect the implementation to allocate outputs, accept
+# process group name that must be resolved and do not support async ops (return output).
 def _local_functional_all_gather_into_tensor(
     tensor: torch.Tensor, group_size: int, group_name: str
 ) -> torch.Tensor:
@@ -401,13 +405,13 @@ def _local_reduce_scatter_tensor_coalesced_(
             # Perform the reduction operation
             reduced_input = _local_reduce(reduce_op, group_inputs)
 
-            reduced_inpit_splits = torch.split(
+            reduced_input_splits = torch.split(
                 reduced_input, reduced_input.size(0) // len(group_ranks), dim=0
             )
 
             # Update all tensors in the group with the reduced result
             for i, rank in enumerate(group_ranks):
-                output_tensor._local_tensors[rank].copy_(reduced_inpit_splits[i])
+                output_tensor._local_tensors[rank].copy_(reduced_input_splits[i])
 
     work = FakeWork()
     work_so = Work.boxed(work)
