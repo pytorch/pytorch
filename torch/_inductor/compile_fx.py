@@ -1544,9 +1544,10 @@ class _InProcessFxCompile(FxCompile):
                             },
                             payload_fn=lambda: inductor_kernel_stack_trace_str,
                         )
-                        get_metrics_context().add_to_set(
-                            "inductor_provenance", inductor_kernel_stack_trace_str
-                        )
+                        if inductor_kernel_stack_trace_str:
+                            get_metrics_context().add_to_set(
+                                "inductor_provenance", inductor_kernel_stack_trace_str
+                            )
 
                     node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
@@ -2449,11 +2450,6 @@ def compile_fx(
                 decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
             )
-
-    if config.deterministic:
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        torch.backends.mkldnn.deterministic = True  # type: ignore[assignment]
 
     # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
     if any(

@@ -35,6 +35,7 @@ from .graphs import (
     is_current_stream_capturing,
     make_graphed_callables,
 )
+from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
 
@@ -1844,6 +1845,7 @@ __all__ = [
     "ExternalStream",
     "Stream",
     "StreamContext",
+    "GreenContext",
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
