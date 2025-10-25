@@ -50,6 +50,7 @@ from torchfuzz.operators.scalar_pointwise import (
 from torchfuzz.operators.tensor_pointwise import (
     AddOperator,
     ClampOperator,
+    CumsumOperator,
     DivOperator,
     MulOperator,
     SubOperator,
@@ -73,6 +74,7 @@ class OperatorRegistry:
         self.register(SubOperator())
         self.register(DivOperator())
         self.register(ClampOperator())
+        self.register(CumsumOperator())
 
         # Individual scalar pointwise operators (preferred)
         self.register(ScalarAddOperator())

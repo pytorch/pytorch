@@ -206,6 +206,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.mul",
                 "torch.div",
                 "torch.clamp",
+                "torch.cumsum",
                 # Tensor shape operations
                 "torch.Tensor.view",
                 "torch.reshape",
