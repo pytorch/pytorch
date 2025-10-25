@@ -37,8 +37,8 @@ import sys
 import traceback
 import types
 import weakref
-from collections.abc import MutableMapping
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, MutableMapping
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -917,11 +917,16 @@ class VariableBuilder:
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif trace_rules.is_numpy(value):
             assert np
-            self.install_guards(
-                GuardBuilder.FUNCTION_MATCH
-                if callable(value)
-                else GuardBuilder.TYPE_MATCH
-            )
+            if istype(value, types.MethodType):
+                install_guard(
+                    AttrSource(self.source, "__func__").make_guard(
+                        GuardBuilder.CLOSURE_MATCH
+                    )
+                )
+            elif callable(value):
+                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            else:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
             return NumpyVariable(value, source=self.source)
         elif trace_rules.is_numpy_dtype(value):
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -987,7 +992,11 @@ class VariableBuilder:
             and value == getattr(value.__self__, "apply", None)
         ):
             # handle aliased autograd function `apply` calls
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            install_guard(
+                AttrSource(self.get_source(), "__func__").make_guard(
+                    GuardBuilder.CLOSURE_MATCH
+                )
+            )
             return GetAttrVariable(
                 AutogradFunctionVariable(
                     value.__self__, source=AttrSource(self.source, member="__self__")
@@ -1031,7 +1040,7 @@ class VariableBuilder:
                     explanation="Directly using invoke_subgraph is not supported. Use nested_compile_region",
                     hints=[],
                 )
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):
             self.install_guards(GuardBuilder.ID_MATCH)

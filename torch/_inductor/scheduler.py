@@ -2676,7 +2676,6 @@ class Scheduler:
                 and (dep := next(iter(node.read_writes.writes)))
                 and isinstance(dep, MemoryDep)
             ):
-                # pyrefly: ignore  # unbound-name
                 node_mode = dep.mode
             else:
                 node_mode = None
@@ -4360,7 +4359,6 @@ class Scheduler:
         if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
-            # pyrefly: ignore  # unbound-name
             (expand_dim, smaller_node, expand_size) = expand_analysis
             smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
             shared_data_score = self.score_fusion_memory(node1, node2)
@@ -4537,14 +4535,12 @@ class Scheduler:
         memory operations.
         """
         node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
-        node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
+        node2_dep_len = len(node2.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
         if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
-                tmp = node1
-                node1 = node2
-                node2 = tmp
+                node1, node2 = node2, node1
 
             deps = [
                 dep
@@ -4671,7 +4667,6 @@ class Scheduler:
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
-                # pyrefly: ignore  # unbound-name
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
             elif is_gpu(device.type) and not device.type == "mps":
                 raise TritonMissing(inspect.currentframe())
@@ -4969,7 +4964,6 @@ class Scheduler:
                 if isinstance(buf.node, ir.MutationOutput) and (
                     real_name := self.mutation_real_name.get(buf_name, None)
                 ):
-                    # pyrefly: ignore  # unbound-name
                     return is_none_layout(real_name)
 
                 return True

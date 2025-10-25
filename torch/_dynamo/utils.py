@@ -51,16 +51,18 @@ from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
+    Literal,
     Optional,
     overload,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, ParamSpec, TypeAlias, TypeGuard, TypeIs
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
@@ -96,6 +98,7 @@ from .graph_utils import _get_flat_args
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
+        Callable,
         Container,
         Generator,
         ItemsView,
@@ -4211,7 +4214,6 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # (x) + (y)
             # ~~^~~~~~~
             while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
-                # pyrefly: ignore  # unbound-name
                 if ch in "\\#":
                     cur_lineno, cur_col = nextline(cur_lineno, cur_col)
                 else:

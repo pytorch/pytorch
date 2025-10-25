@@ -4,7 +4,8 @@ import logging
 import traceback
 import types
 from collections import namedtuple
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -407,11 +408,10 @@ def _suggest_or_raise_constraint_violation(
             torch._ops.OpOverloadPacket | torch._ops.OpOverload,
         )
     ):
-        # pyrefly: ignore  # unbound-name
         dim_constraints.solve()
-        # pyrefly: ignore  # unbound-name
+
         forced_specializations = dim_constraints.forced_specializations()
-        # pyrefly: ignore  # unbound-name
+
         msg = dim_constraints.prettify_results(
             inspect.signature(orig_callable),  # type: ignore[attr-defined]
             dynamic_shapes,
@@ -432,11 +432,10 @@ def _suggest_or_raise_constraint_violation(
                 )
 
         # Error if we have any constraints on static values
-        # pyrefly: ignore  # unbound-name
+
         for k in shape_env.var_to_range.keys():
             if isinstance(k, sympy.Integer):
                 constraint_violation_error = ConstraintViolationError(
-                    # pyrefly: ignore  # unbound-name
                     f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                     "It appears that you're trying to set a constraint on a "
                     f"value which we evaluated to have a static value of {k}. "

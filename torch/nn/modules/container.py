@@ -473,7 +473,6 @@ class ModuleList(Module):
         return self
 
     def pop(self, key: Union[int, slice]) -> Module:
-        # pyrefly: ignore  # index-error
         v = self[key]
         del self[key]
         return v

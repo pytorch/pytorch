@@ -658,6 +658,31 @@ graph():
         fn = torch.compile(f, backend="eager", dynamic=True, fullgraph=True)
         fn(torch.tensor([5]), 5)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cond_runtime_assert_generation(self):
+        def fn(x):
+            y = x.nonzero()  # unbacked binding u0
+            torch._check(y.shape[0] % 4 == 0)
+
+            return torch.randn(y.shape[0])
+
+        @torch.compile(dynamic=True, backend="aot_eager")
+        def foo(x):
+            b = torch.cond(
+                pred=(x.shape[0] % 4 == 0),
+                true_fn=lambda: fn(x),
+                false_fn=lambda: fn(x),
+            )
+
+            return b
+
+        foo(torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            RuntimeError, "Runtime assertion failed for expression Eq(Mod(u1, 4), 0)*"
+        ):
+            foo(torch.randn(5, 5))
+
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
         def f(x):
