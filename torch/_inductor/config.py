@@ -534,6 +534,10 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+cutedsl_enable_autotuning: bool = (
+    os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
+)
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 
