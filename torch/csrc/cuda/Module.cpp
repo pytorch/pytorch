@@ -458,8 +458,7 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
 }
 
 PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  {
+  HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     at::cuda::busy_wait_for_flag();
   }
@@ -468,8 +467,7 @@ PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaClearFlag(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  {
+  HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     at::cuda::clear_flag();
   }
@@ -2094,7 +2092,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
-    {"_cuda_busy_wait_for_flag", THCPModule_cudaBusyWaitForFlag, METH_NOARGS, nullptr},
+    {"_cuda_busy_wait_for_flag",
+     THCPModule_cudaBusyWaitForFlag,
+     METH_NOARGS,
+     nullptr},
     {"_cuda_clear_flag", THCPModule_cudaClearFlag, METH_NOARGS, nullptr},
     {"_cuda_lock_mutex", THCPModule_cudaLockMutex, METH_NOARGS, nullptr},
     {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS, nullptr},
