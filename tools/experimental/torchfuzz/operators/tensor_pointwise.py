@@ -21,11 +21,6 @@ class PointwiseOperator(Operator):
         super().__init__(name)
         self.symbol = symbol
 
-    @property
-    def torch_op_name(self) -> Optional[str]:
-        """Return the torch operation name."""
-        raise NotImplementedError("Subclasses must override torch_op_name")
-
     def can_produce(self, output_spec: Spec) -> bool:
         """Tensor pointwise operations can produce tensors but not scalars."""
         if isinstance(output_spec, TensorSpec) and output_spec.dtype == torch.bool:
