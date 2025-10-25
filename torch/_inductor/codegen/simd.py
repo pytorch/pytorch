@@ -1591,6 +1591,7 @@ class SIMDScheduling(BaseScheduling):
                 "features": kernel_features,
                 "tiling_scores": None,
                 "mix_order_reduction": True,
+                "override_persistent_reduction": True,
             },
         )[0]
         assert kernel.persistent_reduction
