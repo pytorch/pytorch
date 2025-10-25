@@ -5,6 +5,7 @@ from typing import Optional
 from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
+from torchfuzz.operators.index_select import IndexSelectOperator
 from torchfuzz.operators.item import ItemOperator
 from torchfuzz.operators.layout import (
     FlattenOperator,
@@ -84,6 +85,7 @@ class OperatorRegistry:
         # # Data-dependent operators
         self.register(NonzeroOperator())
         self.register(MaskedSelectOperator())
+        self.register(IndexSelectOperator())
         self.register(ItemOperator())
         self.register(UniqueOperator())
 

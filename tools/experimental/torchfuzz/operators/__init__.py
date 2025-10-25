@@ -3,6 +3,7 @@
 from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
+from torchfuzz.operators.index_select import IndexSelectOperator
 from torchfuzz.operators.item import ItemOperator
 from torchfuzz.operators.layout import (
     FlattenOperator,
@@ -68,6 +69,7 @@ __all__ = [
     "ItemOperator",
     "ConstantOperator",
     "ArgOperator",
+    "IndexSelectOperator",
     "ViewOperator",
     "ReshapeOperator",
     "FlattenOperator",

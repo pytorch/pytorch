@@ -212,6 +212,8 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.squeeze",
                 "torch.unsqueeze",
                 "torch.split",
+                # Indexing operations
+                "torch.index_select",
                 # Matrix operations
                 "torch.mm",
                 "torch.addmm",
