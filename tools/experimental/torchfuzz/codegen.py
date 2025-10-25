@@ -214,6 +214,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.squeeze",
                 "torch.unsqueeze",
                 "torch.split",
+                "torch.expand",
                 # Indexing operations
                 "torch.gather",
                 "torch.index_select",

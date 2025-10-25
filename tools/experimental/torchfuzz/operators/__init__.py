@@ -8,6 +8,7 @@ from torchfuzz.operators.gather import GatherOperator
 from torchfuzz.operators.index_select import IndexSelectOperator
 from torchfuzz.operators.item import ItemOperator
 from torchfuzz.operators.layout import (
+    ExpandOperator,
     FlattenOperator,
     ReshapeOperator,
     SplitOperator,
@@ -82,6 +83,7 @@ __all__ = [
     "SqueezeOperator",
     "UnsqueezeOperator",
     "SplitOperator",
+    "ExpandOperator",
     "MMOperator",
     "AddmmOperator",
     "BmmOperator",

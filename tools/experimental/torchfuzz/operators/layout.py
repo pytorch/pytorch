@@ -470,3 +470,72 @@ class SplitOperator(LayoutOperatorBase):
 
         # Generate the split and select the first chunk
         return f"{output_name} = torch.split({input_names[0]}, {split_size}, dim={split_dim})[0]"
+
+
+class ExpandOperator(LayoutOperatorBase):
+    """Operator for torch.expand() operation."""
+
+    def __init__(self):
+        """Initialize ExpandOperator."""
+        super().__init__("expand")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.expand"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Expand can produce any tensor output."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Expand can produce any tensor with at least one dimension
+        return len(output_spec.size) > 0
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input spec for expand operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("ExpandOperator can only produce TensorSpec outputs")
+
+        # torch.expand() broadcasts a tensor to a new shape
+        # For expand to work, each dimension of the input must either:
+        # 1. Match the corresponding output dimension
+        # 2. Be 1 (to be broadcasted)
+        # 3. Not exist (input can have fewer dimensions than output)
+
+        # Generate input size with same or fewer dimensions
+        output_size = output_spec.size
+        input_ndim = random.randint(1, len(output_size))
+
+        # Create input size by choosing dimensions to broadcast
+        input_size = []
+        for i in range(input_ndim):
+            output_dim_idx = len(output_size) - input_ndim + i
+            output_dim = output_size[output_dim_idx]
+
+            # Randomly choose to either match the output dimension or use 1 for broadcasting
+            # Use 1 with higher probability to test broadcasting behavior
+            if random.random() < 0.6 and output_dim > 1:
+                input_size.append(1)
+            else:
+                input_size.append(output_dim)
+
+        input_size = tuple(input_size)
+
+        # Create input tensor spec
+        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
+        input_stride = fuzz_valid_stride(input_size)
+
+        return [
+            TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
+        ]
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for expand operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("ExpandOperator can only produce TensorSpec outputs")
+
+        shape_str = str(list(output_spec.size))
+        return f"{output_name} = {input_names[0]}.expand({shape_str})"
