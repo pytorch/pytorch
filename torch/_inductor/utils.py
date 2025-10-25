@@ -3764,7 +3764,6 @@ def maybe_log_cudagraph_partition(
         and (fx_node := ir_node.get_origin_node())
         and (stack_trace := fx_node.meta.get("stack_trace", None))
     ):
-        # pyrefly: ignore  # unbound-name
         warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
 
     perf_hint_log.warning(warning_msg)

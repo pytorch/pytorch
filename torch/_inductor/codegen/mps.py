@@ -680,7 +680,6 @@ class MetalKernel(SIMDKernel):
                 )
                 idx_val = self._new_idxvar(dtype, default_value=0, is_threadgroup=False)  # type: ignore[assignment]
                 idx_var = next(
-                    # pyrefly: ignore  # missing-argument
                     t
                     for t in self.range_tree_nodes.values()
                     # pyrefly: ignore  # missing-argument
@@ -863,7 +862,6 @@ class MetalKernel(SIMDKernel):
 
             if self.inside_reduction:
                 total_reduction_size = math.prod(
-                    # pyrefly: ignore  # missing-argument
                     t.numel
                     for t in self.range_trees
                     # pyrefly: ignore  # missing-argument

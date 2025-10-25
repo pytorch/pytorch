@@ -453,7 +453,7 @@ def _single_tensor_adam(
             device_beta1 = beta1
 
         # Decay the first and second moment running average coefficient
-        # pyrefly: ignore  # no-matching-overload
+
         exp_avg.lerp_(grad, 1 - device_beta1)
 
         # Nested if is necessary to bypass jitscript rules
