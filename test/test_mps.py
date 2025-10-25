@@ -28,7 +28,7 @@ from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_mo
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
-from torch.distributions import Uniform, Exponential
+from torch.distributions import Uniform, Exponential, Gamma
 from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
@@ -7877,6 +7877,83 @@ class TestMPS(TestCaseMPS):
         for _ in range(100):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
+
+    def test_gamma(self):
+        concentration = torch.randn(5, 5, device='mps').abs().requires_grad_()
+        rate = torch.randn(5, 5, device='mps').abs().requires_grad_()
+        concentration_1d = torch.randn(1, device='mps').abs().requires_grad_()
+        rate_1d = torch.randn(1, device='mps').abs().requires_grad_()
+        
+        # Test sample shapes
+        self.assertEqual(Gamma(concentration, rate).sample().size(), (5, 5))
+        self.assertEqual(Gamma(concentration, rate).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(Gamma(concentration_1d, rate_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Gamma(concentration_1d, rate_1d).sample().size(), (1,))
+        self.assertEqual(Gamma(1.0, 1.0).sample((1,)).size(), (1,))
+        
+        # Test that samples are positive
+        samples = Gamma(concentration, rate).sample((100,))
+        self.assertTrue((samples > 0).all())
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_gamma_sample(self, dtype):
+        # Test various alpha (concentration) values
+        for alpha in [0.5, 1.0, 2.0, 5.0]:
+            concentration = torch.full((100, 100), alpha, device='mps', dtype=dtype)
+            rate = torch.ones(100, 100, device='mps', dtype=dtype)
+            
+            samples = Gamma(concentration, rate).sample()
+            
+            # Check shape and device
+            self.assertEqual(samples.shape, (100, 100))
+            self.assertEqual(samples.device.type, 'mps')
+            self.assertEqual(samples.dtype, dtype)
+            
+            # Check that all samples are positive
+            self.assertTrue((samples > 0).all())
+            
+            # For large sample sizes, mean should be approximately alpha/rate = alpha
+            # and variance should be approximately alpha/rate^2 = alpha
+            if dtype == torch.float32:  # Only check for float32 for better accuracy
+                mean = samples.mean().item()
+                std = samples.std().item()
+                expected_mean = alpha
+                expected_std = math.sqrt(alpha)
+                
+                # Allow for some statistical variation (within 10% of expected for large samples)
+                self.assertLess(abs(mean - expected_mean) / expected_mean, 0.1,
+                              f"Mean {mean} not close to expected {expected_mean} for alpha={alpha}")
+                self.assertLess(abs(std - expected_std) / expected_std, 0.2,
+                              f"Std {std} not close to expected {expected_std} for alpha={alpha}")
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_cauchy_sample(self, dtype):
+        # Test Cauchy distribution
+        from torch.distributions import Cauchy
+        
+        median = torch.tensor([0.0], device='mps', dtype=dtype)
+        scale = torch.tensor([1.0], device='mps', dtype=dtype)
+        
+        cauchy = Cauchy(median, scale)
+        samples = cauchy.sample((1000,))
+        
+        # Check shape and device
+        self.assertEqual(samples.shape, (1000, 1))
+        self.assertEqual(samples.device.type, 'mps')
+        self.assertEqual(samples.dtype, dtype)
+        
+        # Cauchy distribution has undefined mean and variance
+        # But we can check that samples are generated (no NaN/Inf except possibly a few outliers)
+        finite_ratio = torch.isfinite(samples).float().mean().item()
+        self.assertGreater(finite_ratio, 0.95,  # Most samples should be finite
+                          f"Too many non-finite values: {1-finite_ratio:.2%}")
+        
+        # Test with different median and scale
+        median2 = torch.tensor([5.0], device='mps', dtype=dtype)
+        scale2 = torch.tensor([2.0], device='mps', dtype=dtype)
+        cauchy2 = Cauchy(median2, scale2)
+        samples2 = cauchy2.sample((100,))
+        self.assertEqual(samples2.shape, (100, 1))
 
     # Test add
     def test_add_sub(self):
