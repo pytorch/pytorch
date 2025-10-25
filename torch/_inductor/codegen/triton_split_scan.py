@@ -85,7 +85,7 @@ class TritonSplitScanKernel(TritonKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError("NYI TritonSplitDimKernel reductions")
 
-    def scan(self, dtypes, combine_fn, values):
+    def scan(self, dtypes, combine_fn, values, reverse=False):
         """
         Perform an associative scan on 'values'.
         """

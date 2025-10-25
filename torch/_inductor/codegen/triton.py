@@ -4285,6 +4285,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
         values: tuple[CSEVariable, ...],
+        reverse: bool = False,
     ) -> tuple[CSEVariable, ...]:
         """
         Perform an associative scan on 'values'.
@@ -4356,7 +4357,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return tuple(result_vars)
 
         partial_scan_vars = cse_multiple(
-            f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
+            f"tl.associative_scan(({csv(broadcasted_values)}), {dim}, {combine_helper_fn}, {reverse})",
             broadcasted_values,
             masks,
             dtypes,

@@ -1293,6 +1293,7 @@ class HalideKernel(SIMDKernel):
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
         values_orig: tuple[CSEVariable, ...],
+        reverse: bool = False,
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert len(dtypes) == len(values_orig)
