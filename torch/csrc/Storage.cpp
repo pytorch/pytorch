@@ -226,7 +226,7 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
        being finalized that has already been destroyed. */
     if (type->tp_weaklistoffset) {
       /* Modeled after GET_WEAKREFS_LISTPTR() */
-      PyWeakReference** list = reinterpret_cast<PyWeakReference**>(
+      PyWeakReference* const* list = reinterpret_cast<PyWeakReference**>(
           PyObject_GET_WEAKREFS_LISTPTR(self));
       while (*list)
         _PyWeakref_ClearRef(*list);

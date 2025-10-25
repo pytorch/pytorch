@@ -1344,7 +1344,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    c10::StorageImpl const* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });

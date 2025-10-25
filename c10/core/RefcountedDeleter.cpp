@@ -51,7 +51,7 @@ c10::Storage newStorageImplFromRefcountedDataPtr(const c10::Storage& storage) {
 
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
-  c10::DataPtr& data_ptr = storage.mutable_data_ptr();
+  c10::DataPtr const& data_ptr = storage.mutable_data_ptr();
   c10::DataPtr new_data_ptr(
       data_ptr.get(),
       data_ptr.get_context(),

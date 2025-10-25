@@ -24,7 +24,7 @@ namespace torch::utils {
 // https://github.com/python/cpython/commit/c70ab02df2894c34da2223fc3798c0404b41fd79
 // so this function might not be required in Python 3.8+.
 PyObject* returned_structseq_repr(PyStructSequence* obj) {
-  PyTypeObject* typ = Py_TYPE(obj);
+  PyTypeObject const* typ = Py_TYPE(obj);
   THPObjectPtr tup = six::maybeAsTuple(obj);
   if (tup == nullptr) {
     return nullptr;

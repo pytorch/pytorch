@@ -68,7 +68,7 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
 
 int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor) {
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
-  void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
+  void const* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
   return reinterpret_cast<int64_t>(data_ptr);
 }
 

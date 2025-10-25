@@ -97,7 +97,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
     }
   }
 
-  int8_t* weight_ptr_int8 =
+  int8_t const* weight_ptr_int8 =
       reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
 
   std::vector<int32_t> col_offsets(N);

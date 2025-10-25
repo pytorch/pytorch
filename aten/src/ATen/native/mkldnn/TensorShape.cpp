@@ -69,7 +69,7 @@ Tensor mkldnn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optiona
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
       optional_memory_format.value());
-  ideep::tensor& src = itensor_from_mkldnn(self);
+  ideep::tensor const& src = itensor_from_mkldnn(self);
   ideep::tensor dst;
   ideep::direct_copy::compute(src, dst);
   return new_with_itensor_mkldnn(std::move(dst), optTypeMetaToScalarType(self.options().dtype_opt()),

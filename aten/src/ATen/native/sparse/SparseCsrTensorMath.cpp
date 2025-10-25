@@ -1098,8 +1098,8 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor new_values_acc = std::get<1>(acc_buffer);
   new_values_acc.fill_(rop.identity());
 
-  int64_t* columns_map_ptr = columns_map.data_ptr<int64_t>();
-  scalar_t* values_ptr = values.data_ptr<scalar_t>();
+  int64_t const* columns_map_ptr = columns_map.data_ptr<int64_t>();
+  scalar_t const* values_ptr = values.data_ptr<scalar_t>();
   acc_t* new_values_acc_ptr =
       new_values_acc.data_ptr<acc_t>();
 

@@ -309,7 +309,7 @@ static PyObject* THPStorage_fromBuffer(
     return nullptr;
   }
 
-  uint8_t* src = static_cast<uint8_t*>(buffer.buf);
+  uint8_t const* src = static_cast<uint8_t*>(buffer.buf);
   auto fake_mode_active =
       c10::impl::TorchDispatchModeTLS::get_mode(
           c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt;
@@ -592,7 +592,8 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
 
   const auto& self_ = THPStorage_Unpack(self);
   const c10::DataPtr& data_ptr = self_.data_ptr();
-  at::MapAllocator* map_allocator = at::MapAllocator::fromDataPtr(data_ptr);
+  at::MapAllocator const* map_allocator =
+      at::MapAllocator::fromDataPtr(data_ptr);
 
   if (map_allocator == nullptr ||
       !(map_allocator->flags() & at::ALLOCATOR_MAPPED_SHARED)) {

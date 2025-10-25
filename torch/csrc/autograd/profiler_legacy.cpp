@@ -593,7 +593,7 @@ void writeProfilerEventsToStream(
     std::ostream& out,
     const std::vector<LegacyEvent*>& events) {
   TORCH_CHECK(out, "Could not open file");
-  LegacyEvent* profiler_start = nullptr;
+  LegacyEvent const* profiler_start = nullptr;
   for (LegacyEvent* e : events) {
     if (0 == strcmp(e->name(), "__start_profile")) {
       profiler_start = e;
@@ -626,7 +626,7 @@ void writeProfilerEventsToStream(
       first = false;
       auto it = events_map.find(std::make_pair(evt->handle(), evt->nodeId()));
       TORCH_CHECK(it != events_map.end(), "Unmatched pop event");
-      LegacyEvent* evt_start = it->second;
+      LegacyEvent const* evt_start = it->second;
       events_map.erase(it);
 
       at::jit::TemplateEnv env;

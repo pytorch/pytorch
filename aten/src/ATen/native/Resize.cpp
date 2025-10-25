@@ -289,7 +289,7 @@ void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
         size_bytes_i,
         ") cannot be represented as a int64_t");
     const auto size_bytes = static_cast<int64_t>(size_bytes_i);
-    void* original_data_ptr = storage.data_ptr().get();
+    void const* original_data_ptr = storage.data_ptr().get();
 
     auto src_option =
         c10::TensorOptions().device(storage.device()).dtype(at::kByte);

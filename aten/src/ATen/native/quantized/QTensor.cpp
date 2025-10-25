@@ -255,8 +255,8 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
-  void* self_data = self_contig.data_ptr();
-  void* other_data = other_contig.data_ptr();
+  void const* self_data = self_contig.data_ptr();
+  void const* other_data = other_contig.data_ptr();
   auto data_size = self.numel() * self.element_size();
   // For QUint4x2 and QUInt2x4, two elements are packed in one byte
   if (self.scalar_type() == kQUInt4x2 || self.scalar_type() == kQUInt2x4) {

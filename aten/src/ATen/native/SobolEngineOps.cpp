@@ -74,7 +74,7 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
 
   // We deal with `data` and `strides` due to performance issues.
   int64_t* quasi_data = quasi.data_ptr<int64_t>();
-  int64_t* sobolstate_data = sobolstate.data_ptr<int64_t>();
+  int64_t const* sobolstate_data = sobolstate.data_ptr<int64_t>();
 
   int64_t quasi_stride = quasi.stride(0);
   int64_t sobolstate_row_stride = sobolstate.stride(0), sobolstate_col_stride = sobolstate.stride(1);

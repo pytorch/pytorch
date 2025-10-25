@@ -59,7 +59,7 @@ void gds_save_storage(
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   c10::cuda::CUDAGuard gpuGuard(storage.device());
 
-  void* dataPtr = storage.mutable_data();
+  void const* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
 
   // Write device memory contents to the file
@@ -68,7 +68,7 @@ void gds_save_storage(
 }
 
 void gds_register_buffer(const at::Storage& storage) {
-  void* dataPtr = storage.mutable_data();
+  void const* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
 
   CUfileError_t status = cuFileBufRegister(dataPtr, nbytes, 0);
@@ -80,7 +80,7 @@ void gds_register_buffer(const at::Storage& storage) {
 }
 
 void gds_deregister_buffer(const at::Storage& storage) {
-  void* dataPtr = storage.mutable_data();
+  void const* dataPtr = storage.mutable_data();
   CUfileError_t status = cuFileBufDeregister(dataPtr);
   TORCH_CHECK(
       status.err == CU_FILE_SUCCESS,

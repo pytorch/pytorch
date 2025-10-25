@@ -79,7 +79,7 @@ Symbol InternedStrings::_symbol(const std::string& s) {
 
 std::pair<const char*, const char*> InternedStrings::customString(Symbol sym) {
   std::lock_guard<std::mutex> guard(mutex_);
-  SymbolInfo& s = sym_to_info_.at(sym);
+  SymbolInfo const& s = sym_to_info_.at(sym);
   return {s.qual_name.c_str(), s.unqual_name.c_str()};
 }
 

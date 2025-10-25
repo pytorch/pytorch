@@ -1316,7 +1316,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     if (get_deconv_cache().hit(cache_key)) {
-      DeconvParams& params = get_deconv_cache().get_params();
+      DeconvParams const& params = get_deconv_cache().get_params();
       ideep::convolution_transpose_forward::compute<false, false>(
           params, src, weights, b, dst);
     } else {

@@ -437,7 +437,7 @@ void py_set_default_tensor_type(PyObject* obj) {
   TORCH_CHECK_TYPE(
       PyTensorType_Check(obj),
       "invalid type object: only floating-point types are supported as the default type");
-  PyTensorType* type = (PyTensorType*)obj;
+  PyTensorType const* type = (PyTensorType*)obj;
   TORCH_CHECK_TYPE(
       !type->is_cuda || torch::utils::cuda_enabled(),
       "type ",

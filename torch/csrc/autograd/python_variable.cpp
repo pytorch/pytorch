@@ -2414,7 +2414,7 @@ static void THPVariable_subclass_dealloc(PyObject* self) {
        being finalized that has already been destroyed. */
     if (type->tp_weaklistoffset) {
       /* Modeled after GET_WEAKREFS_LISTPTR() */
-      PyWeakReference** list =
+      PyWeakReference* const* list =
           (PyWeakReference**)PyObject_GET_WEAKREFS_LISTPTR(self);
       while (*list)
         _PyWeakref_ClearRef(*list);
@@ -2679,7 +2679,7 @@ static int THPVariable_subclass_traverse(
 
   // All Python defined classes have __dict__
   if (C10_LIKELY(type->tp_dictoffset)) {
-    PyObject** dictptr = _PyObject_GetDictPtr(self);
+    PyObject* const* dictptr = _PyObject_GetDictPtr(self);
     if (dictptr && *dictptr)
       Py_VISIT(*dictptr);
   }
