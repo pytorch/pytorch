@@ -395,6 +395,10 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.shrink_group
+```
+
+```{eval-rst}
 .. autofunction:: get_group_rank
 ```
 

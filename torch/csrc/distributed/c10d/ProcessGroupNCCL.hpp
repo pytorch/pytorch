@@ -997,6 +997,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
+  bool supportsShrinking() const override {
+#ifdef NCCL_HAS_COMM_SHRINK
+    return true;
+#else
+    return false;
+#endif
+  }
+
+  // Backend-style shrink override that returns a Backend instance.
+  c10::intrusive_ptr<Backend> shrink(
+      const std::vector<int64_t>& ranks_to_exclude,
+      int shrink_flags = 0,
+      const c10::intrusive_ptr<Backend::Options>& opts_override =
+          nullptr) override;
+
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
 
   // Allocate tensor from communication-optimized memory pool
@@ -1064,6 +1079,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType,
       int p2pRank = 0,
       bool isSendRecvSelf = false);
+
+  // Initialize device-specific state (comm, stream, event, bookkeeping) for a
+  // given communicator on this process group instance.
+  void initializeDeviceStateForComm(
+      const at::Device& device,
+      std::shared_ptr<NCCLComm> comm);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
