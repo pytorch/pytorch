@@ -32,7 +32,7 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
 
@@ -90,7 +90,7 @@ from .. import config
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.output_code import OutputCode

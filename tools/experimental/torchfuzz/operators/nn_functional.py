@@ -1110,7 +1110,13 @@ class MultiHeadAttentionForwardOperator(Operator):
         # For simplicity and correctness, always generate all required tensors
         # This avoids ambiguity in the codegen about which optional parameters are present
         # We'll use a simplified signature: query, key, value, in_proj_weight, out_proj_weight only
-        specs = [query_spec, key_spec, value_spec, in_proj_weight_spec, out_proj_weight_spec]
+        specs = [
+            query_spec,
+            key_spec,
+            value_spec,
+            in_proj_weight_spec,
+            out_proj_weight_spec,
+        ]
 
         from typing import cast
 

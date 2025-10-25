@@ -156,12 +156,6 @@ TORCH_LIBRARY_IMPL(openreg, PrivateUse1, m) {
 }
 // LITERALINCLUDE END: CUSTOM OPERATOR DEFAULT
 
-// LITERALINCLUDE START: CUSTOM OPERATOR FALLBACK
-TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1, m) {
-  m.fallback(torch::autograd::autogradNotImplementedFallback());
-}
-// LITERALINCLUDE END: CUSTOM OPERATOR FALLBACK
-
 // The rest is for testing purposes
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   /*

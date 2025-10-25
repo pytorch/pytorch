@@ -38,7 +38,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
 
 try:
@@ -196,6 +196,10 @@ from .utils import (
     unpatched_nn_module_getattr,
     verify_guard_fn_signature,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
@@ -2059,9 +2063,6 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_dispatch_key_set_guard(
             val, get_verbose_code_parts(code_parts, guard)
         )
-
-    def NAME_MATCH(self, guard: Guard) -> None:
-        self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)  # type: ignore[arg-type]
 
     def DUAL_LEVEL(self, guard: Guard) -> None:
         # Invalidate dual level if current dual level is different than the one
