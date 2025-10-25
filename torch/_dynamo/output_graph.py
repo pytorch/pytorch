@@ -2741,12 +2741,14 @@ class DynamoTracerOutput:
     error_on_graph_break: bool
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
+    closure: Optional[tuple[Any, ...]]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
     ) -> None:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
+        self.closure = tracer.closure
         if error:
             self.output_graph = None
         else:

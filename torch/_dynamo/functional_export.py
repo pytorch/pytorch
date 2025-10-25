@@ -1,9 +1,8 @@
-import copy
 import inspect
 import logging
 import traceback
-import types
 from collections import namedtuple
+from dataclasses import dataclass
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
@@ -23,12 +22,12 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     StatelessSymbolicContext,
 )
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.graph import _ExportCodeGen, _PyTreeCodeGen, _PyTreeInfo
+from torch.utils._pytree import TreeSpec
 
 
 if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._pytree import TreeSpec
 
 
 log = logging.getLogger(__name__)
@@ -449,9 +448,20 @@ def _suggest_or_raise_constraint_violation(
         raise constraint_violation_error
 
 
+@dataclass(frozen=True)
+class PyTreeifyOutput:
+    graph_module: torch.fx.GraphModule
+    in_spec: TreeSpec
+    in_shuffle_graph: torch.fx.GraphModule
+    num_flat_args: int
+    out_spec: TreeSpec
+    out_shuffle_graph: torch.fx.GraphModule
+    root: Optional[torch.nn.Module] = None
+
+
 def pytreeify(
     out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> Any:
+) -> PyTreeifyOutput:
     """
     Given a dynamo capture output, return a callable graph module that
     contain the following information:
@@ -469,10 +479,13 @@ def pytreeify(
     backend_input = out.backend_input
     backend = out.backend_input.graph_module
 
+    root = None
     if isinstance(mod, torch.nn.Module):
         args = (mod,) + args
+        root = mod
     elif inspect.ismethod(mod):
         args = (mod.__self__,) + args
+        root = mod.__self__
 
     flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
 
@@ -538,47 +551,83 @@ def pytreeify(
     out_shuffle = OutShuffle()
     out_shuffle_graph = torch.fx.symbolic_trace(out_shuffle)
 
-    def pytree_call(*args, **kwargs):
-        import torch.export._unlift
+    assert out_shuffle.out_spec is not None
+    return PyTreeifyOutput(
+        backend_input.graph_module,
+        in_spec,
+        in_shuffle_graph,
+        len(flat_real_args),
+        out_shuffle.out_spec,
+        out_shuffle_graph,
+        root=root,  # type: ignore[arg-type]
+    )
 
-        flat_args, in_spec_runtime = pytree.tree_flatten((args, kwargs))
-        if not torch.export._unlift.eq_spec(in_spec_runtime, in_spec):
-            raise RuntimeError(
-                f"Model input mismatch. Expected input spec: {in_spec}. Actual input spec: {in_spec_runtime}"
-            )
-        flat_outs = backend_input.graph_module(*in_shuffle_graph(*flat_args))
-        assert out_shuffle.out_spec is not None
-        return pytree.tree_unflatten(
-            out_shuffle_graph(*flat_args, *flat_outs), out_shuffle.out_spec
-        )
 
-    if isinstance(mod, torch.nn.Module):
-        compiled_mod = copy.copy(mod)
-        compiled_mod.forward = types.MethodType(pytree_call, compiled_mod)
-        if not hasattr(compiled_mod, "meta"):
-            compiled_mod.meta = {}  # type: ignore[attr-defined]
-        if isinstance(compiled_mod.meta, dict) and "fake_mode" not in compiled_mod.meta:
-            compiled_mod.meta["fake_mode"] = out.backend_input.fake_mode
-        return compiled_mod
-    elif inspect.ismethod(mod):
-        return types.MethodType(pytree_call, mod.__self__)
-    else:
-        return pytree_call
+def normalize_graph_module(gm):
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            node.meta["val"] = node.meta["example_value"]
 
 
 def dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
+    constraints: Optional[list[Constraint]] = None,
 ) -> Callable[..., Any]:
     def inner(*args: Any, **kwargs: Any) -> Any:
+        assert not torch._dynamo.config.install_free_tensors
         with (
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):
-            out = fullgraph_capture(mod, args, kwargs)
+            out = fullgraph_capture(
+                mod,
+                args,
+                kwargs,
+                constraints=constraints,
+            )
 
         # TODO filter out side effects.
+        pyt = pytreeify(out, mod, args, kwargs)
 
-        return pytreeify(out, mod, args, kwargs)
+        graph_module = pyt.graph_module
+        tree_leaf_names = [
+            graph_module.graph._graph_namespace.create_name(f"_tree_leaf_{i}", None)
+            for i in range(pyt.num_flat_args)
+        ]
+        graph_module.graph._codegen = _ExportCodeGen(
+            _PyTreeInfo(
+                argument_names(inspect.signature(mod), args, kwargs),
+                pyt.in_spec,
+                pyt.out_spec,
+            ),
+            pyt.in_shuffle_graph,
+            pyt.out_shuffle_graph,
+            tree_leaf_names,
+            pyt.root,
+        )  # type: ignore[attr-defined]
+        normalize_graph_module(graph_module)
+        if pyt.root is not None:
+            graph_module._parameters = pyt.root._parameters.copy()
+            graph_module._buffers = pyt.root._buffers.copy()
+            assert all(not hasattr(graph_module, m) for m in pyt.root._modules)
+            graph_module._modules.update(pyt.root._modules)
+            graph_module._non_persistent_buffers_set = (
+                pyt.root._non_persistent_buffers_set.copy()
+            )
+        graph_module._in_spec = pyt.in_spec
+        graph_module._out_spec = pyt.out_spec
+        assert not hasattr(graph_module, "_in_shuffle_graph")
+        assert not hasattr(graph_module, "_out_shuffle_graph")
+        graph_module._in_shuffle_graph = pyt.in_shuffle_graph
+        graph_module._out_shuffle_graph = pyt.out_shuffle_graph
+        delattr(graph_module, "_param_name_to_source")
+        graph_module.recompile()
+        graph_module.meta["module_call_specs"] = (
+            out.graph_capture_output.output_graph.export_metadata.module_call_spec
+        )
+        assert out.backend_input is not None
+        graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
+        return graph_module
 
     return inner
 

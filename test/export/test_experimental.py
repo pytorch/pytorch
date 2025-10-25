@@ -7,12 +7,14 @@ from typing import Dict, List, Tuple
 
 import torch
 import torch._dynamo
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import TEST_CUDA
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
@@ -403,8 +405,6 @@ def forward(self, x):
         self.assertEqual(res_export, res_eager)
 
     def test_dynamo_graph_capture(self):
-        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
-
         class Foo(torch.nn.Module):
             def forward(self, dct, lst, bleh):
                 x = dct["a"] * lst[1][0]
@@ -438,6 +438,107 @@ def forward(self, x):
         gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
         test_inputs = make_inputs()
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+
+    def test_dynamo_graph_capture_closure(self):
+        from torch.export import Dim
+
+        N = 3
+        outer = torch.randn(10, 32)
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                z = x + outer
+                y = z[:-1, :]  # [s0 - 1, 32]
+                stacked = torch.stack([y] * N, dim=0)  # [N * (s0 - 1), 32]
+                reshaped = stacked.reshape(-1, N, 32)  # [(s0 - 1), N, 32]
+                return reshaped
+
+        inps = (torch.randn(10, 32),)
+        ep = dynamo_graph_capture_for_export(MyModel())(*inps)
+        """
+        def forward(self, *flat_proxy_args):
+            _flat_proxy_args = flat_proxy_args
+            getitem = _flat_proxy_args[0];  getitem = None
+            getitem_1 = _flat_proxy_args[1];  _flat_proxy_args = None
+            _tensor_constant0 = self._tensor_constant0
+            return (getitem_1, _tensor_constant0)
+        """
+        """
+        def forward(self, args_0):
+            _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
+            L_x_ , L_outer_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+            l_x_ = L_x_
+            l_outer_ = L_outer_
+            z = l_x_ + l_outer_;  l_x_ = l_outer_ = None
+            y = z[(slice(None, -1, None), slice(None, None, None))];  z = None
+            stacked = torch.stack([y, y, y], dim = 0);  y = None
+            reshaped = stacked.reshape(-1, 3, 32);  stacked = None
+            return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, reshaped), self._out_spec)
+        """
+        self.assertEqual(ep(*inps), MyModel()(*inps))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
+        class DummyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scalar):
+                ctx.save_for_backward(x)
+                return x + scalar
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out, None
+
+        def mock_fw_compute(x):
+            with fx_traceback.annotate({"compute": 0}):
+                return DummyOp.apply(x, 10)
+
+        def mock_bw_comm(x):
+            with fx_traceback.annotate({"comm": 0}):
+                return DummyOp.apply(x, 20)
+
+        def mock_bw_compute(x):
+            return DummyOp.apply(x, 30)
+
+        class Model(torch.nn.Module):
+            def forward(self, fw_in, bw_in):
+                fw_out = mock_fw_compute(fw_in)
+                # bw_in blocks bw_out
+                bw_in = mock_bw_comm(bw_in)
+                bw_out = mock_bw_compute(bw_in)
+                return fw_out, bw_out
+
+        def input_fn():
+            inputs = (torch.rand(2, 128, device="cuda", requires_grad=True),)
+            grad_ins = (torch.rand(2, 128, device="cuda"),)
+            return (
+                *inputs,
+                *grad_ins,
+            )
+
+        with torch.device("meta"):
+            model = Model()
+
+        import torch.fx.traceback as fx_traceback
+
+        with fx_traceback.preserve_node_meta():
+            gm = dynamo_graph_capture_for_export(model)(*input_fn())
+
+        """
+        def forward(self, args_0, args_1):
+            _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0, args_1,))
+            L_fw_in_ , L_bw_in_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
+            l_fw_in_ = L_fw_in_
+            l_bw_in_ = L_bw_in_
+            fwd_body_0 = self.fwd_body_0
+            bwd_body_0 = self.bwd_body_0
+            fw_out = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_fw_in_, args_tensor_mask = [True, False], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_fw_in_ = None
+            bw_in = l_bw_in_ + 20;  l_bw_in_ = None
+            bw_out = bw_in + 30;  bw_in = None
+            return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, fw_out, bw_out), self._out_spec)
+        """
+        test_inputs = input_fn()
+        self.assertEqual(gm(*test_inputs), model(*test_inputs))
 
 
 if __name__ == "__main__":

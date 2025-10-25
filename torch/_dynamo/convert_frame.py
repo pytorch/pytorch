@@ -894,6 +894,7 @@ class DynamoOutput:
             output_graph.import_sources,
             output_graph.traced_code,
             self.bytecode,
+            self.tracer_output.closure,
         )
 
 
@@ -925,6 +926,7 @@ class GraphCaptureOutput:
     import_sources: dict[str, str]
     traced_code: list[CodeType]
     bytecode: CodeType
+    closure: Optional[tuple[Any, ...]]
 
     def build_guards(
         self,
@@ -979,7 +981,7 @@ class CaptureOutput:
         return types.FunctionType(
             self.graph_capture_output.bytecode,
             f_globals,
-            closure=(),
+            closure=self.graph_capture_output.closure,
         )
 
 

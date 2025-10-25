@@ -917,6 +917,42 @@ class _PyTreeCodeGen(CodeGen):
         else:
             return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
+    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+        # when kwargs is present, in_spec is tuple(args, kwargs)
+        has_args_kwargs_tuple = (
+            self.pytree_info.in_spec.type is tuple
+            and self.pytree_info.in_spec.num_children == 2
+            and self.pytree_info.in_spec.children_specs[0].type is tuple
+            and self.pytree_info.in_spec.children_specs[1].type is dict
+        )
+        fn_kwargs = "{}"
+        fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
+        if has_args_kwargs_tuple:
+            count_args = self.pytree_info.in_spec.children_specs[0].num_children
+            fn_args = self.pytree_info.orig_args[:count_args]
+            fn_kwargs = (
+                "{"
+                + ", ".join(
+                    f"'{k}':{v}"
+                    for k, v in zip(
+                        self.pytree_info.in_spec.children_specs[1].context,
+                        self.pytree_info.orig_args[count_args:],
+                    )
+                )
+                + "}"
+            )
+            fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
+
+        # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
+        # we need to split it to two lines:
+        # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
+        # one for code: `var1, var2, = function_call()`
+        without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
+        bindings = self._format_annotations(free_vars, expanded_def)
+        bindings += f"""
+    {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+        return bindings
+
     def gen_fn_def(
         self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
     ):
@@ -949,39 +985,7 @@ class _PyTreeCodeGen(CodeGen):
         )
 
         if len(free_vars) > 0:  # pytree has placeholders in it
-            # when kwargs is present, in_spec is tuple(args, kwargs)
-            has_args_kwargs_tuple = (
-                self.pytree_info.in_spec.type is tuple
-                and self.pytree_info.in_spec.num_children == 2
-                and self.pytree_info.in_spec.children_specs[0].type is tuple
-                and self.pytree_info.in_spec.children_specs[1].type is dict
-            )
-            fn_kwargs = "{}"
-            fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
-            if has_args_kwargs_tuple:
-                count_args = self.pytree_info.in_spec.children_specs[0].num_children
-                fn_args = self.pytree_info.orig_args[:count_args]
-                fn_kwargs = (
-                    "{"
-                    + ", ".join(
-                        f"'{k}':{v}"
-                        for k, v in zip(
-                            self.pytree_info.in_spec.children_specs[1].context,
-                            self.pytree_info.orig_args[count_args:],
-                        )
-                    )
-                    + "}"
-                )
-                fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
-
-            # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
-            # we need to split it to two lines:
-            # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
-            # one for code: `var1, var2, = function_call()`
-            without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
-            fn_definition += self._format_annotations(free_vars, expanded_def)
-            fn_definition += f"""
-    {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+            fn_definition += self.gen_var_bindings(fn_args, free_vars, expanded_def)
         return fn_definition
 
     def generate_output(self, output_args, *, descs: Optional[Any] = None):
@@ -999,6 +1003,52 @@ class _PyTreeCodeGen(CodeGen):
                 )
         else:
             return super().generate_output(output_args, descs=descs)
+
+
+class _ExportCodeGen(_PyTreeCodeGen):
+    def __init__(
+        self,
+        pytree_info: _PyTreeInfo,
+        in_shuffle_graph: "GraphModule",
+        out_shuffle_graph: "GraphModule",
+        tree_leaf_names: list[str],
+        root: Optional[torch.nn.Module],
+    ):
+        super().__init__(pytree_info)
+        self.in_shuffle_graph = in_shuffle_graph
+        self.out_shuffle_graph = out_shuffle_graph
+        self.tree_leaf_names = tree_leaf_names
+        self.root = root
+
+    def process_inputs(self, *inputs: Any) -> Any:
+        flat_args = super().process_inputs(*inputs)
+        if self.root is not None:
+            flat_args = (self.root, *flat_args)
+        self.flat_args = flat_args
+        return self.in_shuffle_graph(*flat_args)
+
+    def process_outputs(self, out: Any) -> Any:
+        flat_outs = self.out_shuffle_graph(*self.flat_args, *out)
+        del self.flat_args
+        ret = super().process_outputs(flat_outs)
+        return ret
+
+    def gen_fn_def(self, *args, **kwargs) -> str:
+        fn_def = super().gen_fn_def(*args, **kwargs)
+        return fn_def
+
+    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+        without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
+        fn_signature: str = f"{', '.join(fn_args)}"
+        if self.root is not None:
+            fn_signature = f"self, {fn_signature}"
+        return f"""
+    {", ".join(self.tree_leaf_names)}, = pytree.tree_leaves(({fn_signature},))
+    {", ".join(without_annotation)}, = self._in_shuffle_graph({", ".join(self.tree_leaf_names)})"""
+
+    def generate_output(self, output_args, *args, **kwargs) -> str:
+        output = f"self._out_shuffle_graph({', '.join(self.tree_leaf_names)}, {', '.join([str(a) for a in output_args])})"
+        return f"return pytree.tree_unflatten({output}, self._out_spec)"
 
 
 class _FindNodesLookupTable:
