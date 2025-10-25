@@ -541,42 +541,6 @@ inline Vectorized<float> Vectorized<float>::le(
 }
 
 template <>
-inline void convert(const float* src, int32_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<float>::size());
-       i += Vectorized<float>::size()) {
-    vst1q_s32(dst + i, vcvtq_s32_f32(vld1q_f32(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<int32_t>(src[i]);
-  }
-}
-
-template <>
-inline void convert(const int32_t* src, float* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<float>::size());
-       i += Vectorized<float>::size()) {
-    vst1q_f32(dst + i, vcvtq_f32_s32(vld1q_s32(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<float>(src[i]);
-  }
-}
-
-template <>
 Vectorized<float> inline fmadd(
     const Vectorized<float>& a,
     const Vectorized<float>& b,
