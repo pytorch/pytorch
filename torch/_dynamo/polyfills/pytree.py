@@ -523,7 +523,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     )
     def dict_flatten(
         dct: dict[_KT, _VT], /
-    ) -> tuple[list[_VT], tuple[list[_KT], list[_KT]], tuple[_KT]]:
+    ) -> tuple[list[_VT], tuple[list[_KT], list[_KT]], tuple[_KT, ...]]:
         sorted_keys = optree.utils.total_order_sorted(dct)
         values = [dct[key] for key in sorted_keys]
         original_keys = list(dct)
@@ -535,7 +535,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         skip_signature_check=True,
     )
     def dict_unflatten(
-        metadata: tuple[list[_VT], tuple[list[_KT], list[_KT]], tuple[_KT]],
+        metadata: tuple[list[_VT], tuple[list[_KT], list[_KT]], tuple[_KT, ...]],
         values: Iterable[_VT],
         /,
     ) -> dict[_KT, _VT]:
