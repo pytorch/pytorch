@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
@@ -27,6 +26,7 @@ class OverlapPreservingBucketer:
         scheduled: OrderedSet[fx.Node],
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
+        insert_overlap_deps: bool = False,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -36,6 +36,7 @@ class OverlapPreservingBucketer:
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
         self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
         self.max_coll_distance = max_coll_distance
+        self.insert_overlap_deps = insert_overlap_deps
 
     def bucket_collectives(self) -> None:
         """Main entry point for bucketing collectives."""
@@ -78,7 +79,8 @@ class OverlapPreservingBucketer:
         _stable_topological_sort(self.graph, additional_deps)
 
         # After topological sort, preserve dependencies using effect tokens
-        self._preserve_dependencies_with_tokens(additional_deps)
+        if self.insert_overlap_deps:
+            self._preserve_dependencies_with_tokens(additional_deps)
 
         self.graph.lint()
 
@@ -266,5 +268,4 @@ class OverlapPreservingBucketer:
             preserve_node_ordering,
         )
 
-        if torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps:
-            preserve_node_ordering(self.graph, additional_deps)
+        preserve_node_ordering(self.graph, additional_deps)
