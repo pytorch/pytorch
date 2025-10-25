@@ -9986,6 +9986,20 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(result_triu_min, expected_triu_min)
         self.assertEqual(result_tril_min, expected_tril_min)
 
+    @dtypes(torch.float)
+    def test_triu_tril_inplace_memory_overlap(self, device, dtype):
+        base = torch.rand((), dtype=dtype, device=device)
+        expanded = base.expand(3, 3)
+        msg = (
+            "unsupported operation: more than one element of the written-to tensor "
+            "refers to a single memory location. Please clone() the tensor before "
+            "performing the operation."
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
+            expanded.triu_(1)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            expanded.tril_(-1)
+
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
     def test_1_sized_with_0_strided(self, device, dtype):
