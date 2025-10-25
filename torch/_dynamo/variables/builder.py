@@ -866,7 +866,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
         elif isinstance(value, logging.Logger):
-            self.install_guards(GuardBuilder.CLASS_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
