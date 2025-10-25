@@ -2010,6 +2010,12 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
+        # TODO - Run a CI with the following uncommented to find the remaining places
+        # val = self.get(guard.name)
+        # if inspect.isclass(val):
+        #     raise AssertionError(f"{guard.name} is a class, use CLASS_MATCH guard")
+        # if inspect.ismodule(val):
+        #     raise AssertionError(f"{guard.name} is a module, use MODULE_MATCH guard")
         return self.id_match_unchecked(guard, recompile_hint)
 
     def id_match_unchecked(
@@ -2285,6 +2291,24 @@ class GuardBuilder(GuardBuilderBase):
         # don't support this in serialization because it uses unsupported ID_MATCH
         return self.ID_MATCH(guard)
 
+    def CLASS_MATCH(self, guard: Guard) -> None:
+        """Equals ID_MATCH on classes - better readability than directly calling ID_MATCH"""
+        val = self.get(guard.name)
+        if not inspect.isclass(val):
+            raise AssertionError(
+                f"{guard.name} is not a class, but CLASS_MATCH is used"
+            )
+        self.id_match_unchecked(guard)
+
+    def MODULE_MATCH(self, guard: Guard) -> None:
+        """Equals ID_MATCH on modules - better readability than directly calling ID_MATCH"""
+        val = self.get(guard.name)
+        if not inspect.ismodule(val):
+            raise AssertionError(
+                f"{guard.name} is not a module, but MODULE_MATCH is used"
+            )
+        self.id_match_unchecked(guard)
+
     def CLOSURE_MATCH(self, guard: Guard) -> None:
         """matches a closure by __code__ id."""
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
@@ -2303,9 +2327,7 @@ class GuardBuilder(GuardBuilderBase):
                 self.check_fn_manager.used_builtin_vars.add(
                     guard.originating_source.index
                 )
-            return self.id_match_unchecked(guard)
-
-        return self.ID_MATCH(guard)
+        return self.id_match_unchecked(guard)
 
     def SEQUENCE_LENGTH(self, guard: Guard) -> None:
         # This guard is used to check length of PySequence objects like list,
@@ -3684,6 +3706,8 @@ class CheckFunctionManager:
         "NN_MODULE",
         "ID_MATCH",
         "FUNCTION_MATCH",
+        "CLASS_MATCH",
+        "MODULE_MATCH",
         "CLOSURE_MATCH",
         "WEAKREF_ALIVE",
     )
@@ -4514,7 +4538,6 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
-
         if is_from_skip_guard_source(guard.originating_source):
             continue
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
