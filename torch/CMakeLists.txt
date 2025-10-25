@@ -381,14 +381,6 @@ if(BUILD_LIBTORCHLESS)
     target_compile_definitions(torch_python PRIVATE USE_C10D_GLOO)
   endif()
 
-  if(NOT WIN32)
-    target_compile_definitions(torch_python PRIVATE USE_RPC)
-  endif()
-
-  if(USE_TENSORPIPE)
-    target_compile_definitions(torch_python PRIVATE USE_TENSORPIPE)
-  endif()
-
   set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
   if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")

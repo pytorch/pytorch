@@ -190,12 +190,6 @@ new_local_repository(
     path = "third_party/concurrentqueue",
 )
 
-new_local_repository(
-    name = "tensorpipe",
-    build_file = "//third_party:tensorpipe.BUILD",
-    path = "third_party/tensorpipe",
-)
-
 http_archive(
     name = "mkl",
     build_file = "//third_party:mkl.BUILD",
