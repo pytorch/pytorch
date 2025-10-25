@@ -2,8 +2,9 @@ import itertools
 import logging
 import textwrap
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import sympy
 from sympy import Integer, Symbol

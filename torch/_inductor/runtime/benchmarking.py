@@ -1,11 +1,12 @@
 import functools
 import inspect
 import time
+from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable
-from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
+from typing import Any, Concatenate
+from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed

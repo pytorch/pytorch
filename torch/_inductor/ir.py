@@ -9,13 +9,12 @@ import operator
 import os
 import textwrap
 import traceback
-from collections.abc import Container, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Literal,
@@ -24,18 +23,11 @@ from typing import (
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
+    TypeAlias,
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    assert_never,
-    Never,
-    override,
-    ParamSpec,
-    Self,
-    TypeAlias,
-    TypeIs,
-)
+from typing_extensions import assert_never, Never, override, ParamSpec, Self, TypeIs
 from unittest.mock import patch
 
 import sympy

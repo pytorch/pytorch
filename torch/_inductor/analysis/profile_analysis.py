@@ -2,8 +2,9 @@ import json
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info

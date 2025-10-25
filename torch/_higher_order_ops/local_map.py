@@ -6,9 +6,9 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import functools
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, Sequence, TypeAlias
+from typing import Any, Optional, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree

@@ -2,7 +2,8 @@
 import contextlib
 import operator
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import sympy
 

@@ -26,8 +26,7 @@ import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
@@ -59,7 +58,7 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 
 if TYPE_CHECKING:
     from collections import Counter
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering

@@ -9,9 +9,9 @@ The module offers both context manager and manual acquisition patterns:
 - Unsafe acquisition: Manual acquisition that requires explicit release by the caller
 """
 
+from collections.abc import Generator
 from contextlib import contextmanager
 from threading import Lock
-from typing import Generator
 
 from filelock import FileLock, Timeout
 
