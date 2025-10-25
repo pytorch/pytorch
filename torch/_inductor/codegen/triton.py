@@ -1909,6 +1909,7 @@ class TritonKernelOverrides(TritonOverrides):
         name: str,
         reduction_type: str,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
@@ -3090,7 +3091,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
-    def partial_accumulate(self, name: str, reduction_type, val):
+    def partial_accumulate(
+        self, name: str, reduction_type, val, extra_meta: dict[str, Any]
+    ):
         self.saved_partial_accumulate.append(
             PartialAccumulate(name, reduction_type, val)
         )

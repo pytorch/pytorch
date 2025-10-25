@@ -1510,6 +1510,10 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
     ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+        """
+        Create a reduction node. May split the reduction to multiple layers to expose
+        more parallelism.
+        """
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
@@ -1636,7 +1640,7 @@ class Reduction(Loops):
             )
         elif split > 1:
             # triton doesn't support reduce to single element well, so break it up
-            return cls.create_multilayer(
+            out = cls.create_multilayer(
                 device,
                 dst_dtype,
                 src_dtype,
@@ -1649,7 +1653,47 @@ class Reduction(Loops):
                 input_node,
             )
 
-        return TensorBox.create(
+            # Find the reduction that get split
+            split_reduction = None
+            if config.triton.mix_order_reduction and isinstance(out, TensorBox):
+
+                def _find_split_reduction(
+                    cur_node: TensorBox,
+                ) -> Optional[ComputedBuffer]:
+                    read_names = cur_node.get_read_names()
+                    if len(read_names) != 1:
+                        return None
+
+                    bufname = next(iter(read_names))
+                    if bufname not in V.graph.name_to_buffer:
+                        return None
+                    buf = V.graph.name_to_buffer[bufname]
+                    if not isinstance(buf, ComputedBuffer):
+                        return None
+
+                    assert buf.data.get_reduction_type() is not None
+
+                    return buf
+
+                split_reduction = _find_split_reduction(out)
+
+            if split_reduction:
+                # If a reduction is split to more than 2 layers,
+                # say there are 3 layers,
+                # we always have the correct setting for layer1 (top layer).
+                # The setting on layer2 may be incorrect but it's fine
+                # since they are never get used.
+                # TODO: should we skip setting these fields for layer2
+                assert isinstance(split_reduction.data, Reduction), (
+                    f"{type(split_reduction.data)}"
+                )
+                split_reduction._split_size = split_reduction.data.reduction_ranges[0]
+                split_reduction._original_inner_fn = inner_fn
+                split_reduction._original_ranges = ranges
+                split_reduction._original_reduction_ranges = reduction_ranges
+            return out
+
+        out = TensorBox.create(
             Reduction(
                 device=device,
                 dtype=dst_dtype,
@@ -1661,6 +1705,7 @@ class Reduction(Loops):
                 reduction_hint=reduction_hint,
             )
         )
+        return out
 
     @staticmethod
     def default_accumulator(
@@ -4470,6 +4515,47 @@ class ComputedBuffer(OperationBuffer):
     data: Loops
     _force_realize: ClassVar[bool] = False
 
+    # fields for split reduction
+    _split_size: Optional[int] = None
+    _original_inner_fn: Optional[Callable[..., Any]] = None
+    _original_ranges: Optional[Sequence[_IntLike]] = None
+    _original_reduction_ranges: Optional[Sequence[_IntLike]] = None
+
+    @contextlib.contextmanager
+    def with_original_inner_fn(self) -> Iterator[None]:
+        assert self._split_size is not None
+        assert self._original_inner_fn is not None
+        assert self._original_ranges is not None
+        assert self._original_reduction_ranges is not None
+
+        assert isinstance(self.data, Reduction), f"{type(self.data)}"
+        old_data = self.data
+        old_layout = self.layout
+        try:
+            new_data = Reduction(
+                device=old_data.device,
+                dtype=old_data.dtype,
+                inner_fn=self._original_inner_fn,
+                ranges=self._original_ranges,
+                reduction_ranges=self._original_reduction_ranges,
+                reduction_type=old_data.reduction_type,
+                src_dtype=old_data.src_dtype,
+                reduction_hint=old_data.reduction_hint,
+            )
+            self.data = new_data
+            # this layout does not matter since we skip tl.store
+            # later
+            self.layout = FixedLayout(
+                old_data.device,
+                old_data.dtype,
+                self._original_ranges,
+            )
+            self.get_default_sizes_body.clear_cache(self)
+            yield
+        finally:
+            self.data = old_data
+            self.layout = old_layout
+
     @staticmethod
     @contextlib.contextmanager
     def force_realize() -> Iterator[None]:
@@ -4624,7 +4710,7 @@ class ComputedBuffer(OperationBuffer):
         tuple[list[Expr], list[Expr]],
     ]:
         args, var_ranges = dependencies.index_vars_squeeze(
-            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
+            self.get_pointwise_size(), self.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
             body = LoopBody(
@@ -4838,6 +4924,9 @@ class ComputedBuffer(OperationBuffer):
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
         return sizes, same_reorder(order), inverse_reorder(order)
+
+    def get_pointwise_size(self) -> Sequence[Expr]:
+        return self.data.get_pointwise_size()
 
     def get_reduction_size(self) -> Sequence[Expr]:
         return self.data.get_reduction_size()
