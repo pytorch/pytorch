@@ -311,7 +311,7 @@ __global__ void batch_norm_collect_statistics_kernel(
     stat_accscalar_t v_[UNRL];
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x*UNRL) {
       for (int u = 0; u < UNRL; u++)
-        v_[u] = input[batch][plane][min(x+u*blockDim.x, input.size(2)-1)];
+        v_[u] = input[batch][plane][std::min(x+u*blockDim.x, input.size(2)-1)];
       for (int u = 0; u < UNRL; u++) {
         if (x+u*blockDim.x < input.size(2)) {
           stat_accscalar_t d1 = v_[u] - avg;
