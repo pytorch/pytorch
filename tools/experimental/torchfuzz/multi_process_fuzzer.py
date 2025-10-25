@@ -78,6 +78,9 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"free\(\): invalid next size \(fast\)"
     ),  # TODO: figure out why sometimes heap metadata gets corrupted on program exit (checks actually pass successfully)
+    re.compile(
+        r'assert "int" in str\(indices\.get_dtype\(\)\)'
+    ),  # https://github.com/pytorch/pytorch/issues/166042
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
