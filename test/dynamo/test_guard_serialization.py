@@ -1467,7 +1467,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             torch._dynamo.optimize(
                 package=package,
                 guard_filter_fn=lambda gs: [
-                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH") for x in gs
+                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH", "CLASS_MATCH")
+                    for x in gs
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
