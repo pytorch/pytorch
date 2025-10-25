@@ -73,9 +73,7 @@ class PointwiseOperator(Operator):
     ) -> str:
         """Generate code for pointwise operation."""
         if len(input_names) == 2:
-            return (
-                f"{output_name} = {self.torch_op_name}({input_names[0]}, {input_names[1]})"
-            )
+            return f"{output_name} = {self.torch_op_name}({input_names[0]}, {input_names[1]})"
         else:
             # Chain operations using symbols for readability
             expr = f" {self.symbol} ".join(input_names)
