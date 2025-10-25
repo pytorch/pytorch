@@ -674,6 +674,21 @@ class StackOperator(LayoutOperatorBase):
         # Also, no dimension can be 0 since that would require stacking 0 tensors
         return len(output_spec.size) > 0 and 0 not in output_spec.size
 
+    def _get_stack_params(self, output_spec: TensorSpec) -> int:
+        """Get consistent stack dimension based on output spec.
+
+        This method uses the output_spec to deterministically choose stack parameters,
+        ensuring that fuzz_inputs_specs and codegen make the same choices.
+        """
+        # Use output_spec properties to seed random choices
+        # This ensures both methods make the same choices
+        seed_value = hash((output_spec.size, output_spec.dtype))
+        rng = random.Random(seed_value)
+
+        stack_dim = rng.randint(0, len(output_spec.size) - 1)
+
+        return stack_dim
+
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for stack operation."""
         if not isinstance(output_spec, TensorSpec):
@@ -684,7 +699,7 @@ class StackOperator(LayoutOperatorBase):
         if len(output_spec.size) == 0:
             raise ValueError("Cannot stack into a scalar tensor")
 
-        stack_dim = random.randint(0, len(output_spec.size) - 1)
+        stack_dim = self._get_stack_params(output_spec)
 
         # Number of tensors to stack equals the size of the new dimension
         num_tensors = output_spec.size[stack_dim]
@@ -713,8 +728,8 @@ class StackOperator(LayoutOperatorBase):
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("StackOperator can only produce TensorSpec outputs")
 
-        # Choose a random dimension to stack along
-        stack_dim = random.randint(0, len(output_spec.size) - 1)
+        # Use the same stack_dim that was used in fuzz_inputs_specs
+        stack_dim = self._get_stack_params(output_spec)
 
         # Generate the stack operation
         tensors_str = ", ".join(input_names)
