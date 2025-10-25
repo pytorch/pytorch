@@ -3,11 +3,11 @@ import itertools
 import logging
 import types
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import Any, cast, Mapping, Optional, Protocol, Sequence, TypeAlias
+from typing import Any, cast, Optional, Protocol, TypeAlias
 
 import torch
 import torch.distributed as dist

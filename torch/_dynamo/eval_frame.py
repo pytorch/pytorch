@@ -42,7 +42,7 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -112,7 +112,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
@@ -1707,6 +1707,39 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
         )
 
 
+def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -> None:
+    supported_types = [
+        torch.Tensor,
+        torch.SymInt,
+        torch.SymFloat,
+        torch.SymBool,
+        torch._C.ScriptObject,
+        _IntWrapper,
+    ] + list(common_constant_types)
+
+    def is_supported_type(val: Any) -> bool:
+        return isinstance(val, tuple(supported_types))
+
+    value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
+    # We only check that the outputs are not None. Inputs can be None.
+    for v in flat_values:
+        if not is_supported_type(v):
+            if error_type == UserErrorType.INVALID_INPUT and v is None:
+                continue
+
+            raise UserError(
+                error_type,
+                f"It looks like one of the {value_type}s with type `{type(v)}` "
+                "is not supported or pytree-flattenable. \n"
+                f"Exported graphs {value_type}s can only contain the "
+                f"following supported types: {supported_types}. \n"
+                "If you are using a custom class object, "
+                "please register a pytree_flatten/unflatten function "
+                "using `torch.utils._pytree.register_pytree_node` or "
+                "`torch.export.register_dataclass`.",
+            )
+
+
 def rewrite_signature(
     f_sig: inspect.Signature,
     graph: torch.fx.GraphModule,
@@ -1720,40 +1753,6 @@ def rewrite_signature(
     flat_args_dynamic_dims: list[set[int]],
 ) -> torch.fx.GraphModule:
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
-
-    def check_user_input_output(
-        flat_values: list[Any], error_type: UserErrorType
-    ) -> None:
-        supported_types = [
-            torch.Tensor,
-            torch.SymInt,
-            torch.SymFloat,
-            torch.SymBool,
-            torch._C.ScriptObject,
-            _IntWrapper,
-        ] + list(common_constant_types)
-
-        def is_supported_type(val: Any) -> bool:
-            return isinstance(val, tuple(supported_types))
-
-        value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
-        # We only check that the outputs are not None. Inputs can be None.
-        for v in flat_values:
-            if not is_supported_type(v):
-                if error_type == UserErrorType.INVALID_INPUT and v is None:
-                    continue
-
-                raise UserError(
-                    error_type,
-                    f"It looks like one of the {value_type}s with type `{type(v)}` "
-                    "is not supported or pytree-flattenable. \n"
-                    f"Exported graphs {value_type}s can only contain the "
-                    f"following supported types: {supported_types}. \n"
-                    "If you are using a custom class object, "
-                    "please register a pytree_flatten/unflatten function "
-                    "using `torch.utils._pytree.register_pytree_node` or "
-                    "`torch.export.register_dataclass`.",
-                )
 
     check_user_input_output(flat_args, UserErrorType.INVALID_INPUT)
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)

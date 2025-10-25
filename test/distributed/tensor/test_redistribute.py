@@ -544,6 +544,7 @@ class RedistributeTest(DTensorTestBase):
                         1,
                     )
                 else:
+                    # TODO: Integrate local tensor with CommDebugMode
                     if not self.is_local_tensor_enabled:
                         self.assertEqual(
                             comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],

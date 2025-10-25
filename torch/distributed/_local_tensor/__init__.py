@@ -48,9 +48,9 @@ import operator
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
-from typing import Any, Callable, Generator, Optional, Union
+from typing import Any, Optional, Union
 
 
 try:
@@ -168,24 +168,29 @@ def _set_rng_state(cpu_state: torch.Tensor, cuda_states: list[torch.Tensor]) -> 
     _set_cuda_rng_states(cuda_states)
 
 
-def _combine_singular_rank_results(rank_results: dict[int, Any]) -> Any:
+def _combine_int_rank_results(rank_results: dict[int, int]) -> int | torch.SymInt:
+    any_v = next(iter(rank_results.values()))
+
+    if all(v == any_v for v in rank_results.values()):
+        return any_v
+
+    return torch.SymInt(LocalIntNode(rank_results))
+
+
+def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
     any_v = next(iter(rank_results.values()))
 
     if isinstance(any_v, Tensor):
         return LocalTensor(rank_results)
 
-    all_same = True
-    for v in rank_results.values():
-        assert isinstance(v, type(any_v)), "Ranks results must be of the same type"
-        all_same = all_same and v == any_v
-
-    if all_same:
-        return v
-
     if isinstance(any_v, int):
-        return torch.SymInt(LocalIntNode(rank_results))
+        return _combine_int_rank_results(rank_results)
 
-    raise AssertionError(f"Cannot combine rank results {rank_results}")
+    assert all(v == any_v for v in rank_results.values()), (
+        "Non Tensor or int rank results must be equal for all ranks"
+    )
+
+    return any_v
 
 
 def _combine_rank_results(rank_results: dict[int, Any], default: Any | None) -> Any:
@@ -199,10 +204,10 @@ def _combine_rank_results(rank_results: dict[int, Any], default: Any | None) -> 
             rank_col_results = {
                 r: v[i] if i < len(v) else default for r, v in rank_results.items()
             }
-            ret_list.append(_combine_singular_rank_results(rank_col_results))
+            ret_list.append(_combine_any_rank_results(rank_col_results))
         return type(rank_value)(ret_list)
     else:
-        return _combine_singular_rank_results(rank_results)
+        return _combine_any_rank_results(rank_results)
 
 
 def _zero_sized_like(tensor: torch.Tensor, dim: int) -> torch.Tensor:
