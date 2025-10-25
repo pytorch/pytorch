@@ -195,9 +195,9 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-jammy-xpu-n-py3)
+  pytorch-linux-noble-xpu-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=13
     VISION=yes
     XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0

@@ -47,15 +47,15 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-xpu-n-py3_10-build:
-    name: linux-jammy-xpu-n-py3.10
+  linux-noble-xpu-n-py3_10-build:
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       sync-tag: linux-xpu-n-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      build-environment: linux-jammy-xpu-n-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-py3
+      build-environment: linux-noble-xpu-n-py3.10
+      docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
@@ -70,17 +70,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-xpu-n-py3_10-test:
-    name: linux-jammy-xpu-n-py3.10
+  linux-noble-xpu-n-py3_10-test:
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_xpu-test.yml
-    needs: linux-jammy-xpu-n-py3_10-build
+    needs: linux-noble-xpu-n-py3_10-build
     permissions:
       id-token: write
       contents: read
     with:
-      build-environment: linux-jammy-xpu-n-py3.10
-      docker-image: ${{ needs.linux-jammy-xpu-n-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-xpu-n-py3_10-build.outputs.test-matrix }}
+      build-environment: linux-noble-xpu-n-py3.10
+      docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
     secrets: inherit
 
   windows-xpu-n-1-build:
