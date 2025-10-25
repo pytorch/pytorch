@@ -652,12 +652,21 @@ Tensor cross_entropy_loss_symint(
     ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, std::move(ignore_index), label_smoothing);
   } else {
     auto class_dim = self.dim() == 1 ? 0 : 1;
+
+    bool is_half_precision = (self.scalar_type() == ScalarType::Half ||
+                              self.scalar_type() == ScalarType::BFloat16);
+    bool needs_fp32_compute = is_half_precision && reduction != Reduction::None && self.numel() > 10000;
+
+    auto compute_input = needs_fp32_compute ? self.to(ScalarType::Float) : self;
+
+    auto log_probs = at::log_softmax(compute_input, class_dim, compute_input.scalar_type());
+
     ret = at::nll_loss_nd_symint(
-        at::log_softmax(self, class_dim, self.scalar_type()),
-        target,
-        weight,
-        reduction,
-        std::move(ignore_index));
+      log_probs, target, weight, reduction, std::move(ignore_index));
+
+    if (needs_fp32_compute) {
+      ret = ret.to(self.scalar_type());
+    }
   }
   return ret;
 }
