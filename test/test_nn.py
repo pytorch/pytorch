@@ -12615,9 +12615,7 @@ if __name__ == '__main__':
     @dtypes(torch.float16, torch.bfloat16)
     def test_cross_entropy_loss_half_precision_no_overflow(self, device, dtype):
         # test for Issue: https://github.com/pytorch/pytorch/issues/85791
-        # regression test for fp16/bf16 overflow with large tensors
-        # when using fp16/bf16 with large tensors and reduction, accumulation can overflow
-        # causing inf/nan results.
+        # regression test for fp16/bf16 overflow during reduction accumulation.
         torch.manual_seed(42)
 
         batch_size = 16
@@ -12627,7 +12625,7 @@ if __name__ == '__main__':
         input_fp32 = torch.randn(batch_size, num_classes, seq_len, device=device, dtype=torch.float32)
         target = torch.randint(0, num_classes, (batch_size, seq_len), device=device)
 
-        # test both mean and sum reductions (these trigger the fp32 path for large tensors)
+        # test both mean and sum reductions (these use fp32 accumulation for half precision)
         for reduction in ['mean', 'sum']:
             loss_fn = nn.CrossEntropyLoss(reduction=reduction)
 
@@ -12639,10 +12637,12 @@ if __name__ == '__main__':
             loss_half = loss_fn(input_half, target)
 
             # the loss should not be inf or nan
-            self.assertFalse(torch.isnan(loss_half).any(),
-                           f"{dtype} loss is NaN with reduction={reduction}")
-            self.assertFalse(torch.isinf(loss_half).any(),
-                           f"{dtype} loss is inf with reduction={reduction}")
+            self.assertFalse(
+                torch.isnan(loss_half).any(),
+                f"{dtype} loss is NaN with reduction={reduction}")
+            self.assertFalse(
+                torch.isinf(loss_half).any(),
+                f"{dtype} loss is inf with reduction={reduction}")
 
             # the loss should be close to fp32 result (allowing for reduced precision)
             if dtype == torch.float16:
@@ -12650,9 +12650,10 @@ if __name__ == '__main__':
             else:  # bfloat16
                 rtol, atol = 1e-2, 1e-1
 
-            self.assertEqual(loss_half.to(torch.float32), loss_fp32,
-                           rtol=rtol, atol=atol, exact_dtype=False,
-                           msg=f"Loss mismatch for {dtype} with reduction={reduction}")
+            self.assertEqual(
+                loss_half.to(torch.float32), loss_fp32,
+                rtol=rtol, atol=atol, exact_dtype=False,
+                msg=f"Loss mismatch for {dtype} with reduction={reduction}")
 
         # test reduction='none'
         loss_fn_none = nn.CrossEntropyLoss(reduction='none')

@@ -655,14 +655,14 @@ Tensor cross_entropy_loss_symint(
 
     bool is_half_precision = (self.scalar_type() == ScalarType::Half ||
                               self.scalar_type() == ScalarType::BFloat16);
-    bool needs_fp32_compute = is_half_precision && reduction != Reduction::None && self.numel() > 10000;
+    bool needs_fp32_compute = is_half_precision && reduction != Reduction::None;
 
-    auto compute_input = needs_fp32_compute ? self.to(ScalarType::Float) : self;
-
-    auto log_probs = at::log_softmax(compute_input, class_dim, compute_input.scalar_type());
+    auto compute_dtype = needs_fp32_compute ? std::optional<ScalarType>(ScalarType::Float)
+                                             : std::optional<ScalarType>(self.scalar_type());
+    auto log_probs = at::log_softmax(self, class_dim, compute_dtype);
 
     ret = at::nll_loss_nd_symint(
-      log_probs, target, weight, reduction, std::move(ignore_index));
+        log_probs, target, weight, reduction, std::move(ignore_index));
 
     if (needs_fp32_compute) {
       ret = ret.to(self.scalar_type());
