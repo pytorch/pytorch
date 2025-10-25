@@ -1016,6 +1016,59 @@ class inner_f(torch.nn.Module):
         self.assertFalse("self._opoverload" in foo_node.meta.get("stack_trace", None))
         self.assertFalse("self._opoverload" in gm.print_readable(print_output=False))
 
+    def test_preserve_annotate_replay_view(self):
+        """Test stack trace and annotation are correct on nodes regenerated in functionalization"""
+
+        def _unpermute(out, input_shape, permuted_indices):
+            """
+            Unpermute operation from torchtitan MoE utils.
+            """
+            out_unpermuted = out.new_empty(input_shape)
+            out_unpermuted[permuted_indices, :] = out
+            out = out_unpermuted[:-1]
+            return out
+
+        class Module(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.input_shape = (5, 3)
+                self.permuted_indices = torch.tensor([2, 0, 3, 1])
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    routed_output = _unpermute(
+                        x, self.input_shape, self.permuted_indices
+                    )
+                return routed_output.cos()
+
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        model = Module()
+
+        graph_module = graph_capture(model, inputs, True)
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        slice_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.slice.Tensor
+        )
+        self.assertEqual(len(slice_nodes), 1)
+        slice_backward_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.slice_backward.default
+        )
+        self.assertEqual(len(slice_backward_nodes), 1)
+        slice_node = slice_nodes[0]
+        slice_backward_node = slice_backward_nodes[0]
+
+        self.assertEqual(slice_node.meta["seq_nr"], slice_backward_node.meta["seq_nr"])
+        self.assertTrue("out = out_unpermuted[:-1]" in slice_node.meta["stack_trace"])
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 'new_empty', {'pp_stage': 0})
+('call_function', 'index_put', {'pp_stage': 0})
+('call_function', 'slice_2', {'pp_stage': 0})
+('call_function', 'slice_backward', {'pp_stage': 0})
+('call_function', 'index', {'pp_stage': 0})""",
+        )
+
 
 if __name__ == "__main__":
     run_tests()
