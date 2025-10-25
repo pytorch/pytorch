@@ -49,6 +49,8 @@ from torch.testing._internal.common_utils import (
     decorateIf,
 )
 
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
+
 from torch._inductor.test_case import TestCase as InductorTestCase
 
 _IS_SM8X = False
@@ -619,8 +621,12 @@ class TestMatmulCuda(InductorTestCase):
             raise AssertionError(f"Invalid op: {op}")
 
         C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
-        C = f(A, B.transpose(-2, -1), offs=offs)
-        torch.testing.assert_close(C, C_ref)
+        if not IS_BIG_GPU and max_autotune:
+            with self.assertRaisesRegex(torch._inductor.exc.InductorError, "NoValidChoicesError"):
+                C = f(A, B.transpose(-2, -1), offs=offs)
+        else:
+            C = f(A, B.transpose(-2, -1), offs=offs)
+            self.assertEqual(C, C_ref)
 
 
     @onlyCUDA
