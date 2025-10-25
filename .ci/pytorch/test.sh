@@ -178,6 +178,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # use serial mode run unit tests for xpu
+  export PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL=1
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
