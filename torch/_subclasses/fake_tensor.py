@@ -35,7 +35,7 @@ from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedte
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
-from torch._prims_common import suggest_memory_format
+from torch._prims_common import check_contiguous_sizes_strides, suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
     assert_metadata_eq,
@@ -1072,21 +1072,46 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     Extract the TensorMetadata of a tensor.
     """
     memory_format = suggest_memory_format(t)
-    # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
-    # will go badly (guards will be messed up?)
-    if (
-        t._has_symbolic_sizes_strides
-        or is_sparse_any(t)
-        or not t.is_contiguous(memory_format=memory_format)
-    ):
+    shape = tuple(t.shape)
+    stride = tuple(t.stride()) if t.layout == torch.strided else ()
+
+    if is_sparse_any(t):
+        is_contiguous = False
+    else:
+        if t._has_symbolic_sizes_strides:
+            still_has_symbolic_sizes_strides = False
+
+            def simplify(x: IntLikeType) -> IntLikeType:
+                if not isinstance(x, SymInt):
+                    return x
+                value = x.node.expr
+                if value.is_number:
+                    return int(value)
+                nonlocal still_has_symbolic_sizes_strides
+                still_has_symbolic_sizes_strides = True
+                return x
+
+            shape = tuple(simplify(x) for x in shape)
+            stride = tuple(simplify(x) for x in stride)
+
+            if still_has_symbolic_sizes_strides:
+                # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
+                # will go badly (guards will be messed up?)
+                is_contiguous = False
+            else:
+                is_contiguous = check_contiguous_sizes_strides(shape, stride, True)
+        else:
+            is_contiguous = t.is_contiguous(memory_format=memory_format)
+
+    if not is_contiguous:
         memory_format = None  # type: ignore[assignment]
 
     storage_offset = t.storage_offset()
 
     return TensorMetadata(
         t.dtype,
-        t.shape,
-        t.stride() if t.layout == torch.strided else (),
+        shape,
+        stride,
         t.device,
         t.layout,
         memory_format,
