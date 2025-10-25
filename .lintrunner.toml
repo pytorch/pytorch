@@ -142,6 +142,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
+    'numpy==1.26.4 ; python_version >= "3.10" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
     'pyrefly==0.36.2',
