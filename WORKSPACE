@@ -106,12 +106,6 @@ local_repository(
 )
 
 new_local_repository(
-    name = "eigen",
-    build_file = "//third_party:eigen.BUILD",
-    path = "third_party/eigen",
-)
-
-new_local_repository(
     name = "cutlass",
     build_file = "//third_party:cutlass.BUILD",
     path = "third_party/cutlass",
@@ -168,7 +162,7 @@ new_local_repository(
 
 new_local_repository(
     name = "opentelemetry-cpp",
-    build_file = "//third_party::opentelemetry-cpp.BUILD",
+    build_file = "//third_party:opentelemetry-cpp.BUILD",
     path = "third_party/opentelemetry-cpp",
 )
 
@@ -233,6 +227,7 @@ load("@rules_python//python:repositories.bzl", "python_register_toolchains")
 python_register_toolchains(
     name = "python3_10",
     python_version = "3.10",
+    ignore_root_user_error = True,
 )
 
 load("@python3_10//:defs.bzl", "interpreter")

@@ -1,5 +1,10 @@
 build --cxxopt=--std=c++17
 build --copt=-I.
+
+# registry and module
+common --enable_workspace
+common --registry=https://bcr.bazel.build
+
 # Bazel does not support including its cc_library targets as system
 # headers. We work around this for generated code
 # (e.g. torch/headeronly/macros/cmake_macros.h) by making the generated directory a
@@ -17,7 +22,7 @@ build:no-tty --show_progress_rate_limit 10
 build --define=cuda=true
 # rules_cuda configuration
 build --@rules_cuda//cuda:enable_cuda
-build --@rules_cuda//cuda:cuda_targets=sm_52
+build --@rules_cuda//cuda:cuda_targets=sm_89
 build --@rules_cuda//cuda:compiler=nvcc
 build --repo_env=CUDA_PATH=/usr/local/cuda
 
