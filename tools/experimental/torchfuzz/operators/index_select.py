@@ -51,11 +51,14 @@ class IndexSelectOperator(Operator):
             input_stride = (output_size[1], 1)  # Contiguous
         else:
             # For higher dimensions, keep it simple
-            input_size = tuple(s + 2 if i == dim else s for i, s in enumerate(output_size))
+            input_size = tuple(
+                s + 2 if i == dim else s for i, s in enumerate(output_size)
+            )
             # Contiguous stride
             input_stride = tuple(
-                int(torch.tensor(input_size[i + 1:]).prod().item())
-                if i < len(input_size) - 1 else 1
+                int(torch.tensor(input_size[i + 1 :]).prod().item())
+                if i < len(input_size) - 1
+                else 1
                 for i in range(len(input_size))
             )
 
