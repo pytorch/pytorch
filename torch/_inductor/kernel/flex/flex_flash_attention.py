@@ -36,8 +36,7 @@ from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 
 
 flash_attention_cutedsl_template = CuteDSLTemplate(
-    name="flash_attention_cutedsl",
-    source=load_flex_template("flash_attention"),
+    name="flash_attention_cutedsl", source=load_flex_template("flash_attention")
 )
 
 

@@ -2790,5 +2790,35 @@
       "Explanation": "Object does not allow us to make a weakref to it",
       "Hints": []
     }
+  ],
+  "GB0277": [
+    {
+      "Gb_type": "Attempted to wrap sparse Tensor with VariableTracker",
+      "Context": "str(example_value)",
+      "Explanation": "torch.compile does not support sparse Tensors with VariableTracker",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0278": [
+    {
+      "Gb_type": "Unsupported dict type for fromkeys()",
+      "Context": "{user_cls.__name__}.fromkeys(): {args} {kwargs}",
+      "Explanation": "Failed to call {user_cls.__name__}.fromkeys() because {user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
+      "Hints": [
+        "Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict."
+      ]
+    }
+  ],
+  "GB0279": [
+    {
+      "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

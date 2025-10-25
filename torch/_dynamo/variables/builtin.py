@@ -32,8 +32,8 @@ import types
 import typing
 import unittest
 from collections import defaultdict, OrderedDict
-from collections.abc import Iterable, KeysView, Sequence
-from typing import Any, Callable, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable, KeysView, Sequence
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
@@ -77,6 +77,7 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_methods,
     str_methods,
     tensortype_to_dtype,
@@ -1041,7 +1042,7 @@ class BuiltinVariable(VariableTracker):
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
                         if not has_constant_handler:
-                            log.warning(
+                            log.warning(  # noqa: G200
                                 "incorrect arg count %s %s and no constant handler",
                                 self_handler,
                                 e,
@@ -1559,14 +1560,14 @@ class BuiltinVariable(VariableTracker):
 
                 try:
                     # Only supports certain function types
-                    user_func_variable = variables.UserFunctionVariable(bound_method)
-                except AssertionError as e:
+                    user_func_variable = VariableTracker.build(tx, bound_method)
+                except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
-                    log.warning("Failed to create UserFunctionVariable: %s", e)
+                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
                     return
 
                 # Inline the user function
-                return tx.inline_user_function_return(user_func_variable, [arg], {})
+                return user_func_variable.call_function(tx, [arg], {})
         elif isinstance(arg, (variables.ExceptionVariable,)):
             if len(arg.args) == 0:
                 value = f"{arg.exc_type}"
@@ -1847,7 +1848,7 @@ class BuiltinVariable(VariableTracker):
                 polyfills.builtins.iter_
             ).call_function(tx, [obj, *args], {})
 
-            if len(args):
+            if args:
                 # iter(obj, sentinel) returns an object that implements
                 # __iter__ and __next__ methods (UserDefinedObjectVariable)
                 # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
@@ -1930,20 +1931,47 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        if user_cls not in {dict, OrderedDict, defaultdict}:
+            unimplemented_v2(
+                gb_type="Unsupported dict type for fromkeys()",
+                context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
+                explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
+                f"{user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
+                hints=[
+                    f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
+                ],
+            )
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            assert user_cls is OrderedDict
-            assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
+            if (
+                user_cls is not OrderedDict
+                or len(args) != 1
+                or len(kwargs) != 1
+                or "value" not in kwargs
+            ):
+                raise_args_mismatch(
+                    tx,
+                    f"{user_cls.__name__}.fromkeys",
+                    "1 args and 1 kwargs (`value`)",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
-            msg = ConstantVariable.create(
-                "fromkeys expected at least 1 arguments, got 0"
+            raise_args_mismatch(
+                tx,
+                f"{user_cls.__name__}.fromkeys",
+                "at least 1 args",
+                f"{len(args)} args",
             )
-            raise_observed_exception(TypeError, tx, args=[msg])
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
-        assert len(args) == 2
+        if len(args) != 2:
+            raise_args_mismatch(
+                tx,
+                f"{user_cls.__name__}.fromkeys",
+                "2 args",
+                f"{len(args)} args",
+            )
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2039,7 +2067,13 @@ class BuiltinVariable(VariableTracker):
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
-            assert len(kwargs) == 1 and "strict" in kwargs
+            if not (len(kwargs) == 1 and "strict" in kwargs):
+                raise_args_mismatch(
+                    tx,
+                    "zip",
+                    "1 kwargs (`strict`)",
+                    f"{len(kwargs)} kwargs",
+                )
         strict = kwargs.pop("strict", False)
         args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(

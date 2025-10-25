@@ -364,7 +364,6 @@ def parse_args(
                 fn_name = None
             args = [
                 _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
-                # pyrefly: ignore  # no-matching-overload
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs
@@ -1005,7 +1004,7 @@ def _interpolate_size_to_scales(g: jit_utils.GraphContext, input, output_size, d
             if i < 2
             else float(output_size[-(dim - i)])
             / float(input.type().sizes()[-(dim - i)])
-            for i in range(0, dim)
+            for i in range(dim)
         ]
         scales = g.op(
             "Constant", value_t=torch.tensor(scales_constant, dtype=torch.float32)

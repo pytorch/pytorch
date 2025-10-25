@@ -24,9 +24,9 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, Callable, NewType, Optional, TYPE_CHECKING
+from typing import Any, NewType, Optional, TYPE_CHECKING
 from typing_extensions import Never
 
 import torch
@@ -1122,9 +1122,9 @@ class DiskDynamoCache(DiskDynamoStore):
                 result = super().load_cache_entry(key)
                 counters["dynamo_cache"]["dynamo_cache_hit"] += 1
                 return result
-            except Exception as e:
+            except Exception:
                 counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning("Failed to load package from path %s: %s", path, str(e))
+                logger.warning("Failed to load package from path %s", exc_info=True)
                 return None
         logger.info("No package found for %s", key)
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1

@@ -23,6 +23,7 @@ import operator
 import textwrap
 import traceback
 import types
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import sympy
@@ -61,6 +62,7 @@ from ..utils import (
     object_has_getattribute,
     product,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_example_value,
     tensortype_to_dtype,
 )
@@ -1109,7 +1111,19 @@ class TensorVariable(VariableTracker):
             #   value.requires_grad is True => self.has_grad_fn becomes True
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
-            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+
+            # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
+            # that happen in code like t[idx] += 1 when idx is unbacked. Namely the selection
+            # during 'setitem'.
+            # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
+            # storage offset in select_meta, but the output of the operation 'setitem' does not depend
+            # on the selection.
+            with (
+                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                if tx.fake_mode and tx.fake_mode.shape_env
+                else nullcontext(),
+            ):
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
             vt = value
@@ -1748,8 +1762,13 @@ class UntypedStorageVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "size":
-            assert not args
-            assert not kwargs
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
@@ -1768,7 +1787,8 @@ class UntypedStorageVariable(VariableTracker):
                     ),
                 )
         if name == "resize_" and len(args) == 1:
-            assert not kwargs
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.inductor.resize_storage_bytes_,
