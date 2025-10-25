@@ -4342,6 +4342,31 @@ class CommonTemplate:
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
         self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
 
+    def test_slice_copy(self):
+        class Model(nn.Module):
+            def __init__(self, start=449, step=(2**63 - 1)):
+                super().__init__()
+                self.start = start
+                self.step = step
+
+            def forward(self, x: torch.Tensor):
+                sliced = torch.slice_copy(
+                    x, dim=0, start=self.start, end=None, step=self.step
+                )
+                return torch.reciprocal(sliced)
+
+        with config.patch({"implicit_fallbacks": True}):
+            # bad case
+            self.common(
+                Model(),
+                (torch.randn(875),),
+            )
+            # normal case
+            self.common(
+                Model(step=10),
+                (torch.randn(875),),
+            )
+
     def test_slice1(self):
         def fn(a):
             return (
