@@ -23,7 +23,7 @@ enum class EmbeddingBagMode {
   return !(op1 == op2);
 }
 
-void check_arguments(
+TORCH_API void check_arguments(
     const Tensor& weight,
     const Tensor& indices,
     const Tensor& offsets,
@@ -31,7 +31,7 @@ void check_arguments(
     const std::optional<Tensor>& per_sample_weights,
     bool include_last_offset);
 
-void make_bag_size_out(
+TORCH_API void make_bag_size_out(
     Tensor& bag_size_out,
     const Tensor& offsets,
     const Tensor& indices,
@@ -39,7 +39,7 @@ void make_bag_size_out(
     const bool include_last_offset,
     const bool requires_grad);
 
-void make_max_indices_out(
+TORCH_API void make_max_indices_out(
     Tensor& max_indices_out,
     const Tensor& weight,
     const Tensor& indices,
@@ -48,7 +48,7 @@ void make_max_indices_out(
     const int64_t mode,
     bool include_last_offset);
 
-void make_offset2bag_out(
+TORCH_API void make_offset2bag_out(
     Tensor& offset2bag,
     Tensor& output,
     const Tensor& weight,
