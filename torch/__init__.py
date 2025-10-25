@@ -1412,7 +1412,6 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
@@ -1470,11 +1469,6 @@ def use_deterministic_algorithms(
 
         >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
-
-        # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(1)
-        ...
-        RuntimeError: kthvalue CUDA does not have a deterministic implementation...
 
         # Backward mode nondeterministic error
         >>> torch.nn.AvgPool3d(1)(torch.randn(3, 4, 5, 6, requires_grad=True).cuda()).sum().backward()

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -11,6 +11,10 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map
+
+
+if TYPE_CHECKING:
+    from torch.distributed._tools.mod_tracker import ModTracker
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
@@ -86,6 +90,9 @@ class _DebugCall:
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
 
+    def __repr__(self) -> str:
+        return self.render([])
+
 
 class _OpCall(_DebugCall):
     """Normal operator call"""
@@ -118,9 +125,6 @@ class _OpCall(_DebugCall):
     def __iter__(self):
         # for BC; tuple(self) returns (op, args, kwargs, call_depth)
         yield from [self.op, self.args, self.kwargs, self.call_depth]
-
-    def __repr__(self) -> str:
-        return self.render([])
 
 
 class _RedistributeCall(_DebugCall):
@@ -155,8 +159,24 @@ class _RedistributeCall(_DebugCall):
         yield {}
         yield self.call_depth
 
-    def __repr__(self) -> str:
-        return self.render([])
+
+class _NNModuleCall(_DebugCall):
+    """Designates entering an nn.Module's forward method"""
+
+    def __init__(self, module_name: str, call_depth: int):
+        super().__init__(call_depth)
+        self.module_name = module_name
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[nn.Mod] {self.module_name}"
+
+    def __iter__(self):
+        yield from [
+            f"[nn.Mod] {self.module_name}",
+            (),
+            {},
+            self.call_depth,
+        ]
 
 
 class DebugMode(TorchDispatchMode):
@@ -167,6 +187,7 @@ class DebugMode(TorchDispatchMode):
         record_faketensor=False,
         record_realtensor=True,
         record_tensor_attributes=None,
+        record_nn_module=False,
     ):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -176,6 +197,12 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
         self.record_tensor_attributes = record_tensor_attributes or []
+
+        self.record_nn_module = record_nn_module
+
+        self.module_tracker: Optional[ModTracker] = None
+        if self.record_nn_module:
+            self.module_tracker_setup()
 
         self.operators = []
         self.call_depth = 0
@@ -231,13 +258,34 @@ class DebugMode(TorchDispatchMode):
             torch._C._push_on_torch_function_stack(self)
 
         super().__enter__()
+        if self.record_nn_module:
+            self.module_tracker.__enter__()  # type: ignore[attribute, union-attr]
         return self
 
     # pyrefly: ignore  # bad-override
     def __exit__(self, *args):
         super().__exit__(*args)
+        if self.record_nn_module:
+            self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
+
+    def module_tracker_setup(self):
+        from torch.distributed._tools.mod_tracker import ModTracker
+
+        self.module_tracker = ModTracker()
+
+        # module pre-fw hook: record module call
+        def pre_fw_hook(module, input):
+            fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
+            self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
+            self.call_depth += 1
+
+        # module post-fw hook: decrement call depth
+        def post_fw_hook(module, input, output):
+            self.call_depth -= 1
+
+        self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
 
     @contextlib.contextmanager
     def record_redistribute_calls(
