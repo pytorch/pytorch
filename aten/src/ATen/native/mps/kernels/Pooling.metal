@@ -607,10 +607,11 @@ void avg_pool_backward_3d_input_iter(
       padding,
       count_include_pad);
 
-  auto divisor = has_divisor_override
+  opmath_t<T> divisor = has_divisor_override
       ? divisor_override
       : (bounds0.count) * (bounds1.count) * (bounds2.count);
-  auto grad_val = *grad_output / static_cast<T>(divisor);
+  auto grad_val =
+      static_cast<T>(static_cast<opmath_t<T>>(*grad_output) / divisor);
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
     auto offset0 = grad_input_strides[0] * i0;
