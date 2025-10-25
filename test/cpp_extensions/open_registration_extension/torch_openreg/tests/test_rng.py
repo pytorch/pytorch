@@ -14,9 +14,34 @@ class TestRNG(TestCase):
         state = torch.openreg.get_rng_state(0)
         torch.openreg.set_rng_state(state, 0)
 
+        states = torch.openreg.get_rng_state_all()
+        torch.openreg.set_rng_state_all(states)
+
     def test_manual_seed(self):
-        torch.openreg.manual_seed_all(2024)
-        self.assertEqual(torch.openreg.initial_seed(), 2024)
+        torch.openreg.manual_seed_all(42)
+        self.assertEqual(torch.openreg.initial_seed(), 42)
+
+    def test_seed(self):
+        torch.openreg.seed_all()
+        seed1 = torch.openreg.initial_seed()
+        torch.openreg.seed_all()
+        seed2 = torch.openreg.initial_seed()
+        self.assertNotEqual(seed1, seed2)
+
+    # LITERALINCLUDE START: OPENREG GENERATOR TEST EXAMPLES
+    def test_create_generator_and_seed(self):
+        generator = torch.Generator(device="openreg:0")
+        generator.manual_seed(42)
+        self.assertEqual(generator.initial_seed(), 42)
+
+    def test_offset_unsupported(self):
+        # openreg is a CPU-simulated backend and does not support offsets
+        with self.assertRaisesRegex(RuntimeError, "does not support set_offset"):
+            torch.openreg.set_offset(123)
+        with self.assertRaisesRegex(RuntimeError, "does not support get_offset"):
+            torch.openreg.get_offset()
+
+    # LITERALINCLUDE END: OPENREG GENERATOR TEST EXAMPLES
 
 
 if __name__ == "__main__":
