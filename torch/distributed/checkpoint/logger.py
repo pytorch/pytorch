@@ -37,7 +37,6 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> dict[str, Any]:
 
     checkpoint_id = kwargs.get("checkpoint_id")
     if not checkpoint_id and (serializer := storage_writer or storage_reader):
-        # pyrefly: ignore  # unbound-name
         checkpoint_id = getattr(serializer, "checkpoint_id", None)
 
     msg_dict["checkpoint_id"] = (

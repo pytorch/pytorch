@@ -144,7 +144,6 @@ def benchmark_all_kernels(
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
-                    # pyrefly: ignore  # bad-argument-type
                     ms,
                     launcher.n_regs,
                     launcher.n_spills,

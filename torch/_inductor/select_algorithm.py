@@ -3681,8 +3681,8 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
             node.get_device(),
             node.get_dtype(),
-            # pyrefly: ignore  # missing-attribute
             V.graph.sizevars.atomically_apply_size_hint(
+                # pyrefly: ignore  # missing-attribute
                 node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
