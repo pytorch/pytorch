@@ -6618,7 +6618,7 @@ class TestLearnableBiases(InductorTestCase):
         )
         # Error in backwards
         with self.assertRaisesRegex(
-            torch._inductor.exc.LoweringException,
+            torch._inductor.exc.InductorError,
             "Using multiple indexing operations on the same tensor that requires gradients",
         ):
             self._check_outputs_and_grads(
