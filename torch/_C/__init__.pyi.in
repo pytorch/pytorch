@@ -1323,6 +1323,7 @@ def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _torchDeviceToDLDevice(
     device: torch.device,
 ) -> tuple[_int, _int]: ...  # THPModule_torchDeviceToDLDevice
+def _dlpack_exchange_api() -> _int: ...  # THPModule_DLPackExchangeAPI
 def _get_cpp_backtrace(
     frames_to_skip: _int,
     maximum_number_of_frames: _int,
