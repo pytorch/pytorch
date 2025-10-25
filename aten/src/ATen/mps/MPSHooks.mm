@@ -6,6 +6,7 @@
 #include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/Logging.h>
 
 namespace at::mps {
@@ -82,6 +83,22 @@ void* MPSHooks::getDispatchQueue() const {
 
 void MPSHooks::emptyCache() const {
   at::mps::getIMPSAllocator()->emptyCache();
+}
+
+void MPSHooks::emptyGraphCache() const {
+  @autoreleasepool {
+    // Clear both graph and kernel caches
+    at::native::mps::MPSGraphCache::getInstance()->clearCache();
+    at::native::mps::MPSKernelCache::getInstance()->clearCache();
+  }
+}
+
+size_t MPSHooks::getGraphCacheSize() const {
+  return at::native::mps::MPSGraphCache::getInstance()->size();
+}
+
+size_t MPSHooks::getKernelCacheSize() const {
+  return at::native::mps::MPSKernelCache::getInstance()->size();
 }
 
 size_t MPSHooks::getCurrentAllocatedMemory() const {

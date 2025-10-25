@@ -34,6 +34,9 @@ struct MPSHooks : public at::MPSHooksInterface {
   // MPSAllocator interface
   Allocator* getMPSDeviceAllocator() const override;
   void emptyCache() const override;
+  void emptyGraphCache() const override;
+  size_t getGraphCacheSize() const override;
+  size_t getKernelCacheSize() const override;
   size_t getCurrentAllocatedMemory() const override;
   size_t getDriverAllocatedMemory() const override;
   size_t getRecommendedMaxMemory() const override;

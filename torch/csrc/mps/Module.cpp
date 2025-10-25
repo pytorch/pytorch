@@ -77,6 +77,33 @@ static PyObject* MPSModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_emptyGraphCache(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::detail::getMPSHooks().emptyGraphCache();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_graphCacheSize(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(
+      at::detail::getMPSHooks().getGraphCacheSize());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_kernelCacheSize(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(
+      at::detail::getMPSHooks().getKernelCacheSize());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* MPSModule_setMemoryFraction(
     PyObject* _unused,
     PyObject* args) {
@@ -228,6 +255,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_mps_emptyCache", MPSModule_emptyCache, METH_NOARGS, nullptr},
+    {"_mps_emptyGraphCache", MPSModule_emptyGraphCache, METH_NOARGS, nullptr},
+    {"_mps_graphCacheSize", MPSModule_graphCacheSize, METH_NOARGS, nullptr},
+    {"_mps_kernelCacheSize", MPSModule_kernelCacheSize, METH_NOARGS, nullptr},
     {"_mps_setMemoryFraction", MPSModule_setMemoryFraction, METH_O, nullptr},
     {"_mps_currentAllocatedMemory",
      MPSModule_currentAllocatedMemory,

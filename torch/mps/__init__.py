@@ -81,9 +81,103 @@ def seed() -> None:
 
 def empty_cache() -> None:
     r"""Releases all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other GPU applications.
+    allocator so that those can be used in other GPU applications and clears
+    the MPS graph cache.
+
+    .. note::
+       This function clears the buffer allocator cache. For graph cache clearing,
+       use :func:`empty_graph_cache` or call this after :func:`empty_graph_cache`.
+
+    Example::
+        >>> # Clear buffer cache
+        >>> torch.mps.empty_cache()
+        >>>
+        >>> # Clear both buffer and graph caches
+        >>> torch.mps.empty_graph_cache()
+        >>> torch.mps.empty_cache()
     """
     torch._C._mps_emptyCache()
+
+
+def empty_graph_cache() -> None:
+    r"""Clears the cached MPSGraph and MPSKernel objects.
+
+    This function clears the internal graph and kernel caches used by the MPS backend.
+    These caches can accumulate during training, especially when using varying tensor
+    shapes, leading to memory leaks between epochs.
+
+    .. warning::
+       This is an advanced function. Clearing the graph cache will cause graph
+       recompilation on the next operation, which may impact performance temporarily.
+
+    .. note::
+       This function only clears the graph/kernel caches, not the buffer allocator
+       cache. To clear both, call this function followed by :func:`empty_cache`.
+
+    Example::
+        >>> # Clear only graph caches (advanced usage)
+        >>> torch.mps.synchronize()
+        >>> torch.mps.empty_graph_cache()
+        >>>
+        >>> # Clear both graph and buffer caches (recommended)
+        >>> torch.mps.empty_graph_cache()
+        >>> torch.mps.empty_cache()
+    """
+    if hasattr(torch._C, '_mps_emptyGraphCache'):
+        torch._C._mps_emptyGraphCache()
+    else:
+        # Fallback for older PyTorch versions
+        import warnings
+        warnings.warn(
+            "empty_graph_cache() is not available in this PyTorch build. "
+            "Falling back to empty_cache().",
+            RuntimeWarning
+        )
+        empty_cache()
+
+
+def graph_cache_size() -> int:
+    r"""Returns the number of MPSGraph objects currently cached.
+
+    This function returns the size of the MPSGraph cache, which stores compiled
+    graphs for reuse. The cache can grow during training as new operation patterns
+    are encountered.
+
+    Returns:
+        int: Number of cached MPSGraph objects
+
+    Example::
+        >>> # Check cache size before and after operations
+        >>> print(f"Graph cache size: {torch.mps.graph_cache_size()}")
+        >>> x = torch.randn(100, 100, device='mps')
+        >>> y = x @ x
+        >>> print(f"Graph cache size: {torch.mps.graph_cache_size()}")
+    """
+    if hasattr(torch._C, '_mps_graphCacheSize'):
+        return torch._C._mps_graphCacheSize()
+    return 0
+
+
+def kernel_cache_size() -> int:
+    r"""Returns the number of MPSKernel objects currently cached.
+
+    This function returns the size of the MPSKernel cache, which stores compiled
+    Metal kernels for reuse. The cache can grow during training as new operation
+    patterns are encountered.
+
+    Returns:
+        int: Number of cached MPSKernel objects
+
+    Example::
+        >>> # Check cache size before and after operations
+        >>> print(f"Kernel cache size: {torch.mps.kernel_cache_size()}")
+        >>> x = torch.randn(100, 100, device='mps')
+        >>> y = torch.relu(x)
+        >>> print(f"Kernel cache size: {torch.mps.kernel_cache_size()}")
+    """
+    if hasattr(torch._C, '_mps_kernelCacheSize'):
+        return torch._C._mps_kernelCacheSize()
+    return 0
 
 
 def set_per_process_memory_fraction(fraction) -> None:
@@ -184,6 +278,9 @@ __all__ = [
     "set_rng_state",
     "synchronize",
     "empty_cache",
+    "empty_graph_cache",
+    "graph_cache_size",
+    "kernel_cache_size",
     "set_per_process_memory_fraction",
     "current_allocated_memory",
     "driver_allocated_memory",
