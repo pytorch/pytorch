@@ -242,3 +242,130 @@ to use the NVSHMEM functions.
 ```{eval-rst}
 .. autofunction:: get_backend
 ```
+
+## Op Reference
+:::{note}
+The following ops are hosted in the `torch.ops.symm_mem` namespace. You can call
+them directly via `torch.ops.symm_mem.<op_name>`.
+:::
+
+```{eval-rst}
+.. currentmodule:: torch.ops.symm_mem
+```
+
+```{eval-rst}
+.. py:function:: multimem_all_reduce_(input: Tensor, reduce_op: str, group_name: str) -> Tensor
+
+    Performs a multimem all-reduce operation on the input tensor. This operation
+    requires hardware support for multimem operations. On NVIDIA GPUs, NVLink
+    SHARP is required.
+
+    :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
+    :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+    :param str group_name: Name of the group to perform all-reduce on.
+
+
+.. py:function:: multimem_all_gather_out(input: Tensor, group_name: str, out: Tensor) -> Tensor
+
+    Performs a multimem all-gather operation on the input tensor. This operation requires hardware support for multimem operations. On NVIDIA GPUs, NVLink SHARP is required.
+
+    :param Tensor input: Input tensor to perform all-gather on.
+    :param str group_name: Name of the group to perform all-gather on.
+    :param Tensor out: Output tensor to store the result of the all-gather operation. Must be symmetric.
+
+
+.. py:function:: one_shot_all_reduce(input: Tensor, reduce_op: str, group_name: str) -> Tensor
+
+    Performs a one-shot all-reduce operation on the input tensor.
+
+    :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
+    :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+    :param str group_name: Name of the group to perform all-reduce on.
+
+
+.. py:function:: one_shot_all_reduce_out(input: Tensor, reduce_op: str, group_name: str, out: Tensor) -> Tensor
+
+    Performs a one-shot all-reduce operation based on the input tensor and writes the result to the output tensor.
+
+    :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
+    :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+    :param str group_name: Name of the group to perform all-reduce on.
+    :param Tensor out: Output tensor to store the result of the all-reduce operation. Can be a regular tensor.
+
+
+.. py:function:: two_shot_all_reduce_(input: Tensor, reduce_op: str, group_name: str) -> Tensor
+
+    Performs a two-shot all-reduce operation on the input tensor.
+
+    :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
+    :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+    :param str group_name: Name of the group to perform all-reduce on.
+
+
+.. py:function:: all_to_all_vdev(input: Tensor, out: Tensor, in_splits: Tensor, out_splits_offsets: Tensor, group_name: str) -> None
+
+    Performs an all-to-all-v operation using NVSHMEM, with split information provided on device.
+
+    :param Tensor input: Input tensor to perform all-to-all on. Must be symmetric.
+    :param Tensor out: Output tensor to store the result of the all-to-all operation. Must be symmetric.
+    :param Tensor in_splits: Tensor containing splits of data to send to each peer. Must be symmetric. Must be of size (group_size,). The splits are in the unit of elements in the 1st dimension.
+    :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size). The rows are (in order):
+    output splits and output offsets.
+    :param str group_name: Name of the group to perform all-to-all on.
+
+
+.. py:function:: all_to_all_vdev_2d(input: Tensor, out: Tensor, in_splits: Tensor, out_splits_offsets: Tensor, group_name: str, [major_align: int = None]) -> None
+
+    Perform a 2D all-to-all-v operation using NVSHMEM, with split information provided on device. In Mixture of Experts models, this operation can be used to dispatch tokens.
+
+    :param Tensor input: Input tensor to perform all-to-all on. Must be symmetric.
+    :param Tensor out: Output tensor to store the result of the all-to-all operation. Must be symmetric.
+    :param Tensor in_splits: Tensor containing the splits of data to send to each expert. Must be symmetric. Must be of size (group_size * ne,), where ne is the number of experts per rank. The splits are in the unit of elements in the 1st dimension.
+    :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size * ne). The rows are (in order): output splits and output offsets.
+    :param str group_name: Name of the group to perform all-to-all on.
+    :param int major_align: Optional alignment for the major dimension of the output chunk for each expert. If not provided, the alignment is assumed to be 1. Any alignment adjustment will be reflected in the output offsets.
+
+    A 2D AllToAllv shuffle is illustrated below:
+    (world_size = 2, ne = 2, total number of experts = 4)::
+
+      Source: |       Rank 0      |       Rank 1      |
+              | c0 | c1 | c2 | c3 | d0 | d1 | d2 | d3 |
+
+      Dest  : |       Rank 0      |       Rank 1      |
+              | c0 | d0 | c1 | d1 | c2 | d2 | c3 | d3 |
+
+    where each `c_i` / `d_i` are slices of the `input` tensor, targeting expert
+    `i`, with length indicated by input splits.  That is, the 2D AllToAllv
+    shuffle achieves a transpose from rank-major order at input to expert-major
+    order at output.
+
+    If `major_align` is not 1, the output offsets of c1, c2, c3 will be
+    up-aligned to this value. For example, if c0 has length 5 and d0 has
+    length 7 (making a total of 12), and if the `major_align` is set to 16,
+    the output offset of c1 will be 16. Similar for c2 and c3. This value has
+    no effect on the offset of the minor dimension, i.e.  d0, d1, d2 and d3.
+    Note: since cutlass does not support empty bins, we set the aligned length
+    to `major_align` if it is 0. See
+    https://github.com/pytorch/pytorch/issues/152668.
+
+
+.. py:function:: all_to_all_vdev_2d_offset(Tensor input, Tensor out, Tensor in_splits_offsets, Tensor out_splits_offsets, str group_name) -> None
+
+    Perform a 2D AllToAllv shuffle operation, with input split and offset
+    information provided on device. The input offsets are not required to be
+    exact prefix sum of the input splits, i.e. paddings are allowed between the
+    split chunks. The paddings, however, will not be transferred to peer
+    ranks.
+
+    In Mixture of Experts models, this operation can be used to combine tokens
+    processed by experts on parallel ranks. This operation can be viewed as an
+    "reverse" operation to the `all_to_all_vdev_2d` operation (which shuffles
+    tokens to experts).
+
+    :param Tensor input: Input tensor to perform all-to-all on. Must be symmetric.
+    :param Tensor out: Output tensor to store the result of the all-to-all operation. Must be symmetric.
+    :param Tensor in_splits_offsets: Tensor containing the splits and offsets of data to send to each expert. Must be symmetric. Must be of size (2, group_size * ne), where `ne` is the number of experts. The rows are (in order): input splits and input offsets. The splits are in the unit of elements in the 1st dimension.
+    :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size * ne). The rows are (in order): output splits and output offsets.
+    :param str group_name: Name of the group to perform all-to-all on.
+
+```
