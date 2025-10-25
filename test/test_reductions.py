@@ -1888,6 +1888,22 @@ class TestReductions(TestCase):
                           [3, 3]], device=device, dtype=dtype)
         verify_against_numpy(t)
 
+    # Regression for transposed view after base mutation affecting argmin/argmax indices
+    # Covers https://github.com/pytorch/pytorch/issues/163929
+    @onlyNativeDeviceTypes
+    def test_argmin_argmax_transposed_view_after_mutation(self, device):
+        x = torch.randn(16, 8, device=device)
+        y = x.transpose(0, 1)
+        # mutate base; y shares storage so values change
+        x.add_(1)
+        # Validate indices are consistent along both dims
+        for dim in (0, 1):
+            yi = y.argmax(dim)
+            # torch.max(...)[1] should match argmax indices along the same dim
+            self.assertEqual(yi, torch.max(y, dim=dim)[1])
+            yi = y.argmin(dim)
+            self.assertEqual(yi, torch.min(y, dim=dim)[1])
+
         # Case: Sample from issue: https://github.com/pytorch/pytorch/issues/41998
         t = torch.tensor([[1, 5],
                           [2, 10],
