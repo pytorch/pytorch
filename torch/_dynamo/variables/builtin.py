@@ -2663,7 +2663,10 @@ class BuiltinVariable(VariableTracker):
             (variables.UserDefinedClassVariable, variables.UserDefinedObjectVariable),
         ):
             if args[0].source:
-                install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
+                if isinstance(args[0], variables.UserDefinedClassVariable):
+                    install_guard(args[0].source.make_guard(GuardBuilder.CLASS_MATCH))
+                else:
+                    install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
             constant_result = id(args[0].value)
             return variables.ConstantVariable.create(constant_result)
         elif len(args) == 1 and isinstance(args[0], TensorVariable):
