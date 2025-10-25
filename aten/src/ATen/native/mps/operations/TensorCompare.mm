@@ -155,35 +155,29 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
   Tensor min_opt_tensor;
   Tensor max_opt_tensor;
 
-  if (has_min) {
-    IntArrayRef min_shape = min_opt->sizes();
+  auto reshape_clamp_tensor = [&](const OptionalTensorRef clamp_tensor_ref,
+                                  int64_t num_clamp_dims,
+                                  std::vector<int64_t>& new_shape_storage) -> Tensor {
+    IntArrayRef clamp_shape = clamp_tensor_ref->sizes();
     bool requires_view = false;
 
-    if (num_min_dims > num_input_dims) {
-      min_shape = min_shape.slice(num_min_dims - num_input_dims);
+    if (num_clamp_dims > num_input_dims) {
+      clamp_shape = clamp_shape.slice(num_clamp_dims - num_input_dims);
       requires_view = true;
-    } else if (num_min_dims < num_input_dims) {
-      fill_new_shape(num_input_dims, num_min_dims, new_min_arr.data(), min_shape);
-      min_shape = IntArrayRef(new_min_arr);
+    } else if (num_clamp_dims < num_input_dims) {
+      fill_new_shape(num_input_dims, num_clamp_dims, new_shape_storage.data(), clamp_shape);
+      clamp_shape = IntArrayRef(new_shape_storage);
       requires_view = true;
     }
 
-    min_opt_tensor = requires_view ? (*min_opt).view(min_shape) : *min_opt;
+    return requires_view ? (*clamp_tensor_ref).view(clamp_shape) : *clamp_tensor_ref;
+  };
+
+  if (has_min) {
+    min_opt_tensor = reshape_clamp_tensor(min_opt, num_min_dims, new_min_arr);
   }
   if (has_max) {
-    IntArrayRef max_shape = max_opt->sizes();
-    bool requires_view = false;
-
-    if (num_max_dims > num_input_dims) {
-      max_shape = max_shape.slice(num_max_dims - num_input_dims);
-      requires_view = true;
-    } else if (num_max_dims < num_input_dims) {
-      fill_new_shape(num_input_dims, num_max_dims, new_max_arr.data(), max_shape);
-      max_shape = IntArrayRef(new_max_arr);
-      requires_view = true;
-    }
-
-    max_opt_tensor = requires_view ? (*max_opt).view(max_shape) : *max_opt;
+    max_opt_tensor = reshape_clamp_tensor(max_opt, num_max_dims, new_max_arr);
   }
 
   @autoreleasepool {
