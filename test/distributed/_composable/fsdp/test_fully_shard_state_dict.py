@@ -176,7 +176,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
     def _test_dp_state_dict_cpu_offload(
         self, offload_policy: CPUOffloadPolicy, cpu_state_dict: bool
     ):
-        mlp_dim = 4
+        mlp_dim = self.world_size
         torch.manual_seed(42)
         with torch.device("meta"):
             model = nn.Sequential(
