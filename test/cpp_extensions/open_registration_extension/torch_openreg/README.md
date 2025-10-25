@@ -149,8 +149,8 @@ When `import torch`, installed accelerators (such as `torch_openreg`) will be au
 ### Installation
 
 ```python
-pip3 install --no-build-isolation -e . # for develop
-pip3 install --no-build-isolation . # for install
+python -m pip install --no-build-isolation -e . # for develop
+python -m pip install --no-build-isolation . # for install
 ```
 
 ### Usage Example
