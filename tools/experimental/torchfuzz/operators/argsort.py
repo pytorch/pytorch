@@ -30,7 +30,7 @@ class ArgsortOperator(Operator):
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input spec for argsort operation.
-        
+
         torch.argsort(input, dim=-1, descending=False) returns a tensor with:
         - Same shape as input
         - dtype is torch.long (indices)
@@ -40,10 +40,10 @@ class ArgsortOperator(Operator):
 
         # Input tensor has the same shape as output but can have any numeric dtype
         input_size = output_spec.size
-        
+
         # Generate a valid stride for the input
         input_stride = fuzz_valid_stride(input_size)
-        
+
         # Choose a random float dtype for input (argsort works on numeric types)
         # Using float32 as a reasonable default
         input_dtype = torch.float32
