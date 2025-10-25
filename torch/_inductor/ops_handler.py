@@ -293,6 +293,7 @@ class OpsHandler(Generic[T]):
         name: str,
         reduction_type: ReductionType,
         value: T,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
