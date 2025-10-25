@@ -5,9 +5,10 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 import functools
 import inspect
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

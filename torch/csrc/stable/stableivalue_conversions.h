@@ -4,12 +4,13 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <optional>
 
-namespace torch::stable::detail {
+HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
@@ -335,7 +336,7 @@ inline T to(StableIValue val) {
   return detail::ToImpl<T>::call(val);
 }
 
-} // namespace torch::stable::detail
+HIDDEN_NAMESPACE_END(torch, stable, detail)
 
 // [global from/to deprecation note]
 // WARNING! the following APIs will be removed!! We deprecated global from/to

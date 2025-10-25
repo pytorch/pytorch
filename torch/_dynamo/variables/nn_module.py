@@ -62,11 +62,12 @@ from ..utils import (
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_example_value,
     unpatched_nn_module_call,
     unpatched_nn_module_call_impl,
 )
-from .base import typestr, ValueMutationNew, VariableTracker
+from .base import raise_type_error_exc, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .lists import SliceVariable
@@ -462,7 +463,13 @@ class NNModuleVariable(VariableTracker):
                 assert not is_lazy, (
                     "Expected lazy sequential isn't a valid combination?"
                 )
-                assert not kwargs
+                if kwargs:
+                    raise_args_mismatch(
+                        tx,
+                        "torch.nn.Module.Sequential",
+                        "0 kwargs",
+                        f"{len(kwargs)} kwargs",
+                    )
                 (arg,) = args
                 # TODO: Use named_children when it supports remove_duplicate=False.
                 for child_name, submod in mod._modules.items():
@@ -606,8 +613,16 @@ class NNModuleVariable(VariableTracker):
             return ConstantVariable.create(True)
 
         if name == "_get_item_by_idx":
-            assert args[1].is_python_constant()
-            assert isinstance(args[0], TupleVariable)
+            if not args[1].is_python_constant():
+                raise_type_error_exc(
+                    tx,
+                    f"``nn.Module`` {module}'s call method {name} requires a constant index argument",
+                )
+            if not isinstance(args[0], TupleVariable):
+                raise_type_error_exc(
+                    tx,
+                    f"``nn.Module`` {module}'s call method {name} requires a tuple as first argument",
+                )
             mod_var = args[0].items[args[1].value]
             if isinstance(mod_var, UnspecializedNNModuleVariable):
                 return mod_var
@@ -685,7 +700,13 @@ class NNModuleVariable(VariableTracker):
 
         if name == "named_children":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
@@ -716,7 +737,13 @@ class NNModuleVariable(VariableTracker):
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "children":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return wrap_values(module.named_children())
         elif name == "modules":
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
@@ -728,22 +755,46 @@ class NNModuleVariable(VariableTracker):
             tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             result = []
             for name in module.keys():
                 result.append(ConstantVariable.create(name))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "values":
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return wrap_values(module.items())
         elif name == "items":
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             result = []
             for name, submod in module.items():
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "__len__":
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return ConstantVariable.create(len(module))
         elif (
             name == "__contains__"
@@ -755,7 +806,13 @@ class NNModuleVariable(VariableTracker):
                 args[0].as_python_constant() in module._modules
             )
         elif name == "__getitem__":
-            assert not kwargs and len(args) == 1
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             builtin_supported = (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,

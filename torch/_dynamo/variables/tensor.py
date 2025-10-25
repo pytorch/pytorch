@@ -62,6 +62,7 @@ from ..utils import (
     object_has_getattribute,
     product,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_example_value,
     tensortype_to_dtype,
 )
@@ -1761,8 +1762,13 @@ class UntypedStorageVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "size":
-            assert not args
-            assert not kwargs
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
@@ -1781,7 +1787,8 @@ class UntypedStorageVariable(VariableTracker):
                     ),
                 )
         if name == "resize_" and len(args) == 1:
-            assert not kwargs
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.inductor.resize_storage_bytes_,
