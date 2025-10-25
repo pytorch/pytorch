@@ -108,12 +108,14 @@ struct FlightRecorder {
     capture_cpp_stack_ = getCvarBool(
         {"TORCH_FR_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
+    reset_epoch_start_idx_[0] = 0;
   }
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
                 // buffer this entry will be located to
                 // update state information
+    size_t reset_epoch_; // epoch when this entry was created
     size_t pg_id_;
     std::tuple<std::string, std::string> pg_name_; // <group_name, group_desc>
 
@@ -183,12 +185,20 @@ struct FlightRecorder {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
+  size_t reset_epoch_ = 0;
+  std::unordered_map<size_t, size_t>
+      reset_epoch_start_idx_; // maps reset_epoch to the idx where it starts
   std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_;
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_;
   std::string comm_lib_version_;
 
-  std::optional<size_t> record(
+  struct TraceIdentifier {
+    std::optional<size_t> id;
+    std::optional<size_t> reset_epoch;
+  };
+
+  TraceIdentifier record(
       size_t pg_id,
       const std::tuple<std::string, std::string>& pg_name,
       size_t collective_seq_id,
@@ -213,9 +223,15 @@ struct FlightRecorder {
 
   std::vector<Entry> dump_entries();
 
-  // Returns the entry with the given id, if it exists. Otherwise, returns
-  // std::nullopt.
-  TORCH_API std::optional<Entry> getEntry(std::optional<size_t> id);
+  // Returns the index in entries_ for the given id and reset_epoch.
+  // Caller must hold mutex_lock before calling this method.
+  size_t getIdxFromId(size_t id, size_t reset_epoch) const;
+
+  // Returns the entry with the given id and reset_epoch, if it exists.
+  // Otherwise, returns std::nullopt.
+  TORCH_API std::optional<Entry> getEntry(
+      std::optional<size_t> id,
+      std::optional<size_t> reset_epoch);
 
   /*
   Mark an Event as completed and free its events.
@@ -229,6 +245,7 @@ struct FlightRecorder {
   */
   TORCH_API void retire_id(
       std::optional<size_t> id,
+      std::optional<size_t> reset_epoch,
       bool compute_duration = true);
 
   TORCH_API void reset_all();
