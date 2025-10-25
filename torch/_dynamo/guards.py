@@ -38,7 +38,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
 
 try:
@@ -196,6 +196,10 @@ from .utils import (
     unpatched_nn_module_getattr,
     verify_guard_fn_signature,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None

@@ -42,7 +42,7 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -112,7 +112,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug

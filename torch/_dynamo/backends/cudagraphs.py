@@ -23,8 +23,8 @@ Key components:
 
 import functools
 from collections import defaultdict
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
 
 import torch
 import torch.fx
