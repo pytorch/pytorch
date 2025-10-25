@@ -833,8 +833,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=cudaSetDevice(',
-    '--pattern=cudaGetDevice(',
+    '--pattern=(cudaSetDevice|cudaGetDevice)\\(',
     '--linter-name=RAWCUDADEVICE',
     '--error-name=raw CUDA API usage',
     """--error-description=\
