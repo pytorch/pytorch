@@ -238,7 +238,8 @@ class BackwardHook:
                     self.grad_outputs = None
 
                 if local_grad_outputs is not None:
-                    assert self.output_tensors_index is not None  # mypy
+                    if self.output_tensors_index is None:
+                        raise AssertionError("output_tensors_index should not be None when grad_outputs is not None")
                     return tuple(local_grad_outputs[i] for i in self.output_tensors_index)
 
             grad_fn.register_hook(hook)

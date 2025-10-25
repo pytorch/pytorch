@@ -31,7 +31,8 @@ def cache_method(
 
     @functools.wraps(f)
     def wrap(self: _C, *args: _P.args, **kwargs: _P.kwargs) -> _T:
-        assert not kwargs
+        if kwargs:
+            raise AssertionError("cache_method does not accept keyword arguments")
         if not (cache := getattr(self, cache_name, None)):
             cache = {}
             setattr(self, cache_name, cache)

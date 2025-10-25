@@ -21,7 +21,8 @@ This file should be imported into any file that uses install_config_module like 
 Note that the import should happen before the call to install_config_module(), otherwise runtime errors may occur.
 """
 
-assert TYPE_CHECKING, "Do not use at runtime"
+if not TYPE_CHECKING:  # noqa: PYI002
+    raise AssertionError("Do not use at runtime")  # noqa: W291
 
 def save_config() -> bytes: ...
 def save_config_portable(*, ignore_private_configs: bool = True) -> dict[str, Any]: ...
