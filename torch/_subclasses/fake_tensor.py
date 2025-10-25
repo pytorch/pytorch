@@ -31,6 +31,7 @@ from weakref import ReferenceType
 import torch
 import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
+from torch import storage as _storage
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
@@ -381,12 +382,33 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             return maybe_memo
         # not yet supported in metatensors
+        # HANDLE deepcopy / real tensors safely
+        if t.device.type != "meta":
+            # deepcopy() on a real tensor is not supported inside FakeTensorMode.
+            # we explicitly raise instead of attempting to patch the device to 'meta'
+            # tp prevent silent state mutation
+            raise NotImplementedError(
+                "deepcopy() is not supported on a real tensor (e.g., CPU, CUDA) "
+                "inside FakeTensorMode. This operation is not traceable."
+            )
+
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
         constant = t if make_constant else None
+
+        # Wrap as FakeTensor and return
+        # import FakeTensorMode along with Faketensor
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        # create the FakeTensor inside the context manager
+        with FakeTensorMode():
+            fake = FakeTensor(self, t, t.device, constant=constant)
+
+        self._set_memo(t, fake)
+        return fake
 
         # This callback is used by both subclass and inner tensors. Require the
         # caller to explicitly specify the device in case outer and inner tensors
@@ -2342,6 +2364,7 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> Optional[FakeTensor]:
+
         from torch._higher_order_ops.utils import registered_hop_fake_fns
 
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
@@ -2364,6 +2387,20 @@ class FakeTensorMode(TorchDispatchMode):
             )
             return NotImplemented
 
+        if func == torch.ops.aten.set_.source_Storage:
+            target = args[0]
+            # Explicitly cast source_storage to TypedStorage for MyPy
+            source_storage = cast(_storage.TypedStorage, args[1])
+
+            target_device = getattr(target, "device", None)
+            source_device = getattr(source_storage, "device", None)
+
+            if target_device is not None and source_device is not None:
+                if target_device.type == "meta" and source_device.type != "meta":
+                    meta_storage = torch.empty(
+                        source_storage.size(), dtype=source_storage.dtype, device="meta"
+                    ).storage()
+                    return func(target, meta_storage)
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
