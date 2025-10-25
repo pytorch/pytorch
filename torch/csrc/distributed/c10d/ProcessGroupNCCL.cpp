@@ -33,6 +33,10 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/torch.h>
 #include <optional>
+#include <exception>
+#include <cxxabi.h>
+#include <execinfo.h>
+#include <dlfcn.h>
 
 namespace c10d {
 
@@ -40,6 +44,23 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 using FlightRecorderCUDA = FlightRecorder<at::cuda::CUDAEvent>;
 
 namespace {
+
+// Captures stack trace
+extern "C" void __cxa_throw(void* thrown_exception,
+                            std::type_info* tinfo,
+                            void (*dest)(void*)) {
+    // Capture stack trace here
+    void* buffer[100];
+    int size = backtrace(buffer, 100);
+
+    LOG(ERROR) << "Exception thrown! Stack trace:\n";
+    backtrace_symbols_fd(buffer, size, 2);
+
+    // Call original throw
+    typedef void (*orig_cxa_throw_type)(void*, std::type_info*, void (*)(void*));
+    static orig_cxa_throw_type orig_cxa_throw = (orig_cxa_throw_type)dlsym(RTLD_NEXT, "__cxa_throw");
+    orig_cxa_throw(thrown_exception, tinfo, dest);
+}
 
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
@@ -704,9 +725,9 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 // Print the traceback of the collective at call time
 std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
-  // trace_id_
+  // trace_id_ and trace_reset_epoch_
   std::optional<FlightRecorderCUDA::Entry> entry =
-      FlightRecorderCUDA::get()->getEntry(trace_id_);
+      FlightRecorderCUDA::get()->getEntry(trace_id_, trace_reset_epoch_);
   if (entry.has_value()) {
     auto entryVal = entry.value();
     // Get stack trace from FR entry, in string format
@@ -2394,7 +2415,8 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         pg_->pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
         pg_->pgStatus_->lastCompletedNumelIn = work.numelIn_;
         pg_->pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        FlightRecorderCUDA::get()->retire_id(work.trace_id_, true);
+        FlightRecorderCUDA::get()->retire_id(
+            work.trace_id_, work.trace_reset_epoch_, true);
         if (pg_->onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -3360,7 +3382,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   these objects to the Work because it has implications for keeping those
     //   tensors alive longer and adds overhead when copying Work objects
     //   between threads
-    r->trace_id_ = FlightRecorderCUDA::get()->record(
+    auto traceId = FlightRecorderCUDA::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3374,6 +3396,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         options_->timeout,
         pgStatus_,
         isP2P);
+    r->trace_id_ = traceId.id;
+    r->trace_reset_epoch_ = traceId.reset_epoch;
   }
   return r;
 }
@@ -4168,7 +4192,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // TODO(whc) because we don't pass output {tensor} to initWork, we tell
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
-    work->trace_id_ = FlightRecorderCUDA::get()->record(
+    auto traceId = FlightRecorderCUDA::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -4182,6 +4206,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         options_->timeout,
         pgStatus_,
         /*isP2P=*/true);
+    work->trace_id_ = traceId.id;
+    work->trace_reset_epoch_ = traceId.reset_epoch;
   }
 
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
