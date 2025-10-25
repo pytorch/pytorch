@@ -120,6 +120,7 @@ class GeneratedFileCleaner:
     def open(self, fn, *args, **kwargs):
         if not os.path.exists(fn):
             self.files_to_clean.add(os.path.abspath(fn))
+        # pyrefly: ignore  # not-iterable
         return open(fn, *args, **kwargs)
 
     def makedirs(self, dn, exist_ok=False):

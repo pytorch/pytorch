@@ -1980,12 +1980,14 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, dict):
             arg = [ConstantVariable.create(k) for k in arg.keys()]
             return DictVariableType(
+                # pyrefly: ignore  # bad-argument-type
                 dict.fromkeys(arg, value), user_cls, mutation_type=ValueMutationNew()
             )
         elif arg.has_force_unpack_var_sequence(tx):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
                 return DictVariableType(
+                    # pyrefly: ignore  # bad-argument-type
                     dict.fromkeys(keys, value),
                     user_cls,
                     mutation_type=ValueMutationNew(),

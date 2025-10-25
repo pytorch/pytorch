@@ -1337,6 +1337,7 @@ class Module:
 
         """
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
+            # pyrefly: ignore  # not-iterable
             *args, **kwargs
         )
 

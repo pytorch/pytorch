@@ -352,6 +352,7 @@ class BatchNorm1d(_BatchNorm):
             raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
+# pyrefly: ignore  # inconsistent-inheritance
 class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization.
 
@@ -463,6 +464,7 @@ class BatchNorm2d(_BatchNorm):
             raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
 
+# pyrefly: ignore  # inconsistent-inheritance
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization.
 
@@ -574,6 +576,7 @@ class BatchNorm3d(_BatchNorm):
             raise ValueError(f"expected 5D input (got {input.dim()}D input)")
 
 
+# pyrefly: ignore  # inconsistent-inheritance
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization.
 

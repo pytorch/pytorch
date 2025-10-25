@@ -174,9 +174,12 @@ def _log_softmax_handler(
         tensor_meta=output_tensor_meta,
     )
 
+    # pyrefly: ignore  # bad-argument-type
     return DTensor(
+        # pyrefly: ignore  # bad-argument-count
         res,
         res_spec,
+        # pyrefly: ignore  # unexpected-keyword
         requires_grad=res.requires_grad,
     )
 
@@ -330,9 +333,12 @@ def _nll_loss_forward_handler(
     out_spec = DTensorSpec(spec.mesh, output_placements, tensor_meta=output_tensor_meta)
 
     return (
+        # pyrefly: ignore  # bad-argument-type
         DTensor(
+            # pyrefly: ignore  # bad-argument-count
             result,
             out_spec,
+            # pyrefly: ignore  # unexpected-keyword
             requires_grad=result.requires_grad,
         ),
         total_weight,
@@ -470,9 +476,12 @@ def _nll_loss_backward_handler(
         tensor_meta=output_tensor_meta,
     )
 
+    # pyrefly: ignore  # bad-argument-type
     return DTensor(
+        # pyrefly: ignore  # bad-argument-count
         result,
         out_spec,
+        # pyrefly: ignore  # unexpected-keyword
         requires_grad=result.requires_grad,
     )
 

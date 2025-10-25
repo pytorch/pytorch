@@ -1206,6 +1206,7 @@ class _ModuleFrame:
                     for k in kwargs_spec.context
                 }
             assert self.parent_call_module is not None
+            # pyrefly: ignore  # bad-assignment
             self.parent_call_module.args = tuple(arg_nodes)
             self.parent_call_module.kwargs = kwarg_nodes  # type: ignore[assignment]
 
@@ -1393,6 +1394,7 @@ class _ModuleFrame:
 
     def print(self, *args, **kwargs):
         if self.verbose:
+            # pyrefly: ignore  # not-iterable
             print(*args, **kwargs)
 
     def run_from(self, node_idx):

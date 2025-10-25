@@ -114,6 +114,7 @@ def _cancel_all_tasks(
     for task in to_cancel:
         task.cancel()
 
+    # pyrefly: ignore  # bad-argument-type
     loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
 
     for task in to_cancel:

@@ -515,8 +515,11 @@ def meta_copy_(self, src, non_blocking=False):
 def inferUnsqueezeGeometry(tensor, dim):
     result_sizes = list(tensor.size())
     result_strides = list(tensor.stride())
+    # pyrefly: ignore  # unsupported-operation
     new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
+    # pyrefly: ignore  # bad-argument-type
     result_sizes.insert(dim, 1)
+    # pyrefly: ignore  # bad-argument-type
     result_strides.insert(dim, new_stride)
     return result_sizes, result_strides
 
@@ -5311,6 +5314,7 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
+    # pyrefly: ignore  # not-iterable
     return torch.empty(size, *args, **kwargs)
 
 

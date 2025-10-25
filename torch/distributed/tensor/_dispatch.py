@@ -78,7 +78,9 @@ def found_inf_reduce_handler(
             dtype=target_tensor.dtype,
         ),
     )
+    # pyrefly: ignore  # bad-argument-type
     found_inf_dtensor = dtensor.DTensor(
+        # pyrefly: ignore  # unexpected-keyword
         local_tensor=target_tensor, spec=spec, requires_grad=False
     )
     found_inf = found_inf_dtensor.full_tensor()
@@ -478,6 +480,7 @@ class OpDispatcher:
                 assert isinstance(spec, DTensorSpec), (
                     f"output spec does not match with output! Expected DTensorSpec, got {spec}."
                 )
+                # pyrefly: ignore  # bad-argument-type, bad-argument-count, unexpected-keyword
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor

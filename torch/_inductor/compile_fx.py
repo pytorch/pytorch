@@ -1110,6 +1110,7 @@ def _compile_fx_inner(
         )
         log.info("-" * 130)
         for row in mm_table_data:
+            # pyrefly: ignore  # not-iterable
             log.info("{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
             log.info("-" * 130)
 

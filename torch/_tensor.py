@@ -551,6 +551,7 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError("__setstate__ can be only called on leaf Tensors")
         if len(state) == 4:
             # legacy serialization of Tensor
+            # pyrefly: ignore  # not-iterable
             self.set_(*state)
             return
         elif len(state) == 5:

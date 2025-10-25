@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+# pyrefly: ignore  # missing-import
 from dataclasses_json import DataClassJsonMixin
 
 

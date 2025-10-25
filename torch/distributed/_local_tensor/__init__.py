@@ -198,6 +198,7 @@ def _for_each_rank_run_func(
     rr_val = flat_rank_rets[rr_key]
 
     if isinstance(rr_val, Tensor):
+        # pyrefly: ignore  # bad-argument-type, bad-argument-count
         ret = LocalTensor({r: flat_rank_rets[r] for r in sorted(ranks)})
     elif isinstance(rr_val, (list, tuple)):
         ret_list = []
@@ -206,6 +207,7 @@ def _for_each_rank_run_func(
             v_it = iter(rets.values())
             v = next(v_it)
             if isinstance(v, Tensor):
+                # pyrefly: ignore  # bad-argument-type, bad-argument-count
                 ret_list.append(LocalTensor(rets))
             elif isinstance(v, int) and not all(v == v2 for v2 in v_it):
                 ret_list.append(torch.SymInt(LocalIntNode(rets)))
@@ -491,6 +493,7 @@ class LocalTensor(torch.Tensor):
             "Expecting spec to be not None from `__tensor_flatten__` return value!"
         )
         local_tensors = inner_tensors["_local_tensors"]
+        # pyrefly: ignore  # bad-argument-type, bad-argument-count
         return LocalTensor(local_tensors)
 
     @classmethod
@@ -751,6 +754,7 @@ class LocalTensorMode(TorchDispatchMode):
         """
 
         with self.disable():
+            # pyrefly: ignore  # bad-argument-type, bad-argument-count
             return LocalTensor({r: cb(r) for r in self.ranks})
 
     def _patch_device_mesh(self) -> None:

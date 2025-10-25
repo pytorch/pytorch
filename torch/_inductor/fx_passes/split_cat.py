@@ -2512,6 +2512,7 @@ def reshape_cat_node_to_stack(
             args=(cat_node, tuple(reshape_list)),
         )
         reshape_node.meta["example_value"] = torch.reshape(
+            # pyrefly: ignore  # bad-argument-type
             cat_node.meta["example_value"], tuple(reshape_list)
         )
         permute_list = list(range(len(stack_shape)))
