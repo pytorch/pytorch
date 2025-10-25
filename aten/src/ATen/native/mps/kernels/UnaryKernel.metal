@@ -6,18 +6,18 @@ using namespace metal;
 using namespace c10::metal;
 
 struct angle_functor {
-    template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
-    inline T operator()(const T x) {
-      return T(atan2(x.y, x.x), 0);
-    }
-    template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
-    inline T operator()(const T x) {
-       return T(isnan(x) ? x : x < 0 ? M_PI_F : 0.0);
-    }
-    template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
-    inline float operator()(const T x) {
-       return x < 0 ? M_PI_F : 0.0;
-    }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(atan2(x.y, x.x), 0);
+  }
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(isnan(x) ? x : x < 0 ? M_PI_F : 0.0);
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline float operator()(const T x) {
+    return x < 0 ? M_PI_F : 0.0;
+  }
 };
 
 // Implement exp wrapper for both real and complex types
