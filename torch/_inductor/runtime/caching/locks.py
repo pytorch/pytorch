@@ -8,14 +8,23 @@ The module offers both context manager and manual acquisition patterns:
 - Safe acquisition: Uses context managers that automatically handle lock release
 - Unsafe acquisition: Manual acquisition that requires explicit release by the caller
 """
+from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack, _GeneratorContextManager
 from threading import Lock
 from typing import Generator
+from typing_extensions import Protocol, TypeAlias
 
 from filelock import FileLock, Timeout
 
-from . import exceptions
+from . import exceptions, implementations as impls
+
+
+_LockContextManager: TypeAlias = _GeneratorContextManager[None, None, None]
+
+
+class _LockProtocol(Protocol):
+    def __call__(self, timeout: float | None = None) -> _LockContextManager: ...
 
 
 # Infinite timeout - blocks indefinitely until lock is acquired.
@@ -175,3 +184,13 @@ def _unsafe_acquire_flock_with_timeout(flock: FileLock, timeout: float | None) -
         _ = flock.acquire(timeout=_timeout)
     except Timeout as err:
         raise exceptions.FileLockTimeoutError(flock, _timeout) from err
+
+@contextmanager
+def _acquire_many_impl_locks_with_timeout(
+    *impls: impls._CacheImpl,
+    timeout: float | None = None,
+) -> Generator[None, None, None]:
+    with ExitStack() as stack:
+        for impl in impls:
+            stack.enter_context(impl.lock(timeout))
+        yield
