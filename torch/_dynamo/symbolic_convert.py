@@ -45,8 +45,8 @@ import types
 import weakref
 from collections import deque
 from traceback import StackSummary
-from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing_extensions import TypeIs
 from unittest.mock import patch
 
 import torch
@@ -74,6 +74,7 @@ from .bytecode_analysis import (
 from .bytecode_transformation import (
     cleaned_instructions,
     create_binary_slice,
+    create_binary_subscr,
     create_call_function,
     create_call_function_ex,
     create_copy,
@@ -188,7 +189,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1362,14 +1363,15 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process,
         # Used repr for byte processing and limiting the length to 2048
-        try:
-            stack_repr = repr(self.stack)
-        except ValueError:
-            # Handle large integers that exceed sys.int_info.str_digits_check_threshold
-            stack_repr = "<self.stack repr truncated due to large integer>"
-        self.latest_bytecode_queue.append(
-            f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
-        )
+        if config.verbose:
+            try:
+                stack_repr = repr(self.stack)
+            except ValueError:
+                # Handle large integers that exceed sys.int_info.str_digits_check_threshold
+                stack_repr = "<self.stack repr truncated due to large integer>"
+            self.latest_bytecode_queue.append(
+                f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
+            )
 
         self.update_block_stack(inst)
 
@@ -2204,6 +2206,7 @@ class InstructionTranslatorBase(
                     *graph_break_hints.USER_ERROR,
                     *graph_break_hints.SUPPORTABLE,
                 ],
+                from_exc=raised_exception,
             )
 
         if sys.version_info >= (3, 11):
@@ -2724,7 +2727,7 @@ class InstructionTranslatorBase(
             *create_copy(2),
             # frame_values, frame N stack, frame_values
             create_load_const(0),
-            create_instruction("BINARY_SUBSCR"),
+            create_binary_subscr(),
             *create_binary_slice(0, 0, True),
             # frame_values[0][0:0] = frame N stack
             # frame_values left on top of stack
@@ -3582,11 +3585,13 @@ class InstructionTranslatorBase(
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
         tos = self.stack[-1]
+        assert isinstance(tos, TupleVariable)
+        keys = tos.unpack_var_sequence(self)
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
 
-        if all(k in tos1 for k in tos):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(self, k) for k in tos]))  # type: ignore[attr-defined,arg-type]
+        if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
+            self.push(TupleVariable([tos1.getitem_const(self, k) for k in keys]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -4405,7 +4410,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
             self.stack[-1] = ListIteratorVariable(
-                # pyrefly: ignore  # unbound-name
                 tos.force_unpack_var_sequence(self),
                 mutation_type=ValueMutationNew(),
             )
