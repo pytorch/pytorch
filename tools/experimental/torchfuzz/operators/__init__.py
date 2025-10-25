@@ -7,7 +7,6 @@ from torchfuzz.operators.item import ItemOperator
 from torchfuzz.operators.layout import (
     FlattenOperator,
     ReshapeOperator,
-    SplitOperator,
     SqueezeOperator,
     UnsqueezeOperator,
     ViewOperator,
@@ -73,7 +72,6 @@ __all__ = [
     "FlattenOperator",
     "SqueezeOperator",
     "UnsqueezeOperator",
-    "SplitOperator",
     "MMOperator",
     "AddmmOperator",
     "BmmOperator",
