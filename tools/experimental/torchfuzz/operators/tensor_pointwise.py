@@ -1,7 +1,6 @@
 """Tensor pointwise operator implementation."""
 
 import random
-from typing import Optional
 
 import torch
 
