@@ -10,11 +10,15 @@ namespace c10::openreg {
 struct OpenRegEvent {
   OpenRegEvent(bool enable_timing) noexcept : enable_timing_{enable_timing} {}
 
+  // LITERALINCLUDE START: OPENREG EVENT DTOR
   ~OpenRegEvent() {
-    if (is_created_) {
-      OPENREG_CHECK(orEventDestroy(event_));
-    }
+    try {
+      if (is_created_) {
+        OPENREG_CHECK(orEventDestroy(event_));
+      }
+    } catch (...) { /* No throw */ }
   }
+  // LITERALINCLUDE END: OPENREG EVENT DTOR
 
   OpenRegEvent(const OpenRegEvent&) = delete;
   OpenRegEvent& operator=(const OpenRegEvent&) = delete;
@@ -53,6 +57,7 @@ struct OpenRegEvent {
     return event_;
   }
 
+  // LITERALINCLUDE START: OPENREG EVENT QUERY
   bool query() const {
     if (!is_created_) {
       return true;
@@ -65,16 +70,22 @@ struct OpenRegEvent {
 
     return false;
   }
+  // LITERALINCLUDE END: OPENREG EVENT QUERY
 
+  // LITERALINCLUDE START: OPENREG EVENT RECORD DEFAULT
   void record() {
     record(getCurrentOpenRegStream());
   }
+  // LITERALINCLUDE END: OPENREG EVENT RECORD DEFAULT
 
+  // LITERALINCLUDE START: OPENREG EVENT RECORD ONCE
   void recordOnce(const OpenRegStream& stream) {
     if (!was_recorded_)
       record(stream);
   }
+  // LITERALINCLUDE END: OPENREG EVENT RECORD ONCE
 
+  // LITERALINCLUDE START: OPENREG EVENT RECORD
   void record(const OpenRegStream& stream) {
     if (!is_created_) {
       createEvent(stream.device_index());
@@ -91,13 +102,17 @@ struct OpenRegEvent {
     OPENREG_CHECK(orEventRecord(event_, stream));
     was_recorded_ = true;
   }
+  // LITERALINCLUDE END: OPENREG EVENT RECORD
 
+  // LITERALINCLUDE START: OPENREG EVENT BLOCK
   void block(const OpenRegStream& stream) {
     if (is_created_) {
       OPENREG_CHECK(orStreamWaitEvent(stream, event_, 0));
     }
   }
+  // LITERALINCLUDE END: OPENREG EVENT BLOCK
 
+  // LITERALINCLUDE START: OPENREG EVENT ELAPSED
   float elapsed_time(const OpenRegEvent& other) const {
     TORCH_CHECK_VALUE(
         !(enable_timing_ & orEventDisableTiming) &&
@@ -114,12 +129,15 @@ struct OpenRegEvent {
     OPENREG_CHECK(orEventElapsedTime(&time_ms, event_, other.event_));
     return time_ms;
   }
+  // LITERALINCLUDE END: OPENREG EVENT ELAPSED
 
+  // LITERALINCLUDE START: OPENREG EVENT SYNC
   void synchronize() const {
     if (is_created_) {
       OPENREG_CHECK(orEventSynchronize(event_));
     }
   }
+  // LITERALINCLUDE END: OPENREG EVENT SYNC
 
  private:
   unsigned int enable_timing_{orEventDisableTiming};
@@ -128,11 +146,13 @@ struct OpenRegEvent {
   DeviceIndex device_index_{-1};
   orEvent_t event_{};
 
+  // LITERALINCLUDE START: OPENREG EVENT CREATE
   void createEvent(DeviceIndex device_index) {
     device_index_ = device_index;
     OPENREG_CHECK(orEventCreateWithFlags(&event_, enable_timing_));
     is_created_ = true;
   }
+  // LITERALINCLUDE END: OPENREG EVENT CREATE
 
   void moveHelper(OpenRegEvent&& other) {
     std::swap(enable_timing_, other.enable_timing_);
