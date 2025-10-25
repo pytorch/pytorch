@@ -9,10 +9,6 @@
 #include <utility>
 #include <vector>
 
-#ifdef USE_CUDA
-#define TORCH_USE_CUDA_DSA
-#endif
-
 /// Number of assertion failure messages we can store. If this is too small
 /// threads will fail silently.
 constexpr int C10_CUDA_DSA_ASSERTION_COUNT = 10;
@@ -89,9 +85,6 @@ class C10_CUDA_API CUDAKernelLaunchRegistry {
   /// How many kernel launch infos we've inserted. Used to ensure that circular
   /// queue doesn't provide false information by always increasing, but also to
   /// mark where we are inserting into the queue
-#ifdef TORCH_USE_CUDA_DSA
-  uint64_t generation_number = 0;
-#endif
   /// Shared mutex between writer and accessor to ensure multi-threaded safety.
   mutable std::mutex read_write_mutex;
   /// Used to ensure prevent race conditions in GPU memory allocation
@@ -141,14 +134,8 @@ class C10_CUDA_API CUDAKernelLaunchRegistry {
   bool enabled_at_runtime = false;
   /// Whether or not a device has indicated a failure
   bool has_failed() const;
-#ifdef TORCH_USE_CUDA_DSA
-  const bool enabled_at_compile_time = true;
-#else
   const bool enabled_at_compile_time = false;
-#endif
 };
-
-C10_CUDA_API std::string c10_retrieve_device_side_assertion_info();
 
 } // namespace c10::cuda
 
