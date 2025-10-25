@@ -1180,6 +1180,37 @@ class BuiltinVariable(VariableTracker):
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        if self.fn is operator.mul and len(args) == 2 and not kwargs:
+            a, b = args
+            a_is_symbool_node = isinstance(a, SymNodeVariable) and isinstance(
+                a.sym_num, torch.SymBool
+            )
+            b_is_symbool_node = isinstance(b, SymNodeVariable) and isinstance(
+                b.sym_num, torch.SymBool
+            )
+            a_is_tensor = isinstance(a, TensorVariable)
+            b_is_tensor = isinstance(b, TensorVariable)
+
+            # The scenario is SymBool * Tensor or Tensor * SymBool
+            if (a_is_symbool_node and b_is_tensor) or (
+                a_is_tensor and b_is_symbool_node
+            ):
+                args = list(args)
+                symbool_idx = 0 if a_is_symbool_node else 1
+                symbool_var = args[symbool_idx]
+                symbool_proxy = symbool_var.as_proxy()
+                bool_tensor_node = symbool_proxy.node.args[0]
+                bool_tensor_proxy = torch.fx.Proxy(bool_tensor_node, tx.output) # type: ignore[arg-type]
+                int_tensor_proxy = tx.output.create_proxy(
+                    "call_method", "to", (bool_tensor_proxy, torch.int64), {}
+                )
+                # The new int64 tensor proxy is wrapped into a TensorVariable
+                promoted_var = wrap_fx_proxy_cls(
+                    TensorVariable, tx, int_tensor_proxy
+                )
+                args[symbool_idx] = promoted_var
+                args = tuple(args)
+
         if kwargs and not self.tensor_args(*args, *kwargs.values()):
             return
 

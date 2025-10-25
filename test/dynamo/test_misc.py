@@ -13574,6 +13574,50 @@ instantiate_device_type_tests(
 )
 
 
+class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_tensor_mul(self):
+        def symbool_mul_fn(x_bool, sentinel):
+            result = x_bool * sentinel
+            return result
+        x_true = torch.tensor([True], device="cuda")
+        x_false = torch.tensor([False], device="cuda")
+        sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
+        eager_result_true = symbool_mul_fn(x_true, sentinel)
+        eager_result_false = symbool_mul_fn(x_false, sentinel)
+        compiled_fn = torch.compile(symbool_mul_fn, fullgraph=True, dynamic=True)
+        compiled_result_true = compiled_fn(x_true, sentinel)
+        compiled_result_false = compiled_fn(x_false, sentinel)
+        self.assertEqual(eager_result_true, compiled_result_true)
+        self.assertEqual(eager_result_false, compiled_result_false)
+        self.assertEqual(compiled_result_true.item(), 2.0)
+        self.assertEqual(compiled_result_false.item(), 0.0)
+
+
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_guard_or_false(self):
+        def symbool_guard_fn(a_bool_tensor, b):
+            u0 = a_bool_tensor.item()
+            # Make sure guard_or_false still handles SymBool produced by .item()
+            if guard_or_false(u0):
+                return b * 10
+            else:
+                return b * 100
+        compiled_guard_fn = torch.compile(symbool_guard_fn, backend="eager", dynamic=True)
+        a_true = torch.tensor(True, device="cuda")
+        a_false = torch.tensor(False, device="cuda")
+        b = torch.randn(6, device="cuda")
+        eager_res_true = symbool_guard_fn(a_true, b)
+        compiled_res_true = compiled_guard_fn(a_true, b)
+        self.assertEqual(eager_res_true, compiled_res_true)
+        eager_res_false = symbool_guard_fn(a_false, b)
+        compiled_res_false = compiled_guard_fn(a_false, b)
+        self.assertEqual(eager_res_false, compiled_res_false)
+        self.assertEqual(compiled_res_true, b * 10)
+        self.assertEqual(compiled_res_false, b * 100)
+
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
