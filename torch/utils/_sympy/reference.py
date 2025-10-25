@@ -10,6 +10,7 @@ from torch.utils._sympy.functions import (
     _keep_float,
     BitwiseFn_bitwise_and,
     BitwiseFn_bitwise_or,
+    BitwiseFn_bitwise_xor,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
@@ -206,6 +207,10 @@ class ReferenceAnalysis:
     @staticmethod
     def bitwise_or(a, b):
         return BitwiseFn_bitwise_or(a, b)
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return BitwiseFn_bitwise_xor(a, b)
 
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
