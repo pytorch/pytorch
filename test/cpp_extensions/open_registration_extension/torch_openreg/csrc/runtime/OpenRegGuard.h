@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/DeviceCapability.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <include/openreg.h>
@@ -47,6 +48,14 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   c10::Device getDevice() const override {
     int device_index = current_device();
     return c10::Device(static_type, device_index);
+  }
+
+  /**
+   * Get the device capability for a given device.
+   * By default, OpenReg has 2 same devices with the same capability.
+   */
+  c10::DeviceCapability getDeviceCapability(c10::Device /*unused*/) const override {
+    return c10::DeviceCapability();
   }
 
   /**

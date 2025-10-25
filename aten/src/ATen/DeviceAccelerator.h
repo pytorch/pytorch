@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/core/DeviceCapability.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 
@@ -94,6 +95,8 @@ TORCH_API inline void resetPeakStats(c10::DeviceIndex device_index) {
   at::getDeviceAllocator(device_type)->resetPeakStats(device_index);
 }
 
+TORCH_API c10::DeviceCapability getDeviceCapability(
+    c10::DeviceIndex device_index);
 } // namespace at::accelerator
 
 namespace at {

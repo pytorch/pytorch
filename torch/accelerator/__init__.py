@@ -2,7 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -24,6 +24,7 @@ __all__ = [
     "current_accelerator",
     "current_device_idx",  # deprecated
     "current_device_index",
+    "get_device_capability",
     "current_stream",
     "empty_cache",
     "device_count",
@@ -148,6 +149,12 @@ current_device_idx.__doc__ = r"""
         :func:`torch.accelerator.current_device_idx` is deprecated in favor of :func:`torch.accelerator.current_device_index`
         and will be removed in a future PyTorch release.
     """
+
+
+def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
+    r"""Return the capability of the currently selected device for the current :ref:`accelerator<accelerators>`."""
+    device_index = _get_device_index(device, optional=False)
+    return torch._C._accelerator_getDeviceCapability(device_index)
 
 
 def set_device_index(device: _device_t, /) -> None:

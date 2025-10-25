@@ -27,6 +27,13 @@ class TestDevice(TestCase):
             self.assertEqual(torch.accelerator.current_device_index(), 1)
         self.assertEqual(torch.accelerator.current_device_index(), device)
 
+    def test_device_capability(self):
+        capability = torch.accelerator.get_device_capability("openreg:0")
+        supported_dtypes = capability["supported_dtypes"]
+        expected_dtypes = [torch.float32, torch.float64, torch.int32, torch.int64]
+
+        self.assertTrue(all(dtype in supported_dtypes for dtype in expected_dtypes))
+
 
 if __name__ == "__main__":
     run_tests()
