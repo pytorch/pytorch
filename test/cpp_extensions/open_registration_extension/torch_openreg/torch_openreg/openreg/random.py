@@ -68,7 +68,7 @@ def set_rng_state(new_state: ByteTensor, device: int | str | torch.device = "ope
     default_generator.set_state(new_state)
 
 
-# LITERALINCLUDE START: OPENREG GENERATOR PY WRAPPER EXAMPLE
+# LITERALINCLUDE END: OPENREG GENERATOR PY WRAPPER EXAMPLE
 
 
 def set_rng_state_all(new_states: Iterable[ByteTensor]) -> None:

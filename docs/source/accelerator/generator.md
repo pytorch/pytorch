@@ -37,8 +37,8 @@ Example (OpenReg test extension) Python wrapper:
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/random.py
     :language: python
-    :start-after: LITERALINCLUDE START: START: OPENREG GENERATOR PY WRAPPER EXAMPLE
-    :end-before: LITERALINCLUDE END: START: OPENREG GENERATOR PY WRAPPER EXAMPLE
+    :start-after: LITERALINCLUDE START: OPENREG GENERATOR PY WRAPPER EXAMPLE
+    :end-before: LITERALINCLUDE END: OPENREG GENERATOR PY WRAPPER EXAMPLE
     :linenos:
 ```
 
@@ -117,8 +117,8 @@ Example tests excerpt (OpenReg):
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_rng.py
-    :start-after: LITERALINCLUDE START: LITERALINCLUDE START: OPENREG GENERATOR TEST EXAMPLES
-    :end-before: LITERALINCLUDE END: LITERALINCLUDE START: OPENREG GENERATOR TEST EXAMPLES
+    :start-after: LITERALINCLUDE START: OPENREG GENERATOR TEST EXAMPLES
+    :end-before: LITERALINCLUDE END: OPENREG GENERATOR TEST EXAMPLES
     :language: python
     :linenos:
 ```
