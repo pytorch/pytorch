@@ -7,7 +7,8 @@ appropriate locking mechanisms.
 """
 
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
+from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BufferedReader, BufferedWriter
