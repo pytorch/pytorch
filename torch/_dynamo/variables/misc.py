@@ -18,6 +18,7 @@ Key classes include:
 """
 
 import dataclasses
+import datetime
 import functools
 import inspect
 import itertools
@@ -1971,3 +1972,42 @@ class WeakRefVariable(VariableTracker):
         codegen(self.referent_vt)
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
+
+
+class DatetimeClassVariable(VariableTracker):
+    def python_type(self):
+        return type(datetime.datetime)
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "now" and not args and not kwargs:
+            return DatetimeNowVariable()
+        return super().call_method(tx, name, args, kwargs)
+
+
+def _datetime_attr_tensor(attr: str, dtype: torch.dtype):
+    val = getattr(datetime.datetime.now(), attr)
+    t = torch.tensor(val, dtype=dtype)
+    return t
+
+
+_supported_datetime_attrs = {
+    "year",
+    "month",
+    "day",
+    "hour",
+    "minute",
+    "second",
+    "microsecond",
+}
+
+
+class DatetimeNowVariable(VariableTracker):
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        # TODO: for now supporting only attributes; operations on now() won't work yet
+        if name in _supported_datetime_attrs:
+            vt = tx.output.synthetic_graph_input(
+                _datetime_attr_tensor, (name, torch.get_default_dtype())
+            )
+            vt.is_datetime_scalar = True
+            return vt
+        return super().var_getattr(tx, name)
