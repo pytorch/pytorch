@@ -1799,6 +1799,26 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
+    def test_list_tensor_pattern_replacement(self):
+        @torch.library.custom_op("custom::list_op", mutates_args=())
+        def list_op(xs: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [x + 1 for x in xs]
+
+        @list_op.register_fake
+        def list_op_fake(xs: list[torch.Tensor]) -> list[torch.Tensor]:
+            return xs
+
+        def pattern(xs: list[torch.Tensor]):
+            return torch.ops.custom.list_op(xs)
+
+        def replacement(xs: list[torch.Tensor]):
+            return xs
+
+        patterns = PatternMatcherPass()
+        inputs = [[torch.empty(4, 5), torch.empty(4, 5)]]
+
+        register_replacement(pattern, replacement, inputs, fwd_only, patterns)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
