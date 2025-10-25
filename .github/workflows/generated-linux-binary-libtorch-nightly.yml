@@ -411,7 +411,7 @@ jobs:
     needs:
       - libtorch-rocm6_4-shared-with-deps-release-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -430,6 +430,18 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: .
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: .
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -437,18 +449,6 @@ jobs:
         with:
           name: libtorch-rocm6_4-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -468,13 +468,13 @@ jobs:
           docker-image-name: libtorch-cxx11-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -529,7 +529,7 @@ jobs:
     needs:
       - libtorch-rocm7_0-shared-with-deps-release-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -548,6 +548,18 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: .
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: .
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -555,18 +567,6 @@ jobs:
         with:
           name: libtorch-rocm7_0-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -586,13 +586,13 @@ jobs:
           docker-image-name: libtorch-cxx11-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
