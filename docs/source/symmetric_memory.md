@@ -79,9 +79,19 @@ To create symmetric tensors, one can use the
 ```python
 import torch.distributed._symmetric_memory as symm_mem
 
-t = symm_mem.empty(128, device="cuda")
+t = symm_mem.empty(128, device=torch.device("cuda", rank))
 hdl = symm_mem.rendezvous(t, group)
 ```
+
+The `symm_mem.empty` function creates a tensor that is backed by a symmetric
+memory allocation. The `rendezvous` function establishes a rendezvous with peers
+in the group, and returns a handle to the symmetric memory allocation. The
+handle provides method to access information related to the symmetric memory
+allocation, such as pointers to symmetric buffer on peer ranks, multicast
+pointer (if supported), and signal pads.
+
+The `empty` and `rendezvous` functions must be called in the same order on all
+ranks in the group.
 
 Then, collectives can be called on these tensors. For example, to perform a
 one-shot all-reduce:
