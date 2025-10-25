@@ -5582,8 +5582,8 @@ class AOTInductorTestsTemplate:
                 ).run(code)
 
     def test_aoti_debug_printing_model_inputs_codegen(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -5919,12 +5919,11 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
-    @skipIfXpu(msg="Currently Profiling not enabled on XPU CI builds")
     @requires_gpu
     def test_d2h_copy(self):
         # device to copy host should always have the same stride
-        if GPU_TYPE not in self.device:
-            raise unittest.SkipTest("This test is only for GPU")
+        if "cuda" not in self.device:
+            raise unittest.SkipTest("This test is only for CUDA")
 
         class ToCpuModel(nn.Module):
             def forward(self, x):
@@ -5948,7 +5947,7 @@ class AOTInductorTestsTemplate:
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
+                torch.profiler.ProfilerActivity.CUDA,
             ],
         ) as prof:
             true_res = aoti_model(input_tensor)
@@ -6376,8 +6375,8 @@ class AOTInductorTestsTemplate:
         runner.free_inactive_constant_buffer()
 
     def test_update_user_managed_buffer(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6531,8 +6530,8 @@ class AOTInductorTestsTemplate:
         "To enable after the C shim FC window ends",
     )
     def test_misaligned_input_1(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("GPU test only")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("CUDA/XPU test only")
 
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -7115,8 +7114,8 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_sym_expr_indexing(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
