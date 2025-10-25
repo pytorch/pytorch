@@ -21,8 +21,8 @@ import itertools
 import sys
 import types
 import uuid
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 from . import config
 from .bytecode_analysis import (

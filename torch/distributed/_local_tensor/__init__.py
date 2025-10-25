@@ -47,9 +47,9 @@ import operator
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
-from typing import Any, Callable, Generator, Optional, Union
+from typing import Any, Optional, Union
 
 
 try:
