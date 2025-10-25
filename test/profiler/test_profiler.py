@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipIfTorchDynamo,
+    skipIfXpu,
     TemporaryDirectoryName,
     TemporaryFileName,
     TEST_CUDA,
@@ -2009,6 +2010,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 report = json.load(f)
                 self._validate_basic_json(report["traceEvents"], with_cuda)
 
+    @skipIfXpu
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self):
@@ -2162,7 +2164,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_profile(self):
         # test a really basic profile to make sure no erroneous aten ops are run
-        x = torch.randn(4, device="cuda")
+        acc = torch.accelerator.current_accelerator()
+        self.assertIsNotNone(acc)
+        device = acc.type
+        x = torch.randn(4, device=device)
         with torch.profiler.profile(with_stack=True) as p:
             x *= 2
         names = [e.name for e in p.events()]
@@ -2225,6 +2230,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertGreater(stats.function_events_build_tree_call_duration_us, 0)
         self.assertGreater(stats.number_of_events, 0)
 
+    @skipIfXpu
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(
         torch.cuda.is_available(), "CUDA complains about forking after init"

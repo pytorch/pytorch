@@ -173,6 +173,7 @@ if __name__ == "__main__":
                 subprocess.check_output([sys.executable, "-c", script])
                 .decode("ascii")
                 .strip()
+                .splitlines()[-1]
             )
 
         test_script = """\
