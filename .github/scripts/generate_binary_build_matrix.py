@@ -22,7 +22,7 @@ CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
     "12.9": "12.9.1",
-    "13.0": "13.0.0",
+    "13.0": "13.0.2",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
@@ -96,21 +96,21 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'"
     ),
     "13.0": (
-        "nvidia-cuda-nvrtc==13.0.48; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime==13.0.48; platform_system == 'Linux' | "
-        "nvidia-cuda-cupti==13.0.48; platform_system == 'Linux' | "
+        "nvidia-cuda-nvrtc==13.0.88; platform_system == 'Linux' | "
+        "nvidia-cuda-runtime==13.0.96; platform_system == 'Linux' | "
+        "nvidia-cuda-cupti==13.0.85; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.13.0.50; platform_system == 'Linux' | "
-        "nvidia-cublas==13.0.0.19; platform_system == 'Linux' | "
-        "nvidia-cufft==12.0.0.15; platform_system == 'Linux' | "
+        "nvidia-cublas==13.1.0.3; platform_system == 'Linux' | "
+        "nvidia-cufft==12.0.0.61; platform_system == 'Linux' | "
         "nvidia-curand==10.4.0.35; platform_system == 'Linux' | "
-        "nvidia-cusolver==12.0.3.29; platform_system == 'Linux' | "
-        "nvidia-cusparse==12.6.2.49; platform_system == 'Linux' | "
+        "nvidia-cusolver==12.0.4.66; platform_system == 'Linux' | "
+        "nvidia-cusparse==12.6.3.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.3.24; platform_system == 'Linux' | "
-        "nvidia-nvtx==13.0.39; platform_system == 'Linux' | "
-        "nvidia-nvjitlink==13.0.39; platform_system == 'Linux' | "
-        "nvidia-cufile==1.15.0.42; platform_system == 'Linux'"
+        "nvidia-nvtx==13.0.85; platform_system == 'Linux' | "
+        "nvidia-nvjitlink==13.0.88; platform_system == 'Linux' | "
+        "nvidia-cufile==1.15.1.6; platform_system == 'Linux'"
     ),
     "xpu": (
         "intel-cmplr-lib-rt==2025.2.1 | "
