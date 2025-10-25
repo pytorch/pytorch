@@ -3287,9 +3287,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                else:
-                    if "illegal memory access" in msg:
-                        msg += "\n\nEither error in template or triton bug.\n"
+                elif "illegal memory access" in msg:
+                    msg += "\n\nEither error in template or triton bug.\n"
+                elif "unspecified launch failure" in msg:
+                    msg += "\n\nAn unrecoverable unspecified launch failure was caught during autotuning."
+                    msg += "\nPlease try re-running with TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1.\n\n"
 
                 if isinstance(choice, CUDATemplateCaller):
                     log.debug(
