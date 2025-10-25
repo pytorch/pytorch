@@ -319,8 +319,7 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param Tensor input: Input tensor to perform all-to-all on. Must be symmetric.
     :param Tensor out: Output tensor to store the result of the all-to-all operation. Must be symmetric.
     :param Tensor in_splits: Tensor containing splits of data to send to each peer. Must be symmetric. Must be of size (group_size,). The splits are in the unit of elements in the 1st dimension.
-    :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size). The rows are (in order):
-    output splits and output offsets.
+    :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size). The rows are (in order): output splits and output offsets.
     :param str group_name: Name of the group to perform all-to-all on.
 
 
