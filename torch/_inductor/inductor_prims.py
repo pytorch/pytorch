@@ -85,8 +85,8 @@ lookup_seed = make_prim(
 # the dtype, so it always faithfully produces a float32 tensor during tracing,
 # even if the default dtype is set to something else.
 random = make_prim(
-    "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
-    lambda size, seed, mode: getattr(torch, mode)(
+    "inductor_random(SymInt[] size, Tensor seed, str mode, *, ScalarType? align_dtype=None) -> Tensor",
+    lambda size, seed, mode, *, align_dtype=None: getattr(torch, mode)(
         size, device=seed.device, dtype=torch.float32
     ),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
