@@ -4,9 +4,9 @@ import sys
 from typing import Any
 
 from tools.testing.target_determination.heuristics import (
-    AggregatedHeuristics as AggregatedHeuristics,
+    AggregatedHeuristics,
     HEURISTICS,
-    TestPrioritizations as TestPrioritizations,
+    TestPrioritizations,
 )
 
 

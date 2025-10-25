@@ -2841,8 +2841,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-        tx: InstructionTranslator = tx
-
         def create_scalar():
             return query.call_method(
                 tx,
