@@ -48,9 +48,7 @@ class ArgsortOperator(Operator):
         # Using float32 as a reasonable default
         input_dtype = torch.float32
 
-        return [
-            TensorSpec(size=input_size, stride=input_stride, dtype=input_dtype)
-        ]
+        return [TensorSpec(size=input_size, stride=input_stride, dtype=input_dtype)]
 
     def codegen(
         self, output_name: str, input_names: list[str], output_spec: Spec

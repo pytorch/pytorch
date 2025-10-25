@@ -634,7 +634,9 @@ class CatOperator(LayoutOperatorBase):
             input_stride = fuzz_valid_stride(input_size)
 
             input_specs.append(
-                TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
+                TensorSpec(
+                    size=input_size, stride=input_stride, dtype=output_spec.dtype
+                )
             )
 
         return input_specs
@@ -672,7 +674,12 @@ class StackOperator(LayoutOperatorBase):
             return False
         # Stack creates a new dimension, so output must have at least one dimension
         # Also, no dimension can be 0 since that would require stacking 0 tensors
-        return len(output_spec.size) > 0 and 0 not in output_spec.size
+        # Limit to outputs where all dimensions are <= 4 to avoid creating too large graphs
+        return (
+            len(output_spec.size) > 0
+            and 0 not in output_spec.size
+            and all(dim <= 4 for dim in output_spec.size)
+        )
 
     def _get_stack_params(self, output_spec: TensorSpec) -> int:
         """Get consistent stack dimension based on output spec.
@@ -702,7 +709,8 @@ class StackOperator(LayoutOperatorBase):
         stack_dim = self._get_stack_params(output_spec)
 
         # Number of tensors to stack equals the size of the new dimension
-        num_tensors = output_spec.size[stack_dim]
+        # Limit to max 4 tensors to avoid creating too large graphs
+        num_tensors = min(output_spec.size[stack_dim], 4)
 
         # Input tensors have the output shape with the stack_dim removed
         input_size = list(output_spec.size)
@@ -716,7 +724,9 @@ class StackOperator(LayoutOperatorBase):
         for _ in range(num_tensors):
             input_stride = fuzz_valid_stride(input_size)
             input_specs.append(
-                TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
+                TensorSpec(
+                    size=input_size, stride=input_stride, dtype=output_spec.dtype
+                )
             )
 
         return input_specs
