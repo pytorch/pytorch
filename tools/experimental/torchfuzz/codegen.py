@@ -219,6 +219,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 # Neural network operations
                 "torch.nn.functional.embedding",
                 "torch.nn.functional.linear",
+                "torch.nn.functional.scaled_dot_product_attention",
                 # Activation functions
                 "torch.nn.functional.relu",
                 "torch.nn.functional.leaky_relu",
