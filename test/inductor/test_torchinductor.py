@@ -10193,6 +10193,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t = torch.randn([16, 8], device=self.device)
         self.common(fn, (t,))
 
+    @skip_if_halide
+    def test_argmin_no_dim_transposed_mutation(self):
+        # Covers the no-dim reduction variant from the original report
+        def fn(x):
+            y = x.transpose(0, 1)
+            # mutate the base; y shares storage so values change
+            x.add_(1)
+            return y.argmin()
+
+        t = torch.randn([32, 24], device=self.device)
+        self.common(fn, (t,))
+
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
             out1 = aten.convolution_backward(

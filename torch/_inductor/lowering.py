@@ -6719,12 +6719,25 @@ def reduce_min(x, dim=None, keepdim=False):
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
 reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
-reduce_argmax = register_lowering(aten.argmax)(
-    make_reduction("argmax", override_return_dtype=torch.int64)
-)
-reduce_argmin = register_lowering(aten.argmin)(
-    make_reduction("argmin", override_return_dtype=torch.int64)
-)
+
+_argmax_impl = make_reduction("argmax", override_return_dtype=torch.int64)
+_argmin_impl = make_reduction("argmin", override_return_dtype=torch.int64)
+
+
+@register_lowering(aten.argmax)
+def reduce_argmax(x, axis=None, keepdims=False):
+    # For full reductions (axis=None), ensure contiguous to get row-major indices
+    if axis is None:
+        x = clone(x)
+    return _argmax_impl(x, axis=axis, keepdims=keepdims)
+
+
+@register_lowering(aten.argmin)
+def reduce_argmin(x, axis=None, keepdims=False):
+    # For full reductions (axis=None), ensure contiguous to get row-major indices
+    if axis is None:
+        x = clone(x)
+    return _argmin_impl(x, axis=axis, keepdims=keepdims)
 
 add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"

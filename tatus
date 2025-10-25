@@ -1,0 +1,38 @@
+[1mdiff --git a/torch/_inductor/lowering.py b/torch/_inductor/lowering.py[m
+[1mindex e6a9d4f2763..54da19ca11f 100644[m
+[1m--- a/torch/_inductor/lowering.py[m
+[1m+++ b/torch/_inductor/lowering.py[m
+[36m@@ -6719,12 +6719,27 @@[m [mdef reduce_min(x, dim=None, keepdim=False):[m
+ register_lowering(prims.xor_sum)(make_reduction("xor_sum"))[m
+ reduce_amax = register_lowering(aten.amax)(make_reduction("max"))[m
+ reduce_amin = register_lowering(aten.amin)(make_reduction("min"))[m
+[31m-reduce_argmax = register_lowering(aten.argmax)([m
+[31m-    make_reduction("argmax", override_return_dtype=torch.int64)[m
+[31m-)[m
+[31m-reduce_argmin = register_lowering(aten.argmin)([m
+[31m-    make_reduction("argmin", override_return_dtype=torch.int64)[m
+[31m-)[m
+[32m+[m
+[32m+[m[32m_argmax_impl = make_reduction("argmax", override_return_dtype=torch.int64)[m
+[32m+[m[32m_argmin_impl = make_reduction("argmin", override_return_dtype=torch.int64)[m
+[32m+[m
+[32m+[m
+[32m+[m[32m@register_lowering(aten.argmax)[m
+[32m+[m[32mdef reduce_argmax(x, axis=None, keepdims=False):[m
+[32m+[m[32m    # For full reductions (axis=None), ensure contiguous to get row-major indices[m
+[32m+[m[32m    if axis is None:[m
+[32m+[m[32m        x = clone(x)[m
+[32m+[m[32m        x = as_contiguous(x)[m
+[32m+[m[32m    return _argmax_impl(x, axis=axis, keepdims=keepdims)[m
+[32m+[m
+[32m+[m
+[32m+[m[32m@register_lowering(aten.argmin)[m
+[32m+[m[32mdef reduce_argmin(x, axis=None, keepdims=False):[m
+[32m+[m[32m    # For full reductions (axis=None), ensure contiguous to get row-major indices[m
+[32m+[m[32m    if axis is None:[m
+[32m+[m[32m        x = clone(x)[m
+[32m+[m[32m        x = as_contiguous(x)[m
+[32m+[m[32m    return _argmin_impl(x, axis=axis, keepdims=keepdims)[m
+ [m
+ add = register_pointwise([m
+     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"[m

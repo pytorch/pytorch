@@ -94,6 +94,18 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
     return result
 
 class TestReductions(TestCase):
+    @onlyNativeDeviceTypes
+    def test_argmin_argmax_no_dim_transposed_view_after_mutation(self, device):
+        # Regression for https://github.com/pytorch/pytorch/issues/163929
+        # Ensure argmax/argmin indices are correct on transposed views (no dim)
+        x = torch.randn([16, 8], device=device)
+        y = x.transpose(0, 1)
+        x.add_(1)
+
+        # Compare against flatten-based references
+        self.assertEqual(y.argmin(), y.reshape(-1).argmin())
+        self.assertEqual(y.argmax(), y.reshape(-1).argmax())
+
 
     ###########################################################################
     # ReductionOpInfo unit tests
@@ -1888,21 +1900,6 @@ class TestReductions(TestCase):
                           [3, 3]], device=device, dtype=dtype)
         verify_against_numpy(t)
 
-    # Regression for transposed view after base mutation affecting argmin/argmax indices
-    # Covers https://github.com/pytorch/pytorch/issues/163929
-    @onlyNativeDeviceTypes
-    def test_argmin_argmax_transposed_view_after_mutation(self, device):
-        x = torch.randn(16, 8, device=device)
-        y = x.transpose(0, 1)
-        # mutate base; y shares storage so values change
-        x.add_(1)
-        # Validate indices are consistent along both dims
-        for dim in (0, 1):
-            yi = y.argmax(dim)
-            # torch.max(...)[1] should match argmax indices along the same dim
-            self.assertEqual(yi, torch.max(y, dim=dim)[1])
-            yi = y.argmin(dim)
-            self.assertEqual(yi, torch.min(y, dim=dim)[1])
 
         # Case: Sample from issue: https://github.com/pytorch/pytorch/issues/41998
         t = torch.tensor([[1, 5],
