@@ -639,6 +639,8 @@ def is_pytorch_file(rel_filepath):
         return True
     if rel_filepath.startswith("third_party/nvfuser/"):
         return True
+    if rel_filepath.startswith("third_party/fbgemm/"):
+        return True
     if rel_filepath.startswith("tools/autograd/templates/"):
         return True
     return False

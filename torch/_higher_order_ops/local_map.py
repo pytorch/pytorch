@@ -5,6 +5,7 @@
 
 # NOTE: this file may be removed once we move to a dynamo frontend
 
+import contextlib
 import functools
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -241,9 +242,26 @@ def create_hop_fw_bw(
                 isinstance(t, (FakeTensor, int, torch.SymInt)) for t in fw_inputs
             ), f"Unexpected element in {fw_inputs=}"
 
+            ctx = (
+                fake_mode.shape_env.ignore_fresh_unbacked_symbols
+                if fake_mode.shape_env is not None
+                else contextlib.nullcontext
+            )
+            with ctx():
+                fw_outs = fw_gm(*fw_inputs)
+
+            has_unbacked_outputs = any(
+                [
+                    not fw_out.node.has_hint()
+                    for fw_out in fw_outs
+                    if isinstance(fw_out, torch.SymInt)
+                ]
+            )
+            assert not has_unbacked_outputs
+
             example_grads = pytree.tree_map(
                 _new_tensor,
-                fw_gm(*fw_inputs),
+                fw_outs,
             )
             if not isinstance(example_grads, (list, tuple)):
                 example_grads = [example_grads]
@@ -297,9 +315,6 @@ def create_hop_fw_bw(
             *fw_inputs,
             *[example_grads[i] for i in filtered_grads_idx],
         ]
-        if fake_mode and fake_mode.shape_env:
-            # TODO: we need a better way to handle unbacked symbols that are contained within the HOP subgraphs
-            fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
         from torch._functorch._aot_autograd.graph_capture import (
             copy_fwd_metadata_to_bw_nodes,
@@ -534,13 +549,6 @@ def proxy_mode_key_common(
 
     # propagate local_map args to the call_function node
     out_proxy.node.meta["local_map_kwargs"] = local_map_kwargs
-
-    from torch._guards import detect_fake_mode
-
-    fake_mode = detect_fake_mode(args)
-    if fake_mode and fake_mode.shape_env:
-        # TODO: we need a better way to handle unbacked symbols that are contained within the HOP subgraphs
-        fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
 
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer

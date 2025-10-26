@@ -218,6 +218,7 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    # pyrefly: ignore  # invalid-annotation
     force_flash: NotRequired[bool]
     """ If True, forces use of the cute-dsl flash attention kernel.
 
@@ -266,11 +267,20 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     considered as a score_mod function. If the function has 4 positional arguments, it is
     considered as a mask function.
     """
-    num_positional_args = sum(
-        1
-        for param in inspect.signature(fn).parameters.values()
-        if param.default is inspect.Parameter.empty
-    )
+    if hasattr(fn, "__code__"):
+        code = fn.__code__
+        num_positional_total = code.co_argcount
+        defaults = ()
+        if hasattr(fn, "__defaults__"):
+            defaults = fn.__defaults__ or ()
+        num_defaults = len(defaults)
+        num_positional_args = num_positional_total - num_defaults
+    else:
+        num_positional_args = sum(
+            1
+            for param in inspect.signature(fn).parameters.values()
+            if param.default is inspect.Parameter.empty
+        )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD
@@ -345,6 +355,33 @@ def noop_mask(
 ) -> Tensor:
     """Returns a noop mask_mod"""
     return batch.new_ones(size=(), dtype=torch.bool, device=batch.device)
+
+
+def _sliced_mask_mod_error(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    """
+    Raises helpful error when using mask_mod from a sliced BlockMask.
+
+    After slicing a BlockMask, the mask_mod is reset and cannot be used directly.
+    Users must reassign mask_mod from the original (unsliced) BlockMask.
+    """
+    raise RuntimeError(
+        "Cannot use mask_mod from a sliced BlockMask. "
+        "When you slice a BlockMask using [], the mask_mod attribute is reset. "
+        "You must set it from the original BlockMask's mask_mod."
+        "\n\nIncorrect usage:"
+        "\n  base_mask = create_block_mask(my_mask_fn, ...)"
+        "\n  sliced_mask = base_mask[:, :, block_idx]"
+        "\n  sliced_mask.mask_mod = apply_offset(sliced_mask.mask_mod, offset)  # WRONG!"
+        "\n\nCorrect usage:"
+        "\n  base_mask = create_block_mask(my_mask_fn, ...)"
+        "\n  sliced_mask = base_mask[:, :, block_idx]"
+        "\n  sliced_mask.mask_mod = apply_offset(base_mask.mask_mod, offset)  # Use base_mask!"
+    )
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
@@ -700,7 +737,7 @@ class BlockMask:
             new_full_kv_num_blocks,
             new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
-            mask_mod=None,
+            mask_mod=_sliced_mask_mod_error,
             seq_lengths=self.seq_lengths,
             compute_q_blocks=self.q_indices is not None,
         )
@@ -1403,6 +1440,11 @@ def flex_attention(
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
+
+    # If BlockMask was sliced, its mask_mod is intentionally replaced with an error-raising stub.
+    # This guard ensures we surface the intended error message before any shape-based checks.
+    if getattr(block_mask, "mask_mod", None) is _sliced_mask_mod_error:
+        raise RuntimeError("Cannot use mask_mod from a sliced BlockMask")
 
     if (
         block_mask.BLOCK_SIZE[0] == _LARGE_SPARSE_BLOCK_SIZE

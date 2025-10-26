@@ -26,8 +26,9 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import Callable
 from types import MappingProxyType
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 from torch import fx

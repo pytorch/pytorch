@@ -295,7 +295,7 @@ class SerializationMixin:
             5,
             6
         ]
-        for i in range(0, 100):
+        for i in range(100):
             data.append(0)
         t = torch.tensor(data, dtype=torch.uint8)
 
@@ -4553,7 +4553,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with TemporaryFileName() as f:
             torch.save(m, f)
             try:
-                old_value = os.environ[env_var] if env_var in os.environ else None
+                old_value = os.environ.get(env_var, None)
                 os.environ[env_var] = "1"
                 # if weights_only is explicitly set, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD cannot override it
                 with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):

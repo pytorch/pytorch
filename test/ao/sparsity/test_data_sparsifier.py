@@ -123,7 +123,7 @@ class _BaseDataSparsiferTestCase(TestCase):
 
         step_count = 3
 
-        for _ in range(0, step_count):
+        for _ in range(step_count):
             sparsifier.step()
         for some_data in all_data:
             name, data, _ = self._get_name_data_config(some_data)

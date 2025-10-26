@@ -111,8 +111,10 @@ class _Orthogonal(Module):
             Q = Q * X.diagonal(dim1=-2, dim2=-1).int().unsqueeze(-2)
 
         if hasattr(self, "base"):
+            # pyrefly: ignore  # unbound-name
             Q = self.base @ Q
         if transposed:
+            # pyrefly: ignore  # unbound-name
             Q = Q.mT
         return Q  # type: ignore[possibly-undefined]
 

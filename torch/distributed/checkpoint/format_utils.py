@@ -84,7 +84,8 @@ class BroadcastingTorchSaveReader(StorageReader):
         # the entire checkpoint on each rank, hopefully preventing OOM issues
         # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:
-            assert self.checkpoint_id is not None
+            if self.checkpoint_id is None:
+                raise AssertionError("checkpoint_id must be set before reading data")
             torch_state_dict = torch.load(
                 self.checkpoint_id, map_location="cpu", weights_only=False
             )
@@ -112,10 +113,11 @@ class BroadcastingTorchSaveReader(StorageReader):
 
             tensor = narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
             target_tensor = planner.resolve_tensor(req).detach()
-            assert target_tensor.size() == tensor.size(), (
-                f"req {req.storage_index} mismatch sizes, "
-                f"{target_tensor.size()} vs {tensor.size()}"
-            )
+            if not target_tensor.size() == tensor.size():
+                raise AssertionError(
+                    f"req {req.storage_index} mismatch sizes, "
+                    f"{target_tensor.size()} vs {tensor.size()}"
+                )
             target_tensor.copy_(tensor)
             planner.commit_tensor(req, target_tensor)
 
@@ -128,9 +130,16 @@ class BroadcastingTorchSaveReader(StorageReader):
         """Implementation of the StorageReader method"""
         self.is_coordinator = is_coordinator
         if self.is_coordinator:
-            assert dist.get_rank() == self.coordinator_rank
+            if not dist.get_rank() == self.coordinator_rank:
+                raise AssertionError(
+                    f"Coordinator rank mismatch: expected {self.coordinator_rank}, "
+                    f"got {dist.get_rank()}"
+                )
 
-        assert self.checkpoint_id is not None
+        if self.checkpoint_id is None:
+            raise AssertionError(
+                "checkpoint_id must be set before setting up storage reader"
+            )
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         """Implementation of the StorageReader method"""

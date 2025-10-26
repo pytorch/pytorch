@@ -359,6 +359,16 @@ class Shard(Placement):
 
         return Shard._select_shard(shards, shard_index)
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _get_shard_pad_size(
+        full_size: int, local_tensor: torch.Tensor, dim: int
+    ) -> int:
+        """
+        Get the padding size of the local tensor on the shard dimension.
+        """
+        return full_size - local_tensor.size(dim)
+
     def _to_new_shard_dim(
         self,
         local_tensor: torch.Tensor,
@@ -387,14 +397,16 @@ class Shard(Placement):
             old_dim_full_chunk_size = (
                 old_dim_logical_size + num_chunks - 1
             ) // num_chunks
-            old_dim_pad_size = old_dim_full_chunk_size - local_tensor.size(self.dim)
+            old_dim_pad_size = Shard._get_shard_pad_size(
+                old_dim_full_chunk_size, local_tensor, self.dim
+            )
             local_tensor = pad_tensor(local_tensor, self.dim, old_dim_pad_size)
         if new_dim_padding:
             new_dim_full_chunk_size = (
                 new_dim_logical_size + num_chunks - 1
             ) // num_chunks
-            new_dim_pad_size = new_dim_full_chunk_size * num_chunks - local_tensor.size(
-                new_shard_dim
+            new_dim_pad_size = Shard._get_shard_pad_size(
+                new_dim_full_chunk_size * num_chunks, local_tensor, new_shard_dim
             )
             local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
 
@@ -643,6 +655,11 @@ class _StridedShard(Shard):
 
         return replicate_tensor.contiguous()
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
+        return len(sharded_indices[rank])
+
     def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
@@ -665,7 +682,7 @@ class _StridedShard(Shard):
         # squeeze back to 1D indices tensor
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
-        local_shard_size = len(sharded_indices[rank])
+        local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
 
         # offsets from _StridedShard is never used
         return local_shard_size, None
