@@ -381,6 +381,9 @@ class DTensorTestBase(MultiProcessTestCase):
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
 
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(self.rank)
+
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
 
@@ -698,8 +701,11 @@ class DTensorConverter:
 
 
 class LocalDTensorTestBase(DTensorTestBase):
+    def _handle_test_skip(self, msg: str) -> None:
+        self.skipTest(msg)
+
     def _get_local_tensor_mode(self):
-        return LocalTensorMode(frozenset(range(0, self.world_size)))
+        return LocalTensorMode(frozenset(range(self.world_size)))
 
     def setUp(self) -> None:
         super().setUp()
@@ -734,6 +740,9 @@ class LocalDTensorTestBase(DTensorTestBase):
 
     def _spawn_processes(self) -> None:
         pass
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(0)
 
 
 def make_wrapped(fn, ctxs):

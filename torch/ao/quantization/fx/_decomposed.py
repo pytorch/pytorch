@@ -1159,7 +1159,7 @@ class FakeQuantPerChannel(torch.autograd.Function):
             f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
         )
         assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
-        broadcast_dims = list(range(0, axis)) + list(range(axis + 1, input.ndim))
+        broadcast_dims = list(range(axis)) + list(range(axis + 1, input.ndim))
         unsqueeze_scales = _unsqueeze_multiple(scales, broadcast_dims)
         unsqueeze_zero_points = _unsqueeze_multiple(zero_points, broadcast_dims)
         temp = torch.round(input * (1.0 / unsqueeze_scales)) + unsqueeze_zero_points

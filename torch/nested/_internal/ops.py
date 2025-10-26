@@ -1112,7 +1112,7 @@ def chunk_default(func, *args, **kwargs):
         # the input number; it can be counter-intuitive, but it matches dense behavior.
         return [
             NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
-            for i in range(0, len(chunk_values))
+            for i in range(len(chunk_values))
         ]
     else:
         return [

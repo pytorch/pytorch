@@ -424,7 +424,7 @@ from user code:
         @torch.compile(backend="eager")
         def fn(x):
             d = {"a": 1}
-            optree.tree_flatten(d)
+            optree.tree_flatten_with_path(d)
             return torch.sin(x)
 
         fn(torch.randn(4))
@@ -434,10 +434,10 @@ from user code:
             first_graph_break,
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
+  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten_with_path.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: PyCapsule.flatten_with_path, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )

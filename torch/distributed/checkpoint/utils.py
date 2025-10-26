@@ -168,7 +168,8 @@ class _DistWrapper:
 
             local_reply = gather_result[0]
         else:
-            assert object_list is not None
+            if object_list is None:
+                raise AssertionError("object_list is None")
             local_reply = object_list[0]
         return local_reply
 
@@ -196,7 +197,8 @@ class _DistWrapper:
         all_data = self.gather_object(local_data)
         all_results: Optional[list[Union[R, CheckpointException]]] = None
         if self.is_coordinator:
-            assert all_data is not None
+            if all_data is None:
+                raise AssertionError("all_data is None")
             node_failures = _get_failure_dict(all_data)
 
             if len(node_failures) == 0:
@@ -243,7 +245,8 @@ class _DistWrapper:
         all_data = self.gather_object(local_data)
         result: Optional[Union[R, CheckpointException]] = None
         if self.is_coordinator:
-            assert all_data is not None
+            if all_data is None:
+                raise AssertionError("all_data is None")
             node_failures = _get_failure_dict(all_data)
             if len(node_failures) == 0:
                 try:
@@ -465,10 +468,12 @@ def _api_bc_check(func):
                 p.name for p in sig.parameters.values() if p.kind == p.KEYWORD_ONLY
             ]
             if "storage_writer" in kwonlyargs:
-                assert "storage_writer" not in kwargs, (args, kwargs)
+                if "storage_writer" in kwargs:
+                    raise AssertionError(f"storage_writer in kwargs: {(args, kwargs)}")
                 kwargs["storage_writer"] = args[1]
             elif "storage_reader" in kwonlyargs:
-                assert "storage_reader" not in kwargs, (args, kwargs)
+                if "storage_reader" in kwargs:
+                    raise AssertionError(f"storage_reader in kwargs: {(args, kwargs)}")
                 kwargs["storage_reader"] = args[1]
             else:
                 raise RuntimeError(f"Unexpected kwonlyargs = {kwonlyargs}")

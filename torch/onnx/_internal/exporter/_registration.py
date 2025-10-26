@@ -83,7 +83,7 @@ class OnnxDecompMeta:
                     # When the function is targeting an HOP, for example, it will accept
                     # functions as arguments and fail to generate an ONNX signature.
                     # In this case we set signature to None and dispatch to this function always.
-                    logger.warning(
+                    logger.warning(  # noqa: G200
                         "Failed to infer the signature for function '%s' because '%s'"
                         "All nodes targeting `%s` will be dispatched to this function",
                         self.onnx_function,

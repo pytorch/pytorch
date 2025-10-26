@@ -1009,8 +1009,8 @@ lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
 # mark these ops has side effect so that they won't be removed by DCE
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
 
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
@@ -1176,7 +1176,7 @@ def all_gather_inplace(
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (
+from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,
@@ -1190,11 +1190,11 @@ from torch.distributed.distributed_c10d import (
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
-    legacy_allgather: all_gather_tensor_inplace,
-    legacy_reducescatter: reduce_scatter_tensor_inplace,
-    legacy_allreduce: all_reduce_inplace,
-    legacy_all_to_all_single: all_to_all_inplace,
-    legacy_all_gather: all_gather_inplace,
-    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
-    legacy_all_gather_base: all_gather_tensor_inplace,
+    legacy_allgather: all_gather_tensor_inplace,  # type: ignore[has-type]
+    legacy_reducescatter: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
+    legacy_allreduce: all_reduce_inplace,  # type: ignore[has-type]
+    legacy_all_to_all_single: all_to_all_inplace,  # type: ignore[has-type]
+    legacy_all_gather: all_gather_inplace,  # type: ignore[has-type]
+    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
+    legacy_all_gather_base: all_gather_tensor_inplace,  # type: ignore[has-type]
 }

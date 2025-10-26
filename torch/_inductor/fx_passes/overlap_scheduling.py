@@ -6,7 +6,7 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 
 import torch
 import torch.fx as fx
@@ -42,18 +42,23 @@ def get_group_name(n: fx.Node) -> str:
     return kwargs["group_name"]
 
 
-def get_custom_estimation(n: fx.Node) -> Optional[float]:
-    runtime_estimation = torch._inductor.config.test_configs.estimate_aten_runtime
-    if runtime_estimation == "default":
+def get_custom_estimation(
+    n: fx.Node,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+) -> float | None:
+    if custom_runtime_estimation is None:
         return None
 
-    assert callable(runtime_estimation)
-    return runtime_estimation(n)
+    return custom_runtime_estimation(n)
 
 
-def estimate_collective_time(n: fx.Node, override_size: Optional[int] = None) -> float:
+def estimate_collective_time(
+    n: fx.Node,
+    override_size: int | None = None,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+) -> float:
     """Estimate the runtime of a collective operation, optionally with an overridden size."""
-    if (est := get_custom_estimation(n)) is not None:
+    if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
         return est
 
     return torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
@@ -82,7 +87,7 @@ def is_compute_node(n: fx.Node) -> bool:
     )
 
 
-def get_hint(x: Union[int, torch.SymInt]) -> Optional[int]:
+def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
     assert isinstance(x, torch.SymInt)
@@ -100,7 +105,10 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
         )
 
 
-def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
+def benchmark_node_with_cache_key(
+    n: fx.Node,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+) -> tuple[float, str | None]:
     assert is_compute_node(n)
 
     from torch._dynamo.testing import rand_strided
@@ -115,7 +123,7 @@ def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
 
     key = f"{str(n.target)}: "
 
-    def to_real(t: torch.Tensor) -> Optional[torch.Tensor]:
+    def to_real(t: torch.Tensor) -> torch.Tensor | None:
         shape = [get_hint(dim) for dim in t.shape]
         stride = [get_hint(s) for s in t.stride()]
 
@@ -141,7 +149,7 @@ def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
         if unbacked_tensor:
             return 0, key
 
-        if (est := get_custom_estimation(n)) is not None:
+        if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
             set_cached_node_time(key, est)
             return est, key
 
@@ -151,8 +159,11 @@ def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
         return out, key
 
 
-def benchmark_node(n: fx.Node) -> float:
-    return benchmark_node_with_cache_key(n)[0]
+def benchmark_node(
+    n: fx.Node,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+) -> float:
+    return benchmark_node_with_cache_key(n, custom_runtime_estimation)[0]
 
 
 @functools.cache
@@ -177,7 +188,7 @@ class CollectiveInfo:
     size_bytes: int
     estimated_time_ms: float
     exposed_time_ms: float  # How much of this collective is still exposed
-    hiding_node: Optional[fx.Node] = None  # Node that hides this collective
+    hiding_node: fx.Node | None = None  # Node that hides this collective
 
     @property
     def is_exposed(self) -> bool:
@@ -189,8 +200,8 @@ class CollBucket:
     """Track information about a bucket of collectives."""
 
     collectives: list[fx.Node]  # Original collective starts
-    bucketed_start: Optional[fx.Node] = None  # After bucketing
-    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+    bucketed_start: fx.Node | None = None  # After bucketing
+    bucketed_wait: fx.Node | None = None  # After bucketing
     total_bytes: int = 0
 
 
@@ -226,16 +237,23 @@ class OverlapScheduler:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        max_in_flight_gb: float = 0.5,
-        compute_overlap_multipler: float = 2.0,
-        max_coll_distance: int = 1000,
-        max_compute_pre_fetch: int = 5,
+        max_in_flight_gb: float,
+        max_compute_pre_fetch: int,
+        collective_bucketing: bool,
+        insert_overlap_deps: bool,
+        compute_overlap_multipler: float,
+        max_coll_distance: int,
+        custom_runtime_estimation: Callable[[fx.Node], float | None] | None,
     ):
         self.gm = gm
         self.graph = gm.graph
         self.compute_overlap_multipler = compute_overlap_multipler
         self.max_node_distance = max_coll_distance
         self.max_in_flight_bytes: int = gb_to_bytes(max_in_flight_gb)
+        self.custom_runtime_estimation = custom_runtime_estimation
+        self.collective_bucketing = collective_bucketing
+        self.insert_overlap_deps = insert_overlap_deps
+        self.max_compute_pre_fetch = max_compute_pre_fetch
 
         # Build structures
         stable_topological_sort(self.graph)
@@ -298,7 +316,9 @@ class OverlapScheduler:
         for node in self.nodes:
             if is_wait_tensor(node):
                 start = node.args[0]
-                coll_time_ms = estimate_collective_time(start)
+                coll_time_ms = estimate_collective_time(
+                    start, custom_runtime_estimation=self.custom_runtime_estimation
+                )
 
                 info = CollectiveInfo(
                     start_node=start,
@@ -342,10 +362,10 @@ class OverlapScheduler:
         log.info(
             "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
         )
-        runtime_estimations_keys: list[Optional[str]] = []
+        runtime_estimations_keys: list[str | None] = []
         runtime_estimations: list[float] = []
         for n in self.compute_nodes:
-            val, key = benchmark_node_with_cache_key(n)
+            val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
 
@@ -404,9 +424,9 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing:
+        if self.collective_bucketing:
             self._bucket_collectives()
-        elif torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps:
+        elif self.insert_overlap_deps:
             # If not bucketing, add effect tokens to preserve hiding dependencies
             self._add_effect_tokens_for_overlap()
 
@@ -523,7 +543,9 @@ class OverlapScheduler:
         info = self.collective_info[node]
 
         if self.should_assume_bucketed(node):
-            latency = estimate_collective_time(node, 0)
+            latency = estimate_collective_time(
+                node, 0, custom_runtime_estimation=self.custom_runtime_estimation
+            )
             assert latency <= info.exposed_time_ms
             info.exposed_time_ms = info.exposed_time_ms - latency
 
@@ -559,7 +581,7 @@ class OverlapScheduler:
     def _handle_compute(self, node: fx.Node) -> None:
         """Handle scheduling compute and finding overlaps."""
 
-        compute_time = benchmark_node(node)
+        compute_time = benchmark_node(node, self.custom_runtime_estimation)
         available_compute = compute_time * self.compute_overlap_multipler
 
         # TODO: separate overlap time per process group
@@ -670,8 +692,8 @@ class OverlapScheduler:
             available_compute_time -= overlap_amount
 
     def _find_schedulable_path(
-        self, target: fx.Node, curr_compute_node: Optional[fx.Node]
-    ) -> Optional[OrderedSet[fx.Node]]:
+        self, target: fx.Node, curr_compute_node: fx.Node | None
+    ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
 
         # TODO - following path faster than doing set difference here
@@ -725,7 +747,7 @@ class OverlapScheduler:
         return self.collective_info[oldest_start].wait_node
 
     def _wait_is_hidden(
-        self, wait_node: fx.Node, compute_node: Optional[fx.Node] = None
+        self, wait_node: fx.Node, compute_node: fx.Node | None = None
     ) -> bool:
         assert is_wait_tensor(wait_node)
         info = self.collective_info[self.wait_to_start[wait_node]]
@@ -809,6 +831,7 @@ class OverlapScheduler:
             scheduled=self.scheduled,
             max_bucket_memory_gb=1.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
+            insert_overlap_deps=self.insert_overlap_deps,
         )
         bucketer.bucket_collectives()
 
@@ -821,7 +844,7 @@ class OverlapScheduler:
 
         used_compute_nodes: OrderedSet[fx.Node] = OrderedSet()
 
-        def could_be_hidden(start: fx.Node) -> Optional[fx.Node]:
+        def could_be_hidden(start: fx.Node) -> fx.Node | None:
             for compute_node in self.compute_nodes:
                 if limit_coll_per_compute and compute_node in used_compute_nodes:
                     continue
@@ -865,20 +888,37 @@ class OverlapScheduler:
 def schedule_overlap_bucketing(
     gm: torch.fx.GraphModule,
     max_in_flight_gb: float = 2.0,
+    max_compute_pre_fetch: int = 5,
+    collective_bucketing: bool = False,
+    insert_overlap_deps: bool = False,
     compute_overlap_multipler: float = 1.0,
     max_coll_distance: int = 1000,
+    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
     Args:
         gm: Input graph module to optimize.
-        max_in_flight_gb: Maximum GB of concurrent collective data.
-        compute_overlap_multipler: Scale factor for compute time used to hide collectives.
-        max_coll_distance: Maximum node distance for overlap consideration.
+        max_in_flight_gb: Maximum GB of concurrent collective data. Too much in flight memory
+            can cause memory fragmentation within the CUDA Caching Allocator.
+        max_compute_pre_fetch: Maximum compute node prefetch distance.
+        collective_bucketing: Enable overlap-preserving collective bucketing.
+        insert_overlap_deps: Insert overlap dependencies using control deps operator. This should only be used if
+            compiling with inductor, or for subsequent passes before removing the ops prior to execution.
+        compute_overlap_multipler: Scale factor for compute time used to hide collectives. This can be used
+            to address over or under aggressive overlapping.
+        max_coll_distance: Maximum node distance for overlap or bucketing. Mostly intended to reduce compile time.
+        custom_runtime_estimation: Custom runtime estimation function that estimates runtime in ms for an fx node.
+            If None, uses default estimations. This is currently limited to collectives and compute nodes.
     """
+
     return OverlapScheduler(
         gm,
         compute_overlap_multipler=compute_overlap_multipler,
         max_in_flight_gb=max_in_flight_gb,
         max_coll_distance=max_coll_distance,
+        max_compute_pre_fetch=max_compute_pre_fetch,
+        custom_runtime_estimation=custom_runtime_estimation,
+        collective_bucketing=collective_bucketing,
+        insert_overlap_deps=insert_overlap_deps,
     ).run()

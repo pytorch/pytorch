@@ -137,12 +137,10 @@ def _get_state_dict_2d_layout(
     for key, value in state_dict.items():
         specs[key] = (None, value.size())
         if _is_nested_tensor(value):
-            assert len(value.local_shards()) == 1, (
-                "Cannot handle ST with multiple shards"
-            )
-            assert isinstance(value, ShardedTensor), (
-                "Can only handle nested ShardedTensor"
-            )
+            if not len(value.local_shards()) == 1:
+                raise AssertionError("Cannot handle ST with multiple shards")
+            if not isinstance(value, ShardedTensor):
+                raise AssertionError("Can only handle nested ShardedTensor")
             shard = value.local_shards()[0]
             specs[key] = (
                 shard.metadata.shard_offsets,
@@ -184,7 +182,8 @@ class _ReaderWithOffset(DefaultLoadPlanner):
 
             offset = self.fqn_to_offset[fqn]
 
-            assert len(obj.local_shards()) == 1
+            if not len(obj.local_shards()) == 1:
+                raise AssertionError("Expected exactly one local shard")
             original_shard = obj.local_shards()[0]
             local_chunks = [
                 ChunkStorageMetadata(
@@ -201,7 +200,8 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             # TODO: The ReadItems will have a displaced MetadataIndex, fix it.
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
             for ri in reqs:
-                assert ri.dest_index.offset is not None
+                if ri.dest_index.offset is None:
+                    raise AssertionError("dest_index.offset must not be None")
                 original_offset = _element_wise_sub(ri.dest_index.offset, offset)
                 original_index = dataclasses.replace(
                     ri.dest_index, offset=torch.Size(original_offset)

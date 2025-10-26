@@ -301,7 +301,7 @@ class FlatArgsAdapter(abc.ABC):
         return []
 
 
-class UnflattenedModule(torch.nn.Module):
+class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
     def __init__(
         self,
         export_module: ExportedProgram,
@@ -340,6 +340,7 @@ class UnflattenedModule(torch.nn.Module):
 
         _inplace_buffer_and_input_mutations(export_graph, self.graph_signature)
         _fix_nn_module_stacks(export_graph)
+        self._ty = _root_module_type(export_graph)
 
         self.ivals = _IVals()
         # for any intermediate value of a mutation that is read, track the mutation
@@ -856,6 +857,17 @@ def _inplace_buffer_and_input_mutations(
     # need to thread it through anymore.
     user_outputs = tuple(return_args[num_mutations:])
     output_node.args = ((user_outputs),)
+
+
+def _root_module_type(graph: torch.fx.Graph) -> Optional[str]:
+    for node in graph.nodes:
+        if "nn_module_stack" not in node.meta:
+            continue
+
+        for path, ty in node.meta["nn_module_stack"].values():
+            if not path:
+                return ty
+    return None
 
 
 def _fix_nn_module_stacks(graph):
