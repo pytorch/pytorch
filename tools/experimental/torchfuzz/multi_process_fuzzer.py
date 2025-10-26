@@ -84,9 +84,11 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r'self\.shape_env\.guard_or_defer_runtime_assert\(expr, "guard_equals"\)'
     ),  # https://github.com/pytorch/pytorch/issues/166245
+    re.compile(
+        r"assert len\(self\.stride\) == len\(order\)"
+    ),  # https://github.com/pytorch/pytorch/issues/166270
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
-
 ]
 
 
