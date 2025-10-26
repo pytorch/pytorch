@@ -500,7 +500,7 @@ def xavier_normal_(
 
 
 def _calculate_correct_fan(tensor: Tensor, mode: _FanMode) -> int:
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     mode = mode.lower()
     valid_modes = ["fan_in", "fan_out"]
     if mode not in valid_modes:

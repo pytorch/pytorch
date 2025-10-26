@@ -196,7 +196,7 @@ def get_file_pathnames_from_root(
         if match_masks(fname, masks):
             yield path
     else:
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         for path, dirs, files in os.walk(root, onerror=onerror):
             if abspath:
                 path = os.path.abspath(path)
