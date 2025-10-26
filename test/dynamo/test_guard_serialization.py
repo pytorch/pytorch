@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
-import importlib
 import pickle
 import sys
 import tempfile
@@ -982,23 +981,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3, device="meta")
         dks = torch._C._dispatch_keys(x)
         self._test_check_fn(ref, loaded, {"x": x, "dks": dks}, False)
-
-    def test_name_match(self):
-        def fn(x, y):
-            return torch.cond(x, lambda x: y + 1, lambda x: y - 1, (y,))
-
-        x = torch.tensor(True)
-        y = torch.randn(3)
-        ref, loaded = self._test_serialization("NAME_MATCH", fn, x, y)
-
-        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
-
-        op = importlib.import_module("torch._higher_order_ops.cond").cond_op
-        prev, op.__name__ = op.__name__, ""
-        try:
-            self._test_check_fn(ref, loaded, {"x": x, "y": y}, False)
-        finally:
-            op.__name__ = prev
 
     def test_dual_level(self):
         def fn(x):

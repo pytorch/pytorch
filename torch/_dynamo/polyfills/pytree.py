@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -17,7 +17,7 @@ from ..decorators import substitute_in_graph
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from typing_extensions import Self
 
 
