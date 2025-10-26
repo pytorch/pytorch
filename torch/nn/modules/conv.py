@@ -363,7 +363,7 @@ class Conv1d(_ConvNd):
                 self.dilation,
                 self.groups,
             )
-        # pyrefly: ignore  # no-matching-overload
+
         return F.conv1d(
             input, weight, bias, self.stride, self.padding, self.dilation, self.groups
         )
@@ -541,7 +541,7 @@ class Conv2d(_ConvNd):
                 self.dilation,
                 self.groups,
             )
-        # pyrefly: ignore  # no-matching-overload
+
         return F.conv2d(
             input, weight, bias, self.stride, self.padding, self.dilation, self.groups
         )
@@ -711,7 +711,7 @@ class Conv3d(_ConvNd):
                 self.dilation,
                 self.groups,
             )
-        # pyrefly: ignore  # no-matching-overload
+
         return F.conv3d(
             input, weight, bias, self.stride, self.padding, self.dilation, self.groups
         )

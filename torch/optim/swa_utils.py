@@ -229,9 +229,10 @@ class AveragedModel(Module):
         use_buffers=False,
     ):  # noqa: D107
         super().__init__()
-        assert avg_fn is None or multi_avg_fn is None, (
-            "Only one of avg_fn and multi_avg_fn should be provided"
-        )
+        if avg_fn is not None and multi_avg_fn is not None:
+            raise AssertionError(
+                "Only one of avg_fn and multi_avg_fn should be provided"
+            )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)

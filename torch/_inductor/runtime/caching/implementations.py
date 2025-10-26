@@ -190,6 +190,7 @@ class _OnDiskCacheImpl(_CacheImpl):
                     Defaults to empty string if not specified.
         """
         self._cache_dir: Path = self._base_dir / (sub_dir or "")
+        # pyrefly: ignore  # bad-assignment
         self._flock: FileLock = FileLock(str(self._cache_dir / "dir.lock"))
 
     @property

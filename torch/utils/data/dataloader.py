@@ -678,7 +678,6 @@ class _BaseDataLoaderIter:
 
         # Set pin memory device based on the current accelerator.
         self._pin_memory_device = (
-            # pyrefly: ignore  # unbound-name
             acc.type
             if self._pin_memory
             and (acc := torch.accelerator.current_accelerator()) is not None

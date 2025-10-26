@@ -363,8 +363,15 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
         # sparse compressed tensors don't implement sub/add/copy_
         # yet. However, in non-masked semantics context entry and v
         # have the same sparse indices ...
-        assert entry.layout == v.layout, (entry.layout, v.layout)
-        assert entry._nnz() == v._nnz(), (entry._nnz(), v._nnz(), entry.shape)
+        if entry.layout != v.layout:
+            raise AssertionError(
+                f"Expected entry and v to have the same layout, but got {entry.layout} and {v.layout}"
+            )
+        if entry._nnz() != v._nnz():
+            raise AssertionError(
+                f"Expected entry and v to have the same nnz, but got {entry._nnz()} and {v._nnz()} "
+                f"with entry shape {entry.shape}"
+            )
         # ... the finite differencing can be performed on values only:
         entry = entry.values()
         v = v.values()
@@ -403,13 +410,15 @@ def _compute_numerical_jvps_wrt_specific_input(
             jvp_fn(delta[1] * 1j) if isinstance(delta, tuple) else jvp_fn(delta * 1j)
         )
         for ds_dx, ds_dy in zip(ds_dx_tup, ds_dy_tup):
-            assert not ds_dx.is_complex()
+            if ds_dx.is_complex():
+                raise AssertionError("Expected ds_dx to be real-valued, not complex")
             # conjugate wirtinger derivative
             conj_w_d = ds_dx + ds_dy * 1j
             jvps.append(conj_w_d)
     else:
         for ds_dx in ds_dx_tup:  # R -> R or (R -> C for the forward AD case)
-            assert is_forward_ad or not ds_dx.is_complex()
+            if not is_forward_ad and ds_dx.is_complex():
+                raise AssertionError("Expected ds_dx to be real-valued, not complex.")
             jvps.append(ds_dx)
     return jvps
 
@@ -456,16 +465,18 @@ def _check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
     on_index = f"on index {idx} " if idx is not None else ""
-    assert output1.shape == output2.shape, (
-        f"Expected `func` to return outputs with the same shape"
-        f" when inputs are perturbed {on_index}by {eps}, but got:"
-        f" shapes {output1.shape} and {output2.shape}."
-    )
-    assert output1.dtype == output2.dtype, (
-        f"Expected `func` to return outputs with the same dtype"
-        f" when inputs are perturbed {on_index}by {eps}, but got:"
-        f" dtypes {output1.dtype} and {output2.dtype}."
-    )
+    if output1.shape != output2.shape:
+        raise AssertionError(
+            f"Expected `func` to return outputs with the same shape"
+            f" when inputs are perturbed {on_index}by {eps}, but got:"
+            f" shapes {output1.shape} and {output2.shape}."
+        )
+    if output1.dtype != output2.dtype:
+        raise AssertionError(
+            f"Expected `func` to return outputs with the same dtype"
+            f" when inputs are perturbed {on_index}by {eps}, but got:"
+            f" dtypes {output1.dtype} and {output2.dtype}."
+        )
 
 
 def get_numerical_jacobian_wrt_specific_input(
@@ -478,7 +489,8 @@ def get_numerical_jacobian_wrt_specific_input(
     # is equivalent to a single col of the Jacobian matrix of fn.
     jacobian_cols: dict[int, list[torch.Tensor]] = {}
     input = inputs[input_idx] if input is None else input
-    assert input.requires_grad
+    if not input.requires_grad:
+        raise AssertionError("Expected input to have requires_grad=True")
     for x, idx, d_idx in _iter_tensor(input):
         wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, x)
         input_to_perturb = x[idx]
@@ -687,7 +699,11 @@ def _get_numerical_vJu(
         # Filter out the Ju for non floating point outputs
         filtered_Ju = []
         func_out = _as_tuple(func_out)
-        assert len(all_Ju) == len(func_out)
+        if len(all_Ju) != len(func_out):
+            raise AssertionError(
+                f"Expected all_Ju and func_out to have the same length, "
+                f"but got {len(all_Ju)} and {len(func_out)}"
+            )
         for Ju, output in zip(all_Ju, func_out):
             if _is_float_or_complex_tensor(output):
                 filtered_Ju.append(Ju)
@@ -734,7 +750,11 @@ def _stack_and_check_tensors(
                 out_jacobian[:, j].zero_()
             else:
                 dense = tensor.to_dense() if tensor.layout != torch.strided else tensor
-                assert out_jacobian[:, j].numel() == dense.numel()
+                if out_jacobian[:, j].numel() != dense.numel():
+                    raise AssertionError(
+                        f"Expected out_jacobian column to have {dense.numel()} elements, "
+                        f"but got {out_jacobian[:, j].numel()}"
+                    )
                 out_jacobian[:, j] = dense.reshape(-1)
     return out_jacobians, correct_grad_sizes, correct_grad_types
 
@@ -1061,7 +1081,8 @@ Expected:
 
 def _test_batched_grad_forward_ad(func, inputs) -> bool:
     fwAD = torch.autograd.forward_ad  # To avoid early import issues (do we need this?)
-    assert isinstance(inputs, tuple)
+    if not isinstance(inputs, tuple):
+        raise AssertionError("Expected inputs to be a tuple")
 
     for input_idx, current_input in enumerate(inputs):
         if not (is_tensor_like(current_input) and current_input.requires_grad):
@@ -1641,7 +1662,10 @@ def _slow_gradcheck(
 
 
 def _dot_with_type_promotion(u, v):
-    assert u.dim() == 1 and v.dim() == 1
+    if u.dim() != 1 or v.dim() != 1:
+        raise AssertionError(
+            f"Expected u and v to be 1D tensors, but got dims {u.dim()} and {v.dim()}"
+        )
     return (u * v).sum()
 
 
@@ -1908,7 +1932,8 @@ def _fast_gradcheck(
     )
     # TODO: replicate https://github.com/pytorch/pytorch/pull/77743 for fast gradcheck as well
     if use_forward_ad:
-        assert all_v is None
+        if all_v is not None:
+            raise AssertionError("Expected all_v to be None.")
         analytical_vJu = _get_analytical_jacobian_forward_ad(
             func,
             inputs,
@@ -2036,15 +2061,18 @@ def gradcheck(
         ``True`` if all differences satisfy allclose condition
 
     """
-    assert check_forward_ad or check_backward_ad, (
-        "Expected at least one of check_forward_ad or check_backward_ad to be True"
-    )
-    assert not (check_batched_grad and not check_backward_ad), (
-        "Setting check_batched_grad=True requires check_backward_ad to be True"
-    )
-    assert not (check_batched_forward_grad and not check_forward_ad), (
-        "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
-    )
+    if not (check_forward_ad or check_backward_ad):
+        raise AssertionError(
+            "Expected at least one of check_forward_ad or check_backward_ad to be True"
+        )
+    if check_batched_grad and not check_backward_ad:
+        raise AssertionError(
+            "Setting check_batched_grad=True requires check_backward_ad to be True"
+        )
+    if check_batched_forward_grad and not check_forward_ad:
+        raise AssertionError(
+            "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
+        )
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
@@ -2189,15 +2217,18 @@ def gradgradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
-    assert check_fwd_over_rev or check_rev_over_rev, (
-        "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
-    )
-    assert not (check_undefined_grad and not check_rev_over_rev), (
-        "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
-    )
-    assert not (check_batched_grad and not check_rev_over_rev), (
-        "Setting check_batched_grad=True requires check_rev_over_rev to be True"
-    )
+    if not (check_fwd_over_rev or check_rev_over_rev):
+        raise AssertionError(
+            "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
+        )
+    if check_undefined_grad and not check_rev_over_rev:
+        raise AssertionError(
+            "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
+        )
+    if check_batched_grad and not check_rev_over_rev:
+        raise AssertionError(
+            "Setting check_batched_grad=True requires check_rev_over_rev to be True"
+        )
     # TODO: do we want to test this too?
     # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
     #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")
