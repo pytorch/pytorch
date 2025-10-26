@@ -121,7 +121,7 @@ def slicer(dim, slice_range, *tensors):
 def multidim_slicer(dims, slices, *tensors):
     for t in tensors:
         s = [slice(None)] * t.dim()
-        for d, d_slice in zip(dims, slices):
+        for d, d_slice in zip(dims, slices, strict=True):
             if d is not None:
                 s[d] = d_slice
         yield t[tuple(s)]
@@ -140,7 +140,7 @@ def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
     import itertools
 
     def generate_grid_points():
-        for fg, mg in zip(full_grid, grid_blocks):
+        for fg, mg in zip(full_grid, grid_blocks, strict=True):
             yield range(0, fg, mg)
 
     def generate_sliced_tensors(slices):
@@ -149,9 +149,10 @@ def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
 
     for grid_point in itertools.product(*generate_grid_points()):
         grid = [
-            min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, grid_blocks)
+            min(fg - gp, mg)
+            for fg, gp, mg in zip(full_grid, grid_point, grid_blocks, strict=True)
         ]
-        slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid)]
+        slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid, strict=True)]
         # grid_points are iterated in a "contiguous" order, i.e.
         # left dimensions traversed slower than right dimensions.
         # This order is reversed for CUDA grids.
@@ -173,7 +174,8 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
                 return max(1, min(g, mg))
 
         grid_blocks = tuple(
-            valid_grid_dim(g, mg) for g, mg in zip(grid_blocks, cuda_max_grid)
+            valid_grid_dim(g, mg)
+            for g, mg in zip(grid_blocks, cuda_max_grid, strict=True)
         )  # type: ignore[assignment]
 
     for grid, *sliced_tensors in grid_partitioner(

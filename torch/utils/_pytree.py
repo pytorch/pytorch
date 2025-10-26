@@ -792,7 +792,7 @@ def _dict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
     # pyrefly: ignore [bad-return]
-    return [(MappingKey(k), v) for k, v in zip(context, values)], context
+    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
 
 
 def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
@@ -861,7 +861,7 @@ def _ordereddict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
     # pyrefly: ignore [bad-return]
-    return [(MappingKey(k), v) for k, v in zip(context, values)], context
+    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
 
 
 def _ordereddict_unflatten(
@@ -886,7 +886,9 @@ def _defaultdict_flatten_with_keys(
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
     # pyrefly: ignore [bad-return]
-    return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
+    return [
+        (MappingKey(k), v) for k, v in zip(dict_context, values, strict=True)
+    ], context
 
 
 def _defaultdict_unflatten(
