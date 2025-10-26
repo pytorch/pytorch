@@ -758,10 +758,10 @@ class AutogradFunctionVariable(VariableTracker):
             # functions, so we have to add guards manually.
             if self.source:
                 fwd_src = AttrSource(self.source, "forward")
-                install_guard(fwd_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                install_guard(fwd_src.make_guard(GuardBuilder.CLOSURE_MATCH))
                 if is_setup_ctx_defined:
                     setup_ctx_src = AttrSource(self.source, "setup_context")
-                    install_guard(setup_ctx_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                    install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
 
