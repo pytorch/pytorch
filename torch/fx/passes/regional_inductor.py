@@ -106,7 +106,6 @@ def _needs_inductor_compile(node):
         and hasattr(node, "meta")
         and node.meta.get("custom", None)
         and "compile_with_inductor" in node.meta["custom"]
-        and node.meta["custom"]["compile_with_inductor"] != "0"
     )
 
 
@@ -160,11 +159,6 @@ def regional_inductor(gm, *example_args):
                 "triton.cudagraphs": False
             }
         }
-    }):
-
-    If you want to disable inductor for the region, you should do
-    with fx_traceback.annotate({
-        "compile_with_inductor": 0
     }):
     """
     # fuser utils create new nodes using create_proxy which retains the seq_nr
