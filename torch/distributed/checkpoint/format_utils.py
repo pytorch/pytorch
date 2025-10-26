@@ -64,7 +64,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         self.checkpoint_id = checkpoint_id
         self.coordinator_rank = coordinator_rank
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def read_metadata(self) -> Metadata:
         """Extends the default StorageReader to support building the metadata file"""
         # Metadata is built in planner.set_up_planner, since we are not actually reading metadata from
@@ -104,7 +104,7 @@ class BroadcastingTorchSaveReader(StorageReader):
             #  Broadcast the tensor from the coordinator rank
             if self.is_coordinator:
                 pg_device = dist.distributed_c10d._get_pg_default_device()
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 tensor = torch_state_dict[req.storage_index.fqn].to(pg_device)
             else:
                 tensor = torch.empty_like(planner.state_dict[req.storage_index.fqn])
@@ -125,7 +125,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         fut.set_result(None)
         return fut
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         """Implementation of the StorageReader method"""
         self.is_coordinator = is_coordinator

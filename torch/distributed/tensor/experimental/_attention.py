@@ -465,7 +465,7 @@ def _templated_ring_attention(
         )
         sdpa_merger.step(out, logsumexp, partial)
 
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     return *sdpa_merger.results(), *rest
 
 
@@ -632,7 +632,7 @@ def _templated_ring_attention_backward(
         grad_query,
         grad_key,
         grad_value,
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         *rest,
     )
 
@@ -1327,7 +1327,6 @@ class _ContextParallel(ParallelStyle):
         placement = [Shard(self.seq_dim)]
         all_args = []
 
-        # pyrefly: ignore  # bad-assignment, bad-argument-type
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, DTensor):
