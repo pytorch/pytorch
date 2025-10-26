@@ -297,9 +297,6 @@ def create_hop_fw_bw(
             *fw_inputs,
             *[example_grads[i] for i in filtered_grads_idx],
         ]
-        if fake_mode and fake_mode.shape_env:
-            # TODO: we need a better way to handle unbacked symbols that are contained within the HOP subgraphs
-            fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
         from torch._functorch._aot_autograd.graph_capture import (
             copy_fwd_metadata_to_bw_nodes,
@@ -314,14 +311,13 @@ def create_hop_fw_bw(
         prepped_joint_hop_gm = prepare_for_partitioner(
             joint_hop_gm, num_fw_inputs, num_fw_outputs
         )
-        with disable_proxy_modes_tracing():
-            # Also runs joint passes
-            new_fw_gm, new_bw_gm = partition_fn(
-                prepped_joint_hop_gm,
-                [],
-                num_fwd_outputs=num_fw_outputs,
-                static_lifetime_input_indices=[],
-            )
+        # Also runs joint passes
+        new_fw_gm, new_bw_gm = partition_fn(
+            prepped_joint_hop_gm,
+            [],
+            num_fwd_outputs=num_fw_outputs,
+            static_lifetime_input_indices=[],
+        )
 
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
@@ -527,14 +523,6 @@ def proxy_mode_key_common(
 
     # propagate local_map args to the call_function node
     out_proxy.node.meta["local_map_kwargs"] = local_map_kwargs
-
-    from torch._guards import detect_fake_mode
-
-    fake_mode = detect_fake_mode(args)
-    if fake_mode and fake_mode.shape_env:
-        # TODO: we need a better way to handle unbacked symbols that are contained within the HOP subgraphs
-        fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
-
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )

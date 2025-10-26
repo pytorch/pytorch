@@ -193,7 +193,12 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-    if _use_flex_flash_attention(subgraph, mask_graph, kernel_options):
+    if _use_flex_flash_attention(
+        subgraph,
+        mask_graph,
+        kernel_options,
+        num_score_mod_placeholders=len(placeholder_inps),
+    ):
         return create_flex_flash_attention_kernel(
             query,
             key,

@@ -166,6 +166,7 @@ class TorchExportStrictStrategy(CaptureStrategy):
                     kwargs=kwargs,
                     dynamic_shapes=dynamic_shapes,
                     strict=True,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
             except torch._dynamo.exc.UserError as exc:
                 # Refine the dynamic shapes based on the suggested fixes.
@@ -177,7 +178,12 @@ class TorchExportStrictStrategy(CaptureStrategy):
                     # If the dynamic shapes cannot be refined, re-raise the exception.
                     raise exc from None
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=True
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=new_shapes,
+                    strict=True,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
 
     def _enter(self, model) -> None:
@@ -215,6 +221,7 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
                     kwargs=kwargs,
                     dynamic_shapes=dynamic_shapes,
                     strict=False,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
             except torch._dynamo.exc.UserError as exc:
                 # Refine the dynamic shapes based on the suggested fixes.
@@ -226,7 +233,12 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
                     # If the dynamic shapes cannot be refined, re-raise the exception.
                     raise exc from None
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=new_shapes,
+                    strict=False,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
 
     def _enter(self, model) -> None:

@@ -708,7 +708,7 @@ def _distribute_state_dict(
             local_state_dict[key] = value.cpu()
         else:
             assert isinstance(value, torch.Tensor)
-            local_state = local_state_dict.get(key, None)
+            local_state = local_state_dict.get(key)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):

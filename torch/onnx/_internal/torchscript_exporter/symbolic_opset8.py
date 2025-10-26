@@ -116,7 +116,7 @@ def _interpolate(name, dim, interpolate_mode):
                 if i < 2
                 else float(output_size[-(dim - i)])
                 / float(input.type().sizes()[-(dim - i)])
-                for i in range(0, dim)
+                for i in range(dim)
             ]
         return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
 

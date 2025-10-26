@@ -18,9 +18,9 @@ specialized implementations for each hardware backend's unique features.
 import inspect
 import time
 from collections import namedtuple
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import torch
 

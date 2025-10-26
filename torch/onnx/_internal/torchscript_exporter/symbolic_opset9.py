@@ -840,7 +840,7 @@ def t(g: jit_utils.GraphContext, self):
 def numpy_T(g: jit_utils.GraphContext, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     assert ndim is not None
-    perm = list(reversed(range(0, ndim)))
+    perm = list(reversed(range(ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
 
@@ -990,7 +990,7 @@ def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
 @_onnx_symbolic("aten::permute")
 @symbolic_helper.parse_args("v", "is")
 def permute(g: jit_utils.GraphContext, self, dims):
-    if dims == list(range(0, len(dims))):
+    if dims == list(range(len(dims))):
         return self
     return g.op("Transpose", self, perm_i=dims)
 
@@ -1368,7 +1368,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
         )
     ceiled_output_dim = [
         math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
-        for i in range(0, len(padding))
+        for i in range(len(padding))
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
@@ -1377,7 +1377,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
             else ceiled_output_dim[i]
         )
-        for i in range(0, len(ceiled_output_dim))
+        for i in range(len(ceiled_output_dim))
     ]
     padding_ceil = [
         (
@@ -1392,7 +1392,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
                 )
             )
         )
-        for i in range(0, len(padding))
+        for i in range(len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
@@ -1405,7 +1405,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
             else int(padding_ceil[i])
         )
-        for i in range(0, len(padding_ceil))
+        for i in range(len(padding_ceil))
     ]
     return padding_ceil
 
@@ -1697,14 +1697,14 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
                 name, "input size not accessible", input
             )
         # verify if output size % input size = 0 for all dim
-        mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
+        mod = [dim[i] % output_size[i] for i in range(len(dim))]
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return symbolic_helper._unimplemented(
                 name, "output size that are not factor of input size", output_size_value
             )
-        k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
+        k = [int(dim[i] / output_size[i]) for i in range(len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
             # pyrefly: ignore  # not-callable
@@ -2906,7 +2906,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
             for low, hi in zip(low_indices, hi_indices)
         ]
         ndim = len(sizes)
-        perm = list(range(0, ndim))
+        perm = list(range(ndim))
         perm.append(perm.pop(dimension))
         unsqueeze = [
             symbolic_helper._unsqueeze_helper(

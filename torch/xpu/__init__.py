@@ -251,7 +251,6 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     # Only keep attributes that are safe for dictionary serialization.
     serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
     return {
-        # pyrefly: ignore  # unbound-name
         key: value
         for key in dir(props)
         if not key.startswith("__")
