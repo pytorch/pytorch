@@ -40,7 +40,6 @@ class TestDevice(TestCase):
                 # Second, try to initialize in the child process
                 torch.openreg.init()
             except Exception as e:
-                print(e)
                 q.put(e)
 
         ctx = multiprocessing.get_context("fork")
