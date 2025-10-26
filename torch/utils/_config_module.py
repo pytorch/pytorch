@@ -85,16 +85,12 @@ class _Config(Generic[T]):
         )
 
         if self.alias is not None:
-            if (
-                self.default is not _UNSET_SENTINEL
-                or self.justknob is not None
-                or self.env_name_default is not None
-                or self.env_name_force is not None
-            ):
-                raise AssertionError(
-                    "if alias is set, none of {default, justknob, \
-                        env_name_default and env_name_force} can be set"
-                )
+            assert (
+                self.default is _UNSET_SENTINEL
+                and self.justknob is None
+                and self.env_name_default is None
+                and self.env_name_force is None
+            ), "if alias is set, none of {default, justknob and env var} can be set"
 
     @staticmethod
     def string_or_list_of_string_to_list(
@@ -104,8 +100,7 @@ class _Config(Generic[T]):
             return None
         if isinstance(val, str):
             return [val]
-        if not isinstance(val, list):
-            raise AssertionError(f"val is not a list, got {type(val)}")
+        assert isinstance(val, list)
         return val
 
 
@@ -198,10 +193,7 @@ def install_config_module(module: ModuleType) -> None:
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
-                if value.__module__ != module.__name__:
-                    raise AssertionError(
-                        f"subconfig class {value} must be defined in module {module.__name__}"
-                    )
+                assert value.__module__ == module.__name__
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")
@@ -242,8 +234,10 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> set[str
             prev_name = ""
             maybe_current = token.string.strip()
             if COMPILE_IGNORED_MARKER in maybe_current:
-                if current_comment != ("", -1):
-                    raise AssertionError(f"unconsumed {COMPILE_IGNORED_MARKER}")
+                assert current_comment == (
+                    "",
+                    -1,
+                ), f"unconsumed {COMPILE_IGNORED_MARKER}"
                 current_comment = maybe_current, token.start[0]
         elif token.type == tokenize.NAME:
             # Only accept the first name token, to handle if you have
@@ -260,8 +254,7 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> set[str
                 assignments.add(prev_name)
                 current_comment = "", -1  # reset
             prev_name = ""
-    if current_comment != ("", -1):
-        raise AssertionError(f"unconsumed {COMPILE_IGNORED_MARKER}")
+    assert current_comment == ("", -1), f"unconsumed {COMPILE_IGNORED_MARKER}"
     return assignments
 
 
@@ -313,22 +306,20 @@ class _ConfigEntry:
 
         # Ensure justknobs and envvars are allowlisted types
         if self.justknob is not None and self.default is not None:
-            if not isinstance(self.default, bool):
-                raise AssertionError(
-                    f"justknobs only support booleans, {self.default} is not a boolean"
-                )
+            assert isinstance(self.default, bool), (
+                f"justknobs only support booleans, {self.default} is not a boolean"
+            )
         if self.value_type is not None and (
             config.env_name_default is not None or config.env_name_force is not None
         ):
-            if self.value_type not in (
+            assert self.value_type in (
                 bool,
                 str,
                 Optional[bool],
                 Optional[str],
-            ):
-                raise AssertionError(
-                    f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
-                )
+            ), (
+                f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
+            )
 
 
 class ConfigModule(ModuleType):
@@ -426,10 +417,7 @@ class ConfigModule(ModuleType):
 
     def _set_alias_val(self, entry: _ConfigEntry, val: Any) -> None:
         data = self._get_alias_module_and_name(entry)
-        if data is None:
-            raise AssertionError(
-                "alias data should not be None when setting alias value"
-            )
+        assert data is not None
         module, constant_name = data
         setattr(module, constant_name, val)
 
@@ -654,32 +642,19 @@ class ConfigModule(ModuleType):
         changes: dict[str, Any]
         if arg1 is not None:
             if arg2 is not None:
-                if not isinstance(arg1, str):
-                    raise AssertionError(
-                        "first argument must be a string when passing 2 positional args to patch"
-                    )
+                assert isinstance(arg1, str)
                 # patch("key", True) syntax
                 changes = {arg1: arg2}
             else:
-                if not isinstance(arg1, dict):
-                    raise AssertionError(
-                        "first argument must be a dict when passing a single positional arg to patch"
-                    )
+                assert isinstance(arg1, dict)
                 # patch({"key": True}) syntax
                 changes = arg1
-            if kwargs:
-                raise AssertionError(
-                    "cannot pass both positional and keyword arguments to patch"
-                )
+            assert not kwargs
         else:
             # patch(key=True) syntax
             changes = kwargs
-            if arg2 is not None:
-                raise AssertionError(
-                    "second positional argument is only valid when first argument is a key string"
-                )
-        if not isinstance(changes, dict):
-            raise AssertionError(f"expected `dict` got {type(changes)}")
+            assert arg2 is None
+        assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior: dict[str, Any] = {}
         config = self
 
@@ -688,10 +663,7 @@ class ConfigModule(ModuleType):
                 self.changes = changes
 
             def __enter__(self) -> None:
-                if prior:
-                    raise AssertionError(
-                        "prior should be empty when entering ConfigPatch"
-                    )
+                assert not prior
                 for key in self.changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
