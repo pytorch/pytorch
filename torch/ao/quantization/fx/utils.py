@@ -721,7 +721,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
                     a = a.args[0][0]  # type: ignore[assignment,index]
                 else:
                     a = a.args[0]  # type: ignore[assignment]
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return a
 
     all_match_patterns = [

@@ -521,7 +521,7 @@ class LSTM(RNNBase):
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -807,7 +807,7 @@ class GRU(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     _FLOAT_MODULE = nn.GRU
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
