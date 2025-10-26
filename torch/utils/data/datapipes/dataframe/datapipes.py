@@ -53,7 +53,7 @@ class ConcatDataFramesPipe(DFIterDataPipe):
             if len(buffer) == self.n_batch:
                 yield df_wrapper.concat(buffer)
                 buffer = []
-        if len(buffer):
+        if buffer:
             yield df_wrapper.concat(buffer)
 
 
@@ -78,7 +78,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             if len(buffer) == size:
                 yield df_wrapper.concat(buffer)
                 buffer = []
-        if len(buffer):
+        if buffer:
             yield df_wrapper.concat(buffer)
 
 
@@ -107,7 +107,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
                 if len(buffer) == size:
                     yield df_wrapper.concat(buffer)
                     buffer = []
-        if len(buffer):
+        if buffer:
             yield df_wrapper.concat(buffer)
 
 

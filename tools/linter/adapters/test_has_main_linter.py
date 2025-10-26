@@ -15,7 +15,10 @@ import multiprocessing as mp
 from enum import Enum
 from typing import NamedTuple
 
+# pyrefly: ignore  # import-error
 import libcst as cst
+
+# pyrefly: ignore  # import-error
 import libcst.matchers as m
 
 

@@ -6,7 +6,7 @@ import operator
 import typing
 from collections import Counter
 from collections.abc import Sequence
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch._guards
@@ -593,12 +593,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
             constant_fold_uniform_value
         )
 
-    if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
-        )
-        count += 1
-
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(
@@ -706,8 +700,8 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 
 
 def definitely_equal(
-    old_sizes: Sequence[Union[torch.SymInt, int]],
-    new_sizes: Sequence[Union[torch.SymInt, torch.fx.Node, int]],
+    old_sizes: Sequence[torch.SymInt | int],
+    new_sizes: Sequence[torch.SymInt | torch.fx.Node | int],
 ) -> bool:
     """
     Leverage guard_or_true/false to compare if two lists of int/symint are equal.
@@ -906,7 +900,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         if dtype is not None:
             inp = inp.to(dtype)
 
-        sign: Union[int, float, torch.Tensor]
+        sign: int | float | torch.Tensor
         if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
@@ -936,7 +930,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         if dtype is not None:
             inp = inp.to(dtype)
 
-        sign: Union[int, float, torch.Tensor]
+        sign: int | float | torch.Tensor
         if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:

@@ -201,7 +201,8 @@ class _OverlappingCpuLoader(_TensorLoader):
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
     def _finish(self) -> Iterable[tuple[torch.Tensor, object]]:
-        assert self._done
+        if not self._done:
+            raise AssertionError("_finish called before all items were processed")
         if len(self.current_items) > 0:
             self.stream.synchronize()
         return self.current_items
@@ -281,7 +282,8 @@ class _StorageWriterTransforms:
 
 def _item_size(item: WriteItem) -> int:
     size = 1
-    assert item.tensor_data is not None
+    if item.tensor_data is None:
+        raise AssertionError("WriteItem tensor_data must not be None")
     # can't use math.prod as PT needs to support older python
     for s in item.tensor_data.size:
         size *= s
@@ -329,11 +331,16 @@ def _write_item(
     )
 
     if write_item.type == WriteItemType.BYTE_IO:
-        assert isinstance(data, io.BytesIO)
+        if not isinstance(data, io.BytesIO):
+            raise AssertionError("Data must be io.BytesIO for BYTE_IO write items")
         transform_to.write(data.getbuffer())
     else:
-        assert isinstance(data, torch.Tensor)
-        assert data.device == torch.device("cpu")
+        if not isinstance(data, torch.Tensor):
+            raise AssertionError(
+                "Data must be torch.Tensor for non-BYTE_IO write items"
+            )
+        if data.device != torch.device("cpu"):
+            raise AssertionError("Tensor must be on CPU device")
         if serialization_format == SerializationFormat.TORCH_SAVE:
             torch.save(data, transform_to)
 
@@ -428,7 +435,8 @@ def _write_files_from_queue(
                 tensor_dict = {}
                 metadata_dict = {}
                 for tensor, write_item in loader.values():
-                    assert tensor.is_cpu
+                    if not tensor.is_cpu:
+                        raise AssertionError("Tensor must be on CPU")
                     write_results.append(
                         _write_item(
                             transforms,
@@ -631,7 +639,7 @@ class _FileSystemWriter(StorageWriter):
     def set_up_storage_writer(
         self, is_coordinator: bool, *args: Any, **kwargs: Any
     ) -> None:
-        self.rank = kwargs.get("rank", None)
+        self.rank = kwargs.get("rank")
         self.use_collectives = kwargs.get("use_collectives", True)
 
     def _metadata_exists(self) -> bool:
@@ -903,9 +911,10 @@ class FileSystemReader(StorageReader):
                         )
                         target_tensor = planner.resolve_tensor(req).detach()
 
-                        assert target_tensor.size() == tensor.size(), (
-                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                        )
+                        if target_tensor.size() != tensor.size():
+                            raise AssertionError(
+                                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                            )
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
 
@@ -919,7 +928,7 @@ class FileSystemReader(StorageReader):
 
     # Implementing the abstract function in StorageReader
     def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
-        rank = kwargs.get("rank", None)
+        rank = kwargs.get("rank")
         path = self._get_metadata_path(rank)
         with self.fs.create_stream(path, "rb") as metadata_file:
             metadata = pickle.load(metadata_file)
@@ -934,9 +943,10 @@ class FileSystemReader(StorageReader):
         self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
     ) -> None:
         self.storage_data = metadata.storage_data
-        self.rank = kwargs.get("rank", None)
+        self.rank = kwargs.get("rank")
         self.use_collectives = kwargs.get("use_collectives", True)
-        assert self.storage_data is not None
+        if self.storage_data is None:
+            raise AssertionError("storage_data must not be None in metadata")
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan

@@ -206,13 +206,12 @@ __all__ = [
     "get_filename",
     "get_results",
     "get_validators",
-    "write_file_on_exit",
-    "write_file",
     "read_file",
     "tune_gemm_in_file",
     "mgpu_tune_gemm_in_file",
     "set_rotating_buffer_size",
     "get_rotating_buffer_size",
+    "set_numerical_check_tolerances",
 ]
 
 
@@ -306,25 +305,6 @@ def get_validators() -> tuple[str, str]:
     return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 
 
-def write_file_on_exit(val: bool) -> None:
-    r"""During Tuning Context destruction, write file to disk.
-
-    This is useful as a final flush of your results to disk if your application
-    terminates as result of normal operation or an error. Manual flushing of
-    your results can be achieved by manually calling ``write_file()``."""
-    torch._C._cuda_tunableop_write_file_on_exit(val)  # type: ignore[attr-defined]
-
-
-def write_file(filename: Optional[str] = None) -> bool:
-    r"""Write results to a CSV file.
-
-    If :attr:`filename` is not given, ``get_filename()`` is called.
-    """
-    if filename is None:
-        filename = get_filename()
-    return torch._C._cuda_tunableop_write_file(filename)  # type: ignore[attr-defined]
-
-
 def read_file(filename: Optional[str] = None) -> bool:
     r"""Read results from a TunableOp CSV file.
 
@@ -346,6 +326,13 @@ def set_rotating_buffer_size(buffer_size: int) -> None:
 def get_rotating_buffer_size() -> int:
     r"""Get the rotating buffer size in kilobytes."""
     return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
+
+
+def set_numerical_check_tolerances(
+    enable: bool, atol: float = 1e-5, rtol: float = 1e-5
+) -> None:
+    r"""Set the atol and rtol values in numeric check"""
+    return torch._C._cuda_tunableop_set_numerical_check_tolerances(enable, atol, rtol)  # type: ignore[attr-defined]
 
 
 def tune_gemm_in_file(filename: str) -> None:
@@ -787,7 +774,6 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
     mp_context = mp.get_context("spawn")
 
     futures = []  # empty list to hold futures
-    flush_results = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
     h = 0
@@ -808,13 +794,6 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
         for future in concurrent.futures.as_completed(futures):
             future.result()
-
-        for g in range(num_gpus):
-            flush_result = executor.submit(write_file)
-            flush_results.append(flush_result)
-
-        for flush_result in concurrent.futures.as_completed(flush_results):
-            flush_result.result()
 
     torch.cuda.synchronize()
 

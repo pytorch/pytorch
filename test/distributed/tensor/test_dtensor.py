@@ -1020,6 +1020,19 @@ class DTensorMeshTest(DTensorTestBase):
             self.fail("Unexpected ValueError raised with run_check=False")
 
 
+DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
+    DTensorMeshTest,
+    skipped_tests=[
+        # Test asserts must be rewritten for local tensor
+        "test_from_local_sub_mesh",
+        "test_default_value_sub_mesh",
+        "test_redistribute_sub_mesh",
+        # Local tensor mode doesn't support tensors of different types on different ranks
+        "test_metadata_consistency_check",
+    ],
+)
+
+
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
     def world_size(self):
@@ -1053,7 +1066,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
                 is_tensor_empty = [
-                    False if splitted_tensor.numel() > 0 else True
+                    not splitted_tensor.numel() > 0
                     for splitted_tensor in splitted_tensor_list
                 ]
                 expected_is_tensor_empty = [True] * self.world_size
@@ -1076,14 +1089,17 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [
-                    False if idx < size else True
-                    for idx, _ in enumerate(range(self.world_size))
+                    not idx < size for idx, _ in enumerate(range(self.world_size))
                 ]
                 is_tensor_empty = [
-                    False if unpadded_tensor.numel() > 0 else True
-                    for unpadded_tensor in unpadded_list
+                    not unpadded_tensor.numel() > 0 for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorPlacementTypes,
+)
 
 
 class TestDTensorSpec(DTensorTestBase):
@@ -1264,6 +1280,10 @@ class TestDTensorSpec(DTensorTestBase):
             DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
         )
 
+
+TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorSpec,
+)
 
 if __name__ == "__main__":
     run_tests()

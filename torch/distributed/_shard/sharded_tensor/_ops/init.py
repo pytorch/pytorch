@@ -143,7 +143,7 @@ def register_tensor_creation_op(op):
         takes a ShardedTensor as argument, such as ``torch.zeros_like`` or
         ``torch.full_like``.
         """
-        creation_op = tensor_like_creation_op_map.get(op, None)
+        creation_op = tensor_like_creation_op_map.get(op)
         if creation_op is None:
             raise RuntimeError(f"Tensor creation {op} not supported!")
         if kwargs is None:

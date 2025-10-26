@@ -189,7 +189,7 @@ def _insert_stage_symbolic_backward(
                 output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
                 if node in tuples:
                     stage_output = tuples[node]
-                    output_grads = tuple(val_to_grad.get(n, None) for n in tuples[node])
+                    output_grads = tuple(val_to_grad.get(n) for n in tuples[node])
                     outputs_with_grads_idxs = [
                         i for i, n in enumerate(tuples[node]) if n in live_nodes
                     ]
