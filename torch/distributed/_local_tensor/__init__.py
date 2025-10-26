@@ -952,3 +952,11 @@ def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
         return ret
 
     return wrapper
+
+
+def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:
+    """
+    Context manager that disables LocalTensorMode for the duration of the context.
+    """
+    lm = local_tensor_mode()
+    return lm.disable() if lm is not None else contextlib.nullcontext()
