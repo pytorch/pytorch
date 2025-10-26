@@ -2191,6 +2191,17 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
         # count either full_backward or backward_weight together, to determine when to sync DP grads
         self.backward_counter.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
+            # Remove completed send operations from list, this frees the memory used for the send buffer earlier
+            for work_batch in send_ops:
+                completed_ops = []
+                for idx, send_op in enumerate(work_batch):
+                    if send_op.is_completed():
+                        send_op.wait()
+                        completed_ops.append(idx)
+                # Remove completed ops (reverse to maintain indices)
+                for idx in reversed(completed_ops):
+                    del work_batch[idx]
+
             try:
                 with record_function(_get_profiler_function_name(action)):
                     if action.computation_type in self._comp_type_to_function_map:
