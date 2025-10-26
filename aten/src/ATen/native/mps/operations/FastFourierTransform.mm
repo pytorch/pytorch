@@ -1,4 +1,6 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -37,11 +39,7 @@ NSArray<NSNumber*>* IntArrayToNSArray(IntArrayRef arr) {
 } // anonymous namespace
 
 Tensor _fft_c2r_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  TORCH_CHECK(self.is_complex());
-  auto in_sizes = self.sizes();
-  DimVector out_sizes(in_sizes.begin(), in_sizes.end());
-  out_sizes[dim.back()] = last_dim_size;
-  auto out = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
+  auto out = at::empty({}, self.options().dtype(c10::toRealValueType(self.scalar_type())));
   return _fft_c2r_mps_out(self, dim, normalization, last_dim_size, out);
 }
 
@@ -112,6 +110,12 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
                          int64_t normalization,
                          int64_t last_dim_size,
                          Tensor& out) {
+  TORCH_CHECK(self.is_complex(), "Input must be complex");
+  TORCH_CHECK(out.scalar_type() == c10::toRealValueType(self.scalar_type()), "Unexpected output type");
+  auto in_sizes = self.sizes();
+  DimVector out_sizes(in_sizes.begin(), in_sizes.end());
+  out_sizes[dim.back()] = last_dim_size;
+  at::native::resize_output(out, out_sizes);
   auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(last_dim_size);
   @autoreleasepool {
