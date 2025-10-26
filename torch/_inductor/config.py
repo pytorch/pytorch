@@ -745,6 +745,8 @@ combo_kernels_autotune = 1
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
 combo_kernel_foreach_dynamic_shapes = True
+# Maximum number of arguments (read/write buffers) allowed in a combo kernel
+combo_kernel_max_num_args = 250
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
