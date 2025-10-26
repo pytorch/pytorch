@@ -275,7 +275,7 @@ class CuteDSLTemplateKernel(Kernel):
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
 
-    def unpack_buffers(self):
+    def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
         """Generate buffer unpacking code via render hook."""
 
         def hook():
@@ -287,9 +287,10 @@ class CuteDSLTemplateKernel(Kernel):
             unpacking_lines = []
             for i, buffer_name in enumerate(tensor_buffers):
                 # pyrefly: ignore  # bad-argument-type
-                unpacking_lines.append(f"{buffer_name} = buffers[{i}]")
+                unpacking_lines.append(f"{buffer_name} = {buffer_list_name}[{i}]")
 
-            return "\n        ".join(unpacking_lines)
+            indent = " " * indent_width
+            return "\n" + indent + ("\n" + indent).join(unpacking_lines)
 
         # Register the hook and return placeholder
         placeholder = "<UNPACK_BUFFERS>"

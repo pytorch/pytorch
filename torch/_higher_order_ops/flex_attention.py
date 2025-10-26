@@ -112,7 +112,7 @@ flex_attention = FlexAttentionHOP()
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flex_attention_backward")
+        super().__init__("flex_attention_backward", cacheable=True)
 
     def __call__(
         self,

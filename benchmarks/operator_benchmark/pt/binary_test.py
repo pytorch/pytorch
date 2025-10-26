@@ -25,7 +25,7 @@ binary_configs_broadcast = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu"],
-        "dtype": [torch.float, torch.bfloat16],
+        "dtype": [torch.float, torch.bfloat16, torch.float64],
     },
     tags=["short"],
 )
