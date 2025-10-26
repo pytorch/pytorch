@@ -6500,12 +6500,10 @@ def div_prim(a, b):
     # see https://github.com/pytorch/pytorch/issues/157959
     if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
-        # pyrefly: ignore  # unbound-name
+
         if divisor.value == 0:
-            # pyrefly: ignore  # unbound-name
             reciprocal = math.copysign(float("inf"), divisor.value)
         else:
-            # pyrefly: ignore  # unbound-name
             reciprocal = 1.0 / divisor.value
         return mul(a, reciprocal)
 

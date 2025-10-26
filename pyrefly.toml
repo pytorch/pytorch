@@ -130,6 +130,7 @@ errors.bad-param-name-override = false
 # Mypy doesn't require that imports are explicitly imported, so be compatible with that.
 # Might be a good idea to turn this on in future.
 errors.implicit-import = false
+errors.deprecated = false # re-enable after we've fix import formatting
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
 search-path = ["tools/experimental"]
