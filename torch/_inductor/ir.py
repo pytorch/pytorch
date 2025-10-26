@@ -379,7 +379,7 @@ def ir_node_to_tensor(
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     stride = convert_shape_to_symint(stride)
     with V.graph.sizevars.shape_env.suppress_guards():
         t = torch.empty_strided(
@@ -407,7 +407,7 @@ def get_device_type(
         return x.type
     elif isinstance(x, (IRNode, OutputSpec)):
         return get_device_type(x.get_device())
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     assert_never(f"get_device_type({x}: {type(x).__name__})")
 
 
@@ -618,7 +618,7 @@ class IRNode:
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes.get(
                         "postToPre",
                         {},
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                     ).get(node.name, [])
                 )
                 if not isinstance(pre_grad_nodes, list):
@@ -654,7 +654,7 @@ class IRNode:
         lines = list(lines) + list(self.common_repr(shorten))
         lines = list(map(str, lines))
         if multiline:
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             new_lines = indent(",\n".join(lines))
             return f"{type(self).__name__}(\n{new_lines}\n)"
         else:
@@ -1497,7 +1497,7 @@ class Reduction(Loops):
             return fn
 
     @classmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def create(
         cls,
         device: torch.device,
@@ -2443,7 +2443,7 @@ class Scan(Loops):
         scan_type = Scan
         if num_splits > 1:
             supports_split = (
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 torch.version.hip is None or (has_triton and triton_version >= "3.3.0")
             ) and (len(dtypes) == 1)
             if not supports_split:
@@ -2904,7 +2904,7 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 assert sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0, (
                     f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
                 )
@@ -3638,7 +3638,7 @@ class Layout(OutputSpec):
     ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self.device = device
         self.dtype = dtype
         assert len(size) == len(stride), f"size={size}, stride={stride}"
@@ -3822,7 +3822,7 @@ class Layout(OutputSpec):
             # [25, 25, 5, 1].
             return in_strides
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         metrics.num_comprehensive_padding += 1
         return new_strides
 
@@ -4897,7 +4897,7 @@ class TemplateBuffer(OperationBuffer):
 
             def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
                 assert len(rindex) == 0
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 return ops.load(inp.get_name(), indexer(index))
 
             deps.reads |= dependencies.extract_read_writes(
@@ -5221,7 +5221,7 @@ class CppTemplateBuffer(TemplateBuffer):
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
             assert isinstance(self.outputs, Iterable), type(self.outputs)
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             first_output = self.outputs[0]
             assert isinstance(first_output, Buffer), type(first_output)
             layout = first_output.layout
@@ -5538,7 +5538,7 @@ class ConcatKernel(NopKernel):
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
             if cls.can_realize_into_without_copy(src, dst):
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 src.data.layout = NonOwningLayout(dst)
                 return src.data
         # introduce a copy
@@ -7220,7 +7220,7 @@ class IndexPutFallback(ExternKernel):
     ) -> None:
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
         cpp_kernel_name = "aoti_torch_index_put_out"
         super().__init__(
@@ -7593,7 +7593,7 @@ class FallbackKernel(ExternKernelAlloc):
                         add_alias(optional_tensor_arg)
             else:
                 assert library_utils.is_tensor_like_type(info.type)
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
@@ -8025,7 +8025,7 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = tuple(outputs)
         else:
             packed.outputs = [outputs]
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return outputs
 
     def apply_constraint(self) -> None:
@@ -8472,7 +8472,7 @@ class InvokeSubgraph(ExternKernel):
         # Realize the inputs. Also intermediates can have different strides than
         # the inputs of the subgraph. So, force the intermediates to have same
         # strides as that of subgraph inputs.
-        # pyrefly: ignore  # annotation-mismatch
+        # pyrefly: ignore [annotation-mismatch]
         operands: list[IRNode] = [cls.realize_input(x) for x in operands]
         new_operands: list[IRNode] = []
 
@@ -8484,7 +8484,7 @@ class InvokeSubgraph(ExternKernel):
                     constrain_to_fake_tensor(operand, fake_operands[idx])
                 )
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         operands = new_operands
 
         if subgraph.graph is None:
@@ -8595,9 +8595,9 @@ class Conditional(ExternKernel):
         operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ) -> Sequence[IRNode]:
         """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         predicate = cls.realize_input(predicate)
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         operands = [cls.realize_input(x) for x in operands]
         fx_operands: Argument = V.graph.current_node.args[-1]
 
@@ -9391,7 +9391,7 @@ class _WaitKernel(_CollectiveKernel):
             # Case 1
             if isinstance(coll, _CollectiveKernel):
                 _, idx = inp.indices[0]
-                # pyrefly: ignore  # bad-return
+                # pyrefly: ignore [bad-return]
                 return [coll.inputs[idx]]
             # Case 2
             return []
