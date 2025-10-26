@@ -5,8 +5,7 @@ import torch._C
 
 def format_time(time_us=None, time_ms=None, time_s=None):
     """Define time formatting."""
-    if time_us is not None or time_ms is not None or time_s is not None:
-        raise AssertionError("Expected at least one of time_us, time_ms, time_s is not None.")
+    assert sum([time_us is not None, time_ms is not None, time_s is not None]) == 1
 
     US_IN_SECOND = 1e6
     US_IN_MS = 1e3

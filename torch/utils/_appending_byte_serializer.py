@@ -38,8 +38,7 @@ class BytesWriter:
         digest = zlib.crc32(self._data[CHECKSUM_DIGEST_SIZE:]).to_bytes(
             4, byteorder="big", signed=False
         )
-        if len(digest) != CHECKSUM_DIGEST_SIZE:
-            raise AssertionError("Computed checksum digest has unexpected size")
+        assert len(digest) == CHECKSUM_DIGEST_SIZE
         self._data[0:CHECKSUM_DIGEST_SIZE] = digest
         return bytes(self._data)
 
@@ -47,13 +46,11 @@ class BytesWriter:
 class BytesReader:
     def __init__(self, data: bytes) -> None:
         # Check for data corruption
-        if len(data) < CHECKSUM_DIGEST_SIZE:
-            raise AssertionError("Input data is too short to contain checksum")
+        assert len(data) >= CHECKSUM_DIGEST_SIZE
         digest = zlib.crc32(data[CHECKSUM_DIGEST_SIZE:]).to_bytes(
             4, byteorder="big", signed=False
         )
-        if len(digest) != CHECKSUM_DIGEST_SIZE:
-            raise AssertionError("Computed checksum digest has unexpected size")
+        assert len(digest) == CHECKSUM_DIGEST_SIZE
         if data[0:CHECKSUM_DIGEST_SIZE] != digest:
             raise RuntimeError(
                 "Bytes object is corrupted, checksum does not match. "
@@ -123,11 +120,7 @@ class AppendingByteSerializer(Generic[T]):
     @staticmethod
     def to_list(data: bytes, *, deserialize_fn: Callable[[BytesReader], T]) -> list[T]:
         reader = BytesReader(data)
-        if reader.read_uint64() != _ENCODING_VERSION:
-            raise AssertionError(
-                f"Encoding version mismatch in AppendingByteSerializer.to_list, \
-                    got {reader.read_uint64()}"
-            )
+        assert reader.read_uint64() == _ENCODING_VERSION
 
         result: list[T] = []
         while not reader.is_finished():

@@ -121,13 +121,10 @@ def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config.input_activation is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.input_activation
-    if quantization_spec.qscheme not in [
+    assert quantization_spec.qscheme in [
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
-    ]:
-        raise AssertionError(
-            f"Unsupported activation qscheme: {quantization_spec.qscheme}"
-        )
+    ]
     return quantization_spec
 
 
@@ -137,21 +134,17 @@ def get_output_act_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config.output_activation is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.output_activation
-    if quantization_spec.qscheme not in [
+    assert quantization_spec.qscheme in [
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
-    ]:
-        raise AssertionError(
-            f"Unsupported activation qscheme: {quantization_spec.qscheme}"
-        )
+    ]
     return quantization_spec
 
 
 def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
-    if quantization_config is None:
-        raise AssertionError("quantization_config must not be None")
+    assert quantization_config is not None
     if quantization_config.weight is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.weight
@@ -169,15 +162,13 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
 def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
-    if quantization_config is None:
-        raise AssertionError("quantization_config must not be None")
+    assert quantization_config is not None
     if quantization_config.bias is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.bias
-    if quantization_spec.dtype != torch.float:
-        raise AssertionError(
-            "Only float dtype for bias is supported for bias right now"
-        )
+    assert quantization_spec.dtype == torch.float, (
+        "Only float dtype for bias is supported for bias right now"
+    )
     return quantization_spec
 
 
@@ -262,13 +253,11 @@ def _annotate_linear_relu(
 
         input_qspec_map = {}
         input_act = linear_node.args[0]
-        if not isinstance(input_act, Node):
-            raise AssertionError("input activation must be a FX Node")
+        assert isinstance(input_act, Node)
         input_qspec_map[input_act] = input_act_qspec
 
         weight = linear_node.args[1]
-        if not isinstance(weight, Node):
-            raise AssertionError("weight must be a FX Node")
+        assert isinstance(weight, Node)
         input_qspec_map[weight] = weight_qspec
 
         # adding weight node to the partition as well
@@ -314,13 +303,11 @@ def _annotate_conv(
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
-        if not isinstance(input_act, Node):
-            raise AssertionError("input activation must be a FX Node")
+        assert isinstance(input_act, Node)
         input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
         weight = conv_node.args[1]
-        if not isinstance(weight, Node):
-            raise AssertionError("weight must be a FX Node")
+        assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
         # adding weight node to the partition as well
@@ -375,13 +362,11 @@ def _do_annotate_conv_relu(
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
-        if not isinstance(input_act, Node):
-            raise AssertionError("input activation must be a FX Node")
+        assert isinstance(input_act, Node)
         input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
         weight = conv_node.args[1]
-        if not isinstance(weight, Node):
-            raise AssertionError("weight must be a FX Node")
+        assert isinstance(weight, Node)
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
         # adding weight node to the partition as well
@@ -650,10 +635,8 @@ def _annotate_gru_io_only(
         # subgraph
         input_act = input_nodes[0]
         input_act_user = next(iter(input_act.users.keys()))
-        if not isinstance(input_act, Node):
-            raise AssertionError("input activation must be a FX Node")
-        if not isinstance(input_act_user, Node):
-            raise AssertionError("input activation user must be a FX Node")
+        assert isinstance(input_act, Node)
+        assert isinstance(input_act_user, Node)
         input_act_user.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
                 input_act: get_input_act_qspec(quantization_config),
@@ -663,10 +646,8 @@ def _annotate_gru_io_only(
 
         hidden_state = input_nodes[1]
         hidden_state_user = next(iter(hidden_state.users.keys()))
-        if not isinstance(hidden_state, Node):
-            raise AssertionError("hidden state must be a FX Node")
-        if not isinstance(hidden_state_user, Node):
-            raise AssertionError("hidden state user must be a FX Node")
+        assert isinstance(hidden_state, Node)
+        assert isinstance(hidden_state_user, Node)
         hidden_state_user.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
                 hidden_state: get_input_act_qspec(quantization_config),
@@ -674,8 +655,7 @@ def _annotate_gru_io_only(
             _annotated=True,
         )
 
-        if len(output_nodes) != 2:
-            raise AssertionError("expecting GRU to have two outputs")
+        assert len(output_nodes) == 2, "expecting GRU to have two outputs"
         for output in output_nodes:
             output.meta["quantization_annotation"] = QuantizationAnnotation(
                 output_qspec=get_output_act_qspec(quantization_config),
@@ -711,8 +691,7 @@ def _annotate_adaptive_avg_pool2d(
 
         annotated_partitions.append(partition.nodes)
         input_act = pool_node.args[0]
-        if not isinstance(input_act, Node):
-            raise AssertionError("input activation must be a FX Node")
+        assert isinstance(input_act, Node)
 
         # only annotate input output sharing operator
         # when the output of the input node is annotated
