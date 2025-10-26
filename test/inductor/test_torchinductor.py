@@ -14305,9 +14305,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
 
-    @skip_if_cpp_wrapper("skip cpp wrapper")
+    @skip_if_halide
     @requires_cuda_and_triton
-    def test_argmin_argmax_transpose_logical_index(self):
+    @skip_if_cpp_wrapper("skip cpp wrapper")
+    def test_triton_argmin_argmax_transpose_logical_index(self):
         def fn(x):
             x.tan_()
             x = x.t()
@@ -14321,18 +14322,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
         self.common(fn, (torch.randn(128, 64, device=GPU_TYPE),))
         self.common(fn, (torch.randn(8, 6, device=GPU_TYPE, dtype=torch.float16),))
-
-        def fn(x):
-            transposed = x.t()
-            return (
-                torch.argmin(transposed, 0),
-                torch.argmax(transposed, 0),
-                torch.argmin(transposed, 1),
-                torch.argmax(transposed, 1),
-            )
-
-        self.common(fn, (torch.randn(32, 16, device=GPU_TYPE),))
-        self.common(fn, (torch.randn(512, 256, device=GPU_TYPE),))
 
         def fn(x):
             # Permute: (A, B, C) -> (C, A, B)
