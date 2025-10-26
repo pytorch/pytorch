@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import logging
 from typing import Any, Callable, Optional, Union
 
 import torch
+from torch import _ops
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -12,6 +14,10 @@ from torch._inductor.select_algorithm import (
     ExternKernelChoice,
 )
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
+
+
+log = logging.getLogger(__name__)
 
 
 class CustomOpConfig:
@@ -21,16 +27,20 @@ class CustomOpConfig:
     Each config creates exactly one variant (no Cartesian product).
 
     Args:
-        decomposition: Function to autotune
+        decomposition: Optional functions to autotune. If not provided, default will be used.
         **params: Parameters passed to the function
 
     Examples:
         CustomOpConfig(attention_impl, head_dim=32, method='chunked')
-        CustomOpConfig(fallback_impl)
+        CustomOpConfig(head_dim=32, method='chunked')
     """
 
-    def __init__(self, decomposition: Callable[..., Any], **params: Any):
-        if not callable(decomposition):
+    def __init__(
+        self,
+        decomposition: Optional[Callable[..., Any]] = None,
+        **params: Any,
+    ):
+        if decomposition is not None and not callable(decomposition):
             raise TypeError(
                 f"decomposition must be callable, got {type(decomposition)}"
             )
@@ -38,27 +48,51 @@ class CustomOpConfig:
         self.decomposition = decomposition
         self.params = params
 
-        # Generate descriptive name
-        if self.params:
-            param_suffix = "_".join(f"{k}_{v}" for k, v in sorted(self.params.items()))
-            self.name = f"{decomposition.__name__}_{param_suffix}"
-        else:
-            self.name = decomposition.__name__
+    def get_decomposition(
+        self, default_impl: Optional[Callable[..., Any]] = None
+    ) -> Callable[..., Any]:
+        """Return the decomposition function for this config.
+        When decomposition is not specified, return the default implementation
+        from the custom op's registration.
+        """
+        if self.decomposition is not None:
+            return self.decomposition
 
-    def create_variant(self) -> Callable[..., Any]:
-        """Create callable with parameters pre-applied using functools.partial."""
-        if self.params:
-            variant = functools.partial(self.decomposition, **self.params)
-            variant.__name__ = self.name  # type: ignore[attr-defined]
-            return variant
+        # If no decomposition specified, get Python implementation from custom op
+        if default_impl and isinstance(default_impl, (_ops.OpOverload, str)):
+            from torch._library.custom_ops import _maybe_get_opdef
 
-        return self.decomposition
+            op_def = _maybe_get_opdef(default_impl)
+            if op_def is not None:
+                return op_def._init_fn
+
+        # Fallback to default_impl if we couldn't extract Python implementation
+        if default_impl is None:
+            raise TypeError("decomposition is None and no default_impl provided")
+
+        return default_impl
+
+    def get_name(self) -> str:
+        """Get the name for this config variant."""
+        param_suffix = (
+            "_".join(f"{k}_{v}" for k, v in sorted(self.params.items()))
+            if self.params
+            else ""
+        )
+
+        base_name = self.decomposition.__name__ if self.decomposition else "default"
+
+        return f"{base_name}_{param_suffix}" if param_suffix else base_name
 
     def __repr__(self) -> str:
         if self.params:
             params_str = ", ".join(f"{k}={v}" for k, v in self.params.items())
-            return f"CustomOpConfig({self.decomposition.__name__}, {params_str})"
-        return f"CustomOpConfig({self.decomposition.__name__})"
+            decomp_name = (
+                self.decomposition.__name__ if self.decomposition else "default"
+            )
+            return f"CustomOpConfig({decomp_name}, {params_str})"
+        decomp_name = self.decomposition.__name__ if self.decomposition else "default"
+        return f"CustomOpConfig({decomp_name})"
 
 
 __all__ = [
@@ -100,6 +134,39 @@ def _extract_tensor_inputs(
             non_tensor_kwargs[key] = value
 
     return tensor_inputs, non_tensor_kwargs
+
+
+def _merge_config_and_runtime_kwargs(
+    config_params: dict[str, Any],
+    runtime_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge config parameters with runtime kwargs. Runtime kwargs take precedence.
+
+    Args:
+        config_params: Parameters from CustomOpConfig
+        runtime_kwargs: Runtime non-tensor kwargs from _extract_tensor_inputs
+
+    Returns:
+        Merged kwargs dictionary with runtime values taking precedence
+    """
+    merged_kwargs = config_params.copy()
+
+    # Check for conflicts and let runtime kwargs dominate
+    conflicts = OrderedSet(config_params.keys()).intersection(runtime_kwargs.keys())
+
+    for key in conflicts:
+        log.warning(
+            "Parameter '%s' specified both in CustomOpConfig (%s) "
+            "and at runtime (%s). Using runtime value.",
+            key,
+            config_params[key],
+            runtime_kwargs[key],
+        )
+
+    # Runtime kwargs override config params
+    merged_kwargs.update(runtime_kwargs)
+
+    return merged_kwargs
 
 
 def _create_user_input_gen_fns(
@@ -219,7 +286,7 @@ def autotune_custom_op(
     name: str,
     decompositions: list[Callable[..., Any]],
     inputs: list[Any],
-    kwargs: Optional[dict[str, Any]] = None,
+    non_tensor_args: list[dict[str, Any]],
     default_impl: Optional[Callable[..., Any]] = None,
     user_input_gen_fns: Optional[
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
@@ -237,7 +304,7 @@ def autotune_custom_op(
         name: Unique identifier for the autotuning operation
         decompositions: List of alternative implementation functions to benchmark
         inputs: Input tensor IR nodes from compilation (TensorBox/Buffer objects)
-        kwargs: Non-tensor parameters to pass to decomposition functions
+        non_tensor_args: List of kwargs dicts, paired with corresponding decompositions arg
         default_impl: Original custom op implementation used as fallback
         user_input_gen_fns: Optional custom input generators for benchmarking.
                            Maps input indices to functions that take fake tensors
@@ -250,9 +317,6 @@ def autotune_custom_op(
         TypeError: If decompositions is not a list/tuple
         RuntimeError: If no inputs or no valid choices generated
     """
-    if kwargs is None:
-        kwargs = {}
-
     if not isinstance(decompositions, (list, tuple)):
         raise TypeError(
             f"decompositions must be a list or tuple of callables, got {type(decompositions)}"
@@ -261,12 +325,18 @@ def autotune_custom_op(
     if not inputs:
         raise RuntimeError(f"Custom op '{name}' requires tensor inputs for autotuning")
 
+    if len(decompositions) != len(non_tensor_args):
+        raise ValueError(
+            f"decompositions and non_tensor_args must have same length, "
+            f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
+        )
+
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
-        decompositions=list(decompositions),
+        decompositions=decompositions,
         input_nodes=list(inputs),
-        kwargs=kwargs,
+        non_tensor_args=non_tensor_args,
     )
 
     # Add default implementation as fallback
@@ -278,10 +348,11 @@ def autotune_custom_op(
         if not hasattr(extern_kernels, fallback_name):
             with V.fake_mode:
                 fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
-                fake_output = default_impl(*fake_inputs, **kwargs)
+                fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
+                fake_output = default_impl(*fake_inputs, **fallback_kwargs)
 
             fallback_choice = _create_fallback_choice(
-                name, default_impl, fake_output, kwargs
+                name, default_impl, fake_output, fallback_kwargs
             )
             fallback_choice.maybe_append_choice(
                 choices=choices,
@@ -358,19 +429,13 @@ def register_custom_op_autotuning(
     if not configs:
         raise ValueError("At least one config must be provided")
 
-    # Convert configs to decomposition functions
-    final_decompositions = []
+    processed_configs = []
     for config in configs:
         if isinstance(config, CustomOpConfig):
-            # CustomOpConfig object
-            final_decompositions.append(config.create_variant())
-        elif callable(config):
-            # Direct callable function
-            final_decompositions.append(config)
+            processed_configs.append(config)
         else:
             raise TypeError(
-                f"Each config must be a CustomOpConfig object or callable function, "
-                f"got {type(config)}"
+                f"Each config must be a CustomOpConfig object, got {type(config)}"
             )
 
     if name is None:
@@ -379,14 +444,28 @@ def register_custom_op_autotuning(
     @functools.wraps(custom_op)
     def autotuning_lowering(*args: Any, **kwargs: Any) -> Any:
         """Inductor lowering function that replaces custom op calls with autotuned versions."""
-        # Extract tensor inputs and non-tensor parameters
-        tensor_inputs, non_tensor_kwargs = _extract_tensor_inputs(args, kwargs)
+        # Extract tensor inputs and non-tensor parameters (runtime kwargs)
+        tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
+
+        # Prepare decompositions and kwargs by merging config params with runtime kwargs
+        decompositions = []
+        non_tensor_args = []
+
+        for config in processed_configs:
+            decomp = config.get_decomposition(default_impl=custom_op)
+            decompositions.append(decomp)
+
+            # Merge config params with runtime kwargs (runtime takes precedence)
+            merged_kwargs = _merge_config_and_runtime_kwargs(
+                config.params, runtime_kwargs
+            )
+            non_tensor_args.append(merged_kwargs)
 
         result = autotune_custom_op(
             name=name,
-            decompositions=final_decompositions,
+            decompositions=decompositions,
             inputs=tensor_inputs,
-            kwargs=non_tensor_kwargs,
+            non_tensor_args=non_tensor_args,
             default_impl=custom_op,
             user_input_gen_fns=input_gen_fns,
         )

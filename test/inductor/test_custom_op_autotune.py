@@ -98,7 +98,7 @@ class TestCustomOpAutoTune(TestCase):
                     msg=f"{op_name} {name} differs from {reference_name}",
                 )
 
-    def _create_rmsnorm_inputs(self, batch_size=8, seq_len=1024, hidden_dim=512):
+    def _create_rmsnorm_inputs(self, batch_size=32, seq_len=2048, hidden_dim=512):
         """Create test inputs for RMSNorm operations."""
         input_tensor = torch.randn(
             batch_size,
@@ -169,8 +169,7 @@ class TestCustomOpAutoTune(TestCase):
         def rmsnorm_decomposition2(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """vLLM-style RMSNorm implementation - variance computation first approach."""
-            x_var = x  # In vLLM, this could be sliced for variance_size_override
+            x_var = x
 
             variance = x_var.pow(2).mean(dim=-1, keepdim=True)
 
@@ -183,14 +182,12 @@ class TestCustomOpAutoTune(TestCase):
         def rmsnorm_decomposition3(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """vLLM-style RMSNorm with extended variance computation pattern."""
             x_squared = x.pow(2)
             variance = x_squared.mean(dim=-1, keepdim=True)
 
             rstd = torch.rsqrt(variance + eps)
             normalized = x * rstd
 
-            # Apply weight scaling
             if weight is not None:
                 normalized = normalized * weight
             return normalized
@@ -218,9 +215,7 @@ class TestCustomOpAutoTune(TestCase):
 
         register_custom_op_autotuning(
             op_object.default,
-            configs=[
-                CustomOpConfig(rmsnorm_decomposition1) for decomp in decompositions
-            ],
+            configs=[CustomOpConfig(decomp) for decomp in decompositions],
             name="test_rmsnorm_autotuned",
             input_gen_fns={
                 "x": lambda x: torch.randn_like(x, device=self.device) * 0.02,
@@ -313,9 +308,10 @@ class TestCustomOpAutoTune(TestCase):
             gate_weight: torch.Tensor,
             up_weight: torch.Tensor,
             down_weight: torch.Tensor,
+            method: int = 0,
         ) -> torch.Tensor:
             return mlp_variants(
-                input_tensor, gate_weight, up_weight, down_weight, method=0
+                input_tensor, gate_weight, up_weight, down_weight, method=method
             )
 
         @test_mlp_op.register_fake
@@ -339,8 +335,8 @@ class TestCustomOpAutoTune(TestCase):
         register_custom_op_autotuning(
             op_object.default,
             configs=[
-                CustomOpConfig(mlp_variants, method=1),  # Batched approach
-                CustomOpConfig(mlp_variants, method=2),  # Fused weights
+                CustomOpConfig(method=1),  # Batched approach
+                CustomOpConfig(method=2),  # Fused weights
             ],
             name="test_mlp_autotuned",
             input_gen_fns={
@@ -401,13 +397,13 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_decompose_k_custom_op_autotune(self):
-        """Test decompose_k autotuning with parameter tuning for k_splits values."""
+        """Test decompose_k autotuning with parameter tuning for k_splits values using decomposition functions."""
         test_op_name = f"test_lib::decompose_k_{id(self)}"
 
         def decompose_k_implementation(
             a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
         ) -> torch.Tensor:
-            """Matrix multiply with k-way decomposition - parameter-tuned implementation."""
+            """Matrix multiply with k-way decomposition - Python implementation."""
             m = a.shape[0]
             n = b.shape[1]
             k = a.shape[1]
@@ -428,6 +424,7 @@ class TestCustomOpAutoTune(TestCase):
         def test_decompose_k_op(
             a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
         ) -> torch.Tensor:
+            """Matrix multiply with k-way decomposition - custom op using the decomposition."""
             return decompose_k_implementation(a, b, k_splits)
 
         @test_decompose_k_op.register_fake
@@ -437,26 +434,25 @@ class TestCustomOpAutoTune(TestCase):
         lib_name, op_name = test_op_name.split("::")
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
-        # Use parameter tuning to test different k_splits values
+        # Register autotuning with different k_splits values using decomposition function
         register_custom_op_autotuning(
             op_object.default,
             configs=[
-                CustomOpConfig(decompose_k_implementation, k_splits=2),
-                CustomOpConfig(decompose_k_implementation, k_splits=32),
-                CustomOpConfig(decompose_k_implementation, k_splits=64),
-                CustomOpConfig(decompose_k_implementation, k_splits=128),
-                CustomOpConfig(decompose_k_implementation, k_splits=256),
+                CustomOpConfig(k_splits=32),
+                CustomOpConfig(k_splits=64),
+                CustomOpConfig(k_splits=128),
+                CustomOpConfig(k_splits=256),
             ],
             name="test_decompose_k_autotuned",
             input_gen_fns={
                 "a": lambda fake_tensor: torch.randn_like(
                     fake_tensor, device=self.device
                 )
-                * 0.1,  # Matrix A
+                * 0.1,
                 "b": lambda fake_tensor: torch.randn_like(
                     fake_tensor, device=self.device
                 )
-                * 0.1,  # Matrix B
+                * 0.1,
             },
         )
 
@@ -517,14 +513,10 @@ class TestCustomOpAutoTune(TestCase):
         register_custom_op_autotuning(
             op_object.default,
             configs=[
-                CustomOpConfig(multi_param_scaling, scale_mode=1),  # Broadcast
-                CustomOpConfig(
-                    multi_param_scaling, scale_mode=2, chunk_size=16
-                ),  # Chunked 16
-                CustomOpConfig(
-                    multi_param_scaling, scale_mode=2, chunk_size=32
-                ),  # Chunked 32
-                CustomOpConfig(multi_param_scaling, scale_mode=3),  # Einsum
+                CustomOpConfig(scale_mode=1),  # Broadcast
+                CustomOpConfig(scale_mode=2, chunk_size=16),  # Chunked 16
+                CustomOpConfig(scale_mode=2, chunk_size=32),  # Chunked 32
+                CustomOpConfig(scale_mode=3),  # Einsum
             ],
             name="multi_param_autotuned",
             input_gen_fns={

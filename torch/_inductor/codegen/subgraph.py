@@ -209,7 +209,7 @@ class SubgraphTemplate(KernelTemplate):
         name: str,
         decompositions: list[Callable[..., Any]],
         input_nodes: list[Buffer],
-        kwargs: Optional[dict[str, Any]] = None,
+        non_tensor_args: list[dict[str, Any]],
         default_impl: Optional[Callable[..., Any]] = None,
     ) -> list[SubgraphChoiceCaller]:
         """
@@ -222,7 +222,7 @@ class SubgraphTemplate(KernelTemplate):
             name: Base name for the choices
             decompositions: List of decomposition functions to compare
             input_nodes: Input nodes for the operation
-            kwargs: Additional arguments for decomposition functions
+            non_tensor_args: List of non tensor kwargs dicts, one per decomposition
             default_impl: Default implementation for layout inference
 
         Returns:
@@ -231,12 +231,15 @@ class SubgraphTemplate(KernelTemplate):
         if not decompositions:
             return []
 
-        kwargs = kwargs or {}
+        assert len(decompositions) == len(non_tensor_args), (
+            f"decompositions and non_tensor_args must have same length, "
+            f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
+        )
 
         # Infer layouts and ensure stride consistency for fair autotuning comparison
         layouts = [
             self._infer_custom_op_layout(input_nodes, [decomp], kwargs, default_impl)
-            for decomp in decompositions
+            for decomp, kwargs in zip(decompositions, non_tensor_args)
         ]
 
         self._validate_stride_consistency(name, decompositions, layouts)
@@ -253,23 +256,38 @@ class SubgraphTemplate(KernelTemplate):
         layout = layouts[0]  # All layouts have equivalent stride/shape/dtype now
 
         choices = []
-        for decomp in decompositions:
-            # Create make_fx_graph function for this decomposition
-            def make_fx_graph(*args: Any, decomp: Callable[..., Any] = decomp) -> Any:
-                import functools
+        for decomp, decomp_kwargs in zip(decompositions, non_tensor_args):
+            # Create make_fx_graph function for this decomposition with its merged kwargs
+            # decomp should be a clean function (not functools.partial)
+            # decomp_kwargs contains all merged parameters (config params + runtime kwargs)
 
+            import functools
+
+            def make_fx_graph(
+                *args: Any,
+                decomp: Callable[..., Any] = decomp,
+                decomp_kwargs: dict[str, Any] = decomp_kwargs,
+            ) -> Any:
                 from torch.fx.experimental.proxy_tensor import make_fx
 
-                # Ensure kwargs is not None for unpacking
-                decomp_kwargs = kwargs if kwargs is not None else {}
                 return make_fx(functools.partial(decomp, **decomp_kwargs))(*args)
 
+            # Generate name from decomp and kwargs
+            decomp_name = decomp.__name__
+            if decomp_kwargs:
+                param_suffix = "_".join(
+                    f"{k}_{v}" for k, v in sorted(decomp_kwargs.items())
+                )
+                full_name = f"{decomp_name}_{param_suffix}"
+            else:
+                full_name = decomp_name
+
             choice = self.generate(
-                name=f"{name}_{decomp.__name__}",
+                name=f"{name}_{full_name}",
                 input_nodes=input_nodes,
                 layout=layout,
                 make_fx_graph=make_fx_graph,
-                description=f"CustomOp {decomp.__name__}",
+                description=f"CustomOp {decomp_name}",
             )
             choices.append(choice)
 
