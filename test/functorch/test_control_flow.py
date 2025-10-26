@@ -8457,10 +8457,10 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
-            size = child.size();  child = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u0 < s77)" = unbacked_symint < getitem;  unbacked_symint = getitem = None
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child, 0)
+
+            size = child.size();  child = size = None
+            lt: "Sym(u0 < s77)" = unbacked_symint < sym_size_int;  unbacked_symint = sym_size_int = None
             return lt
 
     class body_fn_0(torch.nn.Module):
@@ -8468,15 +8468,15 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child_1, 0)
+
             x_clone: "f32[s77, s27]" = child_1.clone()
 
             ge: "Sym(u1 >= 0)" = unbacked_symint_0 >= 0
             _check = torch._check(ge);  ge = _check = None
 
-            size = child_1.size();  child_1 = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u1 < s77)" = unbacked_symint_0 < getitem;  getitem = None
+            size = child_1.size();  child_1 = size = None
+            lt: "Sym(u1 < s77)" = unbacked_symint_0 < sym_size_int;  sym_size_int = None
             _check_1 = torch._check(lt);  lt = _check_1 = None
 
             select: "f32[s27]" = x_clone.select(0, unbacked_symint_0)

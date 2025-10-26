@@ -1095,6 +1095,7 @@ def create_a_shadows_b(
                         # pyrefly: ignore  # unbound-name
                         if not isinstance(input_logger, list):
                             raise AssertionError(
+                                # pyrefly: ignore  # unbound-name
                                 f"Expected list, got {type(input_logger)}"
                             )
                         # pyrefly: ignore  # unbound-name
