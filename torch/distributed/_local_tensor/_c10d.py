@@ -9,6 +9,7 @@ from torch._C._distributed_c10d import FakeWork
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
     _get_default_group,
+    _resolve_process_group,
     ProcessGroup,
     ReduceOp,
     Work,
@@ -71,9 +72,13 @@ def _indices_to_layout(indices: list[int]) -> tuple[tuple[int, ...], tuple[int, 
 
 
 def _prepare_collective_groups(
-    process_group_so: ScriptObject,
+    process_group_so: ScriptObject | ProcessGroup,
 ) -> tuple[list[int], list[int], int]:
-    process_group = ProcessGroup.unbox(process_group_so)
+    process_group = (
+        ProcessGroup.unbox(process_group_so)
+        if isinstance(process_group_so, ScriptObject)
+        else process_group_so
+    )
 
     ranks = torch.distributed.get_process_group_ranks(process_group)
     assert ranks
@@ -90,6 +95,120 @@ def _prepare_collective_groups(
     group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
 
     return ranks, group_offsets, offset
+
+
+# NB: There are two flavors of the collectives: regular and functional. Regular collectives
+# allocate outputs to write the result to, accept process group and support async ops (return
+# work object). Functional collectives expect the implementation to allocate outputs, accept
+# process group name that must be resolved and do not support async ops (return output).
+def _local_functional_all_gather_into_tensor(
+    tensor: torch.Tensor, group_size: int, group_name: str
+) -> torch.Tensor:
+    # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
+    from . import LocalTensor
+
+    ranks, group_offsets, offset = _prepare_collective_groups(
+        _resolve_process_group(group_name)
+    )
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+    output_local_tensors: dict[int, torch.Tensor] = {}
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        group_tensors = []
+        for rank in group_ranks:
+            group_tensors.append(tensor._local_tensors[rank])
+
+        gathered_tensor = torch.cat(group_tensors, dim=0)
+
+        for rank in group_ranks:
+            output_local_tensors[rank] = gathered_tensor.clone()
+
+    output = LocalTensor(output_local_tensors)
+
+    return output
+
+
+def _local_functional_reduce_scatter_tensor(
+    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: str
+) -> torch.Tensor:
+    #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
+    from . import _zero_sized_like, LocalTensor
+
+    ranks, group_offsets, offset = _prepare_collective_groups(
+        _resolve_process_group(group_name)
+    )
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+    output_local_tensors: dict[int, torch.Tensor] = {}
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        group_tensors = []
+        for rank in group_ranks:
+            group_tensors.append(tensor._local_tensors[rank])
+
+        reduced_tensor = _local_reduce(reduce_op, group_tensors)
+
+        scattered_tensor = torch.split(
+            reduced_tensor,
+            reduced_tensor.size(0) // len(group_ranks),
+            dim=0,
+        )
+
+        for i, rank in enumerate(group_ranks):
+            if i < len(scattered_tensor):
+                output_local_tensors[rank] = scattered_tensor[i].clone()
+            else:
+                output_local_tensors[rank] = _zero_sized_like(reduced_tensor, 0)
+
+    output = LocalTensor(output_local_tensors)
+
+    return output
+
+
+def _local_functional_shard_dim_alltoall(
+    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: str
+) -> torch.Tensor:
+    # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
+    from . import _zero_sized_like, LocalTensor
+
+    ranks, group_offsets, offset = _prepare_collective_groups(
+        _resolve_process_group(group_name)
+    )
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+    output_local_tensors: dict[int, torch.Tensor] = {}
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        group_tensors = []
+        for rank in group_ranks:
+            group_tensors.append(tensor._local_tensors[rank])
+
+        gathered_tensor = torch.cat(group_tensors, dim=gather_dim)
+
+        split_tensor = torch.split(
+            gathered_tensor,
+            gathered_tensor.size(shard_dim) // len(group_ranks),
+            dim=shard_dim,
+        )
+
+        for i, rank in enumerate(group_ranks):
+            if i < len(split_tensor):
+                output_local_tensors[rank] = split_tensor[i].clone()
+            else:
+                output_local_tensors[rank] = _zero_sized_like(
+                    gathered_tensor, shard_dim
+                )
+
+    output = LocalTensor(output_local_tensors)
+
+    return output
 
 
 def _local_broadcast_(
@@ -134,31 +253,31 @@ def _local_broadcast_(
 
 
 def _local_reduce(
-    reduce_op: ReduceOp,
+    reduce_op: ReduceOp | str,
     tensors: list[torch.Tensor],
 ) -> torch.Tensor:
-    if reduce_op == ReduceOp.SUM:
+    if reduce_op == ReduceOp.SUM or reduce_op == "sum":
         op = operator.add
-    elif reduce_op == ReduceOp.AVG:
+    elif reduce_op == ReduceOp.AVG or reduce_op == "avg":
         op = None
-    elif reduce_op == ReduceOp.PRODUCT:
+    elif reduce_op == ReduceOp.PRODUCT or reduce_op == "product":
         op = operator.mul
-    elif reduce_op == ReduceOp.MIN:
+    elif reduce_op == ReduceOp.MIN or reduce_op == "min":
         op = torch.minimum
-    elif reduce_op == ReduceOp.MAX:
+    elif reduce_op == ReduceOp.MAX or reduce_op == "max":
         op = torch.maximum
-    elif reduce_op == ReduceOp.BAND:
+    elif reduce_op == ReduceOp.BAND or reduce_op == "band":
         op = torch.bitwise_and
-    elif reduce_op == ReduceOp.BOR:
+    elif reduce_op == ReduceOp.BOR or reduce_op == "bor":
         op = torch.bitwise_or
-    elif reduce_op == ReduceOp.BXOR:
+    elif reduce_op == ReduceOp.BXOR or reduce_op == "bxor":
         op = torch.bitwise_xor
-    elif reduce_op == ReduceOp.PREMUL_SUM:
+    elif reduce_op == ReduceOp.PREMUL_SUM or reduce_op == "premul_sum":
         raise NotImplementedError("PREMUL_SUM: need to add binding for scaling factor")
     else:
         raise NotImplementedError(f"ReduceOp {reduce_op} not implemented")
 
-    if reduce_op == ReduceOp.AVG:
+    if reduce_op == ReduceOp.AVG or reduce_op == "avg":
         return functools.reduce(operator.add, tensors) / len(tensors)
     else:
         assert op is not None
@@ -286,13 +405,13 @@ def _local_reduce_scatter_tensor_coalesced_(
             # Perform the reduction operation
             reduced_input = _local_reduce(reduce_op, group_inputs)
 
-            reduced_inpit_splits = torch.split(
+            reduced_input_splits = torch.split(
                 reduced_input, reduced_input.size(0) // len(group_ranks), dim=0
             )
 
             # Update all tensors in the group with the reduced result
-            for rank in group_ranks:
-                output_tensor._local_tensors[rank].copy_(reduced_inpit_splits[rank])
+            for i, rank in enumerate(group_ranks):
+                output_tensor._local_tensors[rank].copy_(reduced_input_splits[i])
 
     work = FakeWork()
     work_so = Work.boxed(work)
