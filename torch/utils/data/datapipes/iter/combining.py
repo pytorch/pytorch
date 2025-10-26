@@ -159,6 +159,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 "Unlimited buffer size is set for `fork`, "
                 "please be aware of OOM at random places",
                 UserWarning,
+                stacklevel=2,
             )
         if copy is None:
             self.copy_fn = _no_op
@@ -359,6 +360,7 @@ class _ChildDataPipe(IterDataPipe):
                     "Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
                     "the buffer and each child DataPipe will read from the start again.",
                     UserWarning,
+                    stacklevel=2,
                 )
             self.main_datapipe.reset()
         # 3. Otherwise, the iterator is behind the others, so it will just need to catch up by setting
@@ -464,6 +466,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 "Unlimited buffer size is set for `demux`, "
                 "please be aware of OOM at random places",
                 UserWarning,
+                stacklevel=2,
             )
         self.current_buffer_usage = 0
         # pyrefly: ignore [invalid-type-var]

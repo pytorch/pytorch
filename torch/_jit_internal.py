@@ -859,6 +859,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -867,6 +868,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -992,7 +994,8 @@ def _check_overload_body(func):
         # Parsing the function definition can raise an OSError if source is unavailable.
         # Since this is just an initial check, just raise a warning if this is the case.
         warnings.warn(
-            f"Unable to retrieve source for @torch.jit._overload function: {func}."
+            f"Unable to retrieve source for @torch.jit._overload function: {func}.",
+            stacklevel=2,
         )
         return
 
@@ -1385,7 +1388,8 @@ def check_empty_containers(obj) -> None:
             "calling torch.jit.isinstance in eager mode. For "
             "example, List[int] would become list and "
             "therefore falsely return True for List[float] or"
-            " List[str]."
+            " List[str].",
+            stacklevel=2,
         )
 
 

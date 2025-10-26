@@ -85,7 +85,8 @@ else:
             # We keep this function for backward compatibility.
             warnings.warn(
                 "This get_root_mesh API will be deprecated soon."
-                "Please use `get_root_mesh` inside DeviceMesh instead."
+                "Please use `get_root_mesh` inside DeviceMesh instead.",
+                stacklevel=2,
             )
             if not device_mesh:
                 return device_mesh
@@ -108,7 +109,8 @@ else:
         ) -> list["DeviceMesh"]:
             warnings.warn(
                 "This _get_all_submeshes API will be deprecated soon."
-                "Please use `_get_all_submeshes` inside DeviceMesh instead."
+                "Please use `_get_all_submeshes` inside DeviceMesh instead.",
+                stacklevel=2,
             )
             return device_mesh._get_all_submeshes(mesh_dim_name)
 
@@ -329,7 +331,8 @@ else:
                         "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
                         "the underlying communicator (i.e. NCCL) can be initialized properly. "
                         "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
-                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. "
+                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
+                        stacklevel=2,
                     )
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
@@ -766,7 +769,8 @@ else:
                 warnings.warn(
                     "You are attempting to slice a submesh from another submesh. While we support this operation, "
                     "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
-                    "If not, this may result in some ranks receiving the submesh while others encounter errors."
+                    "If not, this may result in some ranks receiving the submesh while others encounter errors.",
+                    stacklevel=2,
                 )
                 slice_from_root = False
 
@@ -803,7 +807,8 @@ else:
                 elif name in flatten_name_to_root_layout:
                     warnings.warn(
                         "Slicing a flattened dim from root mesh will be deprecated in PT 2.11. "
-                        "Users need to bookkeep the flattened mesh directly. "
+                        "Users need to bookkeep the flattened mesh directly. ",
+                        stacklevel=2,
                     )
                     layout_sliced.append(flatten_name_to_root_layout[name])
 

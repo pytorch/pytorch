@@ -132,7 +132,7 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
     )
     if not only_datapipe:
         msg += " And, the behavior will be changed to the equivalent of `only_datapipe=True`."
-    warnings.warn(msg, FutureWarning)
+    warnings.warn(msg, FutureWarning, stacklevel=2)
     if only_datapipe is None:
         only_datapipe = False
     cache: set[int] = set()

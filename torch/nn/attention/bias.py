@@ -134,7 +134,8 @@ class CausalBias(torch.Tensor):
         self.seq_len_kv = seq_len_kv
         if seq_len_q > seq_len_kv and variant == CausalVariant.LOWER_RIGHT:
             warn(
-                "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!"
+                "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!",
+                stacklevel=2,
             )
 
     def _upper_left(self, device: torch.device) -> torch.Tensor:

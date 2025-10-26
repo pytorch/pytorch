@@ -2653,7 +2653,8 @@ def compile(
     if torch.compiler.is_exporting():
         warnings.warn(
             "You are calling torch.compile inside torch.export region. "
-            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)"
+            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)",
+            stacklevel=2,
         )
         from torch._higher_order_ops.utils import setup_compilation_env
 

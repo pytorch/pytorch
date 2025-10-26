@@ -352,7 +352,8 @@ class Backend(str):  # noqa: SLOT000
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
                 "`cuda` or `xpu`. Please specify it via the `devices` argument of "
-                "`register_backend`."
+                "`register_backend`.",
+                stacklevel=2,
             )
             Backend.backend_capability[name.lower()] = (
                 ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
@@ -427,7 +428,8 @@ class BackendConfig:
             warnings.warn(
                 f"Device capability of {backend} unknown, assuming `cpu` and "
                 "`cuda`. You can specify it in `device:backend` format in "
-                "`init_process_group` call."
+                "`init_process_group` call.",
+                stacklevel=2,
             )
             backend_val = Backend(backend)
             self.device_backend_map = {
@@ -751,7 +753,8 @@ def _get_default_timeout(backend: Backend) -> timedelta:
             # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
             # changed to be a warning.  We should fix the moco model.
             warnings.warn(
-                "Attempted to get default timeout for nccl backend, but NCCL support is not compiled"
+                "Attempted to get default timeout for nccl backend, but NCCL support is not compiled",
+                stacklevel=2,
             )
             return default_pg_timeout
         return default_pg_nccl_timeout
@@ -802,6 +805,7 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None) -> str:
             f"You are using a Backend {type(group)} as a ProcessGroup. "
             "This usage is deprecated since PyTorch 2.0. Please use a public API "
             "of PyTorch Distributed instead.",
+            stacklevel=2,
         )
         # Provide backward compatibility to cases where `group` passed in is
         # actually a Backend (like `ProcessGroupGloo`) rather than a
@@ -868,7 +872,8 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         "backward-compatiblity reason. If you need to find a device for object "
         "collectives, please use `_get_object_coll_device`. If you need to query "
         "the device types supported by group, please use "
-        "`_device_capability(group)`. "
+        "`_device_capability(group)`. ",
+        stacklevel=2,
     )
     group = group or _get_default_group()
 
@@ -910,7 +915,8 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         warnings.warn(
             "Multiple backends are registered with this ProcessGroup. We cannot "
             f"determine which one is the default. Returning {rv}. "
-            "Please consider using other APIs."
+            "Please consider using other APIs.",
+            stacklevel=2,
         )
         return rv
 
@@ -1010,7 +1016,8 @@ def _warn_not_in_group(op_name) -> None:
     global_rank = -1 if GroupMember.WORLD is None else GroupMember.WORLD.rank()
     warnings.warn(
         f"Running {op_name} on global rank {global_rank} which does not "
-        "belong to the given group."
+        "belong to the given group.",
+        stacklevel=2,
     )
 
 
@@ -1557,7 +1564,9 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
         elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
             backends.add(backend)  # type: ignore[arg-type]
     if len(backends) == 0:
-        warnings.warn("Set timeout is now only supported for either nccl or gloo.")
+        warnings.warn(
+            "Set timeout is now only supported for either nccl or gloo.", stacklevel=2
+        )
     for backend in backends:
         backend._set_default_timeout(timeout)
 
@@ -1758,7 +1767,8 @@ def init_process_group(
             warnings.warn(
                 f"For MPI backend, world_size ({world_size}) and rank ({rank}) "
                 "are ignored since they are assigned by the "
-                "MPI runtime."
+                "MPI runtime.",
+                stacklevel=2,
             )
 
         default_pg, _ = _new_process_group_helper(
@@ -2038,7 +2048,8 @@ def _new_process_group_helper(
                 if backend_options._timeout != timeout:
                     warnings.warn(
                         "backend_options._timeout was specified, "
-                        "but timeout kwarg has a default value that will always override it. "
+                        "but timeout kwarg has a default value that will always override it. ",
+                        stacklevel=2,
                     )
             else:
                 # default backend_options for NCCL
@@ -2259,7 +2270,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         if pg in _world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
-                "ProcessGroup is destroyed. They will be cleaned."
+                "ProcessGroup is destroyed. They will be cleaned.",
+                stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
 
@@ -2349,7 +2361,8 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
         if pg in _world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
-                "ProcessGroup is aborted. They will be cleaned."
+                "ProcessGroup is aborted. They will be cleaned.",
+                stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
 
@@ -4919,7 +4932,8 @@ def barrier(
         if group.rank() == 0:
             warnings.warn(  # warn only once
                 "barrier(): using the device under current context. "
-                "You can specify `device_id` in `init_process_group` to mute this warning."
+                "You can specify `device_id` in `init_process_group` to mute this warning.",
+                stacklevel=2,
             )
 
     work = group.barrier(opts=opts)
@@ -5001,6 +5015,7 @@ def monitored_barrier(
         warnings.warn(
             "Please specify timeout arg as a timedelta. "
             f"Converting current value of {timeout} assuming it represents seconds",
+            stacklevel=2,
         )
         timeout = timedelta(seconds=timeout)
 
