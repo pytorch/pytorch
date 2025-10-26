@@ -3882,6 +3882,15 @@ class Scheduler:
         if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
             return True
         return False
+    
+    def fusion_prevent_too_many_reads_and_writes(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
+    ) -> bool:
+        unique_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
+            node1.read_writes.writes | node2.read_writes.writes
+        )
+        unique_writes = (node2.read_writes.writes) - (node1.read_writes.reads | node2.read_writes.reads)
+        return len(unique_reads) + len(unique_writes) > threshold
 
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
