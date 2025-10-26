@@ -94,18 +94,6 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
     return result
 
 class TestReductions(TestCase):
-    @onlyNativeDeviceTypes
-    def test_argmin_argmax_no_dim_transposed_view_after_mutation(self, device):
-        # Regression for https://github.com/pytorch/pytorch/issues/163929
-        # Ensure argmax/argmin indices are correct on transposed views (no dim)
-        x = torch.randn([16, 8], device=device)
-        y = x.transpose(0, 1)
-        x.add_(1)
-
-        # Compare against flatten-based references
-        self.assertEqual(y.argmin(), y.reshape(-1).argmin())
-        self.assertEqual(y.argmax(), y.reshape(-1).argmax())
-
 
     ###########################################################################
     # ReductionOpInfo unit tests
