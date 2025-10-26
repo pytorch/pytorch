@@ -1036,7 +1036,6 @@ class FxConverter:
             # Add constants stored as Triton metadata, in signature order.
             call_kwargs |= constants
             new_call_args = [
-                # pyrefly: ignore  # missing-attribute
                 call_kwargs[key]
                 for key in signature
                 # pyrefly: ignore  # missing-attribute

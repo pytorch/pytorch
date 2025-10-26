@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import itertools
 import operator
-from typing import Callable, Optional, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Optional, overload, TYPE_CHECKING, TypeAlias, TypeVar
 
 from ..decorators import substitute_in_graph
 
