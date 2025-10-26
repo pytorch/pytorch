@@ -2220,7 +2220,10 @@ class VariableBuilder:
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
             guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        if not isinstance(value, torch.distributed.tensor.DTensor):
+        is_dtensor = torch.distributed.is_available() and isinstance(
+            value, torch.distributed.tensor.DTensor
+        )
+        if not is_dtensor:
             # We guard on the _local_tensor and the _spec, and therefore we dont
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -2240,7 +2243,7 @@ class VariableBuilder:
             # Tensor subclass guards are very expensive because they are
             # implemented in Python. Since DTensor is PyTorch-maintained class,
             # we can skip a lot of these guards.
-            if isinstance(value, torch.distributed.tensor.DTensor):
+            if is_dtensor:
                 self.install_guards(GuardBuilder.TYPE_MATCH)
 
                 # The inner tensor name is always _local_tensor. If its not, we
@@ -2267,6 +2270,12 @@ class VariableBuilder:
                 install_guard(
                     AttrSource(self.source, "_spec").make_guard(
                         GuardBuilder.DTENSOR_SPEC_MATCH
+                    )
+                )
+                # Move this to C++
+                install_guard(
+                    AttrSource(self.source, "requires_grad").make_guard(
+                        GuardBuilder.EQUALS_MATCH
                     )
                 )
             else:
