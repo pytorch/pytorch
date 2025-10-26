@@ -3118,7 +3118,7 @@ def _validate_symbolic_output_for_caching(
     if is_tracing:
         # Check for SymNode types in PROXY mode - this should bypass caching
         # regardless of whether symbols are known or not
-        for node in _iterate_nodes(output):
+        for _node in _iterate_nodes(output):
             raise _BypassDispatchCache("Proxy mode with SymNode output")
     else:
         # Check for unrepresented symbols in tensor expressions
