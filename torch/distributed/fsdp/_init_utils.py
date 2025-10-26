@@ -509,7 +509,7 @@ def _init_prefetching_state(
 
 
 @no_type_check
-# pyrefly: ignore  # bad-function-definition
+# pyrefly: ignore [bad-function-definition]
 def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
     # TODO: we need to add additional check once we support FSDP + PiPPy.
     # This check is currently sufficient, since we only support FSDP + TP.
@@ -918,7 +918,7 @@ def _materialize_meta_module(
                 # the module has directly managed parameters/buffers
                 module_state_iter = itertools.chain(
                     module.parameters(recurse=False),
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     module.buffers(recurse=False),
                 )
                 has_module_states = len(list(module_state_iter)) > 0

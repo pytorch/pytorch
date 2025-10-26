@@ -633,7 +633,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         if func == torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             res = func(args[0].elem, args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
@@ -787,7 +787,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
-        # pyrefly: ignore  # redundant-cast
+        # pyrefly: ignore [redundant-cast]
         return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
@@ -1166,10 +1166,10 @@ def all_gather_inplace(
     for t in tensor_list:
         is_scalar = t.dim() == 0
         t_offset = 1 if is_scalar else t.size(0)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         out = output[offset] if is_scalar else output[offset : offset + t_offset]
         output_splits.append(out)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         offset += t_offset
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
