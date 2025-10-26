@@ -127,21 +127,10 @@ C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
 template <typename T>
 C10_HOST_DEVICE inline T exponential(T val, T lambda) {
   // https://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
-  // Different implementations for CUDA and CPU to preserve original logic
-  // TODO: must be investigated and unified!!!
-  // https://github.com/pytorch/pytorch/issues/38662
-#if defined(__CUDACC__) || defined(__HIPCC__)
-      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
-      // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-      // we need log to be not 0, and not underflow when converted to half
-      // fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
-  auto log = val >= static_cast<T>(1.) - std::numeric_limits<T>::epsilon() / 2
-      ? -std::numeric_limits<T>::epsilon() / 2
-      : at::log(val);
+  val = std::min(std::max(val, std::numeric_limits<T>::epsilon() / 2),
+                   static_cast<T>(1.) - std::numeric_limits<T>::epsilon() / 2);
+  auto log = at::log1p(-val);
   return static_cast<T>(-1.0) / lambda * log;
-#else
-  return static_cast<T>(-1.0) / lambda * at::log1p(-val);
-#endif
 }
 
 /**
