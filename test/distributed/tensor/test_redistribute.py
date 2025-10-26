@@ -7,7 +7,10 @@ import itertools
 import unittest
 
 import torch
-from torch.distributed._local_tensor import maybe_run_for_local_tensor
+from torch.distributed._local_tensor import (
+    maybe_disable_local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -1040,23 +1043,27 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
     def test_ordered_distribute_all_combination(self):
         """Exhaustively test all possible sharding combinations and verify correctness"""
         torch.manual_seed(21)
-        mesh = init_device_mesh(self.device_type, (2, 2, 2))
-        input_tensor_shape = [
-            # even sharding
-            (16, 8),
-            (8, 16, 32),
-            (8, 32, 16, 16),
-            # uneven sharding with padding
-            (17, 5),
-            (13, 2, 13),
-            (33, 16, 8, 1),
-        ]
+
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+            input_tensor_shape = [
+                # even sharding
+                (16, 8),
+                (8, 16, 32),
+                (8, 32, 16, 16),
+                # uneven sharding with padding
+                (17, 5),
+                (13, 2, 13),
+                (33, 16, 8, 1),
+            ]
 
         # 1. Verify correctness of distribute_tensor from Tensor to DTensor.
         for tensor_shape in input_tensor_shape:
             input_data = torch.randn(tensor_shape, device=self.device_type)
             tensor_rank = input_data.ndim
-            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
+            with maybe_disable_local_tensor_mode():
+                shard_orders = self.generate_shard_orders(mesh, tensor_rank)
+            for shard_order in shard_orders:
                 sharded_dt = self.distribute_tensor(
                     input_data.clone(), mesh, placements=None, shard_order=shard_order
                 )
@@ -1070,7 +1077,9 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             input_data = torch.randn(tensor_shape, device=self.device_type)
             tensor_rank = input_data.ndim
             prev_sharded_dt = None
-            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
+            with maybe_disable_local_tensor_mode():
+                shard_orders = self.generate_shard_orders(mesh, tensor_rank)
+            for shard_order in shard_orders:
                 if prev_sharded_dt is None:
                     prev_sharded_dt = self.distribute_tensor(
                         input_data.clone(),
@@ -1090,26 +1099,27 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         """Test mixing Partial in the original placements and do redistribute."""
         # This test takes 226s to complete on 8XA100...
         torch.manual_seed(21)
-        mesh = init_device_mesh(self.device_type, (2, 2, 2))
-        input_tensor_shape = [
-            # even sharding
-            (16, 8),
-            (8, 16, 32),
-            # uneven sharding with padding
-            (17, 5),
-            (13, 2, 13),
-            (33, 16, 8, 1),
-        ]
-        placement_choice = [
-            Shard(0),
-            Shard(1),
-            Shard(2),
-            Partial("sum"),
-            Partial("min"),
-            Replicate(),
-        ]
-        # pick 3 for the 3D mesh
-        partial_placement_comb = list(itertools.combinations(placement_choice, 3))
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+            input_tensor_shape = [
+                # even sharding
+                (16, 8),
+                (8, 16, 32),
+                # uneven sharding with padding
+                (17, 5),
+                (13, 2, 13),
+                (33, 16, 8, 1),
+            ]
+            placement_choice = [
+                Shard(0),
+                Shard(1),
+                Shard(2),
+                Partial("sum"),
+                Partial("min"),
+                Replicate(),
+            ]
+            # pick 3 for the 3D mesh
+            partial_placement_comb = list(itertools.combinations(placement_choice, 3))
 
         def _is_valid_placement(placements, tensor_rank):
             # Check if placements is valid for tensor with rank `tensor_rank`
@@ -1125,7 +1135,9 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     continue
                 local_tensor = torch.randn(shape, device=self.device_type)
                 full_tensor = DTensor.from_local(local_tensor, mesh, placements)
-                for shard_order in self.generate_shard_orders(mesh, len(shape)):
+                with maybe_disable_local_tensor_mode():
+                    shard_orders = self.generate_shard_orders(mesh, len(shape))
+                for shard_order in shard_orders:
                     sharded_dt = self.redistribute(
                         full_tensor, mesh, placements=None, shard_order=shard_order
                     )
