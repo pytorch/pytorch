@@ -130,7 +130,7 @@ def var_decomposition(
         else:
             raise RuntimeError("correction must be int or float")
 
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     return sum / max(0, denom)
 
 
