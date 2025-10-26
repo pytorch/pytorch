@@ -14,7 +14,6 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
-from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
@@ -229,7 +228,7 @@ def _chunk_dtensor(
 
     The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
     """
-    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+    root_mesh = device_mesh._get_root_mesh() if device_mesh is not None else None
     if root_mesh is None:
         raise RuntimeError("No parent device_mesh is found for FSDP device_mesh.")
     if root_mesh.ndim < 2:

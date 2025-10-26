@@ -1737,7 +1737,6 @@ class KernelArgs:
                 )
             )
         for outer, inner in chain(
-            # pyrefly: ignore  # bad-argument-type
             self.input_buffers.items(),
             # pyrefly: ignore  # bad-argument-type
             self.output_buffers.items(),

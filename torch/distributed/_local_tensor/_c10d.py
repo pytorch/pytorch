@@ -1,7 +1,7 @@
 import functools
 import math
 import operator
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 from torch._C import ScriptObject

@@ -982,6 +982,7 @@ exclusions = {
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
+    "annotation",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -59,7 +59,7 @@ def _cast_forward_inputs(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        # pyrefly: ignore  # no-matching-overload
+
         return x.to(dtype)
 
     return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))

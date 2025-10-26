@@ -3,11 +3,11 @@ import itertools
 import logging
 import types
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import Any, cast, Mapping, Optional, Protocol, Sequence, TypeAlias
+from typing import Any, cast, Optional, Protocol, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -1327,7 +1327,6 @@ class _ContextParallel(ParallelStyle):
         placement = [Shard(self.seq_dim)]
         all_args = []
 
-        # pyrefly: ignore  # bad-assignment, bad-argument-type
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, DTensor):
