@@ -184,12 +184,6 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("serialize", [False, True])
     def test_flex_attention(self, serialize):
-        if serialize:
-            # TODO: Fixed in next PR
-            raise unittest.SkipTest(
-                "FlexAttentionBackward isn't marked cacheable even though it is"
-            )
-
         def _squared(score, b, h, m, n):
             return score * score
 
@@ -229,11 +223,6 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
-        if serialize:
-            raise unittest.SkipTest(
-                "FlexAttentionBackward isn't marked cacheable even though it is"
-            )
-
         class FlexAttentionModule(torch.nn.Module):
             def __init__(self, hidden_size, num_heads):
                 super().__init__()
