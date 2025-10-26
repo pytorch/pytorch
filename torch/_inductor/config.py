@@ -691,6 +691,10 @@ max_fusion_unique_io_buffers: Optional[int] = None
 # max number of inputs to generate cat as a pointwise op with masked loads
 max_pointwise_cat_inputs = 8
 
+# maximum number of distinct input buffers allowed after fusing a cat operation.
+# The check is disabled if set to None.
+max_fused_cat_input_buffers: Optional[int] = None
+
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
 

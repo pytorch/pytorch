@@ -1846,6 +1846,26 @@ def cat(inputs, dim=0):
     def additional_pointwise_ops(op: torch._ops.OpOverload):
         return op in (aten.cat.default, aten.constant_pad_nd.default)
 
+    def count_input_buffers(x):
+        """Count the number of input buffers that would be read after fusion."""
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return count_input_buffers(unwrap_tensor(x))
+
+        # If it's not a Pointwise operation, it will be a single input buffer
+        if not isinstance(x, ir.Pointwise):
+            return 1
+
+        # For Pointwise operations, count all the buffers they read
+        total = 0
+        for read in x.get_read_names():
+            total += count_input_buffers(V.graph.get_buffer(read))
+
+        return total
+
+    def total_input_buffers_after_cat_fusion(inputs):
+        """Calculate total number of input buffers after fusing a cat operation."""
+        return sum(count_input_buffers(inp) for inp in inputs)
+
     if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
@@ -1865,8 +1885,16 @@ def cat(inputs, dim=0):
         horizontal_fuse_cat = all(
             should_lower_cat_input(inp) for inp in inputs
         ) and not any(can_fuse_reduction(t) for t in inputs)
+
+        # Check if fusion would create a kernel with too many input buffers
         if fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction):
-            return pointwise_cat(inputs, dim)
+            should_skip_fusion = (
+                config.max_fused_cat_input_buffers is not None
+                and total_input_buffers_after_cat_fusion(inputs)
+                > config.max_fused_cat_input_buffers
+            )
+            if not should_skip_fusion:
+                return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
