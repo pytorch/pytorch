@@ -134,16 +134,16 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
         from torch.nn.parallel.scatter_gather import _is_namedtuple
 
         if _is_namedtuple(obj):
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             return list(zip(*map(to_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             return [list(i) for i in zip(*map(to_map, obj))]
         if isinstance(obj, dict) and len(obj) > 0:
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
         return [obj]
 
