@@ -109,7 +109,8 @@ class _AsyncCheckpointProcess:
         # Wait for the checkpoint background process to initialize.
         # Using default GLOO init timeout.
         response = self._wait_for_response(timeout=1800)
-        assert response == _CheckpointSaveProcessControlOpts.INIT_COMPLETE
+        if not response == _CheckpointSaveProcessControlOpts.INIT_COMPLETE:
+            raise AssertionError(f"Expected INIT_COMPLETE response, got {response}")
 
     def __del__(self) -> None:
         if self._save_process.is_alive():
@@ -175,7 +176,8 @@ class _AsyncCheckpointProcess:
         )
         self._send(async_cp_request)
         result = self._wait_for_response()
-        assert isinstance(result, Metadata)
+        if not isinstance(result, Metadata):
+            raise AssertionError(f"Expected Metadata response, got {type(result)}")
         return result
 
     @staticmethod
@@ -245,7 +247,10 @@ class _AsyncCheckpointProcess:
                 ):
                     logger.info("Terminating the checkpoint background process.")
                     return
-                assert isinstance(obj, _AsyncCheckpointRequest)
+                if not isinstance(obj, _AsyncCheckpointRequest):
+                    raise AssertionError(
+                        f"Expected _AsyncCheckpointRequest, got {type(obj)}"
+                    )
                 logger.info(
                     f"Received async checkpoint request with id={obj.checkpoint_request_id.checkpoint_id}"  # noqa: G004
                 )
@@ -296,7 +301,10 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     ) -> Metadata:
         global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
-            assert pg_init_info is not None
+            if pg_init_info is None:
+                raise AssertionError(
+                    "pg_init_info must not be None when _CHECKPOINT_PROCESS is None"
+                )
             ckpt_kwargs = {}
             if (ckpt_id := getattr(storage_writer, "checkpoint_id", None)) is not None:
                 ckpt_kwargs["checkpoint_id"] = ckpt_id
@@ -310,7 +318,10 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
 
             create_checkpoint_daemon_process()
 
-        assert _CHECKPOINT_PROCESS is not None
+        if _CHECKPOINT_PROCESS is None:
+            raise AssertionError(
+                "_CHECKPOINT_PROCESS must not be None after initialization"
+            )
         staged_state_dict = (
             staging_future_or_state_dict.result()
             if isinstance(staging_future_or_state_dict, Future)

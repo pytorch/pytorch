@@ -310,7 +310,7 @@ class SamplingMethod(Enum):
                 )
             try:
                 new_default = new_type()
-            except Exception:  # noqa: E722
+            except Exception:
                 # if default constructor doesn't work, try None
                 new_default = None
 
@@ -779,7 +779,7 @@ class ConfigFuzzer:
         test_model_fn = self.test_model_fn_factory()
         try:
             test_model_fn()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
             )
@@ -788,7 +788,7 @@ class ConfigFuzzer:
         try:
             test_model_fn2 = self.test_model_fn_factory()
             comp = torch.compile(test_model_fn2, backend="inductor")
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
             )
@@ -796,7 +796,7 @@ class ConfigFuzzer:
         # try running compiled
         try:
             compile_result = comp()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception running compiled",
                 Status.FAILED_RUN_COMPILE_EXCEPTION,

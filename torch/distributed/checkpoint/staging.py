@@ -193,9 +193,10 @@ class DefaultStager(AsyncStager):
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
-            assert torch.accelerator.is_available(), (
-                "Non-blocking copy requires that the current accelerator is available."
-            )
+            if not torch.accelerator.is_available():
+                raise AssertionError(
+                    "Non-blocking copy requires that the current accelerator is available."
+                )
 
         self._staging_future: Optional[Future[STATE_DICT_TYPE]] = None
 
@@ -215,7 +216,10 @@ class DefaultStager(AsyncStager):
             state_dict (STATE_DICT_TYPE): The state_dict to be staged.
         """
         if self._config.use_async_staging:
-            assert self._staging_executor is not None
+            if self._staging_executor is None:
+                raise AssertionError(
+                    "staging_executor should not be None for async staging"
+                )
             self._staging_future = self._staging_executor.submit(
                 self._stage,
                 state_dict,
@@ -227,9 +231,10 @@ class DefaultStager(AsyncStager):
 
     def _stage(self, state_dict: STATE_DICT_TYPE, **kwargs: Any) -> STATE_DICT_TYPE:
         if self._config.use_non_blocking_copy:
-            assert self._staging_stream or not self._config.use_async_staging, (
-                "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
-            )
+            if not (self._staging_stream or not self._config.use_async_staging):
+                raise AssertionError(
+                    "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
+                )
             with (
                 self._staging_stream
                 if self._staging_stream is not None

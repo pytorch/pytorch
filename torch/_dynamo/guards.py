@@ -38,7 +38,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
 
 try:
@@ -196,6 +196,10 @@ from .utils import (
     unpatched_nn_module_getattr,
     verify_guard_fn_signature,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
@@ -1054,9 +1058,7 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
-        self.already_guarded_not_present_in_generic_dict: OrderedSet[
-            tuple[str, str]
-        ] = OrderedSet()
+        self.already_added_code_parts: OrderedSet[str] = OrderedSet()
 
     def guard_on_dict_keys_and_ignore_order(
         self, example_value: dict[Any, Any], guard: Guard
@@ -1849,6 +1851,10 @@ class GuardBuilder(GuardBuilderBase):
             code = f"hasattr({ref}, {attr!r})"
         else:
             code = f"not hasattr({ref}, {attr!r})"
+
+        if code in self.already_added_code_parts:
+            return
+
         self._set_guard_export_info(
             guard, [code], provided_guarded_object=self.get(base)
         )
@@ -1882,6 +1888,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         else:
             base_manager.add_no_hasattr_guard(attr, get_verbose_code_parts(code, guard))
+        self.already_added_code_parts.add(code)
 
     def NOT_PRESENT_IN_GENERIC_DICT(
         self, guard: Guard, attr: Optional[Any] = None
@@ -1892,7 +1899,8 @@ class GuardBuilder(GuardBuilderBase):
 
         base_manager = self.get_guard_manager(guard)
 
-        if (ref, attr) in self.already_guarded_not_present_in_generic_dict:
+        code = f"not ___dict_contains({attr!r}, {ref}.__dict__)"
+        if code in self.already_added_code_parts:
             return
 
         mod_dict_source = f"{guard.name}.__dict__"
@@ -1902,11 +1910,10 @@ class GuardBuilder(GuardBuilderBase):
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
-        code = f"not ___dict_contains({attr!r}, {ref}.__dict__)"
         mod_generic_dict_manager.add_dict_contains_guard(
             False, attr, get_verbose_code_parts(code, guard)
         )
-        self.already_guarded_not_present_in_generic_dict.add((ref, attr))
+        self.already_added_code_parts.add(code)
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
@@ -1948,11 +1955,14 @@ class GuardBuilder(GuardBuilderBase):
 
         maybe_not = "not " if invert else ""
         code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
+        if code in self.already_added_code_parts:
+            return
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
             not invert, key, get_verbose_code_parts(code, guard)
         )
+        self.already_added_code_parts.add(code)
 
     def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool) -> None:
         set_ref = self.arg_ref(guard)
@@ -1960,12 +1970,15 @@ class GuardBuilder(GuardBuilderBase):
         contains = not invert  # install_dict_contains_guard inverts "contains"
 
         code = f"set.__contains__({set_ref}, {item!r})"
+        if code in self.already_added_code_parts:
+            return
 
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
             contains, item, get_verbose_code_parts(code, guard)
         )
+        self.already_added_code_parts.add(code)
 
     def BOOL_MATCH(self, guard: Guard) -> None:
         # checks val == True or val == False
@@ -2050,9 +2063,6 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_dispatch_key_set_guard(
             val, get_verbose_code_parts(code_parts, guard)
         )
-
-    def NAME_MATCH(self, guard: Guard) -> None:
-        self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)  # type: ignore[arg-type]
 
     def DUAL_LEVEL(self, guard: Guard) -> None:
         # Invalidate dual level if current dual level is different than the one
@@ -4090,13 +4100,12 @@ class CheckFunctionManager:
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
-            # pyrefly: ignore  # unbound-name
             assert isinstance(cache_entry, CacheEntry)
-            # pyrefly: ignore  # unbound-name
+
             assert isinstance(extra_state, ExtraState)
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
-            # pyrefly: ignore  # unbound-name
+
             extra_state.invalidate(cache_entry, deleted_guard_manager)
             self.guard_manager = deleted_guard_manager
 
