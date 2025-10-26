@@ -271,6 +271,7 @@ def record_original_output_strides(gm: GraphModule) -> None:
             and (val := output.meta.get("val")) is not None
             and isinstance(val, torch.Tensor)
         ):
+            # pyrefly: ignore  # unbound-name
             output_strides.append(val.stride())
         else:
             # pyrefly: ignore  # bad-argument-type

@@ -44,6 +44,7 @@ def _load_for_lite_interpreter(f, map_location=None):
     map_location = validate_map_location(map_location)
 
     if isinstance(f, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         cpp_module = torch._C._load_for_lite_interpreter(os.fspath(f), map_location)
     else:
         cpp_module = torch._C._load_for_lite_interpreter_from_buffer(
@@ -105,6 +106,7 @@ def _get_model_bytecode_version(f_input) -> int:
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if isinstance(f_input, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         return torch._C._get_model_bytecode_version(os.fspath(f_input))
     else:
         # pyrefly: ignore  # missing-attribute
@@ -138,6 +140,7 @@ def _get_mobile_model_contained_types(f_input) -> int:
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if isinstance(f_input, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         return torch._C._get_mobile_model_contained_types(os.fspath(f_input))
     else:
         # pyrefly: ignore  # missing-attribute
@@ -165,7 +168,9 @@ def _backport_for_mobile(f_input, f_output, to_version):
         isinstance(f_output, (str, os.PathLike))
     ):
         return torch._C._backport_for_mobile(
+            # pyrefly: ignore  # no-matching-overload
             os.fspath(f_input),
+            # pyrefly: ignore  # no-matching-overload
             os.fspath(f_output),
             to_version,
         )
@@ -193,6 +198,7 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if isinstance(f_input, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         return torch._C._backport_for_mobile_to_buffer(os.fspath(f_input), to_version)
     else:
         return torch._C._backport_for_mobile_from_buffer_to_buffer(
@@ -238,6 +244,7 @@ def _get_model_ops_and_info(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if isinstance(f_input, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         return torch._C._get_model_ops_and_info(os.fspath(f_input))
     else:
         # pyrefly: ignore  # missing-attribute

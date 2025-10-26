@@ -916,6 +916,7 @@ def fetch_object_proxy(
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectType, PySymType]
 ) -> object:
+    # pyrefly: ignore  # no-matching-overload
     return get_proxy_slot(t, tracer, t)
 
 
@@ -964,6 +965,7 @@ def _fetch_proxies_and_all_constant_flag(
     """
     f_flat_args_kwargs = [
         (
+            # pyrefly: ignore  # no-matching-overload
             fetch_object_proxy(tracer, x)
             if isinstance(x, (Tensor, _AnyScriptObject))
             else x
@@ -2495,6 +2497,7 @@ class _MakefxTracer:
         ):
             from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
+            # pyrefly: ignore  # unbound-name
             insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
             t.recompile()
         # TODO: kind of a bad way to do it, should maybe figure out a better way

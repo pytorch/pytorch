@@ -317,6 +317,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         res_proxy.node.meta.update(meta.data)
         if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
+            # pyrefly: ignore  # unbound-name
             if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):
                 res_proxy.node.meta["unbacked_bindings"] = symbol_to_path
         self.tracer.set_metadata(res_proxy.node, res_data)

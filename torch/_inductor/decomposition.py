@@ -544,6 +544,7 @@ def amax(
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
+        # pyrefly: ignore  # no-matching-overload
         return torch.any(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
@@ -555,6 +556,7 @@ def amin(
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
+        # pyrefly: ignore  # no-matching-overload
         return torch.all(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 

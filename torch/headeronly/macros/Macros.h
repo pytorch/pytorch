@@ -619,7 +619,10 @@ __host__ __device__
 // loading custom extensions compiled against different libtorch
 // versions where these APIs may have changed.
 
-// Helper macros to handle 1-3 hidden namespace levels when not windows
+// Helper macros for nested namespace expansion
+#define _EXPAND(...) __VA_ARGS__
+
+// Macros to handle 1-3 hidden namespace levels when not windows
 #define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
 #define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden"))) {
 #define _HIDDEN_NS_2(n1, n2) \
@@ -629,15 +632,13 @@ __host__ __device__
   namespace n1::n2 {             \
   namespace n3 __attribute__((visibility("hidden"))) {
 
-// Helper macros to close namespaces when not windows
+// Macros to close namespaces when not windows
 #define _HIDDEN_NS_END_1(n1) }
 #define _HIDDEN_NS_END_N(n1, ...) \
   }                               \
   }
 
-// Helper macros to join strs with :: (for win, where symbols are hidden by
-// default)
-#define _EXPAND(...) __VA_ARGS__
+// Macros to join strs with :: (for win, where symbols are hidden by default)
 #define _JOIN_GET_MACRO(_1, _2, _3, NAME, ...) NAME
 #define _JOIN_NS1(a) a
 #define _JOIN_NS2(a, b) a::b
@@ -646,8 +647,8 @@ __host__ __device__
 #if !defined(HIDDEN_NAMESPACE_BEGIN)
 #if defined(__GNUG__) && !defined(_WIN32)
 #define HIDDEN_NAMESPACE_BEGIN(...) \
-  _HIDDEN_NS_GET_MACRO(             \
-      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__)
+  _EXPAND(_HIDDEN_NS_GET_MACRO(     \
+      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__))
 #else
 #define HIDDEN_NAMESPACE_BEGIN(...)  \
   namespace _EXPAND(_JOIN_GET_MACRO( \
@@ -658,9 +659,9 @@ __host__ __device__
 #if !defined(HIDDEN_NAMESPACE_END)
 #if defined(__GNUG__) && !defined(_WIN32)
 #define HIDDEN_NAMESPACE_END(...)                                         \
-  _HIDDEN_NS_GET_MACRO(                                                   \
+  _EXPAND(_HIDDEN_NS_GET_MACRO(                                           \
       __VA_ARGS__, _HIDDEN_NS_END_N, _HIDDEN_NS_END_N, _HIDDEN_NS_END_1)( \
-      __VA_ARGS__)
+      __VA_ARGS__))
 #else
 #define HIDDEN_NAMESPACE_END(...) }
 #endif

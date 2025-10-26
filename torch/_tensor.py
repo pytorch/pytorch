@@ -1110,6 +1110,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -1136,7 +1137,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.remainder(other, self)
+        return torch.remainder(other, self)  # pyrefly: ignore  # no-matching-overload
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -1149,7 +1150,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.pow(other, self)
+        return torch.pow(other, self)  # pyrefly: ignore  # no-matching-overload
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
@@ -1165,12 +1166,14 @@ class Tensor(torch._C.TensorBase):
     def __rlshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
