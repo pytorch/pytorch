@@ -1485,7 +1485,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
 
-    def codegen_dynamic_scalar(self, node):
+    def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 

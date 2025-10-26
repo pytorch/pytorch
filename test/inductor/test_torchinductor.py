@@ -706,7 +706,7 @@ def check_model_gpu(
     if check_lowp:
 
         def downcast_fn(x):
-            if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.float:
                 return x
             return torch.empty_strided(
                 x.size(), x.stride(), device=GPU_TYPE, dtype=torch.half
@@ -4640,6 +4640,7 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    @skipIfXpu(msg="Incorrect reference on XPU, see issue #165392")
     def test_conv1d_with_permute(self):
         # fix https://github.com/pytorch/pytorch/issues/159462
         class ConvModel(nn.Module):
@@ -4693,7 +4694,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=False if torch.version.hip else True,
+            reference_in_float=not torch.version.hip,
         )
 
     def test_convolution2(self):
@@ -4727,7 +4728,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=False if torch.version.hip else True,
+            reference_in_float=not torch.version.hip,
         )
 
     @skip_if_gpu_halide
@@ -4778,7 +4779,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=False if torch.version.hip else True,
+            reference_in_float=not torch.version.hip,
         )
 
     def test_conv2d_channels_last(self):
@@ -12969,7 +12970,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         res = torch.compile(fn)(20)
-        self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
+        self.assertTrue(torch.all((res >= 0) & (res < 10)).item())
 
     @torch._inductor.config.patch(force_shape_pad=True)
     @skip_if_gpu_halide  # correctness issue
@@ -14267,6 +14268,42 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         out, (code,) = run_and_get_code(compiled, a, b)
         self.assertTrue("'enable_fp_fusion': False" in code)
         torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
+
+    @skip_if_cpp_wrapper("skip cpp wrapper")
+    @requires_cuda_and_triton
+    def test_repeat_interleave_decomposition_has_clamp(self):
+        repeat = torch.ones(2560, dtype=torch.int64, device=GPU_TYPE)
+        output_size = 505450
+        data = torch.arange(2560, device=GPU_TYPE)
+
+        if is_dynamic_shape_enabled():
+            raise unittest.SkipTest(
+                "repeat_interleave decomp doesn't support dynamic output size"
+            )
+
+        @torch.compile
+        def fn(repeat, output_size, data):
+            indices = torch.ops.aten.repeat_interleave.Tensor(
+                repeat, output_size=output_size
+            )
+            return data[indices]
+
+        result, code = run_and_get_code(fn, repeat, output_size, data)
+
+        self.assertEqual(result.shape[0], output_size)
+        self.assertTrue(torch.all(result >= 0).item())
+        self.assertTrue(torch.all(result < 2560).item())
+
+        code_str = "\n".join(code)
+        if torch.version.hip:
+            triton_str = "tl.minimum"
+        else:
+            triton_str = "triton_helpers.minimum"
+        self.assertIn(
+            triton_str,
+            code_str,
+            "Generated Triton code should use triton_helpers.minimum for clamping",
+        )
 
     # end of class CommonTemplate - add new tests here
 
@@ -15751,7 +15788,7 @@ if RUN_GPU:
                 ).run(code)
             else:
                 FileCheck().check_count(
-                    "with torch.cuda._DeviceGuard(0)", 1, exactly=True
+                    f"with torch.{GPU_TYPE}._DeviceGuard(0)", 1, exactly=True
                 ).run(code)
 
     class RNNTest(TestCase):

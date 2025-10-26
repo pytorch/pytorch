@@ -1038,7 +1038,7 @@ class ExecutionTraceObserver(_ITraceObserver):
                 return
 
             # Save the kernel paths for the generated kernels
-            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+            from torch._inductor.codecache import PyCodeCache
 
             kernel_files = [
                 v.__file__

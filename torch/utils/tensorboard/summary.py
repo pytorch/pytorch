@@ -370,9 +370,9 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
       ValueError: If tensor has the wrong shape or type.
     """
     tensor = make_np(tensor).squeeze()
-    assert (
-        tensor.ndim == 0
-    ), f"Tensor should contain one element (0 dimensions). Was given size: {tensor.size} and {tensor.ndim} dimensions."
+    if tensor.ndim != 0:
+        raise AssertionError(f"Tensor should contain one element (0 dimensions). \
+            Was given size: {tensor.size} and {tensor.ndim} dimensions.")
     # python float is double precision in numpy
     scalar = float(tensor)
     if new_style:
@@ -700,7 +700,8 @@ def audio(tag, tensor, sample_rate=44100):
     if abs(array).max() > 1:
         print("warning: audio amplitude out of range, auto clipped.")
         array = array.clip(-1, 1)
-    assert array.ndim == 1, "input tensor should be 1 dimensional."
+    if array.ndim != 1:
+        raise AssertionError("input tensor should be 1 dimensional.")
     array = (array * np.iinfo(np.int16).max).astype("<i2")
 
     import io
@@ -731,7 +732,8 @@ def custom_scalars(layout):
         for chart_name, chart_metadata in v.items():
             tags = chart_metadata[1]
             if chart_metadata[0] == "Margin":
-                assert len(tags) == 3
+                if len(tags) != 3:
+                    raise AssertionError("len(tags) != 3")
                 mgcc = layout_pb2.MarginChartContent(
                     series=[
                         layout_pb2.MarginChartContent.Series(

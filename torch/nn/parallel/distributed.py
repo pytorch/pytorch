@@ -218,7 +218,7 @@ def _dump_DDP_relevant_env_vars():
     ]
     formatted_output = ""
     for var in relevant_env_vars:
-        value = os.environ[var] if var in os.environ else "N/A"
+        value = os.environ.get(var, "N/A")
         formatted_output += f"env:{var}={value}\n"
     print(formatted_output)
 
@@ -701,9 +701,8 @@ class DistributedDataParallel(Module, Joinable):
                 )
             self.device_mesh = device_mesh
             self.process_group = device_mesh.get_group(mesh_dim=0)
-            from torch.distributed.device_mesh import _mesh_resources
 
-            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            root_mesh = device_mesh._get_root_mesh()
             # if a root mesh is not the same as device_mesh,
             # meaning the device_mesh is sliced out from the root mesh.
             if root_mesh != device_mesh:
@@ -775,7 +774,7 @@ class DistributedDataParallel(Module, Joinable):
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",  # noqa: E201,E202
+                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",
                 )
 
             self.device_ids = None

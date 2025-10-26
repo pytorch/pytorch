@@ -237,7 +237,7 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        self._orig_dtype = next(iter(orig_dtypes)) if len(trainable_params) else None
+        self._orig_dtype = next(iter(orig_dtypes)) if trainable_params else None
         if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
             # This can be relaxed if we issue one reduce-scatter per reduce
             # dtype (but we would need a way for users to specify multiple
@@ -245,9 +245,7 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
-        self._reduce_dtype = (
-            next(iter(reduce_dtypes)) if len(trainable_params) else None
-        )
+        self._reduce_dtype = next(iter(reduce_dtypes)) if trainable_params else None
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -273,25 +271,27 @@ class FSDPParamGroup:
         Whether to (try to) use the ProcessGroup's allocate_tensor method for
         the staging buffers for collective comms.
         """
-        assert isinstance(
+        if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
-        ), (
-            "cannot call set_allocate_memory_from_process_group() "
-            f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
-        )
+        ):
+            raise AssertionError(
+                "cannot call set_allocate_memory_from_process_group() "
+                f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
+            )
         self._all_gather_comm = (
             ProcessGroupAllocAllGather(self._all_gather_process_group)
             if enable
             else DefaultAllGather()
         )
 
-        assert isinstance(
+        if not isinstance(
             self._reduce_scatter_comm,
             (DefaultReduceScatter | ProcessGroupAllocReduceScatter),
-        ), (
-            "cannot call set_allocate_memory_from_process_group() "
-            f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
-        )
+        ):
+            raise AssertionError(
+                "cannot call set_allocate_memory_from_process_group() "
+                f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
+            )
         self._reduce_scatter_comm = (
             ProcessGroupAllocReduceScatter(self._reduce_scatter_process_group)
             if enable
@@ -536,9 +536,10 @@ class FSDPParamGroup:
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                 # this means the native HSDP is not enabled,
                 # but user may want to have a custom HSDP setup
-                assert self._all_reduce_hook is not None, (
-                    "all reduce hook stream is specified but hook itself is missing."
-                )
+                if self._all_reduce_hook is None:
+                    raise AssertionError(
+                        "all reduce hook stream is specified but hook itself is missing."
+                    )
                 all_reduce_stream = self._all_reduce_hook_stream
             else:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
@@ -573,7 +574,10 @@ class FSDPParamGroup:
             )
             if all_reduce_input is not None:
                 if self.device.type != "cpu":
-                    assert all_reduce_event is not None
+                    if all_reduce_event is None:
+                        raise AssertionError(
+                            "Expected all_reduce_event to be set for non-CPU device"
+                        )
                 self._all_reduce_state = AllReduceState(
                     all_reduce_input, all_reduce_event
                 )
@@ -712,9 +716,10 @@ class FSDPParamGroup:
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
         num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
-        assert num_pre_save_hooks == num_pre_load_hooks, (
-            f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
-        )
+        if num_pre_save_hooks != num_pre_load_hooks:
+            raise AssertionError(
+                f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+            )
         if num_pre_save_hooks > 0:
             return  # already registered
         modules_with_fsdp_params: set[nn.Module] = {
@@ -755,17 +760,26 @@ class FSDPParamGroup:
             if self.is_sharded_post_forward
             else self.mesh_info
         )
-        assert isinstance(mesh_info, FSDPMeshInfo)
+        if not isinstance(mesh_info, FSDPMeshInfo):
+            raise AssertionError(
+                f"Expected mesh_info to be FSDPMeshInfo, got {type(mesh_info)}"
+            )
         return mesh_info.shard_process_group
 
     @property
     def _reduce_scatter_process_group(self) -> dist.ProcessGroup:
-        assert isinstance(self.mesh_info, FSDPMeshInfo)
+        if not isinstance(self.mesh_info, FSDPMeshInfo):
+            raise AssertionError(
+                f"Expected mesh_info to be FSDPMeshInfo, got {type(self.mesh_info)}"
+            )
         return self.mesh_info.shard_process_group
 
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
-        assert isinstance(self.mesh_info, HSDPMeshInfo)
+        if not isinstance(self.mesh_info, HSDPMeshInfo):
+            raise AssertionError(
+                f"Expected mesh_info to be HSDPMeshInfo, got {type(self.mesh_info)}"
+            )
         return self.mesh_info.replicate_process_group
 
     def _with_fqn(self, label: str) -> str:
@@ -834,7 +848,7 @@ def _get_param_module_infos(
                             param_name
                         )
     if len(param_to_module_info) != len(params):
-        raise AssertionError(f"Some parameters are not in the module tree of {module}")
+        raise AssertionError(f"Some parameters are not in the module tree of {modules}")
     return [param_to_module_info[param] for param in params]
 
 

@@ -87,19 +87,31 @@ __all__ = ['get_storage_info', 'hierarchical_pickle', 'get_model_info', 'get_inl
            'burn_in_info', 'get_info_and_burn_skeleton']
 
 def get_storage_info(storage):
-    assert isinstance(storage, torch.utils.show_pickle.FakeObject)
-    assert storage.module == "pers"
-    assert storage.name == "obj"
-    assert storage.state is None
-    assert isinstance(storage.args, tuple)
-    assert len(storage.args) == 1
+    if not isinstance(storage, torch.utils.show_pickle.FakeObject):
+        raise AssertionError(f"storage is not FakeObject: {type(storage)}")
+    if storage.module != "pers":
+        raise AssertionError(f"storage.module is not 'pers': {storage.module!r}")
+    if storage.name != "obj":
+        raise AssertionError(f"storage.name is not 'obj': {storage.name!r}")
+    if storage.state is not None:
+        raise AssertionError(f"storage.state is not None: {storage.state!r}")
+    if not isinstance(storage.args, tuple):
+        raise AssertionError(f"storage.args is not a tuple: {type(storage.args)}")
+    if len(storage.args) != 1:
+        raise AssertionError(f"len(storage.args) is not 1: {len(storage.args)}")
     sa = storage.args[0]
-    assert isinstance(sa, tuple)
-    assert len(sa) == 5
-    assert sa[0] == "storage"
-    assert isinstance(sa[1], torch.utils.show_pickle.FakeClass)
-    assert sa[1].module == "torch"
-    assert sa[1].name.endswith("Storage")
+    if not isinstance(sa, tuple):
+        raise AssertionError(f"sa is not a tuple: {type(sa)}")
+    if len(sa) != 5:
+        raise AssertionError(f"len(sa) is not 5: {len(sa)}")
+    if sa[0] != "storage":
+        raise AssertionError(f"sa[0] is not 'storage': {sa[0]!r}")
+    if not isinstance(sa[1], torch.utils.show_pickle.FakeClass):
+        raise AssertionError(f"sa[1] is not FakeClass: {type(sa[1])}")
+    if sa[1].module != "torch":
+        raise AssertionError(f"sa[1].module is not 'torch': {sa[1].module!r}")
+    if not sa[1].name.endswith("Storage"):
+        raise AssertionError(f"sa[1].name does not end with 'Storage': {sa[1].name!r}")
     storage_info = [sa[1].name.replace("Storage", "")] + list(sa[2:])
     return storage_info
 
@@ -124,52 +136,69 @@ def hierarchical_pickle(data):
         if (
             typename.startswith(('__torch__.', 'torch.jit.LoweredWrapper.', 'torch.jit.LoweredModule.'))
         ):
-            assert data.args == ()
+            if data.args != ():
+                raise AssertionError("data.args is not ()")
             return {
                 "__module_type__": typename,
                 "state": hierarchical_pickle(data.state),
             }
         if typename == "torch._utils._rebuild_tensor_v2":
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             storage, offset, size, stride, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             storage, offset, size, stride, quantizer, requires_grad, *_ = data.args
             storage_info = get_storage_info(storage)
-            assert isinstance(quantizer, tuple)
-            assert isinstance(quantizer[0], torch.utils.show_pickle.FakeClass)
-            assert quantizer[0].module == "torch"
+            if not isinstance(quantizer, tuple):
+                raise AssertionError("quantizer is not a tuple")
+            if not isinstance(quantizer[0], torch.utils.show_pickle.FakeClass):
+                raise AssertionError("quantizer[0] is not a FakeClass")
+            if quantizer[0].module != "torch":
+                raise AssertionError("quantizer[0].module is not torch")
             if quantizer[0].name == "per_tensor_affine":
-                assert len(quantizer) == 3
-                assert isinstance(quantizer[1], float)
-                assert isinstance(quantizer[2], int)
+                if len(quantizer) != 3:
+                    raise AssertionError("len(quantizer) is not 3")
+                if not isinstance(quantizer[1], float):
+                    raise AssertionError("quantizer[1] is not a float")
+                if not isinstance(quantizer[2], int):
+                    raise AssertionError("quantizer[2] is not an int")
                 quantizer_extra = list(quantizer[1:3])
             else:
                 quantizer_extra = []
             quantizer_json = [quantizer[0].name] + quantizer_extra
             return {"__qtensor__": [storage_info, offset, size, stride, quantizer_json, requires_grad]}
         if typename == "torch.jit._pickle.restore_type_tag":
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             obj, typ = data.args
-            assert isinstance(typ, str)
+            if not isinstance(typ, str):
+                raise AssertionError("typ is not a string")
             return hierarchical_pickle(obj)
         if re.fullmatch(r"torch\.jit\._pickle\.build_[a-z]+list", typename):
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             ls, = data.args
-            assert isinstance(ls, list)
+            if not isinstance(ls, list):
+                raise AssertionError("ls is not a list")
             return hierarchical_pickle(ls)
         if typename == "torch.device":
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             name, = data.args
-            assert isinstance(name, str)
+            if not isinstance(name, str):
+                raise AssertionError("name is not a string")
             # Just forget that it was a device and return the name.
             return name
         if typename == "builtin.UnicodeDecodeError":
-            assert data.state is None
+            if data.state is not None:
+                raise AssertionError("data.state is not None")
             msg, = data.args
-            assert isinstance(msg, str)
+            if not isinstance(msg, str):
+                raise AssertionError("msg is not a string")
             # Hack: Pretend this is a module so we don't need custom serialization.
             # Hack: Wrap the message in a tuple so it looks like a nice state object.
             # TODO: Undo at least that second hack.  We should support string states.
@@ -223,11 +252,13 @@ def get_model_info(
                     "file_size": zi.file_size,
                 }
             )
-        assert path_prefix is not None
+        if path_prefix is None:
+            raise AssertionError("path_prefix is None")
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
         def get_pickle(name):
-            assert path_prefix is not None
+            if path_prefix is None:
+                raise AssertionError("path_prefix is None")
             with zf.open(path_prefix + f"/{name}.pkl") as handle:
                 raw = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
                 return hierarchical_pickle(raw)
@@ -285,7 +316,8 @@ def get_model_info(
             for di, di_next in itertools.pairwise(debug_info):
                 start, source_range, *_ = di
                 end = di_next[0]
-                assert end > start
+                if end <= start:
+                    raise AssertionError("end is not greater than start")
                 source, s_start, s_end = source_range
                 s_text, s_file, s_line = source
                 # TODO: Handle this case better.  TorchScript ranges are in bytes,

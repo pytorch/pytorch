@@ -477,7 +477,6 @@ def extract_normalized_read_writes(
     (norm_pw_vars, norm_red_vars), ranges = index_vars_no_squeeze(
         pw_splits, red_splits, prefix="n"
     )
-    node = node
 
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):

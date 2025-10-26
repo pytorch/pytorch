@@ -1074,13 +1074,13 @@ def _overload_method(func):
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods
-    class_name_map = _overloaded_methods.get(qual_name, None)
+    class_name_map = _overloaded_methods.get(qual_name)
     if class_name_map is None:
         class_name_map = {}
         _overloaded_methods[qual_name] = class_name_map
 
     class_name, line_no = get_class_name_lineno(func)
-    method_overloads = class_name_map.get(class_name, None)
+    method_overloads = class_name_map.get(class_name)
     if method_overloads is None:
         method_overloads = []
         class_name_map[class_name] = method_overloads
@@ -1102,7 +1102,7 @@ def _get_overloaded_methods(method, mod_class):
     if not hasattr(method, "__name__"):
         return None
     qual_name = _qualified_name(method)
-    class_name_map = _overloaded_methods.get(qual_name, None)
+    class_name_map = _overloaded_methods.get(qual_name)
     if class_name_map is None:
         return None
     overloads = class_name_map.get(mod_class.__name__, None)

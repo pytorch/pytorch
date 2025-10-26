@@ -299,7 +299,11 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_rank":
             return ConstantVariable.create(self.value.get_rank())
         if name == "get_local_rank":
-            return ConstantVariable.create(self.value.get_local_rank())
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ConstantVariable.create(
+                self.value.get_local_rank(*const_args, **const_kwargs)
+            )
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}

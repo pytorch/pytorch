@@ -12,10 +12,10 @@ import re
 import typing
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -1314,6 +1314,7 @@ class Graph:
                 f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
+        # pyrefly: ignore  # missing-attribute
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1

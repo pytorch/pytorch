@@ -157,7 +157,7 @@ def _assert_module_states(
     assert rank0_states is not None  # mypy
     for state in olist[1:]:
         assert state is not None  # mypy
-        for (_, p1), (_, p2) in zip(rank0_states, state):
+        for (_, p1), (_, p2) in zip(rank0_states, state, strict=True):
             assert_fn(p1, p2)
 
 
@@ -998,6 +998,42 @@ def patch_all_gather(new_all_gather_into_tensor: Callable):
 
 
 @contextlib.contextmanager
+def patch_foreach_all_gather(new_foreach_all_gather: Callable):
+    orig_foreach_all_gather = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+        new_foreach_all_gather
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+            orig_foreach_all_gather
+        )
+
+
+@contextlib.contextmanager
+def patch_foreach_reduce(new_foreach_reduce: Callable):
+    orig_foreach_foreach_reduce = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+        new_foreach_reduce
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+            orig_foreach_foreach_reduce
+        )
+
+
+@contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     orig_reduce_scatter = dist.reduce_scatter_tensor
     dist.barrier()
@@ -1099,7 +1135,9 @@ def check_sharded_parity(
     prefixes_to_ignore: tuple[str, ...] = (),
 ):
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
-        replicated_module.named_parameters(), sharded_module.named_parameters()
+        replicated_module.named_parameters(),
+        sharded_module.named_parameters(),
+        strict=True,
     ):
         clean_sharded_name = sharded_name
         for prefix in prefixes_to_ignore:

@@ -39,6 +39,15 @@ def from_dynamic_axes_to_dynamic_shapes(
 
     Detail on Dim.DYNAMIC: `#133620 <https://github.com/pytorch/pytorch/pull/133620>`_
     """
+
+    warnings.warn(
+        "from_dynamic_axes_to_dynamic_shapes is deprecated and will be removed in a future release. "
+        "This function converts 'dynamic_axes' format (including custom axis names) to 'dynamic_shapes' format. "
+        "Instead of relying on this conversion, provide 'dynamic_shapes' directly with custom names.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     # https://github.com/pytorch/pytorch/pull/128371
     # 1. The function does not need to provide dynamic_shapes to torch.export.export
     if dynamic_axes is None:
@@ -62,9 +71,8 @@ def from_dynamic_axes_to_dynamic_shapes(
                 raise ValueError(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
-            dynamic_shapes[input_name] = {
-                k: torch.export.Dim.DYNAMIC for k, _ in axes.items()
-            }
+            # str will be converted to Dim.DYNAMIC in convert_str_to_export_dim
+            dynamic_shapes[input_name] = axes
         elif isinstance(axes, list):
             if any(not isinstance(k, int) for k in axes):
                 raise ValueError(

@@ -226,9 +226,10 @@ class HuggingFaceStorageReader(FileSystemReader):
         tensor = f.get_slice(req.storage_index.fqn)[slices]
         target_tensor = planner.resolve_tensor(req).detach()
 
-        assert target_tensor.size() == tensor.size(), (
-            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-        )
+        if target_tensor.size() != tensor.size():
+            raise AssertionError(
+                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+            )
 
         target_tensor.copy_(tensor)
         planner.commit_tensor(req, target_tensor)
@@ -299,9 +300,10 @@ class HuggingFaceStorageReader(FileSystemReader):
             except queue.Empty:
                 pass
 
-            assert processed_count == len(per_file), (
-                f"Not all files were processed: {processed_count} out of {len(per_file)}"
-            )
+            if processed_count != len(per_file):
+                raise AssertionError(
+                    f"Not all files were processed: {processed_count} out of {len(per_file)}"
+                )
 
         fut: Future = Future()
         fut.set_result(None)
