@@ -318,7 +318,6 @@ def split_module(
             and isinstance(s0 := val.node.expr, sympy.Symbol)
             and s0 not in symbol_to_node
         ):
-            # pyrefly: ignore  # unbound-name
             symbol_to_node[val.node.expr] = node
 
         if node.op in ["placeholder", "get_attr", "output"]:
