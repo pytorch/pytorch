@@ -524,7 +524,10 @@ def check_module_version_greater_or_equal(
         if error_if_malformed:
             raise RuntimeError(message) from e
         else:
-            warnings.warn(message + ", but continuing assuming that requirement is met")
+            warnings.warn(
+                message + ", but continuing assuming that requirement is met",
+                stacklevel=2,
+            )
             requirement_is_met = True
 
     return requirement_is_met
@@ -1021,7 +1024,8 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 warnings.warn(
                     "Couldn't retrieve source code for container of "
                     "type " + obj.__name__ + ". It won't be checked "
-                    "for correctness upon loading."
+                    "for correctness upon loading.",
+                    stacklevel=2,
                 )
             return ("module", obj, source_file, source)
 
@@ -1502,6 +1506,7 @@ def load(
                         " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                         " silence this warning)",
                         UserWarning,
+                        stacklevel=2,
                     )
                     if weights_only:
                         raise RuntimeError(
@@ -1603,7 +1608,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             warnings.warn(
                 "Couldn't retrieve source code for container of "
                 "type " + container_type.__name__ + ". It won't be checked "
-                "for correctness upon loading."
+                "for correctness upon loading.",
+                stacklevel=2,
             )
             return
         if original_source != current_source:
@@ -1645,7 +1651,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     "patch tool to revert the changes."
                 )
             msg = f"source code of class '{torch.typename(container_type)}' has changed. {msg}"
-            warnings.warn(msg, SourceChangeWarning)
+            warnings.warn(msg, SourceChangeWarning, stacklevel=2)
 
     def legacy_load(f):
         deserialized_objects: dict[int, Any] = {}
@@ -1949,6 +1955,7 @@ def _load(
             "torch.serialization.set_default_load_endianness to set "
             "the desired default load endianness",
             UserWarning,
+            stacklevel=2,
         )
 
     from torch.utils.serialization import config

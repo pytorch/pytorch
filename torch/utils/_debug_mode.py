@@ -262,7 +262,7 @@ class DebugMode(TorchDispatchMode):
             self.module_tracker.__enter__()  # type: ignore[attribute, union-attr]
         return self
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
         super().__exit__(*args)
         if self.record_nn_module:

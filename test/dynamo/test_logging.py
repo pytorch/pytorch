@@ -245,8 +245,7 @@ due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
     raise AssertionError
-torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
-LoweringException: AssertionError:
+torch._inductor.exc.InductorError: LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))

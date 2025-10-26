@@ -520,7 +520,7 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -543,6 +543,7 @@ class LocalTensor(torch.Tensor):
             "Expecting spec to be not None from `__tensor_flatten__` return value!"
         )
         local_tensors = inner_tensors["_local_tensors"]
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return LocalTensor(local_tensors)
 
     @classmethod
@@ -830,6 +831,7 @@ class LocalTensorMode(TorchDispatchMode):
         """
 
         with self.disable():
+            # pyrefly: ignore [bad-argument-type, bad-argument-count]
             return LocalTensor({r: cb(r) for r in self.ranks})
 
     def _patch_device_mesh(self) -> None:
@@ -840,7 +842,7 @@ class LocalTensorMode(TorchDispatchMode):
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self._old_get_coordinate = None
 
 

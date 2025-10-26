@@ -350,7 +350,8 @@ class Tensor(torch._C.TensorBase):
             # hypothesis is that no one cares for meta tensors.
             if skip_data:
                 warnings.warn(
-                    "Serializing tensors on the meta device under skip_data context manager is a no-op"
+                    "Serializing tensors on the meta device under skip_data context manager is a no-op",
+                    stacklevel=2,
                 )
             arg_meta = (
                 self.dtype,
@@ -551,6 +552,7 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError("__setstate__ can be only called on leaf Tensors")
         if len(state) == 4:
             # legacy serialization of Tensor
+            # pyrefly: ignore [not-iterable]
             self.set_(*state)
             return
         elif len(state) == 5:
@@ -758,7 +760,7 @@ class Tensor(torch._C.TensorBase):
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: dict[Any, Any] = (
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 OrderedDict()
             )
 
@@ -1032,7 +1034,7 @@ class Tensor(torch._C.TensorBase):
     def resize(self, *sizes):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.resize, (self,), self, *sizes)
-        warnings.warn("non-inplace resize is deprecated")
+        warnings.warn("non-inplace resize is deprecated", stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, sizes)
@@ -1040,7 +1042,7 @@ class Tensor(torch._C.TensorBase):
     def resize_as(self, tensor):
         if has_torch_function_variadic(self, tensor):
             return handle_torch_function(Tensor.resize_as, (self, tensor), self, tensor)
-        warnings.warn("non-inplace resize_as is deprecated")
+        warnings.warn("non-inplace resize_as is deprecated", stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, tensor.size())
@@ -1062,7 +1064,7 @@ class Tensor(torch._C.TensorBase):
         else:
             return torch._VF.split_with_sizes(
                 self,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 split_size,
                 dim,
             )
@@ -1119,7 +1121,7 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     __pow__ = cast(
         Callable[
             ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
