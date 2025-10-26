@@ -557,6 +557,32 @@ class GraphModule(torch.nn.Module):
             torch.compile(mismatch_outputs, backend="eager", fullgraph=True)(x)
 
     @unittest.skipIf(*get_skip_reasons())
+    def test_local_map_dynamo_reordered_inputs(self):
+        @local_map(
+            out_placements=((Shard(0), Shard(0)),),
+            in_placements=(
+                (Shard(0), Shard(0)),
+                (Replicate(), Shard(0)),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def reorder_inputs(first_input, second_input):
+            return second_input.sum() * 10 + first_input  # dynamo will reorder inputs
+
+        x = torch.randn(64, 64, 64, requires_grad=True)
+        y = torch.randn(8, 64, 64, requires_grad=True)
+        with (
+            LocalMapWrappedHigherOrderVariable.enable(),
+            self.assertRaisesRegex(
+                AssertionError,
+                r"Dynamo changed the order of inputs to the local_map function, please adjust the order of inputs and input_placements from \[l_args_0_, l_args_1_\], to: \[l_args_1_, l_args_0_\].*",
+            ),
+        ):
+            torch.compile(reorder_inputs, backend="eager", fullgraph=True)(x, y)
+
+    @unittest.skipIf(*get_skip_reasons())
     def test_local_map_with_local_shapes_hop_tracing(self):
         def fn(x):
             assert x.shape == (10, 80), "expected local shapes"
