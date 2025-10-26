@@ -1652,7 +1652,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         )
 
         # Build options dict
-        # pyrefly: ignore  # no-matching-overload
+
         options_dict = dict(
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
