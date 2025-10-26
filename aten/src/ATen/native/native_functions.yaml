@@ -403,16 +403,14 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: angle
-    MPS: angle_mps
+    CPU, CUDA, MPS: angle
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr
   tags: pointwise
 
 - func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: angle_out
-    MPS: angle_out_mps
+    CPU, CUDA, MPS: angle_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr_out
   tags: pointwise
 
@@ -10042,8 +10040,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: hypot_out
-    MPS: hypot_out_mps
+    CPU, CUDA, MPS: hypot_out
   tags: pointwise
 
 - func: hypot(Tensor self, Tensor other) -> Tensor

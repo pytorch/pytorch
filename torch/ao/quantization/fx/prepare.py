@@ -1055,7 +1055,9 @@ def _maybe_insert_input_equalization_observers_for_node(
         return
 
     if is_branch:
-        warnings.warn(f"Cannot equalize {node} because it is part of a branch.")
+        warnings.warn(
+            f"Cannot equalize {node} because it is part of a branch.", stacklevel=2
+        )
         return
 
     new_args = []
