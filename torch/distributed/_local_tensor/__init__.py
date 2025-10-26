@@ -198,6 +198,7 @@ def _for_each_rank_run_func(
     rr_val = flat_rank_rets[rr_key]
 
     if isinstance(rr_val, Tensor):
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         ret = LocalTensor({r: flat_rank_rets[r] for r in sorted(ranks)})
     elif isinstance(rr_val, (list, tuple)):
         ret_list = []
@@ -206,6 +207,7 @@ def _for_each_rank_run_func(
             v_it = iter(rets.values())
             v = next(v_it)
             if isinstance(v, Tensor):
+                # pyrefly: ignore [bad-argument-type, bad-argument-count]
                 ret_list.append(LocalTensor(rets))
             elif isinstance(v, int) and not all(v == v2 for v2 in v_it):
                 ret_list.append(torch.SymInt(LocalIntNode(rets)))
@@ -468,7 +470,7 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -491,6 +493,7 @@ class LocalTensor(torch.Tensor):
             "Expecting spec to be not None from `__tensor_flatten__` return value!"
         )
         local_tensors = inner_tensors["_local_tensors"]
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return LocalTensor(local_tensors)
 
     @classmethod
@@ -751,6 +754,7 @@ class LocalTensorMode(TorchDispatchMode):
         """
 
         with self.disable():
+            # pyrefly: ignore [bad-argument-type, bad-argument-count]
             return LocalTensor({r: cb(r) for r in self.ranks})
 
     def _patch_device_mesh(self) -> None:
@@ -761,7 +765,7 @@ class LocalTensorMode(TorchDispatchMode):
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self._old_get_coordinate = None
 
 
