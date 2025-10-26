@@ -493,10 +493,16 @@ def substitute_in_graph(
         def dispatch_fn(
             self: VariableBuilder, value: Callable[_P, _R]
         ) -> PolyfilledFunctionVariable:
+            if inspect.isclass(value):
+                guard_type = GuardBuilder.CLASS_MATCH
+            elif inspect.ismodule(value):
+                guard_type = GuardBuilder.MODULE_MATCH
+            else:
+                guard_type = GuardBuilder.ID_MATCH
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                **self.install_guards(guard_type),
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
