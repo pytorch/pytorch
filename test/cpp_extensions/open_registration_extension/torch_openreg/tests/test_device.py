@@ -30,7 +30,7 @@ class TestDevice(TestCase):
             self.assertEqual(torch.accelerator.current_device_index(), 1)
         self.assertEqual(torch.accelerator.current_device_index(), device)
 
-    @skipIfWindows("Fork not available on Windows")
+    @skipIfWindows(msg="Fork not available on Windows")
     def test_device_poison_fork(self):
         # First, initialize in the parent process
         torch.openreg.init()
