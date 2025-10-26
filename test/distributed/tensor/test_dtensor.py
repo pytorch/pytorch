@@ -1023,7 +1023,7 @@ class DTensorMeshTest(DTensorTestBase):
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
     DTensorMeshTest,
     skipped_tests=[
-        # Submeshes are not supported by local tensor mode
+        # Test asserts must be rewritten for local tensor
         "test_from_local_sub_mesh",
         "test_default_value_sub_mesh",
         "test_redistribute_sub_mesh",
@@ -1066,7 +1066,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
                 is_tensor_empty = [
-                    False if splitted_tensor.numel() > 0 else True
+                    not splitted_tensor.numel() > 0
                     for splitted_tensor in splitted_tensor_list
                 ]
                 expected_is_tensor_empty = [True] * self.world_size
@@ -1089,12 +1089,10 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [
-                    False if idx < size else True
-                    for idx, _ in enumerate(range(self.world_size))
+                    not idx < size for idx, _ in enumerate(range(self.world_size))
                 ]
                 is_tensor_empty = [
-                    False if unpadded_tensor.numel() > 0 else True
-                    for unpadded_tensor in unpadded_list
+                    not unpadded_tensor.numel() > 0 for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
 

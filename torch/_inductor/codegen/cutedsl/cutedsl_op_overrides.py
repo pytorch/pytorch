@@ -274,7 +274,9 @@ class CuteDSLOpOverrides(OpOverrides):
             else "mlir_math.absi"
         )
         return CuteDSLOpOverrides._apply_unary_op(
-            x, f"cute.TensorSSA({abs_op}({{x}}), {{x}}.shape, {{x}}.dtype)"
+            # pyrefly: ignore  # bad-argument-type
+            x,
+            f"cute.TensorSSA({abs_op}({{x}}), {{x}}.shape, {{x}}.dtype)",
         )
 
     @staticmethod

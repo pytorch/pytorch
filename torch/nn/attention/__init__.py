@@ -34,9 +34,6 @@ __all__: list[str] = [
 WARN_FOR_UNFUSED_KERNELS = False
 
 
-# Hacks for Sphinx documentation:
-# https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
-SDPBackend = SDPBackend
 r"""An enum-like class that contains the different backends for scaled dot product attention.
     This backend class is designed to be used with the sdpa_kernel context manager.
 

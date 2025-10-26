@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, TypeVar, Union
+from typing import Any, Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -216,7 +216,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_fx,
+                config.bucket_reduce_scatters_fx,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -236,7 +236,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_fx,
+                config.bucket_all_gathers_fx,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -273,6 +273,30 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # wait_ag1 = wait_bucket[1]
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
+
+    # Apply overlap scheduling if enabled
+    if config.aten_distributed_optimizations.enable_overlap_scheduling:
+        from torch._inductor.config import aten_distributed_optimizations as dist_opts
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        # by default, insert overlap deps within inductor
+        kwargs: dict[str, object] = {"insert_overlap_deps": True}
+
+        config_keys = (
+            "collective_bucketing",
+            "max_compute_pre_fetch",
+            "custom_runtime_estimation",
+            "insert_overlap_deps",
+        )
+        for key in config_keys:
+            if (val := getattr(dist_opts, key)) is not None:
+                kwargs[key] = val
+
+        GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
+            lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)  # type: ignore[arg-type]
+        )
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
@@ -437,7 +461,7 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
 
 
 def resolve_shape_to_proxy(
-    shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
+    shape: list[int | torch.SymInt], bound_symbols: dict[Any, Any]
 ):
     """
     Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
@@ -666,6 +690,7 @@ def lazy_init():
         prepare_softmax_replacement,
         [torch.empty(4, 8)],
         scalar_workaround=dict(dim=-1),
+        # pyrefly: ignore  # bad-argument-type
         trace_fn=fwd_only,
         # pyrefly: ignore  # bad-argument-type
         pass_dicts=pass_patterns[1],
@@ -730,6 +755,7 @@ def register_lowering_pattern(
     return pattern_matcher.register_lowering_pattern(
         pattern,
         extra_check,
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=pass_patterns[pass_number],
     )
 
@@ -1121,8 +1147,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
     inputs = OrderedSet[torch.fx.Node]()
-    input_storages = OrderedSet[Union[int, None]]()
-    output_storages = OrderedSet[Union[int, None]]()
+    input_storages = OrderedSet[int | None]()
+    output_storages = OrderedSet[int | None]()
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
@@ -1573,6 +1599,7 @@ def register_partial_reduction_pattern():
 
         @register_graph_pattern(
             MultiOutputPattern([partial_reduc, full_reduc]),
+            # pyrefly: ignore  # bad-argument-type
             pass_dict=pass_patterns[2],
         )
         def reuse_partial(match, input, reduced_dims, keepdim):

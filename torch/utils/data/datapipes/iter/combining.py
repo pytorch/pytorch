@@ -626,7 +626,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
-        while len(iterators):
+        while iterators:
             for it in iterators:
                 try:
                     value = next(it)

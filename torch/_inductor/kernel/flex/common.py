@@ -342,4 +342,5 @@ def next_power_of_two(n):
 _FLEX_TEMPLATE_DIR = Path(__file__).parent / "templates"
 load_flex_template = partial(load_template, template_dir=_FLEX_TEMPLATE_DIR)
 
+
 # Template strings have been moved to templates/common.py.jinja

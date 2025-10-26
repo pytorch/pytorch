@@ -196,7 +196,7 @@ class FuzzTemplate:
 
 class DefaultFuzzTemplate(FuzzTemplate):
     def __init__(self):
-        from torchfuzz.checks import EagerVsFullGraphDynamicCompileWithNumericsCheck
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
 
         super().__init__(
             supported_ops=[
@@ -236,7 +236,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 # Regularization
                 "torch.nn.functional.dropout",
             ],
-            check=EagerVsFullGraphDynamicCompileWithNumericsCheck(),
+            check=EagerVsFullGraphDynamicCompileCheck(),
         )
 
     def spec_distribution(self):

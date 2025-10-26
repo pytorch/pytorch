@@ -5,15 +5,15 @@ import collections
 import functools
 import typing
 from enum import auto, Enum
-from typing import Union
 
+import torch
 from torch.utils._triton import has_triton_package
 
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
-    "X": 4096,
+    "X": 8192 if torch.version.hip else 4096,
     "Y": 1024,
     "Z": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
@@ -89,11 +89,13 @@ if has_triton_package():
             divisible_by_16=None,
             equal_to_1=None,
         ):
+            # pyrefly: ignore  # not-iterable
             return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
     AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
+        # pyrefly: ignore  # invalid-argument
         "AttrsDescriptor",
         ["divisible_by_16", "equal_to_1"],
         defaults=[(), ()],
@@ -202,7 +204,7 @@ class HalideMeta(typing.NamedTuple):
     argtypes: list[HalideInputSpec]
     target: str
     scheduler: str | None = None
-    scheduler_flags: dict[str, Union[int, str]] | None = None
+    scheduler_flags: dict[str, int | str] | None = None
     cuda_device: int | None = None
 
     def args(self) -> list[str]:

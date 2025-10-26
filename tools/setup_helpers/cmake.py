@@ -100,6 +100,7 @@ class CMake:
             if ver is not None:
                 eprint(f"Found {cmd} ({command}) version: {ver}", end="")
                 cmake_versions.append(f"{cmd}=={ver}")
+                # pyrefly: ignore  # unsupported-operation
                 if ver >= CMAKE_MINIMUM_VERSION:
                     eprint(f" (>={CMAKE_MINIMUM_VERSION})")
                     valid_cmake_versions[cmd] = ver

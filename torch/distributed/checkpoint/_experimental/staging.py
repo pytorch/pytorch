@@ -158,9 +158,10 @@ class DefaultStager(CheckpointStager):
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
-            assert torch.accelerator.is_available(), (
-                "Non-blocking copy requires that the current accelerator is available."
-            )
+            if not torch.accelerator.is_available():
+                raise AssertionError(
+                    "Non-blocking copy requires that the current accelerator is available."
+                )
 
     def stage(
         self,
@@ -168,9 +169,10 @@ class DefaultStager(CheckpointStager):
         **kwargs: Any,
     ) -> Union[STATE_DICT, Future[STATE_DICT]]:
         if self._config.use_async_staging:
-            assert self._staging_executor is not None, (
-                "Staging executor should be initialized for async staging"
-            )
+            if self._staging_executor is None:
+                raise AssertionError(
+                    "Staging executor should be initialized for async staging"
+                )
             return self._staging_executor.submit(
                 self._stage,
                 state_dict,
@@ -185,9 +187,10 @@ class DefaultStager(CheckpointStager):
         )
 
         if self._config.use_non_blocking_copy:
-            assert self._staging_stream or not self._config.use_async_staging, (
-                "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
-            )
+            if not (self._staging_stream or not self._config.use_async_staging):
+                raise AssertionError(
+                    "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
+                )
 
             # waits for the enqued copy operations to finish.
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()

@@ -275,8 +275,11 @@ class AutotuneCache:
         triton_cache_hash: str | None = None,
     ) -> None:
         data = {
+            # pyrefly: ignore  # missing-attribute
             **config.kwargs,
+            # pyrefly: ignore  # missing-attribute
             "num_warps": config.num_warps,
+            # pyrefly: ignore  # missing-attribute
             "num_stages": config.num_stages,
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
@@ -570,15 +573,20 @@ def _load_cached_autotuning(
             )
 
         # Create the triton_config with the appropriate arguments
+        # pyrefly: ignore  # bad-argument-count
         triton_config = Config(best_config, **config_args)
+        # pyrefly: ignore  # missing-attribute
         triton_config.found_by_coordesc = True
         return triton_config
 
     matching_configs = [
         cfg
         for cfg in configs
+        # pyrefly: ignore  # missing-attribute
         if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
+        # pyrefly: ignore  # missing-attribute
         and cfg.num_warps == best_config.get("num_warps")
+        # pyrefly: ignore  # missing-attribute
         and cfg.num_stages == best_config.get("num_stages")
     ]
     if len(matching_configs) != 1:
