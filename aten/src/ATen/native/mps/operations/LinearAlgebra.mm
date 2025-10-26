@@ -232,7 +232,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool check_errors) {
   using namespace mps;
 
-  TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
+  TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat,
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
@@ -356,8 +356,7 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
                                       const Tensor& info) {
   using namespace mps;
 
-  TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
-              "linalg.lu_factor(): MPS doesn't support complex types.");
+  TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat, "linalg.lu_factor(): MPS only supports floats.");
   Tensor A_t, B_t;
   // If 'left' is false, reinterpret the problem so that Ax = B becomes A^T ⋅ (x^T) = B^T
   // Then we solve the normal "left" case on the transposed matrices and transpose x finally to get the output
@@ -1050,7 +1049,8 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   using namespace mps;
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
-  TORCH_CHECK(!A.is_complex() && !B.is_complex(), "linalg.solve.triangular(); Not supported for complex yet!");
+  TORCH_CHECK(A.scalar_type() == kFloat && B.scalar_type() == kFloat,
+              "linalg.solve.triangular(); Only float is supported!");
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
   at::native::resize_output(out, B_t.sizes());

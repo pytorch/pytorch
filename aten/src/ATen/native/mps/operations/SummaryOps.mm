@@ -18,6 +18,8 @@ static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tens
   MPSStream* stream = getCurrentMPSStream();
   bool has_weights = weights.defined();
 
+  TORCH_CHECK(self.scalar_type() != kBool);
+
   @autoreleasepool {
     std::string key = "bincount_mps_impl" + getTensorsStringKey({self, weights});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {

@@ -80,6 +80,7 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
     MPSGraphTensor* outputTensor_ = nil;
   };
 
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "foobar");
   @autoreleasepool {
     std::string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" +
         std::to_string(interpolation_mode) + ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);

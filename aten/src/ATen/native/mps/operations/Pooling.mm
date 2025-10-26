@@ -595,6 +595,7 @@ static void avg_pool2d_template(const Tensor& input,
                                 bool count_include_pad,
                                 const std::optional<int64_t> divisor_override,
                                 const std::string& op_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const bool is_backward_pass = grad_output.defined();
   const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
