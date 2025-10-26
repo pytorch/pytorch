@@ -202,7 +202,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
         Args:
             device (int, optional): if specified, all parameters will be copied to that device
         """
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return self._apply(lambda t: getattr(t, custom_backend_name)(device))
 
     _check_register_once(torch.nn.Module, custom_backend_name)
@@ -252,11 +252,15 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
             device (int, optional): if specified, all parameters will be copied to that device
         """
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
-            *args, **kwargs
+            # pyrefly: ignore [not-iterable]
+            *args,
+            **kwargs,
         )
         if ex.device.type == custom_backend_name:
+            # pyrefly: ignore [not-iterable]
             return self.to(*args, **kwargs)
         kwargs.update({"device": custom_backend_name})
+        # pyrefly: ignore [not-iterable]
         return self.to(*args, **kwargs)
 
     _check_register_once(torch.nn.utils.rnn.PackedSequence, custom_backend_name)

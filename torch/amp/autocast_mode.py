@@ -525,7 +525,7 @@ def custom_fwd(
         args[0]._dtype = torch.get_autocast_dtype(device_type)
         if cast_inputs is None:
             args[0]._fwd_used_autocast = torch.is_autocast_enabled(device_type)
-            return fwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
+            return fwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
         else:
             autocast_context = torch.is_autocast_enabled(device_type)
             args[0]._fwd_used_autocast = False
@@ -536,7 +536,7 @@ def custom_fwd(
                         **_cast(kwargs, device_type, cast_inputs),
                     )
             else:
-                return fwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
+                return fwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
 
     return decorate_fwd
 
@@ -571,6 +571,6 @@ def custom_bwd(bwd=None, *, device_type: str):
             enabled=args[0]._fwd_used_autocast,
             dtype=args[0]._dtype,
         ):
-            return bwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
+            return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
 
     return decorate_bwd

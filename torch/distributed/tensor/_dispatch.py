@@ -78,8 +78,11 @@ def found_inf_reduce_handler(
             dtype=target_tensor.dtype,
         ),
     )
+    # pyrefly: ignore [bad-argument-type]
     found_inf_dtensor = dtensor.DTensor(
-        local_tensor=target_tensor, spec=spec, requires_grad=False
+        local_tensor=target_tensor,  # pyrefly: ignore [unexpected-keyword]
+        spec=spec,  # pyrefly: ignore [unexpected-keyword]
+        requires_grad=False,  # pyrefly: ignore [unexpected-keyword]
     )
     found_inf = found_inf_dtensor.full_tensor()
     target_tensor.copy_(found_inf)
@@ -189,7 +192,7 @@ class OpDispatcher:
             local_tensor_args = (
                 pytree.tree_unflatten(
                     cast(list[object], op_info.local_args),
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     op_info.args_tree_spec,
                 )
                 if op_info.args_tree_spec
@@ -366,7 +369,7 @@ class OpDispatcher:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,
                             arg_spec,
-                            # pyrefly: ignore  # bad-argument-type
+                            # pyrefly: ignore [bad-argument-type]
                             reshard_arg_spec,
                         )
                     new_local_args.append(resharded_local_tensor)
@@ -439,7 +442,7 @@ class OpDispatcher:
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
                     op_call,
                     v,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     compute_mesh,
                 )
                 local_kwargs[k] = v
@@ -456,7 +459,7 @@ class OpDispatcher:
             OpSchema(
                 op_call,
                 (
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     pytree.tree_unflatten(args_schema, args_spec)
                     if args_spec
                     else tuple(args_schema)
@@ -478,6 +481,7 @@ class OpDispatcher:
                 assert isinstance(spec, DTensorSpec), (
                     f"output spec does not match with output! Expected DTensorSpec, got {spec}."
                 )
+                # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor

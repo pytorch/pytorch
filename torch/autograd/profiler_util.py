@@ -30,6 +30,7 @@ class EventList(list):
         use_device = kwargs.pop("use_device", None)
         profile_memory = kwargs.pop("profile_memory", False)
         with_flops = kwargs.pop("with_flops", False)
+        # pyrefly: ignore [not-iterable]
         super().__init__(*args, **kwargs)
         self._use_device = use_device
         self._profile_memory = profile_memory
@@ -505,9 +506,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.overload_name: str = overload_name
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
@@ -516,13 +517,13 @@ class FunctionEvent(FormattedTimesMixin):
         self.count: int = 1
         self.cpu_children: list[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.input_shapes: tuple[int, ...] = input_shapes
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.concrete_inputs: list[Any] = concrete_inputs
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.kwinputs: dict[str, Any] = kwinputs
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.stack: list = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device
@@ -766,7 +767,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_device_memory_usage += other.self_device_memory_usage
         self.count += other.count
         if self.flops is None:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.flops = other.flops
         elif other.flops is not None:
             self.flops += other.flops
@@ -1003,7 +1004,7 @@ def _build_table(
         ]
         if flops <= 0:
             raise AssertionError(f"Expected flops to be positive, but got {flops}")
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
         if not (log_flops >= 0 and log_flops < len(flop_headers)):
             raise AssertionError(

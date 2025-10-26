@@ -883,9 +883,12 @@ class Redistribute(torch.autograd.Function):
             output = local_tensor
             target_spec = current_spec
 
+        # pyrefly: ignore [bad-argument-type]
         return dtensor.DTensor(
+            # pyrefly: ignore [bad-argument-count]
             output,
             target_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=input.requires_grad,
         )
 
@@ -944,9 +947,12 @@ class Redistribute(torch.autograd.Function):
                 dtype=output.dtype,
             ),
         )
+        # pyrefly: ignore [bad-argument-type]
         output_dtensor = dtensor.DTensor(
+            # pyrefly: ignore [bad-argument-count]
             output,
             spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=grad_output.requires_grad,
         )
 

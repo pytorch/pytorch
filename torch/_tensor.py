@@ -551,6 +551,7 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError("__setstate__ can be only called on leaf Tensors")
         if len(state) == 4:
             # legacy serialization of Tensor
+            # pyrefly: ignore [not-iterable]
             self.set_(*state)
             return
         elif len(state) == 5:
@@ -758,7 +759,7 @@ class Tensor(torch._C.TensorBase):
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: dict[Any, Any] = (
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 OrderedDict()
             )
 
@@ -1062,7 +1063,7 @@ class Tensor(torch._C.TensorBase):
         else:
             return torch._VF.split_with_sizes(
                 self,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 split_size,
                 dim,
             )
@@ -1119,7 +1120,7 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     __pow__ = cast(
         Callable[
             ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
