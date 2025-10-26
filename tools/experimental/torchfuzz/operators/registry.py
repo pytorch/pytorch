@@ -30,10 +30,8 @@ from torchfuzz.operators.nn_functional import (
     LayerNormOperator,
     LeakyReLUOperator,
     LinearOperator,
-    MultiHeadAttentionForwardOperator,
     ReLUOperator,
     RMSNormOperator,
-    ScaledDotProductAttentionOperator,
     SigmoidOperator,
     SiLUOperator,
     SoftmaxOperator,
@@ -103,8 +101,6 @@ class OperatorRegistry:
         # Neural network functional operators
         self.register(EmbeddingOperator())
         self.register(LinearOperator())
-        self.register(ScaledDotProductAttentionOperator())
-        self.register(MultiHeadAttentionForwardOperator())
 
         # Activation functions
         self.register(ReLUOperator())
