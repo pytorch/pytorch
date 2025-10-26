@@ -792,7 +792,17 @@ class TestUnaryUfuncs(TestCase):
         real = torch.randn(1024, device=device, dtype=torch.float32) * (2 * math.pi)
         imag = torch.randn(1024, device=device, dtype=torch.float32) * 5.0
         real = torch.cat([real, specials])
-        imag = torch.cat([imag, torch.linspace(-3, 3, steps=specials.numel(), device=device)])
+        imag = torch.cat(
+            [
+                imag,
+                torch.linspace(
+                    -3,
+                    3,
+                    steps=specials.numel(),
+                    device=device,
+                ),
+            ]
+        )
         z = torch.complex(real, imag).to(dtype)
         self.compare_with_numpy(torch.tan, np.tan, z)
 
