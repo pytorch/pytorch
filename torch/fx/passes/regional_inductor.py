@@ -58,9 +58,32 @@ def _compile_submod(gm, prefix):
 
             submod = getattr(gm, node.target)
 
-            compiled_fn = torch._inductor.standalone_compile(
-                submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+            # Get inductor configs from annotation
+            inductor_options = {}
+            for sub_node in submod.graph.nodes:
+                if hasattr(sub_node, "meta") and sub_node.meta.get("custom", None):
+                    custom = sub_node.meta["custom"]
+                    if isinstance(custom, dict) and "compile_with_inductor" in custom:
+                        compile_value = custom["compile_with_inductor"]
+                        if (
+                            isinstance(compile_value, dict)
+                            and "inductor_configs" in compile_value
+                        ):
+                            inductor_options = compile_value["inductor_configs"]
+                            break
+
+            # Log the options being used
+            logger.info(
+                f"Compiling submodule {node.target} with inductor options: {inductor_options}"
             )
+
+            # Apply config patches before compilation
+            import torch._inductor.config as inductor_config
+
+            with inductor_config.patch(inductor_options):
+                compiled_fn = torch._inductor.standalone_compile(
+                    submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+                )
             assert isinstance(compiled_fn, AOTCompiledArtifact)
             # _dummy_wrapper is to make call_function happy
             compiled_submod = _dummy_wrapper(compiled_fn)
@@ -83,6 +106,7 @@ def _needs_inductor_compile(node):
         and hasattr(node, "meta")
         and node.meta.get("custom", None)
         and "compile_with_inductor" in node.meta["custom"]
+        and node.meta["custom"]["compile_with_inductor"] != "0"
     )
 
 
@@ -127,6 +151,21 @@ def _recursive_compile_fx_annotated_nodes_with_inductor(gm):
 def regional_inductor(gm, *example_args):
     """
     Scoops out inductor marked regions and compiles them with inductor.
+
+    Inductor options should be provided via the annotation API:
+    with fx_traceback.annotate({
+        "compile_with_inductor": {
+            "inductor_configs": {
+                "max_autotune": True,
+                "triton.cudagraphs": False
+            }
+        }
+    }):
+
+    If you want to disable inductor for the region, you should do
+    with fx_traceback.annotate({
+        "compile_with_inductor": 0
+    }):
     """
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
