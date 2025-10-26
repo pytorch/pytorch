@@ -16,6 +16,7 @@
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
+#include <ATen/ops/hypot_native.h>
 #include <ATen/ops/le_native.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
@@ -275,6 +276,22 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   } else {
     at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
+}
+
+TORCH_IMPL_FUNC(hypot_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::BinaryOpBlock hypot_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+    MPSGraphTensor* sumTensor = [mpsGraph additionWithPrimaryTensor:[mpsGraph powerWithPrimaryTensor:primaryCastTensor
+                                                                                     secondaryTensor:twoTensor
+                                                                                                name:nil]
+                                                    secondaryTensor:[mpsGraph powerWithPrimaryTensor:secondaryCastTensor
+                                                                                     secondaryTensor:twoTensor
+                                                                                                name:nil]
+                                                               name:nil];
+    return [mpsGraph squareRootWithTensor:sumTensor name:nil];
+  };
+  mps::binaryOpTensor(self, other, output, "hypot_out_mps", hypot_op_block);
 }
 
 TORCH_IMPL_FUNC(logaddexp_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {

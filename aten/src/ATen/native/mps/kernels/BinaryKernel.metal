@@ -222,13 +222,6 @@ struct nextafter_functor {
   }
 };
 
-struct hypot_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
-  }
-};
-
 // Complex binary functors
 struct polar_functor {
   template <typename U>
@@ -369,7 +362,6 @@ struct igammac_functor {
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
   REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
 
-REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(copysign);
 REGISTER_INT2FLOAT_BINARY_OP(copysign);
 REGISTER_FLOAT_BINARY_OP(fmax);

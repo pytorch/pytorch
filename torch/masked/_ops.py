@@ -642,6 +642,7 @@ def _sparse_coo_scatter_reduction_helper(
 
     # promote dtype if specified
     if values.dtype != output_dtype:
+        # pyrefly: ignore  # no-matching-overload
         values = values.to(output_dtype)
 
     if keepdim:
@@ -766,6 +767,7 @@ def _sparse_csr_segment_reduction_helper(
 
     # promote dtype if specified
     if values.dtype != output_dtype:
+        # pyrefly: ignore  # no-matching-overload
         values = values.to(output_dtype)
 
     if len(dims) == 0:
