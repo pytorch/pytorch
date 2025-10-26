@@ -33,8 +33,8 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -69,7 +69,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import typestr, VariableTracker
+from .base import raise_type_error_exc, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -147,7 +147,6 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.accelerator.current_device_index,
-    torch.accelerator.current_accelerator,
     torch.cuda.current_device,
     torch.cuda.is_initialized,
     torch.xpu.current_device,
@@ -1179,7 +1178,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_push_torch_function(
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
-            assert len(args) == 1 and not kwargs
+            if len(args) != 1 or kwargs:
+                raise_type_error_exc(
+                    tx,
+                    f"push_torch_function takes exactly one argument ({len(args)} given)",
+                )
             TorchFunctionModeStackVariable.register_mutation(tx)
             tx.symbolic_torch_function_state.push_torch_function_mode(args[0])
             return ConstantVariable.create(None)
@@ -1188,14 +1191,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_len_torch_function(
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
-            assert not args and not kwargs
+            if args or kwargs:
+                raise_type_error_exc(tx, "len_torch_function_stack takes no arguments")
             return ConstantVariable.create(
                 len(tx.symbolic_torch_function_state.mode_stack)
             )
 
         @register(torch._C._get_function_stack_at)
         def handle_get_stack_at(self, tx: "InstructionTranslator", *args, **kwargs):
-            assert len(args) == 1 and not kwargs
+            if len(args) != 1 or kwargs:
+                raise_type_error_exc(
+                    tx,
+                    f"get_function_stack_at takes exactly one argument ({len(args)} given)",
+                )
             ind = args[0].as_python_constant()
             assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
             return tx.symbolic_torch_function_state.mode_stack[ind]
@@ -1960,7 +1968,7 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
             return variables.EnumVariable(self.value.key())
         elif name == "process":
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(self.value.process.__func__),
+                VariableTracker.build(tx, self.value.process.__func__),
                 [self] + args,
                 kwargs,
             )

@@ -284,8 +284,8 @@ class SubprocPool:
             self.process.wait(300)
             if self.log_file:
                 self.log_file.close()
-        except OSError as e:
-            log.warning("Ignored OSError in pool shutdown:  %s", e)
+        except OSError:
+            log.warning("Ignored OSError in pool shutdown", exc_info=True)
         finally:
             with self.futures_lock:
                 for future in self.pending_futures.values():

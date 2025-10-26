@@ -6,7 +6,10 @@ import unittest
 import torch
 import torch.distributed as dist
 import torch.fx.traceback as fx_traceback
-from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import (
+    _dynamo_graph_capture_for_export,
+    dynamo_graph_capture_for_export,
+)
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
@@ -94,6 +97,13 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # between ep.module() and aot_export_joint_with_descriptors.
     # Keeping this here to show the issue.
     return aot_export_joint_with_descriptors_alone(ep.module(), inputs)
+
+
+def graph_capture_and_aot_export_joint_with_descriptors_v2(model, inputs):
+    gm = dynamo_graph_capture_for_export(model)(inputs)
+    fake_mode = gm.meta.get("fake_mode", None)
+    with tracing(TracingContext(fake_mode)):
+        return aot_export_joint_with_descriptors_alone(gm, inputs)
 
 
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
@@ -288,6 +298,7 @@ class DTensorExportTest(TestCase):
     @parametrize(
         "export_fn",
         [
+            graph_capture_and_aot_export_joint_with_descriptors_v2,
             graph_capture_and_aot_export_joint_with_descriptors,
             aot_export_joint_with_descriptors_alone,
         ],
@@ -307,7 +318,21 @@ class DTensorExportTest(TestCase):
     def test_annotate_aot_export_joint_with_descriptors_alone(self):
         self._run_test(aot_export_joint_with_descriptors_alone, True)
 
-    def test_dynamic_shapes(self):
+    @parametrize(
+        "export_fn_with_answer",
+        [
+            (
+                graph_capture_and_aot_export_joint_with_descriptors_v2,
+                "[[4, 10], [4], [10, 4], [10], [4, 10], [4], [10, 4], [10], [s64, 10], [s64, 10]]",
+            ),
+            (
+                graph_capture_and_aot_export_joint_with_descriptors,
+                "[[4, 10], [4], [10, 4], [10], [s22, 10], [s22, 10]]",
+            ),
+        ],
+    )
+    def test_dynamic_shapes(self, export_fn_with_answer):
+        export_fn, answer = export_fn_with_answer
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
 
@@ -331,7 +356,7 @@ class DTensorExportTest(TestCase):
         inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
         torch._dynamo.mark_dynamic(inputs, 0, min=5, max=100)
 
-        joint_gm = graph_capture_and_aot_export_joint_with_descriptors(tp_model, inputs)
+        joint_gm = export_fn(tp_model, inputs)
 
         res = []
         for node in joint_gm.graph.nodes:
@@ -341,12 +366,16 @@ class DTensorExportTest(TestCase):
                 if isinstance(fake_val, torch._subclasses.fake_tensor.FakeTensor):
                     res.append(list(fake_val.shape))
 
-        self.assertExpectedInline(
-            str(res),
-            """[[4, 10], [4], [10, 4], [10], [s22, 10], [s22, 10]]""",
-        )
+        self.assertEqual(str(res), answer)
 
-    def test_einsum_dtensor_export(self):
+    @parametrize(
+        "export_fn",
+        [
+            dynamo_graph_capture_for_export,
+            _dynamo_graph_capture_for_export,
+        ],
+    )
+    def test_einsum_dtensor_export(self, export_fn):
         """Test exporting a model with einsum that has DTensor inputs/outputs with side effects"""
         world_size = 4
         # Create device mesh
@@ -366,9 +395,7 @@ class DTensorExportTest(TestCase):
         output = model(x_dtensor, y_dtensor, z_dtensor)
         with torch._dynamo.config.patch(install_free_tensors=True):
             # TODO: switch to use the official graph_capture API once it is ready
-            gm = _dynamo_graph_capture_for_export(model)(
-                x_dtensor, y_dtensor, z_dtensor
-            )
+            gm = export_fn(model)(x_dtensor, y_dtensor, z_dtensor)
         output_gm = gm(x_dtensor, y_dtensor, z_dtensor)
         self.assertEqual(output, output_gm)
 

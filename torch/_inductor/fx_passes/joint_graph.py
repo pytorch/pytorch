@@ -593,12 +593,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
             constant_fold_uniform_value
         )
 
-    if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
-        )
-        count += 1
-
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(

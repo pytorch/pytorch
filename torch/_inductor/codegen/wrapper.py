@@ -416,6 +416,19 @@ class CommentLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class DynamicScalarLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.DynamicScalar
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_dynamic_scalar(self.node)
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_dynamic_scalar
+
+
+@dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
 
@@ -2060,6 +2073,9 @@ class PythonWrapperCodegen(CodeGen):
         self.unbacked_symbol_decls.add(str(node.unbacked_size_symbol))
 
     def codegen_dynamic_scalar(self, node):
+        self.writeline(DynamicScalarLine(self, node))
+
+    def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         if len(node.keypath) == 0:
             self.writeline(f"{node.sym} = {data}.item()")

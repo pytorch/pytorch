@@ -13,7 +13,7 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
@@ -513,7 +513,7 @@ def _init_prefetching_state(
 def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
     # TODO: we need to add additional check once we support FSDP + PiPPy.
     # This check is currently sufficient, since we only support FSDP + TP.
-    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+    root_mesh = device_mesh._get_root_mesh() if device_mesh is not None else None
     # if a root mesh is not the same as device_mesh,
     # meaning the device_mesh is sliced out from the root mesh.
     if device_mesh and root_mesh != state._device_mesh:

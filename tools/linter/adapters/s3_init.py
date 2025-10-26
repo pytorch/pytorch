@@ -95,8 +95,8 @@ Deleting %s just to be safe.
 
     try:
         binary_path.unlink()
-    except OSError as e:
-        logging.critical("Failed to delete binary: %s", e)
+    except OSError:
+        logging.critical("Failed to delete binary", exc_info=True)
         logging.critical(
             "Delete this binary as soon as possible and do not execute it!"
         )
