@@ -45,8 +45,8 @@ import types
 import weakref
 from collections import deque
 from traceback import StackSummary
-from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing_extensions import TypeIs
 from unittest.mock import patch
 
 import torch
@@ -189,7 +189,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -4410,7 +4410,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
             self.stack[-1] = ListIteratorVariable(
-                # pyrefly: ignore  # unbound-name
                 tos.force_unpack_var_sequence(self),
                 mutation_type=ValueMutationNew(),
             )

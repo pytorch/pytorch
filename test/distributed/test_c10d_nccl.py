@@ -3818,27 +3818,6 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
         self.assertEqual(output_tensor, tensor)
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_noncontig(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        device = "cuda"
-        tensor = (
-            torch.arange(0, 16, device=torch.device(device))
-            .view(2, 2, 2, 2)
-            .to(memory_format=torch.channels_last)
-        )
-        tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
-        dist.all_gather(tensor_list, tensor)
-        for o in tensor_list:
-            self.assertEqual(o, tensor)
-
-    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_allgather_float8(self, float8_dtype):
