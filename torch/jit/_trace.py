@@ -686,7 +686,8 @@ def _trace_impl(
         # it is hard to trace it because the forward method on ScriptModule is already defined, so it
         # would result in an error.
         warnings.warn(
-            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is."
+            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.",
+            stacklevel=2,
         )
         return func
 

@@ -747,7 +747,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ):
                 self._test_serialization("NN_MODULE", fn, m, x)
 
-    def test_function_match(self):
+    def test_class_match(self):
         def fn(x):
             # usage of this context manager installs a FUNCTION_MATCH guard
             with torch.no_grad():
@@ -759,9 +759,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
         # support that in serialization
         with self.assertRaisesRegex(
-            PackageError, "FUNCTION_MATCH guard cannot be serialized."
+            PackageError, "CLASS_MATCH guard cannot be serialized."
         ):
-            self._test_serialization("FUNCTION_MATCH", fn, x)
+            self._test_serialization("CLASS_MATCH", fn, x)
 
     def test_closure_match(self):
         def fn(x):
@@ -957,12 +957,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
 
         def fn(x):
-            # usage of this context manager installs a FUNCTION_MATCH guard
+            # usage of this context manager installs a CLASS_MATCH guard
             with torch.no_grad():
                 y = x * 2
             return y
 
-        ref, loaded = self._test_serialization("FUNCTION_MATCH", fn, torch.randn(3))
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
         self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
 
     def test_dispatch_key_set_match(self):
@@ -1467,7 +1467,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             torch._dynamo.optimize(
                 package=package,
                 guard_filter_fn=lambda gs: [
-                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH") for x in gs
+                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH", "CLASS_MATCH")
+                    for x in gs
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)

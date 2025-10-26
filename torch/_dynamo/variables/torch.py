@@ -244,7 +244,12 @@ class BaseTorchVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        if inspect.isclass(value):
+            install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
+        elif inspect.ismodule(value):
+            install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
+        else:
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
