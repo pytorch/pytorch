@@ -1703,7 +1703,7 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 # TODO add deprecation annotation
@@ -1753,7 +1753,7 @@ def _check_index(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(IndexError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(IndexError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_value(cond, message=None):  # noqa: F811
@@ -1771,7 +1771,7 @@ def _check_value(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(ValueError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(ValueError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_type(cond, message=None):  # noqa: F811
@@ -1789,7 +1789,7 @@ def _check_type(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(TypeError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(TypeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_not_implemented(cond, message=None):  # noqa: F811

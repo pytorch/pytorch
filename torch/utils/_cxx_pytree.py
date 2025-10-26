@@ -701,7 +701,6 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -762,7 +761,6 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 

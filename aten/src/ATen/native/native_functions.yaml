@@ -10040,8 +10040,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: hypot_out
-    MPS: hypot_out_mps
+    CPU, CUDA, MPS: hypot_out
   tags: pointwise
 
 - func: hypot(Tensor self, Tensor other) -> Tensor

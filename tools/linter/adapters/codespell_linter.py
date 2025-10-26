@@ -20,6 +20,8 @@ FORBIDDEN_WORDS = {
     "multipy",  # project pytorch/multipy is dead  # codespell:ignore multipy
 }
 
+MAX_FILE_SIZE: int = 1024 * 1024 * 1024  # 1GB in bytes
+
 
 class LintSeverity(str, Enum):
     ERROR = "error"
@@ -86,6 +88,39 @@ def run_codespell(path: Path) -> str:
 
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
+
+    # Check if file is too large
+    try:
+        file_size = os.path.getsize(path)
+        if file_size > MAX_FILE_SIZE:
+            return [
+                LintMessage(
+                    path=filename,
+                    line=None,
+                    char=None,
+                    code="CODESPELL",
+                    severity=LintSeverity.WARNING,
+                    name="file-too-large",
+                    original=None,
+                    replacement=None,
+                    description=f"File size ({file_size} bytes) exceeds {MAX_FILE_SIZE} bytes limit, skipping",
+                )
+            ]
+    except OSError as err:
+        return [
+            LintMessage(
+                path=filename,
+                line=None,
+                char=None,
+                code="CODESPELL",
+                severity=LintSeverity.ERROR,
+                name="file-access-error",
+                original=None,
+                replacement=None,
+                description=f"Failed to get file size: {err}",
+            )
+        ]
+
     try:
         run_codespell(path)
     except Exception as err:

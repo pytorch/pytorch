@@ -239,7 +239,7 @@ def _compare_onnx_pytorch_outputs_in_np(
             if acceptable_error_percentage:
                 error_percentage = 1 - np.sum(
                     np.isclose(ort_out, pt_out, rtol=options.rtol, atol=options.atol)
-                ) / np.prod(ort_out.shape)  # pyrefly: ignore # missing-attribute
+                ) / np.prod(ort_out.shape)  # pyrefly: ignore [missing-attribute]
                 if error_percentage <= acceptable_error_percentage:
                     warnings.warn(
                         f"Suppressed AssertionError:\n{e}.\n"
