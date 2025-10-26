@@ -1478,7 +1478,6 @@ class CppGemmTemplate(CppTemplate):
             assert isinstance(template_buffer, ir.IRNode)
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
             gemm_output_buffer = ir.Buffer(
-                # pyrefly: ignore  # missing-attribute
                 name=gemm_output_name,
                 # pyrefly: ignore  # missing-attribute
                 layout=template_buffer.layout,
@@ -1502,7 +1501,6 @@ class CppGemmTemplate(CppTemplate):
                 reindexers.append(None)
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
-                        # pyrefly: ignore  # missing-attribute
                         name=buffer_name,
                         # pyrefly: ignore  # missing-attribute
                         layout=template_buffer.layout,

@@ -876,7 +876,6 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         not _CODE_STATE
         and (sticky_read := torch.compiler.config.pgo_extra_read_key) is not None
     ):
-        # pyrefly: ignore  # unbound-name
         extra_read_key = get_extra_cache_key(sticky_read)
         if extra_read_key is not None:
             get_extra_remote_code_state(extra_read_key)

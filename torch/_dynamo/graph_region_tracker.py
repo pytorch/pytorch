@@ -23,7 +23,7 @@ import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
@@ -38,6 +38,8 @@ T = TypeVar("T")
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .symbolic_convert import InstructionTranslatorBase
 
 
