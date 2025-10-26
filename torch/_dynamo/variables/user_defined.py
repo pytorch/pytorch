@@ -872,9 +872,6 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def fn(self):
         return self.value
 
-    def python_type(self):
-        return self.value
-
 
 class NO_SUCH_SUBOBJ:
     pass
