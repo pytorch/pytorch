@@ -87,18 +87,12 @@ class DeviceContext(TorchFunctionMode):
         # or else someone else has popped it!
         for _ in range(_len_torch_function_stack() - 1):
             mode = _pop_mode()
-            if isinstance(mode, DeviceContext):
-                raise AssertionError(
-                    "Found nested DeviceContext on the mode stack where none expected"
-                )
+            assert not isinstance(mode, DeviceContext)
             cur_stack.append(mode)
 
         if _len_torch_function_stack() > 0:
             mode = _pop_mode()
-            if not isinstance(mode, DeviceContext):
-                raise AssertionError(
-                    "Expected a DeviceContext at the bottom of the mode stack"
-                )
+            assert isinstance(mode, DeviceContext)
 
         for mode in reversed(cur_stack):
             _push_mode(mode)

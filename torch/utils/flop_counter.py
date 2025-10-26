@@ -62,8 +62,7 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     # Inputs contains the shapes of two matrices.
     m, k = a_shape
     k2, n = b_shape
-    if k != k2:
-        raise AssertionError(f"matmul: inner dimensions must match (k == k2), got {k} and {k2}")
+    assert k == k2
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     return m * n * 2 * k
 
@@ -79,10 +78,8 @@ def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     # Inputs contains the shapes of two tensor.
     b, m, k = a_shape
     b2, k2, n = b_shape
-    if b != b2:
-        raise AssertionError(f"bmm: batch dimensions must match (b == b2), got {b} and {b2}")
-    if k != k2:
-        raise AssertionError(f"bmm: inner dimensions must match (k == k2), got {k} and {k2}")
+    assert b == b2
+    assert k == k2
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     flop = b * m * n * 2 * k
     return flop
@@ -269,8 +266,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
     b, h, s_q, d_q = query_shape
     _b2, _h2, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
-    if not b == _b2 == _b3 or not h == _h2 == _h3 or not d_q == _d2 or not s_k == _s3 or not d_q == _d2:
-        raise AssertionError("sdpa_flop_count: query/key/value shapes are incompatible")
+    assert b == _b2 == _b3 and h == _h2 == _h3 and d_q == _d2 and s_k == _s3 and d_q == _d2
     total_flops = 0
     # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
     total_flops += bmm_flop((b * h, s_q, d_q), (b * h, d_q, s_k))
@@ -324,21 +320,15 @@ def _unpack_flash_attention_nested_shapes(
         # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
         # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
         # So the flops calculation in this case is an overestimate of the actual flops.
-        if len(key.shape) != 3:
-            raise AssertionError("sdpa_flop_count: expected key.shape to be 3-dimensional")
-        if len(value.shape) != 3:
-            raise AssertionError("sdpa_flop_count: expected value.shape to be 3-dimensional")
-        if grad_out is not None and grad_out.shape != query.shape:
-            raise AssertionError("sdpa_flop_count: grad_out.shape must match query.shape when provided")
+        assert len(key.shape) == 3
+        assert len(value.shape) == 3
+        assert grad_out is None or grad_out.shape == query.shape
         _, h_q, d_q = query.shape
         _, h_k, d_k = key.shape
         _, h_v, d_v = value.shape
-        if cum_seq_q is None:
-            raise AssertionError("sdpa_flop_count: cum_seq_q must not be None")
-        if cum_seq_k is None:
-            raise AssertionError("sdpa_flop_count: cum_seq_k must not be None")
-        if cum_seq_q.shape != cum_seq_k.shape:
-            raise AssertionError("sdpa_flop_count: cum_seq_q and cum_seq_k must have the same shape")
+        assert cum_seq_q is not None
+        assert cum_seq_k is not None
+        assert cum_seq_q.shape == cum_seq_k.shape
         seq_q_lengths = _offsets_to_lengths(cum_seq_q, max_q)
         seq_k_lengths = _offsets_to_lengths(cum_seq_k, max_k)
         for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths):
@@ -378,22 +368,15 @@ def _unpack_efficient_attention_nested_shapes(
         # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
         # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
         # So the flops calculation in this case is an overestimate of the actual flops.
-        if len(key.shape) != 4:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: expected key.shape to be 4-dimensional")
-        if len(value.shape) != 4:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: expected value.shape to be 4-dimensional")
-        if grad_out is not None and grad_out.shape != query.shape:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: grad_out.shape must match query.shape when provided")
+        assert len(key.shape) == 4
+        assert len(value.shape) == 4
+        assert grad_out is None or grad_out.shape == query.shape
         _, _, h_q, d_q = query.shape
         _, _, h_k, d_k = key.shape
         _, _, h_v, d_v = value.shape
-        if cu_seqlens_q is None:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: cu_seqlens_q must not be None")
-        if cu_seqlens_k is None:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: cu_seqlens_k must not be None")
-        if cu_seqlens_q.shape != cu_seqlens_k.shape:
-            raise AssertionError("_unpack_efficient_attention_nested_shapes: "
-                                 "cu_seqlens_q and cu_seqlens_k must have the same shape")
+        assert cu_seqlens_q is not None
+        assert cu_seqlens_k is not None
+        assert cu_seqlens_q.shape == cu_seqlens_k.shape
         seqlens_q = _offsets_to_lengths(cu_seqlens_q, max_seqlen_q)
         seqlens_k = _offsets_to_lengths(cu_seqlens_k, max_seqlen_k)
         for len_q, len_k in zip(seqlens_q, seqlens_k):
@@ -477,10 +460,8 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     _b2, _h2, s_k, _d2 = key_shape
     _b3, _h3, _s3, d_v = value_shape
     _b4, _h4, _s4, _d4 = grad_out_shape
-    if not b == _b2 == _b3 == _b4 or not h == _h2 == _h3 == _h4 or not d_q == _d2:
-        raise AssertionError("sdpa_backward_flop_count: batch/heads/dimension mismatch among tensors")
-    if not d_v == _d4 or not s_k == _s3 or not s_q == _s4:
-        raise AssertionError("sdpa_backward_flop_count: grad_out/value/key/query shapes are incompatible")
+    assert b == _b2 == _b3 == _b4 and h == _h2 == _h3 == _h4 and d_q == _d2
+    assert d_v == _d4 and s_k == _s3 and s_q == _s4
     total_flops = 0
     # Step 1: We recompute the scores matrix.
     # q: [b, h, s_q, d_q] @ k: [b, h, d_q, s_k] -> scores: [b, h, s_q, s_k]
@@ -761,8 +742,7 @@ class FlopCounterMode:
         return self
 
     def __exit__(self, *args):
-        if self.mode is None:
-            raise AssertionError("Internal error: FlopCounter.__exit__ called but mode is None")
+        assert self.mode is not None
         b = self.mode.__exit__(*args)
         self.mode = None  # break cycles
         self.mod_tracker.__exit__()

@@ -1303,6 +1303,7 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     new_size = sym_size
 
     if start_index is not None:
+        x.realize()
         # we shouldn't have allocated storage offset symbol if start index was determinable
         assert sym_storage is None
         new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]

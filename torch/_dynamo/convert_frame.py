@@ -886,6 +886,7 @@ class DynamoOutput:
         return GraphCaptureOutput(
             OutputGraphCommon(
                 output_graph.dump_guards_state(),
+                output_graph.import_sources,
                 output_graph.shape_env,
                 output_graph.export_metadata,
                 output_graph.tracked_fakes_id_to_source,
@@ -959,6 +960,27 @@ class CaptureOutput:
     graph_capture_output: GraphCaptureOutput
     # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
     backend_input: Optional[BackendInput]
+
+    def forward_callable(self) -> Callable[..., Any]:
+        import importlib
+
+        # TODO code sharing
+        import_sources = self.graph_capture_output.output_graph.import_sources
+        assert self.backend_input is not None
+        backend_id = self.backend_input.backend_id
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in import_sources.items()
+        }
+        f_globals = {
+            **import_sources,
+            backend_id: self.backend_input.graph_module,
+        }
+        return types.FunctionType(
+            self.graph_capture_output.bytecode,
+            f_globals,
+            closure=(),
+        )
 
 
 def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:

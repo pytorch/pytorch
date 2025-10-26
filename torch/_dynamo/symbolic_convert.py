@@ -74,6 +74,7 @@ from .bytecode_analysis import (
 from .bytecode_transformation import (
     cleaned_instructions,
     create_binary_slice,
+    create_binary_subscr,
     create_call_function,
     create_call_function_ex,
     create_copy,
@@ -2725,7 +2726,7 @@ class InstructionTranslatorBase(
             *create_copy(2),
             # frame_values, frame N stack, frame_values
             create_load_const(0),
-            create_instruction("BINARY_SUBSCR"),
+            create_binary_subscr(),
             *create_binary_slice(0, 0, True),
             # frame_values[0][0:0] = frame N stack
             # frame_values left on top of stack
@@ -3583,11 +3584,13 @@ class InstructionTranslatorBase(
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
         tos = self.stack[-1]
+        assert isinstance(tos, TupleVariable)
+        keys = tos.unpack_var_sequence(self)
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
 
-        if all(k in tos1 for k in tos):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(self, k) for k in tos]))  # type: ignore[attr-defined,arg-type]
+        if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
+            self.push(TupleVariable([tos1.getitem_const(self, k) for k in keys]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:

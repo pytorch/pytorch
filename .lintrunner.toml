@@ -1138,11 +1138,8 @@ command = [
 [[linter]]
 code = 'WORKFLOWSYNC'
 include_patterns = [
-    '.github/workflows/pull.yml',
-    '.github/workflows/trunk.yml',
-    '.github/workflows/periodic.yml',
-    '.github/workflows/mac-mps.yml',
-    '.github/workflows/slow.yml',
+    '.github/workflows/*.yml',
+    '.github/workflows/*.yaml',
 ]
 command = [
     'python3',

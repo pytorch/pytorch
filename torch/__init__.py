@@ -1427,6 +1427,27 @@ def use_deterministic_algorithms(
     Note that deterministic operations tend to have worse performance than
     nondeterministic operations.
 
+
+    When this setting is turned on, the Inductor deterministic mode is also tuned on
+    automatically. In deterministic mode, Inductor would avoid doing on device benchmarking
+    that affect numerics. This includes:
+
+      - don't pad matmul input shapes. Without enabling deterministic mode, Inductor would do
+        benchmarking to check if padding matmul shape is beneficial.
+      - don't autotune templates. Inductor has templates for kernels like matmul/conv/attention.
+        Without enabling deterministic mode, Inductor would do autotuning to
+        pick the best configs for those templates and adopt it if it's faster
+        than the kernel in eager mode. In deterministic mode, we pick the eager kernel.
+      - don't autotune triton configs for reduction. Reduction numerics are
+        very sensitive to triton configs. In deterministic mode, Inductor
+        will use some heuristics to pick the most promising configs rather
+        than do autotuning.
+      - Skip autotuning for reduction in coordinate descent tuning.
+      - Don't benchmarking for the computation/communication reordering pass
+      - Disable the feature that dynamically scale down RBLOCK triton config for higher
+        occupancy.
+
+
     .. note::
 
         This flag does not detect or prevent nondeterministic behavior caused
@@ -1460,6 +1481,9 @@ def use_deterministic_algorithms(
         ...
         RuntimeError: avg_pool3d_backward_cuda does not have a deterministic implementation...
     """
+    import torch._inductor.config as inductor_config
+
+    inductor_config.deterministic = mode
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 

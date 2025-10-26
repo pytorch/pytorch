@@ -351,16 +351,14 @@ class TensorWeakRef:
     ref: WeakRef[Tensor]
 
     def __init__(self, tensor: Tensor):
-        if not isinstance(tensor, Tensor):
-            raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
+        assert isinstance(tensor, Tensor)
         self.ref = weakref.ref(tensor)
 
     def __call__(self):
         out = self.ref()
         if out is None:
             return out
-        if not isinstance(out, Tensor):
-            raise AssertionError(f"expected torch.Tensor, got {type(out)}.")
+        assert isinstance(out, Tensor)
         # TODO, add _fix_weakref type binding
         out._fix_weakref()  # type: ignore[attr-defined]
         return out

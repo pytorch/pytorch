@@ -366,15 +366,19 @@ def _single_tensor_adam(
     differentiable: bool,
     decoupled_weight_decay: bool,
 ):
-    assert grad_scale is None and found_inf is None
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
-        assert isinstance(lr, float)
-        assert isinstance(beta1, float)
-        assert isinstance(beta2, float)
+        if not isinstance(lr, float):
+            raise AssertionError(f"Expected lr to be a float, but got {type(lr)}")
+        if not isinstance(beta1, float):
+            raise AssertionError(f"Expected beta1 to be a float, but got {type(beta1)}")
+        if not isinstance(beta2, float):
+            raise AssertionError(f"Expected beta2 to be a float, but got {type(beta2)}")
     else:
         lr = _to_scalar(lr)
         beta1 = _to_scalar(beta1)
@@ -398,12 +402,13 @@ def _single_tensor_adam(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+                )
 
         # update step
         step_t += 1
@@ -600,17 +605,20 @@ def _multi_tensor_adam(
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
-    assert grad_scale is None and found_inf is None
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     lr = _to_scalar(lr)
     beta1 = _to_scalar(beta1)
