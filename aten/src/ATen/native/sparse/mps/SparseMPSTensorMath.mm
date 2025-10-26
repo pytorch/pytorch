@@ -806,9 +806,9 @@ static void sparse_mask_apply_out_mps_kernel(
   auto src  = src_in.coalesce();
   auto mask = coalesce_mask ? mask_in.coalesce() : mask_in;
 
-  const int64_t src_nnz = src._nnz();
-  const int64_t mask_nnz = mask._nnz();
-  const int64_t sd = src.sparse_dim();
+  const auto src_nnz = src._nnz();
+  const auto mask_nnz = mask._nnz();
+  const auto sd = src.sparse_dim();
   result.sparse_resize_(mask.sizes(), mask.sparse_dim(), mask.dense_dim());
 
   auto commonDtype = at::result_type(src, mask);
@@ -850,9 +850,9 @@ static void sparse_mask_apply_out_mps_kernel(
   auto mask_keys = flatten_indices(mask._indices().contiguous(), mask.sizes().slice(0, sd)).contiguous();
   auto src_keys  = flatten_indices(src._indices().contiguous(), src.sizes().slice(0, sd)).contiguous();
 
-  const bool A_is_src = (src_nnz <= mask_nnz);
-  const int64_t lenA = A_is_src ? src_nnz  : mask_nnz;
-  const int64_t lenB = A_is_src ? mask_nnz : src_nnz;
+  const auto A_is_src = (src_nnz <= mask_nnz);
+  const auto lenA = A_is_src ? src_nnz  : mask_nnz;
+  const auto lenB = A_is_src ? mask_nnz : src_nnz;
   auto A_keys = A_is_src ? src_keys  : mask_keys;
   auto B_keys = A_is_src ? mask_keys : src_keys;
 
@@ -889,9 +889,9 @@ static void sparse_mask_projection_out_mps_kernel(
   auto lhs_c = lhs.coalesce();
   auto rhs_c = rhs.coalesce();
 
-  const int64_t sd = lhs_c.sparse_dim();
-  const int64_t lhs_nnz = lhs_c._nnz();
-  const int64_t rhs_nnz = rhs_c._nnz();
+  const auto sd = lhs_c.sparse_dim();
+  const auto lhs_nnz = lhs_c._nnz();
+  const auto rhs_nnz = rhs_c._nnz();
 
   auto commonDtype = at::result_type(lhs_c, rhs_c);
   TORCH_CHECK(canCast(commonDtype, result.scalar_type()),
@@ -907,9 +907,9 @@ static void sparse_mask_projection_out_mps_kernel(
     auto lhs_keys = flatten_indices(lhs_indices, lhs_c.sizes().slice(0, sd)).contiguous();
     auto rhs_keys = flatten_indices(rhs_c._indices().contiguous(), rhs_c.sizes().slice(0, sd)).contiguous();
 
-    const bool A_is_lhs = (lhs_nnz <= rhs_nnz);
-    const int64_t lenA = A_is_lhs ? lhs_nnz : rhs_nnz;
-    const int64_t lenB = A_is_lhs ? rhs_nnz : lhs_nnz;
+    const auto A_is_lhs = (lhs_nnz <= rhs_nnz);
+    const auto lenA = A_is_lhs ? lhs_nnz : rhs_nnz;
+    const auto lenB = A_is_lhs ? rhs_nnz : lhs_nnz;
     auto A_keys = A_is_lhs ? lhs_keys : rhs_keys;
     auto B_keys = A_is_lhs ? rhs_keys : lhs_keys;
 
@@ -922,7 +922,7 @@ static void sparse_mask_projection_out_mps_kernel(
       auto idx_in_lhs = A_is_lhs ? idx_in_A : idx_in_B;
       auto idx_in_rhs = A_is_lhs ? idx_in_B : idx_in_A;
 
-      const int64_t view_cols = rhs_values.numel() / std::max<int64_t>(rhs_nnz, 1);
+      const auto view_cols = rhs_values.numel() / std::max<int64_t>(rhs_nnz, 1);
       auto rhs_rows = rhs_values.index_select(0, idx_in_rhs).contiguous();
       auto rhs_rows_2d = rhs_rows.view({M, view_cols});
       auto out_2d = out_values.view({lhs_nnz, view_cols});
