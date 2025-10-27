@@ -226,7 +226,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
 
         self.assertEqual(f4(torch.zeros(3)), torch.zeros(3) + 255)
         self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 2)
-        breakpoint()
 
     def test_supported_ctx_manager(self):
         global check, check_disabled, f1, f2, f3
