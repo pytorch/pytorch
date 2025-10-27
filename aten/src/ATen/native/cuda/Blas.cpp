@@ -334,7 +334,7 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
     && (
       self.is_contiguous() &&
       // NOTE: fine to have 1-len dims to the left from the leading one
-      self.dim() <= result.dim() && self.squeeze().dim() == 1 &&
+      (self.dim() == 1 || self.squeeze().dim() == 1) &&
       self.sizes().back() == mat2_sizes[1]
     )
     && ( // some dtype restrictions
