@@ -1387,7 +1387,6 @@ class CachingAutotuner(KernelInterface):
                 new_signature: list[str] = []
                 from triton.runtime.interpreter import InterpretedFunction
 
-                constexprs = get_constexprs(self.fn)
                 for i, x in enumerate(self.triton_meta["signature"].keys()):
                     if isinstance(self.fn, InterpretedFunction):
                         # These are torch compiled triton kernels that definitely
@@ -1395,7 +1394,7 @@ class CachingAutotuner(KernelInterface):
                         # trace user defined triton kernels when TRITON_INTERPRET=1
                         if x not in cfg.kwargs.keys():
                             new_signature.append(x)
-                    elif i not in constexprs:
+                    elif i not in get_constexprs(self.fn):
                         # use constexprs rather than just configs since user
                         # defined triton kernels may not have any configs
                         new_signature.append(x)
