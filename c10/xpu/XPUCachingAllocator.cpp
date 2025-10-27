@@ -714,6 +714,7 @@ class DeviceCachingAllocator {
      * We have to do a device-level synchronization before free these blocks to
      * guarantee that all kernels can access to the blocks have finished.
      */
+    TORCH_INTERNAL_ASSERT(!block->expandable_segment);
     sycl::free(block->ptr, xpu::get_device_context());
     auto* pool = block->pool;
     pool->blocks.erase(block);
@@ -809,7 +810,8 @@ class DeviceCachingAllocator {
 
   bool should_split(const Block* block, size_t size) {
     size_t remaining = block->size - size;
-    if (block->pool->is_small) {
+    if (block->pool->is_small ||
+        AcceleratorAllocatorConfig::use_expandable_segments()) {
       return remaining >= kMinBlockSize;
     } else {
       return remaining > kSmallSize;
