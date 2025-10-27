@@ -1,4 +1,3 @@
-#include "ATen/core/Generator.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorFactories.h>
 
@@ -12,6 +11,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TracerMode.h>
+#include <ATen/core/Generator.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/UnaryOps.h>
 #include <c10/core/ScalarType.h>

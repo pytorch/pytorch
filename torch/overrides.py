@@ -1076,7 +1076,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         ),
         torch.rad2deg: lambda input, out=None: -1,
         torch.rand_like: lambda input, generator=None, dtype=None, layout=None, device=None, requires_grad=False: -1,
-        torch.randint_like: lambda input, high, generator=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
+        torch.randint_like: lambda input, high, generator=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,  # noqa: B950
         torch.randn_like: lambda input, generator=None, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
