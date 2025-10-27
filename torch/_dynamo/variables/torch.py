@@ -250,6 +250,9 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        elif inspect.isbuiltin(value):
+            # We can skip guards here, because we dont expect torch.* builtins to change id
+            pass
         else:
             assert False
         return cls(value, source=source)
