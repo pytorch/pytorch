@@ -1743,32 +1743,8 @@ def _aot_stage2b_bw_compile(
 
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
-                # value. Using suppress_guards and guard_or_true to avoid that.
-                from torch._guards import detect_fake_mode
-                from torch.fx.experimental.symbolic_shapes import guard_or_true
-
-                stride_different = False
-                fake_mode = detect_fake_mode()
-                suppress_ctx = (
-                    fake_mode.shape_env.suppress_guards()
-                    if fake_mode is not None and fake_mode.shape_env is not None
-                    else nullcontext()
-                )
-                # if we cant statically tell that strides are the same,
-                # we assume they are not. 
-                # Inductor can choose different strdies for activations than 
-                # what backwars graph has. 
-                # import fbvscode
-                # fbvscode.set_trace()
-                V.graph.sizevars
-                with suppress_ctx:
-                    for i in range(len(ph_arg.stride())):
-                        # can real_stride be symbolic? CI will tell us lol.
-                        if guard_or_true(ph_arg.stride()[i] != int(real_stride[i])):
-                            stride_different = True
-                            break
-          
-                if stride_different:
+                # value. Using the hints to avoid that.
+                if _get_symint_hints(ph_arg.stride()) != real_stride:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
@@ -2069,7 +2045,6 @@ def _aot_stage2b_compile_forward_or_inference(
     - FunctionalizedRngRuntimeWrapper
     - FakifiedOutWrapper
     """
-
     # Validation
     if not is_inference and num_fw_outs_saved_for_bw is None:
         raise ValueError(
