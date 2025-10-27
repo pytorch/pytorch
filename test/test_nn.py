@@ -4049,6 +4049,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(ValueError, error_msg):
                 rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
 
+    def test_rnn_invalid_input_size_and_hidden_size(self):
+        # test that RNN modules raise TypeError when input_size or hidden_size is not an int
+        for mode in ['RNN', 'LSTM', 'GRU']:
+            with self.assertRaisesRegex(TypeError, "input_size should be of type int, got: float"):
+                getattr(nn, mode)(input_size=3.0, hidden_size=5)
+
+            with self.assertRaisesRegex(TypeError, "hidden_size should be of type int, got: float"):
+                getattr(nn, mode)(input_size=3, hidden_size=5.0)
+
+            with self.assertRaisesRegex(ValueError, "input_size must be greater than zero"):
+                getattr(nn, mode)(input_size=-1, hidden_size=5)
+
+            with self.assertRaisesRegex(ValueError, "input_size must be greater than zero"):
+                getattr(nn, mode)(input_size=0, hidden_size=5)
+
+            with self.assertRaisesRegex(ValueError, "hidden_size must be greater than zero"):
+                getattr(nn, mode)(input_size=3, hidden_size=-1)
+
+            with self.assertRaisesRegex(ValueError, "hidden_size must be greater than zero"):
+                getattr(nn, mode)(input_size=3, hidden_size=0)
+
     def _test_RNN_cpu_vs_cudnn(self, dropout, dtype=torch.double):
 
         def forward_backward(cuda, rnn, input_val, grad_output, weights_val, hx_val, grad_hy,
