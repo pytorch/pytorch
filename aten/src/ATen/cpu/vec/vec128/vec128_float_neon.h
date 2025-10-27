@@ -634,8 +634,7 @@ inline Vectorized<float> Vectorized<float>::erf() const {
   // - exp(- x * x)
   auto pow_2 = (*this) * (*this);
   auto neg_pow_2 = pow_2 ^ neg_zero_vec;
-  auto tmp4 = neg_pow_2.map(
-      std::exp); // This can be swapped for a faster implementation of exp.
+  auto tmp4 = neg_pow_2.exp();
   auto tmp5 = tmp4 ^ neg_zero_vec;
   // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
   auto tmp6 = t * tmp5;
