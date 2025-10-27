@@ -421,60 +421,9 @@ static PyMappingMethods THPStorage_mappingmethods = {
     reinterpret_cast<binaryfunc>(THPStorage_get),
     reinterpret_cast<objobjargproc>(THPStorage_set)};
 
-struct THPStorageMeta {
-  PyHeapTypeObject base;
-};
-
-static int THPStorageMetaType_init(
-    PyObject* cls,
-    PyObject* args,
-    PyObject* kwargs);
-
-static PyTypeObject THPStorageMetaType = {
-    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
-    "torch._C._StorageMeta", /* tp_name */
-    sizeof(THPStorageMeta), /* tp_basicsize */
-    0, /* tp_itemsize */
-    nullptr, /* tp_dealloc */
-    0, /* tp_vectorcall_offset */
-    nullptr, /* tp_getattr */
-    nullptr, /* tp_setattr */
-    nullptr, /* tp_reserved */
-    nullptr, /* tp_repr */
-    nullptr, /* tp_as_number */
-    nullptr, /* tp_as_sequence */
-    nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
-    nullptr, /* tp_call */
-    nullptr, /* tp_str */
-    nullptr, /* tp_getattro */
-    nullptr, /* tp_setattro */
-    nullptr, /* tp_as_buffer */
-    // NOLINTNEXTLINE(misc-redundant-expression)
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-    nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
-    nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
-    nullptr, /* tp_iter */
-    nullptr, /* tp_iternext */
-    nullptr, /* tp_methods */
-    nullptr, /* tp_members */
-    nullptr, /* tp_getset */
-    DEFERRED_ADDRESS(&PyType_Type), /* tp_base */
-    nullptr, /* tp_dict */
-    nullptr, /* tp_descr_get */
-    nullptr, /* tp_descr_set */
-    0, /* tp_dictoffset */
-    THPStorageMetaType_init, /* tp_init */
-    nullptr, /* tp_alloc */
-    nullptr, /* tp_new */
-};
-
 // TODO: implement equality
 PyTypeObject THPStorageType = {
-    PyVarObject_HEAD_INIT(&THPStorageMetaType, 0)
+    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
     "torch._C.StorageBase", /* tp_name */
     sizeof(THPStorage), /* tp_basicsize */
     0, /* tp_itemsize */
@@ -517,13 +466,6 @@ PyTypeObject THPStorageType = {
     THPStorage_pynew, /* tp_new */
 };
 
-int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
-  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
-    return -1;
-  }
-  return 0;
-}
-
 static PyObject* THPStorage_device(THPStorage* self, void* unused) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
@@ -558,13 +500,7 @@ bool THPStorage_init(PyObject* module) {
   THPUtils_addPyMethodDefs(methods, THPStorage_getMethods());
   THPUtils_addPyMethodDefs(methods, THPStorage_getSharingMethods());
 
-  THPStorageMetaType.tp_base = &PyType_Type;
-  if (PyType_Ready(&THPStorageMetaType) < 0)
-    return false;
-  Py_INCREF(&THPStorageMetaType);
-  PyModule_AddObject(
-      module, "_StorageMeta", reinterpret_cast<PyObject*>(&THPStorageMetaType));
-
+  THPStorageType.tp_base = &PyType_Type;
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_getset = THPStorage_properties;
   if (PyType_Ready(&THPStorageType) < 0)
