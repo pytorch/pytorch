@@ -914,6 +914,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
  bool ceil_mode,
  const Tensor& output,
  const Tensor& indices) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Max pooling for complex is not supported for MPS");
   bool use_graph = use_graph_for_max_pool2d(kernel_size, stride);
   if (use_graph) {
     auto indices_memory_format = indices.suggest_memory_format();
@@ -966,6 +968,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
  bool ceil_mode,
  const Tensor& indices,
  const Tensor& grad_input) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Max pooling for complex is not supported for MPS");
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     return [mpsGraph maxPooling2DGradientWithGradientTensor:cachedGraph.gradOutputTensor

@@ -119,6 +119,10 @@ Tensor& relu_mps_(Tensor& self) {
 
 TORCH_IMPL_FUNC(log_softmax_mps_out)
 (const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "log_softmax for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "log_softmax for bool is not supported for MPS");
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
 
@@ -162,6 +166,10 @@ TORCH_IMPL_FUNC(log_softmax_mps_out)
 
 TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
 (const Tensor& grad_output, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& out) {
+  TORCH_CHECK_NOT_IMPLEMENTED(grad_output.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(grad_output.scalar_type()),
+                              "log_softmax for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(grad_output.scalar_type() != kBool, "log_softmax for bool is not supported for MPS");
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
 
@@ -705,6 +713,8 @@ static void elu_variants_out_mps(const Tensor& self,
                                  const Scalar& input_scale,
                                  const Tensor& result,
                                  std::string func_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()), "ELU for complex is not supported for MPS");
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
 
@@ -794,6 +804,9 @@ TORCH_IMPL_FUNC(elu_backward_out_mps)
  bool is_result,
  const Tensor& self_or_result,
  const Tensor& grad_input) {
+  TORCH_CHECK_NOT_IMPLEMENTED(grad_output.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(grad_output.scalar_type()),
+                              "ELU for complex is not supported for MPS");
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
   auto gradMemFormat = grad_input.suggest_memory_format();
@@ -1162,6 +1175,8 @@ TORCH_IMPL_FUNC(mish_out_mps)
 (const Tensor& self, const Tensor& result) {
   using namespace mps;
   TORCH_CHECK(self.is_mps());
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()), "Mish for complex is not supported for MPS");
 
   if (result.numel() == 0)
     return;
@@ -1210,6 +1225,8 @@ TORCH_IMPL_FUNC(mish_out_mps)
 Tensor mish_backward_mps(const Tensor& grad_output, const Tensor& self) {
   using namespace mps;
   TORCH_CHECK(self.is_mps());
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()), "Mish for complex is not supported for MPS");
 
   Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
   if (grad_input.numel() == 0)
