@@ -1353,9 +1353,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # NB: 0 is predicate
             ix = 1 if branch else 2
             # TODO: Support kwargs
-            pred = args[0].sym_num.node.expr
-            prelude = pred if branch else ~pred
-            with tx.output.shape_env.patch_ra_prelude(prelude):
+            ra_context = contextlib.nullcontext()
+            if hasattr(args[0], "sym_num"):
+                pred = args[0].sym_num.node.expr
+                prelude = pred if branch else ~pred
+                ra_context = tx.output.shape_env.patch_ra_prelude(prelude)
+
+            with ra_context:
                 (
                     (ret_val, ret_spec),
                     ret_graph,
@@ -1373,6 +1377,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     supports_input_mutation=self.supports_input_mutation,
                     supports_aliasing=self.supports_aliasing,
                 )
+
 
             if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
