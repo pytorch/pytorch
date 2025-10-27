@@ -124,14 +124,12 @@ struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
       std::optional<sycl::queue*> queue,
-      size_t address_space_size,
       size_t segment_size,
       std::vector<c10::DeviceIndex> peers)
       : device_(device),
         queue_(queue),
         // 2MB for small pool, 20MB for large pool
         segment_size_(segment_size),
-        max_handles_(numSegments(address_space_size)),
         peers_(std::move(peers)) {
     const auto device_total =
         c10::xpu::get_raw_device(device)
@@ -164,7 +162,7 @@ struct ExpandableSegment {
       try {
         // Construct the physical_mem directly in the optional to avoid copies.
         handles_.at(i).emplace(
-            xpu::get_raw_devic(device_),
+            xpu::get_raw_device(device_),
             xpu::get_device_context(),
             segment_size_);
       } catch (const sycl::exception& e) {
@@ -185,7 +183,7 @@ struct ExpandableSegment {
   }
 
   // Unmap a virtual memory range from physical memory.
-  virtual SegmentRange unmap(SegmentRange range) {
+  SegmentRange unmap(SegmentRange range) {
     auto begin = segmentRight(range.ptr);
     auto end = segmentLeft(range.ptr + range.size);
     if (begin >= end) {
@@ -328,7 +326,7 @@ struct ExpandableSegment {
       handles_{};
   // Peer devices on which this memory should be mapped and accessible.
   std::vector<c10::DeviceIndex> peers_{};
-}
+};
 
 struct AllocParams {
   AllocParams(
@@ -373,8 +371,8 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<xpu::XPUStream, std::deque<std::pair<sycl::event, Block*>>>
       xpu_events;
   DeviceIndex device_index;
-  std::vector<ExpandableSegment*> expandable_segments_;
-  std::vector<c10::DeviceIndex> devices_with_peer_access_;
+  std::vector<ExpandableSegment*> expandable_segments;
+  std::vector<c10::DeviceIndex> devices_with_peer_access;
 
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
@@ -518,10 +516,10 @@ class DeviceCachingAllocator {
       }
     }
     auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
-    expandable_segments_.emplace_back(new ExpandableSegment(
-        device, queue, segment_size, devices_with_peer_access_));
+    expandable_segments.emplace_back(new ExpandableSegment(
+        device, queue, segment_size, devices_with_peer_access));
 
-    ExpandableSegment* es = expandable_segments_.back();
+    ExpandableSegment* es = expandable_segments.back();
     Block* candidate = new Block(device, queue, es->size(), pool, es->ptr());
     candidate->mapped = false;
     candidate->expandable_segment = es;
@@ -562,10 +560,9 @@ class DeviceCachingAllocator {
     try_merge_blocks(to_map, to_map->prev, pool);
     try_merge_blocks(to_map, to_map->next, pool);
 
-    pool.insert(to_map);
+    pool.blocks.insert(to_map);
 
     // update statistics
-    total_allocated_memory += mapped_range.size;
     StatTypes stat_types = get_stat_types_for_pool(*to_map->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(mapped_range.size);
@@ -697,11 +694,11 @@ class DeviceCachingAllocator {
         "block disagrees with segment");
     TORCH_INTERNAL_ASSERT(!block->mapped);
     auto it = std::find(
-        expandable_segments_.begin(),
-        expandable_segments_.end(),
+        expandable_segments.begin(),
+        expandable_segments.end(),
         block->expandable_segment);
-    TORCH_INTERNAL_ASSERT(it != expandable_segments_.end());
-    expandable_segments_.erase(it);
+    TORCH_INTERNAL_ASSERT(it != expandable_segments.end());
+    expandable_segments.erase(it);
     block->pool->unmapped.erase(block);
     delete block->expandable_segment;
     delete block;
@@ -744,7 +741,7 @@ class DeviceCachingAllocator {
           block->device, block->queue, before_size, block->pool, block->ptr);
       before_free->expandable_segment = block->expandable_segment;
       before_free->splice(block->prev, block);
-      block->pool.blocks.insert(before_free);
+      block->pool->blocks.insert(before_free);
     }
 
     auto after_size = block->size - (before_size + unmapped.size);
@@ -758,7 +755,7 @@ class DeviceCachingAllocator {
           unmapped.ptr + unmapped.size);
       after_free->expandable_segment = block->expandable_segment;
       after_free->splice(block, block->next);
-      block->pool.blocks.insert(after_free);
+      block->pool->blocks.insert(after_free);
     }
 
     block->ptr = unmapped.ptr;
