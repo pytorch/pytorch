@@ -905,6 +905,14 @@ class HingeEmbeddingLoss(_Loss):
           operates over all the elements.
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
+
+    Examples:
+
+        >>> loss = nn.HingeEmbeddingLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["margin", "reduction"]
@@ -1063,6 +1071,14 @@ class SmoothL1Loss(_Loss):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.SmoothL1Loss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1127,6 +1143,14 @@ class HuberLoss(_Loss):
         - Input: :math:`(*)` where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.HuberLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction", "delta"]
@@ -1171,6 +1195,13 @@ class SoftMarginLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
+    Examples:
+
+        >>> loss = nn.SoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1430,6 +1461,14 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
         - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+
+    Examples:
+
+        >>> loss = nn.MultiLabelSoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.empty(3, 5).random_(2)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
