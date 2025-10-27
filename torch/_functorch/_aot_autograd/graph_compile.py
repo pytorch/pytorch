@@ -1760,8 +1760,10 @@ def _aot_stage2b_bw_compile(
                 # what backwars graph has. 
                 # import fbvscode
                 # fbvscode.set_trace()
+                V.graph.sizevars
                 with suppress_ctx:
                     for i in range(len(ph_arg.stride())):
+                        # can real_stride be symbolic? CI will tell us lol.
                         if guard_or_true(ph_arg.stride()[i] != int(real_stride[i])):
                             stride_different = True
                             break
