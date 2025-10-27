@@ -260,6 +260,8 @@ class BaseTorchVariable(VariableTracker):
         ):
             # Dont need to guard on wrappers
             pass
+        else:
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
