@@ -295,9 +295,7 @@ class BaseListVariable(VariableTracker):
                 {},
             )
         elif name == "__iter__":
-            return ListIteratorVariable(
-                list(self.items), mutation_type=ValueMutationNew()
-            )
+            return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1589,6 +1587,7 @@ class ListIteratorVariable(IteratorVariable):
         # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
+        self.is_exhausted = False
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
@@ -1596,7 +1595,8 @@ class ListIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         assert self.is_mutable()
         old_index = self.index
-        if old_index >= len(self.items):
+        if old_index >= len(self.items) or self.is_exhausted:
+            self.is_exhausted = True
             raise_observed_exception(StopIteration, tx)
 
         tx.output.side_effects.mutation(self)
@@ -1618,15 +1618,19 @@ class ListIteratorVariable(IteratorVariable):
         return True
 
     def unpack_var_sequence(self, tx):
-        r = list(self.items[self.index :])
-        self.index = len(self.items)
-        return r
+        if self.is_exhausted:
+            return []
+        self.is_exhausted = True
+        return list(self.items[self.index :])
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        remaining_items = self.items[self.index :]
+        if not self.is_exhausted:
+            remaining_items = self.items[self.index :]
+        else:
+            remaining_items = []
         codegen.foreach(remaining_items)
         codegen.extend_output(
             [
