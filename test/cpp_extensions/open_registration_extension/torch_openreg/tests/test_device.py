@@ -2,6 +2,7 @@
 
 import torch
 import torch_openreg  # noqa: F401
+from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -34,7 +35,7 @@ class TestDevice(TestCase):
     def test_device_capability(self):
         capability = torch.accelerator.get_device_capability("openreg:0")
         supported_dtypes = capability["supported_dtypes"]
-        expected_dtypes = [torch.float32, torch.float64, torch.int32, torch.int64]
+        expected_dtypes = get_all_dtypes(include_complex32=True, include_qint=True)
 
         self.assertTrue(all(dtype in supported_dtypes for dtype in expected_dtypes))
 
