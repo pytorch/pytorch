@@ -153,7 +153,7 @@ def get_ratings_for_tests(file: str | Path) -> dict[str, float]:
     try:
         changed_files = query_changed_files()
     except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
+        warn(f"Can't query changed test files due to {e}", stacklevel=2)
         return {}
     ratings: dict[str, float] = defaultdict(float)
     for file in changed_files:

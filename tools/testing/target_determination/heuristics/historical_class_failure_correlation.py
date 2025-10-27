@@ -57,7 +57,7 @@ def _get_ratings_for_tests(
     try:
         changed_files = query_changed_files()
     except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
+        warn(f"Can't query changed test files due to {e}", stacklevel=2)
         return {}
 
     test_class_correlations = _get_historical_test_class_correlations()

@@ -1452,7 +1452,9 @@ class Graph:
         if to_erase.graph != self:
             raise RuntimeError(f"Attempting to remove {to_erase} from wrong graph!")
         if to_erase._erased:
-            warnings.warn(f"erase_node({to_erase}) on an already erased node")
+            warnings.warn(
+                f"erase_node({to_erase}) on an already erased node", stacklevel=2
+            )
             return
 
         if (
@@ -1590,7 +1592,7 @@ class Graph:
             try:
                 submod: torch.nn.Module = mod.get_submodule(module_path)
             except AttributeError:
-                warnings.warn(f"Failed to fetch module {module_path}!")
+                warnings.warn(f"Failed to fetch module {module_path}!", stacklevel=2)
                 return False
 
             if not hasattr(submod, name):
@@ -1668,7 +1670,8 @@ class Graph:
                 "no underlying reference in the owning "
                 "GraphModule! Call "
                 "GraphModule.add_submodule to add the "
-                "necessary submodule"
+                "necessary submodule",
+                stacklevel=2,
             )
         return self.create_node(
             "call_module", module_name, args, kwargs, type_expr=type_expr

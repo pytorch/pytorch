@@ -118,7 +118,7 @@ class Filepath(HeuristicInterface):
         try:
             changed_files = query_changed_files()
         except Exception as e:
-            warn(f"Can't query changed test files due to {e}")
+            warn(f"Can't query changed test files due to {e}", stacklevel=2)
             changed_files = []
 
         test_ratings = get_freq_dict(tests, changed_files)

@@ -981,7 +981,8 @@ def gather_docstrs() -> dict[str, str]:
         except ModuleNotFoundError:
             # Gracefully fail if these modules are not importable
             warn(
-                "Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files."
+                "Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files.",
+                stacklevel=2,
             )
 
     return docstrs

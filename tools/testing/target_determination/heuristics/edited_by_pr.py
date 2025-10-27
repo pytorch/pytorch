@@ -52,6 +52,6 @@ def _get_modified_tests() -> set[str]:
                 should_run.add(test_file)
         return should_run
     except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
+        warn(f"Can't query changed test files due to {e}", stacklevel=2)
         # If unable to get changed files from git, quit without doing any sorting
     return set()

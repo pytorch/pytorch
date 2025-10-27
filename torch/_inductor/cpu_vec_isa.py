@@ -491,7 +491,9 @@ def get_isa_from_cpu_capability(
                 return vec_isa
 
     if capability:
-        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
+        warnings.warn(
+            f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}", stacklevel=2
+        )
 
     return vec_isa_list[0]
 
