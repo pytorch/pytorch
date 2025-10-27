@@ -4,7 +4,7 @@ import unittest
 
 import torch
 import torch._dynamo.testing
-from torch._dynamo.testing import CompileCounter, same
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -202,17 +202,20 @@ class DataPtrTests(TestCase):
         opt_fn = torch.compile(fn, fullgraph=True)
         self.assertTrue(opt_fn(x))
 
-    def test_data_ptr_comparison_with_incompatible_type(self):
-        """Test that comparing data_ptr with incompatible types returns NotImplemented"""
+    def test_data_ptr_comparison_to_int_constant_works(self):
+        """
+        Verify that returning NotImplemented allows comparisons with int
+        constants to complete via Python's comparison protocol fallback.
+        """
 
         def fn(x):
-            ptr = x.data_ptr()
-            # Comparing with the same type should work
-            return ptr == ptr
+            # DataPtrVariable.__eq__(ConstantVariable) returns NotImplemented,
+            # which allows Python's protocol to handle the comparison
+            return x.data_ptr() == 99999
 
-        x = torch.randn(4, 4)
+        x = torch.randn(10)
         opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
+        self.assertFalse(opt_fn(x))
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_data_ptr_slice_different_first_element(self):
@@ -278,6 +281,41 @@ class DataPtrTests(TestCase):
         # True: same first element (both at offset 0)
         self.assertTrue(opt_fn(x))
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_empty_tensors_both_null(self):
+        """Two empty tensors both have data_ptr() == 0"""
+
+        def fn(x, y):
+            return x.data_ptr() == y.data_ptr()
+
+        empty1 = torch.tensor((), dtype=torch.float32)
+        empty2 = torch.tensor((), dtype=torch.float32)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(empty1, empty2))
+        self.assertEqual(fn(empty1, empty2), opt_fn(empty1, empty2))
+
+    def test_data_ptr_empty_vs_nonempty(self):
+        """Empty tensor (data_ptr==0) vs non-empty should be False"""
+
+        def fn(x, y):
+            return x.data_ptr() == y.data_ptr()
+
+        empty = torch.tensor((), dtype=torch.float32)
+        nonempty = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertFalse(opt_fn(empty, nonempty))
+        self.assertEqual(fn(empty, nonempty), opt_fn(empty, nonempty))
+
+    def test_data_ptr_zero_sized_multidim(self):
+        """Zero-sized multi-dimensional tensors have data_ptr() == 0"""
+
+        def fn(x):
+            return x.data_ptr() == x.data_ptr()
+
+        zero_sized = torch.empty(5, 0)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(zero_sized))
+        self.assertEqual(fn(zero_sized), opt_fn(zero_sized))
 
 
 if __name__ == "__main__":
