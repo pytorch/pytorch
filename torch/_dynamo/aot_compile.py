@@ -4,9 +4,10 @@ import inspect
 import logging
 import pickle
 import types
+from collections.abc import Callable
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -80,7 +81,7 @@ class AOTCompiledFunction:
             **import_sources,
             self._artifacts.backend_id: self._artifacts.compiled_fn,
         }
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self.fn = types.FunctionType(
             self._artifacts.bytecode, f_globals, closure=self._artifacts.closure
         )
