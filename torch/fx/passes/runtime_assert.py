@@ -178,7 +178,24 @@ def insert_deferred_runtime_asserts(
                 assert isinstance(node.target, str)
                 target = getattr(fake_args[0], node.target)
                 fake_args = fake_args[1:]
-            node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
+
+            # The OrderedAnd function in torch.utils._sympy.functions combines
+            # `not` and `any` operations to generate runtime assertions correctly
+            # in the code. For these specific operations, we avoid evaluating the
+            # function directly, as doing so could unnecessarily trigger
+            # data-dependent errors. For example, if there's a runtime
+            # assertion `u0 <= 0`, evaluating the meta of not(u0 <= 0) would
+            # cause us to guard on the inner expression and potentially raise a
+            # data-dependent error. Therefore, we choose not to compute the meta
+            # in these cases, since it's not essential.
+            calculate_meta = (
+                node.target != operator.not_
+                and node.target != any
+                and not any(hasattr(a, "target") and a.target == any for a in node.args)  # type: ignore[union-attr]
+            )
+            if calculate_meta:
+                node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
+
         except NotImplementedError:
             # This can happen when attempting to reify a symbol with an unsupported call_function node,
             # e.g. with NestedTensors + sym_size.int via match_symbol().
@@ -195,11 +212,12 @@ def insert_deferred_runtime_asserts(
 
     Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 
-    def _sympy_interp(expr_to_proxy, expr):
+    def _sympy_interp(expr_to_proxy, expr, graph):
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
 
+        from torch.utils._sympy.functions import OrderedAnd
         from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
         # hash cons
@@ -209,10 +227,31 @@ def insert_deferred_runtime_asserts(
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
             return sympy_interp(Analysis, expr_to_proxy, expr)
 
+        if isinstance(expr, OrderedAnd):
+            predicate = (_sympy_interp(expr_to_proxy, expr.args[0], graph)).node
+            runtime_assert = _sympy_interp(expr_to_proxy, expr.args[1], graph).node
+
+            not_predicate = fx.Proxy(
+                graph.call_function(operator.not_, (predicate,)), tracer=tracer
+            ).node
+
+            return fx.Proxy(
+                graph.call_function(
+                    any,
+                    (
+                        [
+                            not_predicate,
+                            runtime_assert,
+                        ],
+                    ),
+                ),
+                tracer=tracer,
+            )
+
         # hash cons on arguments, run expr handler
         expr_to_proxy[expr] = _run_sympy_handler(
             Analysis,
-            [_sympy_interp(expr_to_proxy, arg) for arg in expr.args],
+            [_sympy_interp(expr_to_proxy, arg, graph) for arg in expr.args],
             expr,
         )
         return expr_to_proxy[expr]
@@ -258,7 +297,7 @@ def insert_deferred_runtime_asserts(
                 # Convert the sympy expression into a sequence of FX
                 # nodes
                 with _set_node_metadata_hook(gm, _node_metadata_hook):
-                    res = _sympy_interp(expr_to_proxy, ra.expr).node
+                    res = _sympy_interp(expr_to_proxy, ra.expr, graph).node
 
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
@@ -410,6 +449,7 @@ def insert_deferred_runtime_asserts(
                                 expr_to_proxy,
                                 # pyrefly: ignore  # unbound-name
                                 sym_expr,
+                                graph,
                             )  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
                     hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
@@ -627,7 +667,9 @@ def insert_deferred_runtime_asserts(
                             ),
                         ):
                             if (min_val := convert(vr.lower)) is not None:
-                                ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
+                                ge = _sympy_interp(
+                                    expr_to_proxy, i0 >= min_val, graph
+                                ).node
                                 graph.call_function(
                                     torch.ops.aten._assert_scalar.default,
                                     (
@@ -637,7 +679,9 @@ def insert_deferred_runtime_asserts(
                                 )
                                 added_asserts.add(i0 >= min_val)
                             if (max_val := convert(vr.upper)) is not None:
-                                le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
+                                le = _sympy_interp(
+                                    expr_to_proxy, i0 <= max_val, graph
+                                ).node
                                 graph.call_function(
                                     torch.ops.aten._assert_scalar.default,
                                     (

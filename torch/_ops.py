@@ -334,14 +334,37 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             from torch._higher_order_ops.utils import _has_gen_schema
 
             if _has_gen_schema(self):
-                schema = self.gen_schema(*args, **kwargs)
-                if any(arg.is_write for arg in schema.arguments):
-                    raise RuntimeError(
-                        f"The {self.name()} HigherOrderOperator does not currently support training "
-                        "with in-place input or buffer mutations "
-                        "If you require this feature, please submit an issue to PyTorch. "
-                        "Alternatively, consider creating your own custom autograd.Function. "
-                    )
+                try:
+                    schema = self.gen_schema(*args, **kwargs)
+                    if any(arg.is_write for arg in schema.arguments):
+                        raise RuntimeError(
+                            f"The {self.name()} HigherOrderOperator does not currently support training "
+                            "with in-place input or buffer mutations "
+                            "If you require this feature, please submit an issue to PyTorch. "
+                            "Alternatively, consider creating your own custom autograd.Function. "
+                        )
+                except RuntimeError as e:
+                    if "Expected cond to be True, but got False" in str(e):
+                        # Although we attempt to detect in-place input or buffer mutations,
+                        # the current approach in CondOp::gen_schema is not fully reliable.
+                        # Specifically, we invoke materialize_as_graph on both the true and false
+                        # subgraphs with the provided inputs at runtime (not compile time).
+                        # This can lead to unintended side effects: for example, consider the following code:
+                        #
+                        # def nop(x, w):
+                        #   torch._check(x.shape[0] == 0)
+                        #
+                        # torch.cond(x.shape[0] > 0, compute, nop, (x, w))
+                        #
+                        # If, at runtime, x.shape[0] > 0, the assertion in nop will be triggered,
+                        # even though that branch is not actually taken. As a result, strictly enforcing
+                        # a hard failure based on this check would incorrectly penalize valid programs
+                        # due to the unsoundness of our detection mechanism. Therefore, rather than
+                        # failing outright, we conservatively proceed under the assumption that there
+                        # are no in-place input or buffer mutations.
+                        pass
+                    else:
+                        raise
 
             return fn(*args, **kwargs)
 

@@ -34,6 +34,7 @@ from .functions import (
     Mod,
     ModularIndexing,
     OpaqueUnaryFn_log2,
+    OrderedAnd,
     PowByNatural,
     PythonMod,
     RoundDecimal,
@@ -108,6 +109,7 @@ def handlers():
         OpaqueUnaryFn_log2: "log2",
         BitwiseFn_bitwise_and: "bitwise_and",
         BitwiseFn_bitwise_or: "bitwise_or",
+        OrderedAnd: "ordered_and",
     }
     # TODO: This is kind of pointless, we shouldn't be generating sympy.sin
     # for these functions, they should be Opaque instead
