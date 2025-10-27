@@ -620,23 +620,38 @@ class ContinueExecutionCache:
                 nonlocal orig_offset
                 (target,) = (i for i in instructions if i.offset == cur_offset)
                 # match the functions starting at the last instruction as we have added a prefix
-                (new_target,) = (
+                new_target_tuple = tuple(
                     i2
                     for i1, i2 in zip(
                         reversed(instructions), reversed(meta.instructions)
                     )
                     if i1 is target
                 )
+
+                if not new_target_tuple:
+                    # Instruction with cur_offset in instructions was not found
+                    # in the original code - orig_offset left as -1.
+                    # Caller expected to handle this case.
+                    return
+
+                assert len(new_target_tuple) == 1
+                new_target = new_target_tuple[0]
+
                 assert target.opcode == new_target.opcode
                 assert new_target.offset is not None
                 orig_offset = new_target.offset
 
             transform_code_object(code, find_orig_offset_transform)
-            assert orig_offset >= 0
             return orig_offset
 
         orig_init_offset = find_orig_offset(init_offset)
+        # It is fine if the initial instruction is not found in the original code;
+        # this means we graph broke in the prefix, which only happens with nested graph breaks.
+        # We should not be running into ambiguous graph break issues here.
         orig_resume_offset = find_orig_offset(resume_offset)
+        assert orig_resume_offset > -1, (
+            "resume instruction not found in original code - this is a bug."
+        )
 
         if sys.version_info >= (3, 11):
             # setup_fn_target_offsets currently contains the target offset of
