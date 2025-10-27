@@ -91,7 +91,9 @@ class _DebugCall:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
         """
-        raise NotImplementedError("Subclasses must implement stringify_args(), even if no-op")
+        raise NotImplementedError(
+            "Subclasses must implement stringify_args(), even if no-op"
+        )
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
@@ -296,9 +298,7 @@ class DebugMode(TorchDispatchMode):
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self._record_call(
-                        _OpCall(func, args, kwargs, self.call_depth + 1)
-                    )
+                    self._record_call(_OpCall(func, args, kwargs, self.call_depth + 1))
         elif len(types) == 0:
             if self.record_realtensor:
                 self._record_call(_OpCall(func, args, kwargs, self.call_depth + 1))
