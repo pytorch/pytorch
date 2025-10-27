@@ -6287,7 +6287,11 @@ class ShapeEnv:
         """Given a expression, it returns a list of predicates that follow from it"""
 
         if isinstance(e, OrderedAnd):
-            # We can't assume anything globally with OrderedAnd.
+            # Because SymPy's default And does not preserve operand order,
+            # we introduced OrderedAnd to maintain order. As a result, we
+            # cannot make additional global logical assumptions about the
+            # conjunction as a whole, since the semantics of OrderedAnd are
+            # intentionally more restrictive.
             return tuple()
 
         equiv: dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
