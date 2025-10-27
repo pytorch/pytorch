@@ -716,7 +716,7 @@ def cache_on_self_and_args(
 
     @functools.wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> RV:
-        key = (args, tuple(sorted(kwargs.items())))
+        key = (id(self), args, tuple(sorted(kwargs.items())))
         if key not in cache:
             cache[key] = fn(self, *args, **kwargs)
         return cache[key]
