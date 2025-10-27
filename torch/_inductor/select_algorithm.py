@@ -3596,7 +3596,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @staticmethod
-    def log_flex_attention_results(
+    def maybe_log_flex_attention_results(
         name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
     ) -> None:
         flex_attention_filename = get_flex_attention_log_filename()
@@ -3720,7 +3720,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             append_to_log(mm_filename, out_dict)
 
-        AlgorithmSelectorCache.log_flex_attention_results(name, input_nodes, timings)
+        AlgorithmSelectorCache.maybe_log_flex_attention_results(name, input_nodes, timings)
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
