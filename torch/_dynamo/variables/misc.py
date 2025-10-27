@@ -58,6 +58,7 @@ from ..utils import (
     istype,
     list_methods,
     proxy_args_kwargs,
+    raise_args_mismatch,
     tuple_methods,
 )
 from .base import raise_type_error_exc, VariableTracker
@@ -200,10 +201,9 @@ class SuperVariable(VariableTracker):
                 and not (args or kwargs)
             ):
                 with do_not_convert_to_tracable_parameter():
-                    fn_vt = VariableTracker.build(
-                        tx, unpatched_nn_module_init, source=source
-                    )
-                    return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
+                    return variables.UserFunctionVariable(
+                        unpatched_nn_module_init, source=source
+                    ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented_v2(
                     gb_type="Unsupported super().__init__() call",
@@ -231,8 +231,9 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
-            fn_vt = VariableTracker.build(tx, inner_fn.__func__, source=source)
-            return fn_vt.call_function(tx, args, kwargs)
+            return variables.UserFunctionVariable(
+                inner_fn.__func__, source=source
+            ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
@@ -255,13 +256,13 @@ class SuperVariable(VariableTracker):
                     tx, self.objvar.value_type, cls_source
                 )
 
-            fn_vt = VariableTracker.build(
-                tx, inner_fn.__func__, source=AttrSource(source, "__func__")
-            )
-            return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
+            return variables.UserFunctionVariable(
+                inner_fn.__func__, source=AttrSource(source, "__func__")
+            ).call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
-            fn_vt = VariableTracker.build(tx, inner_fn, source=source)
-            return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
+            return variables.UserFunctionVariable(
+                inner_fn, source=source
+            ).call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, source=source
@@ -574,8 +575,10 @@ class ComptimeVariable(VariableTracker):
         from ..comptime import comptime
 
         # To support the comptime.print_graph convenience accessors
-        return VariableTracker.build(
-            tx, getattr(comptime, name), source=AttrSource(self.source, name)
+        from .functions import UserFunctionVariable
+
+        return UserFunctionVariable(
+            getattr(comptime, name), source=AttrSource(self.source, name)
         )
 
     def call_function(
@@ -587,20 +590,25 @@ class ComptimeVariable(VariableTracker):
         from ..comptime import ComptimeContext
 
         # TODO: support an expression form as well
-
-        assert not kwargs
         # Second argument is runtime lambda, ignored
-        assert len(args) <= 2
+        if kwargs or len(args) > 2:
+            raise_args_mismatch(
+                tx,
+                "comptime()",
+                "at most 2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
             fn.get_function()(ComptimeContext(tx))
         elif isinstance(fn, NestedUserFunctionVariable):
             # We have to manually bind the freevars ourselves
             code = fn.get_code()
-            assert not fn.closure, (
-                "comptime function must not have free variables, "
-                f"but these variables were free: {code.co_freevars}"
-            )
+            if fn.closure:
+                raise_type_error_exc(
+                    tx,
+                    f"comptime function must not have free variables, but these variables were free: {code.co_freevars}",
+                )
             func = types.FunctionType(
                 code,
                 fn.f_globals,
@@ -769,8 +777,9 @@ class AutogradFunctionVariable(VariableTracker):
             sig = inspect.signature(fn)
             if len(args) - 1 == len(sig._parameters):
                 args = args[1:]  # Don't use context
-            fn_vt = VariableTracker.build(tx, fn, source=source)
-            return fn_vt.call_function(tx, args, kwargs)
+            return variables.UserFunctionVariable(fn, source=source).call_function(
+                tx, args, kwargs
+            )
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
                 fn.__func__,
@@ -796,8 +805,9 @@ class AutogradFunctionVariable(VariableTracker):
         assert isinstance(fn, types.FunctionType)
 
         fn_source = AttrSource(self.source, "backward")
-        fn_vt = VariableTracker.build(tx, fn, source=fn_source)
-        return fn_vt.call_function(tx, args, kwargs)
+        return variables.UserFunctionVariable(fn, source=fn_source).call_function(
+            tx, args, kwargs
+        )
 
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
         return AutogradFunctionVariable(self.fn_cls)
@@ -942,7 +952,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
         elif name == "mark_non_differentiable":
-            assert len(kwargs) == 0
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
 
@@ -970,7 +981,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             )
 
         if not self.inference:
-            assert self.source and not kwargs
+            if kwargs or not self.source:
+                raise_type_error_exc(
+                    tx, "save_for_backward() requires a source and no keyword arguments"
+                )
             tx.output.side_effects.track_save_for_backward(self, args)
 
         # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
@@ -1022,12 +1036,10 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                 assert tx.one_graph or tx.error_on_graph_break, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
-                fn_vt = VariableTracker.build(
-                    tx,
+                return variables.UserFunctionVariable(
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
                     source=self.source,
-                )
-                return fn_vt.call_function(
+                ).call_function(
                     tx,
                     (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
                     kwargs,
