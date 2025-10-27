@@ -68,6 +68,29 @@ class Adafactor(Optimizer):
                     step_val = float(p_state["step"])
                     p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype())
 
+    def _get_factor_dims(self, grad: Tensor, fqn: Optional[str]=None) -> Tuple[int, int]:
+        """Returns the dimensions to reduce over for the row and column factors.
+        
+        Defaults to using the the second largest and largest dimension of the gradient
+        Tensor for row and column respectively, but can be overridden for custom behavior.
+
+        Args:
+            grad (Tensor): Gradient tensor.
+            fqn (Optional[str]): Fully qualified name of the parameter corresponding to
+                the gradient. (default: None)
+        
+        Returns:
+            Tuple[int, int]: The dimensions to reduce over for the row and column factors,
+                respectively.
+        """
+        if grad.dim() < 2:
+            raise RuntimeError(
+                f"Adafactor _get_factor_dims should only be called on a tensor with at"
+                f" least 2 dimensions, but got a grad with {grad.dim()} dimensions."
+            )
+        sorted_dims = torch.argsort(grad.shape)
+        return int(sorted_dims[-2]), int(sorted_dims[-1])
+
     def _init_group(
         self,
         group,
@@ -77,6 +100,7 @@ class Adafactor(Optimizer):
         col_vars,
         variances,
         state_steps,
+        factored_dims,
     ):
         for p in group["params"]:
             if p.grad is None:
@@ -98,13 +122,15 @@ class Adafactor(Optimizer):
                 state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
 
                 if p.grad.dim() > 1:
+                    row_dim, col_dim = self._get_factor_dims(p.grad, ???)
+                    state["factored_dims"] = (row_dim, col_dim)
                     row_shape = list(p.grad.shape)
-                    row_shape[-1] = 1
+                    row_shape[row_dim] = 1
                     # Row factor of variance, NOT the same shape as grads (will be reduced along last dim)
                     state["row_var"] = p.grad.new_zeros(row_shape)
 
                     col_shape = list(p.grad.shape)
-                    col_shape[-2] = 1
+                    col_shape[col_dim] = 1
                     # Col factor of variance, NOT the same shape as grads (will be reduced along penultimate dim)
                     state["col_var"] = p.grad.new_zeros(col_shape)
                 else:
@@ -112,6 +138,7 @@ class Adafactor(Optimizer):
                         p.grad, memory_format=torch.preserve_format
                     )
 
+            factored_dims.append(state.get("factored_dims", None))
             row_vars.append(state.get("row_var", None))
             col_vars.append(state.get("col_var", None))
             variances.append(state.get("variance", None))
@@ -140,6 +167,7 @@ class Adafactor(Optimizer):
             col_vars: list[Optional[Tensor]] = []
             variances: list[Optional[Tensor]] = []
             state_steps: list[Tensor] = []
+            factored_dims: list[Optional[Tuple[int, int]]] = []
             eps1, eps2 = group["eps"]
 
             has_complex = self._init_group(
@@ -150,6 +178,7 @@ class Adafactor(Optimizer):
                 col_vars,
                 variances,
                 state_steps,
+                factored_dims,
             )
 
             adafactor(
@@ -350,16 +379,15 @@ def _single_tensor_adafactor(
     maximize: bool,
     has_complex: bool,
 ):
-    if grad_scale is not None or found_inf is not None:
-        raise AssertionError("Grad scaling should occur outside of optimizer.step()")
+    assert grad_scale is None and found_inf is None, (
+        "Grad scaling should occur outside of optimizer.step()"
+    )
 
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
-        if not isinstance(lr, float):
-            raise AssertionError(f"Expected lr to be a float, but got {type(lr)}")
-
+        assert isinstance(lr, float)
     else:
         lr = _to_scalar(lr)
 
@@ -385,10 +413,9 @@ def _single_tensor_adafactor(
             param.mul_(1 - lr * weight_decay)
 
         if grad.dim() > 1:
-            if row_var is None or col_var is None:
-                raise AssertionError(
-                    "row_var and col_var should be defined when grad is multidimensional"
-                )
+            assert row_var is not None and col_var is not None, (
+                "row_var and col_var should be defined when grad is multidimensional"
+            )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_mean = (
                 torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
@@ -402,8 +429,9 @@ def _single_tensor_adafactor(
             var_estimate = row_var @ col_var
             var_estimate.div_(row_var.mean(dim=-2, keepdim=True).clamp_(min=eps1))
         else:
-            if variance is None:
-                raise AssertionError("variance should be defined when grad is a vector")
+            assert variance is not None, (
+                "variance should be defined when grad is a vector"
+            )
             grad_squared = grad * grad
             variance.lerp_(grad_squared, one_minus_beta2_t)
             # avoid writing into variance during update
@@ -436,8 +464,7 @@ def _group_tensors_by_device_dtype_and_is_multidim(
 
         # assumes grad is the second tensorlist
         for j, tensor in enumerate(tensorlists[1]):
-            if tensor is None:
-                raise AssertionError("grad should not be None")
+            assert tensor is not None, "grad should not be None"
             if tensor.dim() > 1:
                 if matrix_key not in ultra_grouped_tensors:
                     ultra_grouped_tensors[matrix_key] = [[] for _ in tensorlists]
@@ -477,8 +504,9 @@ def _multi_tensor_adafactor(
     if len(params) == 0:
         return
 
-    if grad_scale is not None or found_inf is not None:
-        raise AssertionError("Grad scaling should occur outside of optimizer.step()")
+    assert grad_scale is None and found_inf is None, (
+        "Grad scaling should occur outside of optimizer.step()"
+    )
 
     lr = _to_scalar(lr)
 
@@ -499,10 +527,9 @@ def _multi_tensor_adafactor(
         device_grads = cast(list[Tensor], device_grads_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
         if eps1 is None:
-            if dtype is None:
-                raise AssertionError(
-                    "dtype is needed to compute eps1 when eps1 is unset"
-                )
+            assert dtype is not None, (
+                "dtype is needed to compute eps1 when eps1 is unset"
+            )
             eps1 = torch.finfo(dtype).eps
 
         if TYPE_CHECKING:
@@ -542,10 +569,9 @@ def _multi_tensor_adafactor(
         if is_multidim:
             device_row_vars = cast(list[Tensor], device_row_vars_)
             device_col_vars = cast(list[Tensor], device_col_vars_)
-            if device_row_vars[0] is None or device_col_vars[0] is None:
-                raise AssertionError(
-                    "row_var and col_var should be defined when grad is multidimensional"
-                )
+            assert device_row_vars[0] is not None and device_col_vars[0] is not None, (
+                "row_var and col_var should be defined when grad is multidimensional"
+            )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_means = [
                 torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
@@ -576,8 +602,9 @@ def _multi_tensor_adafactor(
             del row_var_means
         else:
             device_variances = cast(list[Tensor], device_variances_)
-            if device_variances[0] is None:
-                raise AssertionError("variance should be defined when grad is a vector")
+            assert device_variances[0] is not None, (
+                "variance should be defined when grad is a vector"
+            )
 
             grads_squared = torch._foreach_mul(device_grads, device_grads)
             torch._foreach_lerp_(device_variances, grads_squared, one_minus_beta2_ts)
