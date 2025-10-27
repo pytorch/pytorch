@@ -2207,7 +2207,9 @@ static void THPVariable_dealloc(PyObject* self) {
 }
 
 // Creates a new Python object for a Variable without modifying the var
-static PyObject* THPVariable_New(PyTypeObject* type, const at::TensorBase& _var) {
+static PyObject* THPVariable_New(
+    PyTypeObject* type,
+    const at::TensorBase& _var) {
   PyObject* obj = type->tp_alloc(type, 0);
   if (!obj) {
     throw py::error_already_set();
@@ -2383,7 +2385,8 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
   THPVariable* var = reinterpret_cast<THPVariable*>(self);
   Py_VISIT(var->backward_hooks);
   Py_VISIT(var->post_accumulate_grad_hooks);
-  // printf("traversing %p of type %s backward_hooks=%p\n", self, type->tp_name, var->backward_hooks);
+  // printf("traversing %p of type %s backward_hooks=%p\n", self, type->tp_name,
+  // var->backward_hooks);
   TORCH_INTERNAL_ASSERT(!var->cdata.unsafeIsBorrowed());
   if (!var->cdata.unsafeIsBorrowed()) {
     const auto& tensor = THPVariable_Unpack(var);

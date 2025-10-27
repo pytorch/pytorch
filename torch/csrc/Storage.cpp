@@ -35,7 +35,6 @@ PyTypeObject* THPStorageClass = nullptr;
 PyObject* THPStorage_BasicNewWithStorage(
     PyTypeObject* type,
     c10::Storage _storage) {
-
   TORCH_CHECK(
       PyType_IsSubtype(type, &THPStorageType),
       "Creating a Storage subclass from a class that does not inherit from ",

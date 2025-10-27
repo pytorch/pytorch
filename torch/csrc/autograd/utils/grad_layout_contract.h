@@ -66,8 +66,8 @@ inline at::Tensor clone_obey_contract(
                              variable.sym_sizes(),
                              variable.sym_strides(),
                              variable.options()
-                                .memory_format(std::nullopt)
-                                .dtype(new_grad.dtype()))
+                                 .memory_format(std::nullopt)
+                                 .dtype(new_grad.dtype()))
                          .copy_(new_grad));
   } else {
     // (2)

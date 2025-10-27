@@ -106,16 +106,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void incref_pyobject() const override {
-    PyObject *obj = pyobj_slot_._unchecked_untagged_pyobj();
+    PyObject* obj = pyobj_slot_._unchecked_untagged_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->incref(obj);
   }
 
   void decref_pyobject() const override {
-    PyObject *obj = pyobj_slot_._unchecked_untagged_pyobj();
+    PyObject* obj = pyobj_slot_._unchecked_untagged_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->decref(obj, false);
   }
 
-  bool init_pyobj(PyObject *obj) {
+  bool init_pyobj(PyObject* obj) {
     pyobj_slot_.init_pyobj(obj);
     return set_has_pyobject();
   }

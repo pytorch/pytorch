@@ -334,7 +334,7 @@ class intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       uint64_t combined = detail::atomic_combined_refcount_increment(
-            target_->combined_refcount_, detail::kReferenceCountOne);
+          target_->combined_refcount_, detail::kReferenceCountOne);
       uint32_t new_refcount = detail::refcount(combined);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
@@ -1094,8 +1094,9 @@ inline void incref(intrusive_ptr_target* self) {
   if (self) {
     uint64_t new_refcount = detail::atomic_combined_refcount_increment(
         self->combined_refcount_, detail::kReferenceCountOne);
-    if (C10_UNLIKELY(detail::has_pyobject(new_refcount) &&
-                     detail::refcount(new_refcount) == 2)) {
+    if (C10_UNLIKELY(
+            detail::has_pyobject(new_refcount) &&
+            detail::refcount(new_refcount) == 2)) {
       self->incref_pyobject();
     }
   }
