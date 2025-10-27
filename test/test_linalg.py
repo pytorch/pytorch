@@ -2138,6 +2138,33 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_compare_backends(self, device, dtype):
+        def fulfills_eigen_decomposition_identity(a, eig, dtype):
+
+            # check correctness using eigendecomposition identity
+            if dtype in [torch.float32, torch.complex64]:
+                atol = 1e-3  # less accurate results for float32 and complex64 (one to two OOM from NumPy results)
+            else:
+                atol = 1e-13  # Same OOM for NumPy
+
+
+            w, v = eig
+
+            # move all tensors to CPU to avoid issues with GPU matmul
+            a = a.cpu().to(v.dtype)
+            v = v.to("cpu")
+            w = w.to("cpu")
+
+            if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
+                return True
+            elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
+                return False
+
+            diff = (a @ v) - (v * w.unsqueeze(-2))
+            diff = diff.abs()
+            diff = torch.max(diff)
+            print(f"diff: {diff}")
+            return diff <= atol
+
         def run_test(shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
@@ -2154,7 +2181,7 @@ class TestLinalg(TestCase):
             # compare with CPU
             expected = torch.linalg.eig(a.to(complementary_device))
             self.assertEqual(expected[0], actual[0])
-            self.assertEqual(expected[1], actual[1])
+            self.assertTrue(fulfills_eigen_decomposition_identity(a, actual, dtype))  # check evs using eigen identity
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
