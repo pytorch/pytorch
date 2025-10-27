@@ -3560,12 +3560,7 @@ Example::
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
       .def_readwrite(
           "is_high_priority_stream",
-          &::c10d::ProcessGroupXCCL::Options::is_high_priority_stream)
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupXCCL::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupXCCL::Options::group_name);
+          &::c10d::ProcessGroupXCCL::Options::is_high_priority_stream);
   module
       .def(
           "_dump_xccl_trace",
