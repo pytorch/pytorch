@@ -318,6 +318,12 @@ class LookupTableChoices(InductorChoices):
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[KernelTemplateChoice]:
         """Check lookup table for hits, use those if found, otherwise fall back to parent."""
+        # Early exit if lookup table system is disabled - call super directly
+        if not config.lookup_table.active:
+            return super()._finalize_template_configs(
+                template_choices, kernel_inputs, templates, op_name, kwarg_overrides
+            )
+
         # 1. Collect template src_hashes for validation
         template_uids = [template.uid for template in templates]
         template_hash_map = {}

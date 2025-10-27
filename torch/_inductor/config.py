@@ -2074,6 +2074,9 @@ write_are_deterministic_algorithms_enabled = (
 
 
 class lookup_table:
+    # Enable/disable lookup table choices system (defaults to True)
+    active: bool = True
+
     # Lookup table for template config overrides
     table: Optional[dict[str, list[dict[str, Any]]]] = None
 
