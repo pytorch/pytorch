@@ -25,7 +25,6 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
-from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -288,6 +287,8 @@ def create_hop_fw_bw(
             fw_outs, grads = create_joint(
                 prepare_fw_with_masks(fw_gm), aot_config=dummy_aot_config
             )(primals, tangents)
+            from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
             assert not has_free_unbacked_symbols((*fw_outs, *grads)), (
                 "Unbacked symints leaking outside of the joint graph is not yet supported."
             )
