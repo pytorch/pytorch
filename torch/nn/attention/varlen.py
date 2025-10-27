@@ -200,7 +200,6 @@ def varlen_attn(
         return out, lse
     return out
 
-
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
     out, lse, rng_state = output
@@ -216,20 +215,20 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.lse = lse
     ctx.rng_state = rng_state
 
-
-def _backward(
-    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
-) -> tuple[Optional[torch.Tensor], ...]:
-    query = ctx.query
-    key = ctx.key
-    value = ctx.value
-    cu_seq_q = ctx.cu_seq_q
-    cu_seq_k = ctx.cu_seq_k
-    max_q = ctx.max_q
-    max_k = ctx.max_k
-    is_causal = ctx.is_causal
-    out = ctx.output
-    lse = ctx.lse
+@torch.library.custom_op("torch_nn_attention::_varlen_attn_backward", mutates_args={})
+def _varlen_attn_backward(
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    lse: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     rng_state = torch.empty(2, device=query.device)
     unused = torch.empty(0, device=query.device)
 
@@ -270,6 +269,61 @@ def _backward(
             rng_state,
             unused,
         )
+    return dq, dk, dv
+
+
+@_varlen_attn_backward.register_fake
+def _varlen_attn_backward_fake(
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    lse: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Fake implementation for meta tensor computation and tracing.
+    """
+
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    return grad_query, grad_key, grad_value
+
+
+def _backward(
+    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
+) -> tuple[Optional[torch.Tensor], ...]:
+    query = ctx.query
+    key = ctx.key
+    value = ctx.value
+    cu_seq_q = ctx.cu_seq_q
+    cu_seq_k = ctx.cu_seq_k
+    max_q = ctx.max_q
+    max_k = ctx.max_k
+    is_causal = ctx.is_causal
+    out = ctx.output
+    lse = ctx.lse
+
+    dq, dk, dv = torch.ops.torch_nn_attention._varlen_attn_backward(
+        grad_out,
+        query,
+        key,
+        value,
+        out,
+        lse,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        is_causal,
+    )
     return dq, dk, dv, None, None, None, None, None, None
 
 
