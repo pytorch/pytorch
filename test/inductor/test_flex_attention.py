@@ -1967,6 +1967,38 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    @dtypes(torch.float16)
+    @dtypesIfCUDA(torch.float16)
+    def test_dynamic_captured_buffer(self, device, dtype):
+        def run_with_head_count(compiled_fa, head_count):
+            head_scale = torch.randn(
+                head_count, device=device, dtype=dtype, requires_grad=True
+            )
+
+            def score_mod(score, batch, head, token_q, token_kv):
+                return score * head_scale[head]
+
+            q = torch.randn(
+                B, head_count, S, D, device=device, dtype=dtype, requires_grad=True
+            )
+            k = torch.randn_like(q, requires_grad=True)
+            v = torch.randn_like(q, requires_grad=True)
+
+            block_mask = create_block_mask(noop_mask, B, 1, S, S, device=device)
+
+            out = compiled_fa(q, k, v, score_mod=score_mod, block_mask=block_mask)
+            loss = out.sum()
+            loss.backward()
+            return out
+
+        compiled_fa = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+
+        head_counts = [4, 8, 4, 16, 4]
+        for head_count in head_counts:
+            run_with_head_count(compiled_fa, head_count)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -4964,6 +4996,28 @@ class TestBlockMask(InductorTestCase):
             )
 
     @supported_platform
+    def test_sliced_blockmask_mask_mod_error(self, device):
+        """Test that sliced BlockMask raises helpful error when used with flex_attention"""
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        base_mask = create_block_mask(
+            causal_mask, B=1, H=1, Q_LEN=256, KV_LEN=256, device=device
+        )
+        sliced_mask = base_mask[:, :, 0]
+
+        q = torch.randn(1, 1, 1, 64, device=device)
+        k = torch.randn(1, 1, 256, 64, device=device)
+        v = torch.randn(1, 1, 256, 64, device=device)
+
+        compiled_fa = torch.compile(flex_attention)
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot use mask_mod from a sliced BlockMask"
+        ):
+            compiled_fa(q, k, v, block_mask=sliced_mask)
+
+    @supported_platform
     def test_block_mask_device_change(self, device):
         device = torch.device(device)
         offset = torch.zeros(8, device=device)
@@ -6564,7 +6618,7 @@ class TestLearnableBiases(InductorTestCase):
         )
         # Error in backwards
         with self.assertRaisesRegex(
-            torch._inductor.exc.LoweringException,
+            torch._inductor.exc.InductorError,
             "Using multiple indexing operations on the same tensor that requires gradients",
         ):
             self._check_outputs_and_grads(
