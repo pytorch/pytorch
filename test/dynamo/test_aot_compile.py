@@ -471,6 +471,67 @@ from user code:
         assert hasattr(backend_result.compiled_fn, "serialize")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
+    def test_fullgraph_capture_with_pytree_module(self):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return {
+                    "y": self.linear2(x[2] + 1),
+                    "z": self.linear3(x[1] - 1),
+                    "w": self.linear(x[0]["b"] + 2),
+                    "v": self.linear1(x[0]["a"] - 2),
+                }
+
+        mod = Module()
+        compiled_mod = dynamo_graph_capture_for_export(mod)(
+            (
+                {"a": torch.randn(3, 3), "b": torch.randn(3, 3)},
+                torch.randn(3, 3),
+                torch.randn(3, 3),
+            )
+        )
+
+        inputs = (
+            {"a": torch.randn(3, 3), "b": torch.randn(3, 3)},
+            torch.randn(3, 3),
+            torch.randn(3, 3),
+        )
+        self.assertEqual(compiled_mod(inputs), mod(inputs))
+
+    def test_fullgraph_capture_with_pytree_func(self):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        def foo(x):
+            return {
+                "y": x[2] + 1,
+                "z": x[1] - 1,
+                "w": x[0]["b"] + 2,
+                "v": x[0]["a"] - 2,
+            }
+
+        compiled_foo = dynamo_graph_capture_for_export(foo)(
+            (
+                {"a": torch.randn(4, 3), "b": torch.randn(3, 2)},
+                torch.randn(2, 3),
+                torch.randn(3, 4),
+            )
+        )
+
+        inputs = (
+            {"a": torch.randn(4, 3), "b": torch.randn(3, 2)},
+            torch.randn(2, 3),
+            torch.randn(3, 4),
+        )
+        self.assertEqual(compiled_foo(inputs), foo(inputs))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
