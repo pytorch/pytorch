@@ -1274,17 +1274,8 @@ def maybe_inline_graph_saved_tensors_hooks(
         else:
             # Keep usages of bw_g_input in inserted unpacked hook graph.
             # Replace other usages of bw_g_input with unpack_saved_tensor_n.
-            from torch._C import _fx_map_arg
-
-            def maybe_replace_node(n):
-                return unpack_saved_tensor_n if n == bw_g_input else n
-
             for use_node in original_bw_g_input_users:
-                new_args = _fx_map_arg(use_node.args, maybe_replace_node)
-                new_kwargs = _fx_map_arg(use_node.kwargs, maybe_replace_node)
-                assert isinstance(new_args, tuple)
-                assert isinstance(new_kwargs, dict)
-                use_node._update_args_kwargs(new_args, new_kwargs)
+                use_node._replace_input_with(bw_g_input, unpack_saved_tensor_n)
         bw_g.erase_node(bw_unpack_out_n)
 
     # Changing forward graph outputs,
