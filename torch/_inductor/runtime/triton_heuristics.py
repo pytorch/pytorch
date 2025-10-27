@@ -2436,7 +2436,6 @@ def triton_config_reduction(
         else:
             num_warps = total_numel() // 128
 
-
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
         num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
