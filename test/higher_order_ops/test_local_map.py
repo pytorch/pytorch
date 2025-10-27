@@ -5,6 +5,7 @@
 import functools
 import unittest
 from contextlib import contextmanager, ExitStack
+from typing import Any, Callable, Optional
 
 import torch
 import torch._dynamo
@@ -18,6 +19,7 @@ from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderV
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.utils.checkpoint import create_selective_checkpoint_contexts
 
@@ -49,48 +51,50 @@ def enable_local_map_wrapping():
         yield
 
 
-@contextmanager
-def ap_style_frontend_patches():
-    @contextmanager
-    def monkey_patch_export_verifier():
-        from torch._export.verifier import final, Verifier
+def _export(model: torch.nn.Module, inputs: tuple[Any]) -> torch.nn.Module:
+    from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+    from torch.export._trace import _restore_state_dict
 
-        prior = Verifier._check_graph_module
-
-        @final
-        def skip_checks(self: Verifier, gm: torch.fx.GraphModule) -> None:
-            return
-
-        try:
-            Verifier._check_graph_module = skip_checks
-            yield
-        finally:
-            Verifier._check_graph_module = prior
-
-    with ExitStack() as stack:
-        stack.enter_context(enable_local_map_wrapping())
-        stack.enter_context(
-            torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
-        )
-        stack.enter_context(torch._dynamo.config.patch(install_free_tensors=True))
-        stack.enter_context(monkey_patch_export_verifier())
-        yield
+    """
+    Thin wrapper around graph capture output that restores the
+    original calling convention and attribute fqn. TODO:
+    1) Use bytecode for calling convention instead of pytree for more
+       seamless UX.
+    2) Attach guards
+    3) Be more careful about tensor constants names.
+    """
+    with torch._dynamo.config.patch(install_free_tensors=True):
+        gm = _dynamo_graph_capture_for_export(model)(*inputs)
+        _restore_state_dict(model, gm)
+        return gm
 
 
-def ap_style_initial_capture(model, inputs):
+def ap_style_initial_capture(
+    model: torch.nn.Module, inputs_fn: Callable
+) -> torch.nn.Module:
     """
     Similar to AP's initial capture, but:
     - no dtype casting
     - no AP decomps
     - no inductor
     """
+    fake_mode = FakeTensorMode()
+    fake_mode.shape_env = ShapeEnv()
+    fake_mode.static_shapes = False
+
+    with fake_mode:
+        inputs = inputs_fn()
     assert isinstance(inputs, tuple)
-    with ap_style_frontend_patches():
-        ep = torch.export.export(model, inputs, strict=True)
+
+    with (
+        enable_local_map_wrapping(),
+        torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+    ):
+        torch_ir_with_fqn = _export(model, inputs)
         unused = ExitStack()
         joint_with_descriptors = aot_export_joint_with_descriptors(
             unused,
-            ep.module(),
+            torch_ir_with_fqn,
             inputs,
             decompositions=torch._inductor.decomposition.select_decomp_table(),
         )
@@ -235,17 +239,18 @@ class TestLocalMap(TestCase):
             from torch.testing._internal.distributed.fake_pg import FakeStore
 
             self.fake_store = FakeStore()
-            self.world_size = 256
+            self.world_size = 2048
             torch.distributed.init_process_group(
                 "fake", store=self.fake_store, rank=0, world_size=self.world_size
             )
             self.mesh = torch.distributed.device_mesh.init_device_mesh(
                 "cpu",
-                (self.world_size // 32, 8, 4),
+                (8, 8, 4, 8),
                 mesh_dim_names=(
                     "dp",
                     "tp",
                     "cp",
+                    "ep",
                 ),
             )
 
@@ -626,9 +631,11 @@ class GraphModule(torch.nn.Module):
                 return fn(x)
 
         model = MyModule()
-        with FakeTensorMode():
-            inputs = (torch.randn(80, 80, requires_grad=True),)
-        gm = ap_style_initial_capture(model, inputs)
+
+        def inputs_fn():
+            return (torch.randn(80, 80, requires_grad=True),)
+
+        gm = ap_style_initial_capture(model, inputs_fn)
         fw_node, bw_node = [n for n in gm.graph.nodes if "call_local_map" in n.name]
 
         # Graph should not be aware that Fake key used local shapes
@@ -673,14 +680,11 @@ class GraphModule(torch.nn.Module):
                 return replicate_linear(self.w.weight, x)
 
         model = MyModule()
-        with FakeTensorMode():
-            inputs = (
-                torch.randn(
-                    80,
-                    80,
-                ),
-            )
-        ap_style_initial_capture(model, inputs)
+
+        def inputs_fn():
+            return (torch.randn(80, 80),)
+
+        ap_style_initial_capture(model, inputs_fn)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_none_placements(self):
@@ -714,9 +718,11 @@ class GraphModule(torch.nn.Module):
             def forward(self, x):
                 return fn_with_non_tensors(x, 10, self.module)
 
-        x = torch.randn(10, 10, requires_grad=True)
+        def inputs_fn():
+            return (torch.randn(10, 10, requires_grad=True),)
+
         model = MyModule()
-        ap_style_initial_capture(model, (x,))
+        ap_style_initial_capture(model, inputs_fn)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_filtered_gradients(self):
@@ -747,9 +753,143 @@ class GraphModule(torch.nn.Module):
                 return a.sum() + b.sum()
 
         model = MyModule()
-        with FakeTensorMode():
-            inputs = (torch.randn(80, 80),)
-        ap_style_initial_capture(model, inputs)
+
+        def inputs_fn():
+            return (torch.randn(80, 80),)
+
+        ap_style_initial_capture(model, inputs_fn)
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_symint_activations(self):
+        import torch.distributed.distributed_c10d as c10d
+
+        def _get_group_name_from_axis_name(mesh_name):
+            mesh = self.mesh
+            group = mesh.get_group(mesh_name)
+            return group.group_name
+
+        def axis_size(axis_name):
+            mesh = self.mesh
+            # assert axis_name in mesh.mesh_dim_names
+            axis_dim = mesh.mesh_dim_names.index(axis_name)
+            return mesh.size(axis_dim)
+
+        def _all_to_all(
+            self: torch.Tensor,
+            output_split_sizes: Optional[list[int]],
+            input_split_sizes: Optional[list[int]],
+            group_name: str,
+        ):
+            group_size = c10d._get_group_size_by_name(group_name)
+            if output_split_sizes is None or input_split_sizes is None:
+                assert output_split_sizes is None and input_split_sizes is None, (
+                    "output_split_sizes and input_split_sizes must either be "
+                    "specified together or both set to None"
+                )
+                output_split_sizes = [self.shape[0] // group_size] * group_size
+                input_split_sizes = output_split_sizes
+
+            tensor = torch.ops._c10d_functional.all_to_all_single(
+                self, output_split_sizes, input_split_sizes, group_name
+            )
+            res = torch.ops._c10d_functional.wait_tensor(tensor)
+            return res
+
+        class _AllToAll(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx: Any,
+                x: torch.Tensor,
+                output_split_sizes: Optional[list[int]],
+                input_split_sizes: Optional[list[int]],
+                axis_name: str,
+            ):
+                group_name = _get_group_name_from_axis_name(axis_name)
+                ctx.group_name = group_name
+                ctx.output_split_sizes = output_split_sizes
+                ctx.input_split_sizes = input_split_sizes
+                return _all_to_all(x, output_split_sizes, input_split_sizes, group_name)
+
+            @staticmethod
+            def backward(ctx: Any, grad_output: torch.Tensor):  # type: ignore[override]
+                return _all_to_all(
+                    grad_output,
+                    ctx.input_split_sizes,
+                    ctx.output_split_sizes,
+                    ctx.group_name,
+                )
+
+        all_to_all = _AllToAll.apply
+
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+                None,
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def _forward(num_tokens_per_expert, x, axis_name):
+            ep_size = axis_size(axis_name)
+
+            # generate the input splits and output splits for all-to-all
+            with torch.no_grad():
+                num_tokens_per_expert_group = all_to_all(
+                    num_tokens_per_expert,
+                    None,
+                    None,
+                    axis_name,
+                )
+                input_splits = (
+                    num_tokens_per_expert.view(ep_size, -1)
+                    .sum(dim=1)
+                    .to(torch.device("cpu"), non_blocking=True)
+                )
+                # NOTE: this would incur a device-to-host sync
+                output_splits = (
+                    num_tokens_per_expert_group.view(ep_size, -1)
+                    .sum(dim=1)
+                    .to(torch.device("cpu"), non_blocking=False)
+                )
+                input_splits = input_splits.tolist()
+                output_splits = output_splits.tolist()
+
+            # perform all-to-all
+            routed_inputs = all_to_all(
+                x,
+                output_splits,
+                input_splits,
+                axis_name,
+            )
+
+            # noop routed experts
+            routed_outputs = routed_inputs
+            # noop shared experts
+            out = x.clone()
+
+            return out.add_(routed_outputs)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, num_tokens_per_expert, routed_input):
+                return _forward(num_tokens_per_expert, routed_input, "ep")
+
+        model = MyModule()
+
+        def inputs_fn():
+            x = torch.randn(8, 80, requires_grad=True)
+            num_tokens_per_expert = torch.ones(1, 8, dtype=torch.int32)
+            return (
+                num_tokens_per_expert,
+                x,
+            )
+
+        ap_style_initial_capture(model, inputs_fn)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_fx_annotations(self):
@@ -783,11 +923,12 @@ class GraphModule(torch.nn.Module):
                 return a.sum() + b.sum()
 
         model = MyModule()
-        with FakeTensorMode():
-            fw_inputs = (torch.randn(80, 80),)
+
+        def inputs_fn():
+            return (torch.randn(80, 80),)
 
         with fx_traceback.preserve_node_meta():
-            joint_gm_deferred = ap_style_initial_capture(model, fw_inputs)
+            joint_gm_deferred = ap_style_initial_capture(model, inputs_fn)
             joint_inputs = [
                 n.meta["val"]
                 for n in joint_gm_deferred.graph.nodes
