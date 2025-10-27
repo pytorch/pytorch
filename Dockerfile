@@ -53,7 +53,7 @@ ARG CUDA_PATH=cu121
 ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
 # pinning version of conda here see: https://github.com/pytorch/pytorch/issues/164574
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=25.7.0
+RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION} conda=25.7.0
 
 ARG TARGETPLATFORM
 

@@ -658,6 +658,7 @@ static void check_shape_forward(const at::Tensor& input,
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
   TORCH_CHECK(!params.is_dilation_neg(), "dilation should be greater than zero");
+  TORCH_CHECK(groups > 0, "expected groups to be greater than 0, but got groups=", groups);
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -702,7 +703,7 @@ static void check_shape_forward(const at::Tensor& input,
       // If kernel size is incorrect
       std::ostringstream input_ss;
       std::ostringstream kernel_ss;
-      std::string separator = "";
+      std::string separator;
 
       for (int i = 0, len = input_shape.size(); i < len; ++i) {
         input_ss << separator << input_shape[i];
@@ -1019,7 +1020,7 @@ static Tensor convolution_same(
 
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
-    SymDimVector output_padding(static_cast<size_t>(dim));
+    SymDimVector output_padding(dim);
     return at::convolution_symint(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
@@ -1039,7 +1040,7 @@ static Tensor convolution_same(
     }
   }
   auto padded_input = at::constant_pad_nd_symint(input, pad_nd, 0);
-  SymDimVector output_padding(static_cast<size_t>(dim));
+  SymDimVector output_padding(dim);
   return at::convolution_symint(padded_input, weight, bias, stride, padding_l,
                                 dilation, false, output_padding, groups);
 }

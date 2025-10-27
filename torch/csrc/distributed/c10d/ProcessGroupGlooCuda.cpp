@@ -126,8 +126,8 @@ class AsyncAllreduceCUDAHostWork : public AsyncAllreduceWork {
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<c10::Stream> streams{};
-  std::vector<c10::Event> events{};
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
@@ -180,9 +180,9 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     }
   }
 
-  std::vector<at::Tensor> tmp{};
-  std::vector<c10::Stream> streams{};
-  std::vector<c10::Event> events{};
+  std::vector<at::Tensor> tmp;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCUDAWork(

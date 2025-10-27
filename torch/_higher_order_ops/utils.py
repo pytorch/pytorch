@@ -270,6 +270,7 @@ def _set_compilation_env():
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        # pyrefly: ignore  # bad-assignment
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
@@ -440,6 +441,7 @@ def unique_graph_name_with_root(
 ) -> tuple[int, str]:
     next_name = None
     i = 0
+    # pyrefly: ignore  # bad-assignment
     while not next_name:
         candidate = f"{prefix}_{i}"
         if hasattr(root, candidate):
@@ -500,8 +502,7 @@ def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
-            for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
         ]
 
     return fw_with_masks
@@ -796,6 +797,8 @@ def create_bw_fn(
     """
 
     from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+    # pyrefly: ignore  # missing-module-attribute
     from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
 
     dummy_aot_config = AOTConfig(
@@ -857,7 +860,7 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
 
 # Returns a mask whether a list element is a tensor or not
 def get_tensor_mask(tensor_list: Iterable[Any]) -> list[bool]:
-    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
+    return [bool(isinstance(v, torch.Tensor)) for v in tensor_list]
 
 
 def mask_list(
@@ -940,6 +943,7 @@ def check_input_alias_and_mutation(
         out_out_alias_map,
         mutated_inputs,
     ) = check_input_alias_and_mutation_return_outputs(gm)[:-1]
+    # pyrefly: ignore  # bad-return
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 

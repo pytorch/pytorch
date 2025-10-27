@@ -5050,7 +5050,6 @@ Running aten.expand.default from within SumBackward0
 Running aten.div.Tensor from within DivBackward0
 Running aten.mul.Tensor from within MulBackward0
 Running aten.detach.default from within AccumulateGrad
-Running aten.detach.default from within AccumulateGrad
 Done""",
         )
 
@@ -7323,9 +7322,7 @@ for shape in [(1,), ()]:
             lambda x: x.exp(), x, use_reentrant=False, context_fn=context_fn
         )
         out.backward()
-        self.assertEqual(
-            verbose_mode.operators, ["exp.default", "detach.default", "detach.default"]
-        )
+        self.assertEqual(verbose_mode.operators, ["exp.default", "detach.default"])
 
         with self.assertRaisesRegex(
             Exception, "only supported when use_reentrant=False"
@@ -8958,6 +8955,27 @@ for shape in [(1,), ()]:
         abs_1_1j = abs(1 + 1j)
         expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
         self.assertEqual(z.grad, torch.view_as_real(expected))
+
+    def test_custom_function_saving_mutated_view_no_leak(self):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_dirty(x)
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                pass
+
+        def scope():
+            x = torch.tensor(1.0, requires_grad=True).clone()
+            x = x.view_as(x)
+            y = Test.apply(x)
+            return weakref.ref(x)
+
+        ref = scope()
+        self.assertIsNone(ref())
 
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):
@@ -11843,7 +11861,7 @@ class TestAutogradDeviceType(TestCase):
             def test_nonzero(tensor, value, expected):
                 tensor[0] = value
                 self.assertEqual(expected, bool(tensor))
-                self.assertEqual(expected, True if tensor else False)
+                self.assertEqual(expected, bool(tensor))
 
             test_nonzero(l, 0, False)
             test_nonzero(l, -2, True)
