@@ -80,6 +80,222 @@ bool BlockComparatorSize(const Block* a, const Block* b) {
       reinterpret_cast<uintptr_t>(b->ptr);
 }
 
+// Represents a contiguous virtual memory segment mapped for allocation.
+struct SegmentRange {
+  SegmentRange(void* addr, size_t bytes)
+      : ptr(static_cast<char*>(addr)), size(bytes) {}
+  char* ptr; // Starting address of the mapped range.
+  size_t size; // Size in bytes of the mapped range.
+};
+
+struct ExpandableSegment {
+  ExpandableSegment(
+      c10::DeviceIndex device,
+      std::optional<sycl::queue*> queue,
+      size_t segment_size,
+      std::vector<c10::DeviceIndex> peers)
+      : device_(device),
+        queue_(queue),
+        // 2MB for small pool, 20MB for large pool
+        segment_size_(segment_size),
+        peers_(std::move(peers)) {
+    const auto device_total =
+        c10::xpu::get_raw_device(device)
+            .get_info<sycl::info::device::global_mem_size>();
+    // The extra 1/8 allows flexibility for remapping or moving pages within the
+    // segment when unmapping earlier regions.
+    max_handles_ = numSegments(device_total * (1 + 1.0 / 8));
+    ptr_ = sycl::ext::oneapi::experimental::reserve_virtual_mem(
+        segment_size_ * max_handles_, xpu::get_device_context());
+  }
+
+  C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
+  ExpandableSegment(ExpandableSegment&&) = delete;
+  ExpandableSegment& operator=(ExpandableSegment&&) = delete;
+
+  // Maps a virtual memory range to physical memory.
+  SegmentRange map(SegmentRange range) {
+    auto begin = segmentLeft(range.ptr);
+    auto end = segmentRight(range.ptr + range.size);
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
+    if (begin == end) {
+      return rangeFromHandles(begin, end);
+    }
+
+    while (end > handles_.size()) {
+      handles_.emplace_back(std::nullopt);
+    }
+    for (const auto i : c10::irange(begin, end)) {
+      TORCH_INTERNAL_ASSERT(!handles_.at(i));
+      try {
+        // Construct the physical_mem directly in the optional to avoid copies.
+        handles_.at(i).emplace(
+            xpu::get_raw_device(device_),
+            xpu::get_device_context(),
+            segment_size_);
+      } catch (const sycl::exception& e) {
+        if (e.code() == sycl::errc::memory_allocation) {
+          // Rollback previously allocated handles.
+          for (const auto j : c10::irange(begin, i)) {
+            handles_.at(j) = std::nullopt;
+          }
+          trimHandles();
+          return rangeFromHandles(begin, begin);
+        } else {
+          return SegmentRange(nullptr, 0);
+        }
+      }
+    }
+    mapAndSetAccess(begin, end);
+    return rangeFromHandles(begin, end);
+  }
+
+  // Unmap a virtual memory range from physical memory.
+  SegmentRange unmap(SegmentRange range) {
+    auto begin = segmentRight(range.ptr);
+    auto end = segmentLeft(range.ptr + range.size);
+    if (begin >= end) {
+      return SegmentRange{range.ptr, 0};
+    }
+    unmapHandles(begin, end);
+    return rangeFromHandles(begin, end);
+  }
+
+  // Returns the base pointer of the virtual memory segment.
+  char* ptr() const {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<char*>(ptr_);
+  }
+
+  // Returns the total size of the virtual memory segment.
+  size_t size() const {
+    return max_handles_ * segment_size_;
+  }
+
+  // Registers a new peer device and updates access permissions.
+  void addPeer(c10::DeviceIndex device) {
+    peers_.push_back(device);
+    forEachAllocatedRange(
+        [&](size_t begin, size_t end) { setAccess(device, begin, end); });
+  }
+
+  ~ExpandableSegment() {
+    forEachAllocatedRange(
+        [&](size_t begin, size_t end) { unmapHandles(begin, end); });
+    sycl::ext::oneapi::experimental::free_virtual_mem(
+        ptr_, segment_size_ * max_handles_, xpu::get_device_context());
+  }
+
+ private:
+  // Sets access permissions for the specified device on the segment range
+  // [begin, end).
+  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
+    sycl::ext::oneapi::experimental::set_access_mode(
+        reinterpret_cast<void*>(ptr_ + begin * segment_size_),
+        (end - begin) * segment_size_,
+        sycl::ext::oneapi::experimental::address_access_mode::read_write,
+        xpu::get_device_context());
+  }
+
+  // Maps physical memory handles and sets access permissions for the segment.
+  void mapAndSetAccess(size_t begin, size_t end) {
+    for (const auto i : c10::irange(begin, end)) {
+      handles_.at(i).value().map(
+          ptr_ + i * segment_size_,
+          segment_size_,
+          sycl::ext::oneapi::experimental::address_access_mode::read_write);
+    }
+    setAccess(device_, begin, end);
+    for (const auto p : peers_) {
+      setAccess(p, begin, end);
+    }
+  }
+
+  // Unmaps the physical memory handles in the range [begin, end) from the
+  // segment.
+  void unmapHandles(size_t begin, size_t end) {
+    // Currently, we don't support IPC shared memory with expandable segments.
+    TORCH_INTERNAL_ASSERT(queue_);
+    // As explained in Note [Safe to Free Blocks on BlockPool], additional
+    // synchronization is unnecessary here because the memory is already safe to
+    // release.
+    for (const auto i : c10::irange(begin, end)) {
+      handles_.at(i) = std::nullopt;
+      sycl::ext::oneapi::experimental::unmap(
+          reinterpret_cast<void*>(ptr_ + segment_size_ * i),
+          segment_size_,
+          xpu::get_device_context());
+    }
+    trimHandles();
+  }
+
+  // Remove trailing unused handles from the end of handles_.
+  void trimHandles() {
+    while (!handles_.empty() && !handles_.back()) {
+      handles_.pop_back();
+    }
+  }
+
+  // Iterates over all contiguous ranges of allocated segments in `handles_`,
+  // and invokes the provided function `fn(start, end)` for each range.
+  // Each range is defined as a half-open interval [start, end).
+  void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
+    size_t start = 0;
+    for (const auto i : c10::irange(handles_.size())) {
+      if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
+        start = i;
+      }
+      if (handles_.at(i) && (i + 1 == handles_.size() || !handles_.at(i + 1))) {
+        fn(start, i + 1);
+      }
+    }
+  }
+
+  // Returns the number of full segments required to cover `size` bytes.
+  // Rounds up to ensure partial segments are counted.
+  size_t numSegments(size_t size) const {
+    return (size + segment_size_ - 1) / segment_size_;
+  }
+
+  // Returns the index of the segment that contains the pointer `p`,
+  // relative to the base pointer `ptr_`. This is the *inclusive* lower bound
+  // of the segment that includes `p`.
+  size_t segmentLeft(char* p) const {
+    size_t offset = p - ptr();
+    return offset / segment_size_;
+  }
+
+  // Returns the index of the segment just *past* the one containing pointer
+  // `p`, relative to the base pointer `ptr_`. This is the *exclusive* upper
+  // bound, useful for [begin, end) style ranges.
+  // If `p` lies exactly on a segment boundary, this is equal to segmentLeft(p).
+  // Otherwise, it rounds up and returns segmentLeft(p) + 1.
+  size_t segmentRight(char* p) const {
+    size_t offset = p - ptr();
+    return numSegments(offset);
+  }
+
+  // Constructs a SegmentRange starting at [start, end) indices.
+  SegmentRange rangeFromHandles(size_t begin, size_t end) {
+    return SegmentRange(
+        ptr() + segment_size_ * begin, segment_size_ * (end - begin));
+  }
+
+  c10::DeviceIndex device_{-1};
+  std::optional<sycl::queue*> queue_;
+  // Virtual memory address used for reservation.
+  uintptr_t ptr_{0};
+  // Size of each segment in bytes.
+  size_t segment_size_{0};
+  // Maximum number of segments that can be allocated in this segment.
+  size_t max_handles_{0};
+  // Physical memory handles for the segments.
+  std::vector<std::optional<sycl::ext::oneapi::experimental::physical_mem>>
+      handles_{};
+  // Peer devices on which this memory should be mapped and accessible.
+  std::vector<c10::DeviceIndex> peers_{};
+};
+
 struct AllocParams {
   AllocParams(
       DeviceIndex device,
