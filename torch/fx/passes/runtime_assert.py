@@ -183,8 +183,8 @@ def insert_deferred_runtime_asserts(
             # `not` and `any` operations to generate runtime assertions correctly
             # in the code. For these specific operations, we avoid evaluating the
             # function directly, as doing so could unnecessarily trigger
-            # data-dependent errors (DDEs). For example, if there's a runtime
-            # assertion like u0 <= 0, evaluating the meta of not(u0 <= 0) would
+            # data-dependent errors. For example, if there's a runtime
+            # assertion `u0 <= 0`, evaluating the meta of not(u0 <= 0) would
             # cause us to guard on the inner expression and potentially raise a
             # data-dependent error. Therefore, we choose not to compute the meta
             # in these cases, since it's not essential.
