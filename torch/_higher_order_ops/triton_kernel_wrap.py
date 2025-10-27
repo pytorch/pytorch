@@ -1901,13 +1901,14 @@ class TritonHOPifier:
         assert len(grids) != 0
         if isinstance(variable.kernel, JITFunction):
             constexprs = [p.num for p in variable.kernel.params if p.is_constexpr]
+            arg_names = [p.name for p in variable.kernel.params]
         else:
             # If we are looking at an @triton.autotune decorator, the nested function should be a JITFunction
             # This is because we don't support @triton.heuristics or nested @triton.autotune decorators yet
             assert isinstance(variable.kernel, Autotuner)
             constexprs = [p.num for p in variable.kernel.fn.params if p.is_constexpr]
+            arg_names = [p.name for p in variable.kernel.fn.params]
 
-        arg_names = [p.name for p in variable.kernel.params]
         for idx, arg_name in enumerate(arg_names):
             if idx in constexprs:
                 if arg_name in combined_args_raw:
