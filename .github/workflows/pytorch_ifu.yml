@@ -1,0 +1,145 @@
+name: PyTorch IFU (Sync with upstream)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ifu_target_repo:
+        description: "Target repo for IFU"
+        required: false
+        default: "ROCm/pytorch"
+        type: string
+      ifu_target_branch:
+        description: "Target branch for IFU"
+        required: true
+        default: "rocm7.1_internal_testing"
+        type: string
+      ifu_source_repo:
+        description: "Source repo for IFU"
+        required: false
+        default: "pytorch/pytorch"
+        type: string
+      ifu_source_branch:
+        description: "Source branch for IFU"
+        required: false
+        default: "main"
+        type: string
+  # schedule:
+  #   # Runs every 14 days at 09:00 AM UTC/ 04:00 AM CST
+  #   - cron: "0 9 */14 * *"
+
+permissions:
+  contents: write        # push branches/tags
+  pull-requests: write   # create PRs
+
+concurrency:
+  group: ifu
+  # If two jobs are running simultaneously, we will queue them (not cancel the one running)
+  cancel-in-progress: false
+
+jobs:
+  ifu:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REMOTE: upstream                              # IFU source remote name
+      UPSTREAM_REPO: ${{ inputs.ifu_source_repo }}           # source repo for IFU
+      UPSTREAM_BRANCH: ${{ inputs.ifu_source_branch }}       # source branch for IFU
+      DOWNSTREAM_REMOTE: origin                              # IFU target remote name
+      DOWNSTREAM_REPO: ${{ inputs.ifu_target_repo }}         # target repo for IFU (fork); actions/checkout sets this to origin
+      DOWNSTREAM_BRANCH: ${{ inputs.ifu_target_branch }}     # target branch for IFU
+      GH_TOKEN: ${{ secrets.IFU_GITHUB_TOKEN }}              # used by gh; provided by Action 
+    steps:
+      - name: Checkout repository (${{ env.DOWNSTREAM_REPO }}) (full history)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DOWNSTREAM_REPO }}
+          path: ${{ env.DOWNSTREAM_REPO }}
+          ref: ${{ env.DOWNSTREAM_BRANCH }}
+          token: ${{ env.GH_TOKEN }}
+          fetch-depth: 0 # need full history for merges/tags
+          submodules: recursive
+
+      - name: Add upstream remote (${{ env.UPSTREAM_REPO }})
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        run: |
+          if ! git remote get-url ${UPSTREAM_REMOTE} >/dev/null 2>&1; then
+            git remote add ${UPSTREAM_REMOTE} https://github.com/${UPSTREAM_REPO}.git
+          fi
+          # Confirm remotes
+          git remote -v
+
+      - name: Configure Git user
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream and local branch
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        run: |
+          git fetch ${UPSTREAM_REMOTE} ${UPSTREAM_BRANCH}
+          git fetch ${DOWNSTREAM_REMOTE} ${DOWNSTREAM_BRANCH}
+
+      - name: Compute date tag and create working branch
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        id: tag
+        shell: bash
+        run: |
+          DATE="$(date +"%Y-%m-%d")"
+          TAG="${DOWNSTREAM_BRANCH}_IFU_${DATE}"
+          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+          # Start from rocm branch
+          git checkout -b "$TAG" "${DOWNSTREAM_REMOTE}/${DOWNSTREAM_BRANCH}"
+
+      - name: Save ROCm base commit
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        id: rocm_base
+        run: |
+          base_commit=`git rev-parse --short HEAD`
+          echo "ROCM_BASE_COMMIT=$base_commit" >> $GITHUB_OUTPUT
+                  
+      - name: Merge upstream into working branch (non-interactive)
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        id: merge
+        run: |
+          if git merge "${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}" --no-edit; then
+            echo "merge_status=clean" >> $GITHUB_OUTPUT
+          else
+            echo "Merge conflicts detected. Committing current resolution snapshot."
+            git submodule sync
+            git submodule update --init --recursive
+            git add -A
+            git status
+            git commit --no-edit 
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push branch & tag to fork
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        run: |
+          git push ${DOWNSTREAM_REMOTE} "${{ steps.tag.outputs.TAG }}"
+
+      - name: Authenticate gh (non-interactive)
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        run: |
+          # The GitHub-hosted runner has gh preinstalled.
+          gh auth status || echo "$GH_TOKEN" | gh auth login --with-token
+          gh repo set-default "${{ env.DOWNSTREAM_REPO }}"
+
+      - name: Create Pull Request with gh
+        working-directory: ${{ env.DOWNSTREAM_REPO }}
+        run: |
+          BASE="${DOWNSTREAM_BRANCH}"
+          HEAD="${{ steps.tag.outputs.TAG }}"
+          TITLE="[AUTOGENERATED] $HEAD"
+          BODY="rocm_base: ${{ steps.rocm_base.outputs.ROCM_BASE_COMMIT }}"
+
+          # If a PR for this head already exists, skip creating a new one
+          if gh pr list --head "$HEAD" --base "$BASE" --state all --json number | grep -q '[0-9]'; then
+            echo "PR already exists for $HEAD -> $BASE. Skipping creation."
+          else
+            gh pr create --base "$BASE" --head "$HEAD" --title "$TITLE" --body "$BODY"
+          fi
+
+      - name: Summarize
+        run: |
+          echo "::notice title=IFU Completed::Branch ${{ steps.tag.outputs.TAG }} pushed. PR created (or already existed). Merge status: ${{ steps.merge.outputs.merge_status }}"
