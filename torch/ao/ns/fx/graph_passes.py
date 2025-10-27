@@ -959,7 +959,7 @@ def create_a_shadows_b(
                 if should_log_inputs:
                     # skip the input logger when inserting a dtype cast
                     if isinstance(prev_node_c, Node):
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)
                     elif isinstance(prev_node_c, list):
                         prev_node_c = [
@@ -968,7 +968,7 @@ def create_a_shadows_b(
                         ]
                 dtype_cast_node = _insert_dtype_cast_after_node(
                     subgraph_a.start_node,
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     node_c,
                     prev_node_c,
                     gm_a,
@@ -1052,7 +1052,7 @@ def create_a_shadows_b(
                 if num_non_param_args_node_a == 2:
                     # node_c_second_non_param_arg = node_c.args[1]
                     node_c_second_non_param_arg = get_normalized_nth_input(
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         node_c,
                         gm_b,
                         1,
@@ -1063,7 +1063,7 @@ def create_a_shadows_b(
                     subgraph_a,
                     gm_a,
                     gm_b,
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     node_c.name + "_shadow_copy_",
                 )
                 env_c[node_a_shadows_c.name] = node_a_shadows_c
@@ -1086,19 +1086,19 @@ def create_a_shadows_b(
                     cur_node = node_a_shadows_c
                     while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:  # type: ignore[possibly-undefined]
                         cur_node = get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     if isinstance(input_logger, Node):
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         input_logger_mod = getattr(gm_b, input_logger.name)
                         input_logger_mod.ref_node_name = cur_node.name
                     else:
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         if not isinstance(input_logger, list):
                             raise AssertionError(
-                                # pyrefly: ignore  # unbound-name
+                                # pyrefly: ignore [unbound-name]
                                 f"Expected list, got {type(input_logger)}"
                             )
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         for input_logger_inner in input_logger:
                             input_logger_mod = getattr(gm_b, input_logger_inner.name)
                             input_logger_mod.ref_node_name = cur_node.name
