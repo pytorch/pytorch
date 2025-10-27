@@ -1555,26 +1555,13 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
-def is_valid_addmm_fusion(match):
-    mat1, mat2 = match.args
+def can_fuse_bias_in_addmm(match):
     inp = match.kwargs["inp"]
 
     if not (
         isinstance(inp, torch.fx.Node) and isinstance(inp.meta["val"], torch.Tensor)
     ):
         return False  # Input is a number
-
-    in_shape = inp.meta["val"].shape
-    mm_shape = mat1.meta["val"].shape[0], mat2.meta["val"].shape[1]
-    matched = is_expandable_to(in_shape, mm_shape)
-    if not matched:
-        return False  # Shape mismatch
-
-    inp_dtype = inp.meta["val"].dtype
-
-    # aten cublas integration assumes equal dtypes
-    if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
-        return False
 
     return not should_prefer_unfused_addmm(match)
 
@@ -1587,7 +1574,7 @@ def is_valid_addmm_fusion(match):
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
-    extra_check=is_valid_addmm_fusion,
+    extra_check=can_fuse_bias_in_addmm,
 )
 @register_graph_pattern(
     CallFunction(
@@ -1597,7 +1584,7 @@ def is_valid_addmm_fusion(match):
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
-    extra_check=is_valid_addmm_fusion,
+    extra_check=can_fuse_bias_in_addmm,
 )
 def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
