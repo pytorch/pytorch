@@ -712,7 +712,7 @@ class OutputGraph(OutputGraphCommon):
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
@@ -1160,7 +1160,7 @@ class OutputGraph(OutputGraphCommon):
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
 
                 assert "tensor_dict" not in vt.as_proxy().node.meta
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 vt.as_proxy().node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 return vt
@@ -1172,7 +1172,7 @@ class OutputGraph(OutputGraphCommon):
                 install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
                 def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     return NNModuleVariable(type(target), module_key, target, **options)
 
             else:
@@ -2411,7 +2411,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -2831,7 +2831,7 @@ def check_pt2_compliant_op(
                 hints=[],
             )
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
@@ -2839,7 +2839,7 @@ def check_pt2_compliant_op(
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 f"which resolves to the overload ({overload}) that is "
                 f"not PT2 compliant.",
             )
@@ -2860,7 +2860,7 @@ class LazyProxy:
         **kwargs: P.kwargs,
     ) -> None:
         self.tracer = tracer
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
