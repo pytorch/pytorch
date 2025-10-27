@@ -485,6 +485,22 @@ test_inductor_aoti() {
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
+test_inductor_aoti_cross_compile_for_windows() {
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  # Set WINDOWS_CUDA_HOME environment variable
+  WINDOWS_CUDA_HOME="$(pwd)/win-torch-wheel-extracted"
+  export WINDOWS_CUDA_HOME
+
+  echo "WINDOWS_CUDA_HOME is set to: $WINDOWS_CUDA_HOME"
+  echo "Contents:"
+  ls -lah "$(pwd)/win-torch-wheel-extracted/lib/x64/" || true
+
+  python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$(pwd)/win-torch-wheel-extracted/torch/lib"
+}
+
 test_inductor_cpp_wrapper_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -900,7 +916,7 @@ test_inductor_set_cpu_affinity(){
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
 
-  if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
+  if [[ "$(uname -m)" != "aarch64" ]]; then
     # Use Intel OpenMP for x86
     IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
     export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
@@ -914,7 +930,7 @@ test_inductor_set_cpu_affinity(){
   cores=$((cpus / thread_per_core))
 
   # Set number of cores to 16 on aarch64 for performance runs
-  if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
+  if [[ "$(uname -m)" == "aarch64" && $cores -gt 16 ]]; then
     cores=16
   fi
   export OMP_NUM_THREADS=$cores
@@ -1615,6 +1631,7 @@ test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
+  ARCH=$(uname -m)
 
   test_inductor_set_cpu_affinity
 
@@ -1629,7 +1646,7 @@ test_operator_benchmark() {
   pip_install pandas
   python check_perf_csv.py \
       --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
+      --expected "${ARCH}_expected_ci_operator_benchmark_eager_float32_cpu.csv"
 }
 
 test_operator_microbenchmark() {
@@ -1666,7 +1683,7 @@ if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
     python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
   fi
   python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
-elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
@@ -1717,6 +1734,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
+  test_inductor_aoti_cross_compile_for_windows
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))

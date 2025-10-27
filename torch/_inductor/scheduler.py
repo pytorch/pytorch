@@ -474,6 +474,9 @@ class BaseSchedulerNode:
     def is_reduction(self) -> bool:
         return False
 
+    def is_native_matmul(self) -> bool:
+        return False
+
     def is_split_scan(self) -> bool:
         return False
 
@@ -893,11 +896,11 @@ class BaseSchedulerNode:
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
-                log.info(e)
+                log.info(e)  # noqa: G200
                 return 0
             except TypeError as e:
                 # this happens when the collective is not of type ir._CollectiveKernel
-                log.info(e)
+                log.info(e)  # noqa: G200
                 return 0
 
         elif is_wait(self.node):
@@ -1341,6 +1344,10 @@ class SchedulerNode(BaseSchedulerNode):
         )
         return bool(self.node.get_reduction_type())
 
+    def is_native_matmul(self) -> bool:
+        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
+        return self.node.get_reduction_type() == "dot"
+
     def is_split_scan(self) -> bool:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
             f"{type(self.node)=}"
@@ -1675,6 +1682,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self) -> bool:
         return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_native_matmul(self) -> bool:
+        return any(x.is_native_matmul() for x in self.snodes)
 
     @cache_on_self
     def is_split_scan(self) -> bool:
@@ -2271,7 +2282,6 @@ class Scheduler:
                 *V.graph.torchbind_constants.keys(),
             ]
         )
-
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
@@ -2666,7 +2676,6 @@ class Scheduler:
                 and (dep := next(iter(node.read_writes.writes)))
                 and isinstance(dep, MemoryDep)
             ):
-                # pyrefly: ignore  # unbound-name
                 node_mode = dep.mode
             else:
                 node_mode = None
@@ -3356,7 +3365,7 @@ class Scheduler:
                             future.result()
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
+                            fusion_log.debug(  # noqa: G200
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
                                 str(e),
@@ -3432,7 +3441,7 @@ class Scheduler:
                     # triton  will unpredictably error with valid prologue fusions
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
+                            fusion_log.debug(  # noqa: G200
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
                                 str(e),
@@ -3984,6 +3993,12 @@ class Scheduler:
         ):
             return -1
 
+        # in some rare case, a template can be passed in.
+        # Check test_interaction_with_multi_template in test_loop_ordering.py
+        # and https://github.com/pytorch/pytorch/issues/165579
+        if node1.is_template() or node2.is_template():
+            return -1
+
         node1_buffer_names = node1.read_writes.buffer_names()
         node2_buffer_names = node2.read_writes.buffer_names()
         # Fast path: no common buffers.
@@ -4344,7 +4359,6 @@ class Scheduler:
         if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
-            # pyrefly: ignore  # unbound-name
             (expand_dim, smaller_node, expand_size) = expand_analysis
             smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
             shared_data_score = self.score_fusion_memory(node1, node2)
@@ -4521,14 +4535,12 @@ class Scheduler:
         memory operations.
         """
         node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
-        node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
+        node2_dep_len = len(node2.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
         if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
-                tmp = node1
-                node1 = node2
-                node2 = tmp
+                node1, node2 = node2, node1
 
             deps = [
                 dep
@@ -4655,7 +4667,6 @@ class Scheduler:
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
-                # pyrefly: ignore  # unbound-name
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
             elif is_gpu(device.type) and not device.type == "mps":
                 raise TritonMissing(inspect.currentframe())
@@ -4953,7 +4964,6 @@ class Scheduler:
                 if isinstance(buf.node, ir.MutationOutput) and (
                     real_name := self.mutation_real_name.get(buf_name, None)
                 ):
-                    # pyrefly: ignore  # unbound-name
                     return is_none_layout(real_name)
 
                 return True
@@ -4997,6 +5007,16 @@ class Scheduler:
             buffer_names_to_free: OrderedSet[str] = OrderedSet()
             for node in partition:
                 buffer_names_to_free.update(node.last_usage)
+
+            # buffer_names_to_free may contain buffers allocated in previous
+            # graph partitions. These buffers should also be a partition
+            # input.
+            extra_input_names = [
+                name
+                for name in (buffer_names_to_free - output_names)
+                if name in name_to_node
+            ]
+            partition_input_names.update(extra_input_names)
 
             input_nodes = {
                 name: name_to_node[name]

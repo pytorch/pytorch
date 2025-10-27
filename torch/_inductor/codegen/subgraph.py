@@ -80,6 +80,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         sym_inputs = [
+            # pyrefly: ignore  # no-matching-overload
             int(V.graph.sizevars.shape_env.size_hint(sym_var))
             for sym_var in self.sym_inputs
         ]

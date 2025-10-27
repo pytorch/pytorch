@@ -826,15 +826,14 @@ def _schedule_for_comm(
             collective_cost > 0
             and (candidate := get_overlapping_candidate()) is not None
         ):
-            # pyrefly: ignore  # unbound-name
             ready.remove(candidate)
-            # pyrefly: ignore  # unbound-name
+
             schedule(candidate.snode)
-            # pyrefly: ignore  # unbound-name
+
             collective_cost -= snode_to_cost[candidate.snode]
         heapq.heapify(ready)
 
-    while len(ready):
+    while ready:
         snode = heapq.heappop(ready).snode
         if reorder_for_overlap and contains_collective(snode):
             schedule_collective_for_overlap(snode)
@@ -1098,7 +1097,7 @@ def _sink_waits_iterative_internal(
                         info.grouped_info = _group_names(gns)
                         candidate = _next[candidate]
                         continue
-                    # pyrefly: ignore  # unbound-name
+
                     elif (data_dep is None) and both_contain_comms:
                         info.limiting_factor = (
                             f"collective ordering {_group_names(gns)}"

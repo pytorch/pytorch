@@ -485,7 +485,7 @@ class TestMultiheadAttentionNN(NNTestCase):
         )[0]
         output_3d = output_3d.transpose(0, 1)  # [N, T, D]
 
-        for i in range(0, batch_size):
+        for i in range(batch_size):
             output_2d = mta_model(
                 query[i].unsqueeze(0).transpose(0, 1),
                 key[i].unsqueeze(0).transpose(0, 1),

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Union
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -476,9 +475,7 @@ def build_subgraph_buffer(
         elif node.op == "call_function":
             # For call_function we use the default lowerings and pass in the
             # already created TensorBoxes as args
-            args, kwargs = tree_map(
-                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
-            )
+            args, kwargs = tree_map(lambda x: env.get(x, x), (node.args, node.kwargs))
             env[node] = lowerings[node.target](*args, **kwargs)
         elif node.op == "output":
 
@@ -516,7 +513,7 @@ def build_subgraph_buffer(
 
 def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox | ShapeAsConstantBuffer:
     """
     Creates a placeholder input buffers for producing subgraph_output
     """
@@ -692,9 +689,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     for node in graph.nodes:  # preserve the order of nodes
         if node in subgraph_node_set:
             subgraph_node_list.append(node)
-            new_node = new_graph.node_copy(
-                node, lambda x: node_remapping[x] if x in node_remapping else x
-            )
+            new_node = new_graph.node_copy(node, lambda x: node_remapping.get(x, x))
             node_remapping[node] = new_node
             if node is inner_mm:
                 new_input_anchor = new_node

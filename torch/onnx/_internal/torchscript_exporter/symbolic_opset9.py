@@ -840,7 +840,7 @@ def t(g: jit_utils.GraphContext, self):
 def numpy_T(g: jit_utils.GraphContext, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     assert ndim is not None
-    perm = list(reversed(range(0, ndim)))
+    perm = list(reversed(range(ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
 
@@ -925,7 +925,8 @@ def embedding(
         warnings.warn(
             "Warning: ONNX export of embedding with padding_idx >= 0 "
             "for training mode. "
-            "ONNX does not support not updating the embedding vector at padding_idx during training."
+            "ONNX does not support not updating the embedding vector at padding_idx during training.",
+            stacklevel=2,
         )
 
     return g.op("Gather", weight, indices)
@@ -990,7 +991,7 @@ def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
 @_onnx_symbolic("aten::permute")
 @symbolic_helper.parse_args("v", "is")
 def permute(g: jit_utils.GraphContext, self, dims):
-    if dims == list(range(0, len(dims))):
+    if dims == list(range(len(dims))):
         return self
     return g.op("Transpose", self, perm_i=dims)
 
@@ -1142,7 +1143,8 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
                 + "Axis is converted to "
                 + str(squeeze_dim + rank)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect."
+                + "Passing an tensor of different rank in execution will be incorrect.",
+                stacklevel=2,
             )
             squeeze_dim += rank
         else:
@@ -1161,7 +1163,8 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + " of the input "
             + "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on "
             + "non-singleton dimensions, it is recommended to export this model using opset "
-            + "version 11 or higher."
+            + "version 11 or higher.",
+            stacklevel=2,
         )
         return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
     if dim_size > 1:
@@ -1174,7 +1177,8 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + ". The model will "
             + "be exported without the squeeze node. If the model is intended to be used with dynamic "
             + "input shapes, please use opset version 11 to "
-            + "export the model."
+            + "export the model.",
+            stacklevel=2,
         )
         return self
 
@@ -1182,7 +1186,8 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
         "This model contains a squeeze operation on dimension "
         + str(squeeze_dim)
         + ". If the model is "
-        + "intended to be used with dynamic input shapes, please use opset version 11 to export the model."
+        + "intended to be used with dynamic input shapes, please use opset version 11 to export the model.",
+        stacklevel=2,
     )
     return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
 
@@ -1368,7 +1373,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
         )
     ceiled_output_dim = [
         math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
-        for i in range(0, len(padding))
+        for i in range(len(padding))
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
@@ -1377,7 +1382,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
             else ceiled_output_dim[i]
         )
-        for i in range(0, len(ceiled_output_dim))
+        for i in range(len(ceiled_output_dim))
     ]
     padding_ceil = [
         (
@@ -1392,7 +1397,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
                 )
             )
         )
-        for i in range(0, len(padding))
+        for i in range(len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
@@ -1405,7 +1410,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
             else int(padding_ceil[i])
         )
-        for i in range(0, len(padding_ceil))
+        for i in range(len(padding_ceil))
     ]
     return padding_ceil
 
@@ -1697,14 +1702,14 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
                 name, "input size not accessible", input
             )
         # verify if output size % input size = 0 for all dim
-        mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
+        mod = [dim[i] % output_size[i] for i in range(len(dim))]
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return symbolic_helper._unimplemented(
                 name, "output size that are not factor of input size", output_size_value
             )
-        k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
+        k = [int(dim[i] / output_size[i]) for i in range(len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
             # pyrefly: ignore  # not-callable
@@ -2906,7 +2911,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
             for low, hi in zip(low_indices, hi_indices)
         ]
         ndim = len(sizes)
-        perm = list(range(0, ndim))
+        perm = list(range(ndim))
         perm.append(perm.pop(dimension))
         unsqueeze = [
             symbolic_helper._unsqueeze_helper(
@@ -3859,7 +3864,8 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
                 + "Axis is converted to "
                 + str(dim + rank + 1)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect."
+                + "Passing an tensor of different rank in execution will be incorrect.",
+                stacklevel=2,
             )
             dim = dim + rank + 1
         else:
@@ -4266,7 +4272,8 @@ def _generic_rnn(
         + " can cause an error "
         + "when running the ONNX model with a different batch size. "
         + "Make sure to save the model with a batch size of 1, "
-        + "or define the initial states (h0/c0) as inputs of the model. "
+        + "or define the initial states (h0/c0) as inputs of the model. ",
+        stacklevel=2,
     )
 
     onnxActivations = [
@@ -5316,7 +5323,8 @@ def index(g: jit_utils.GraphContext, self, index):
             warnings.warn(
                 "Exporting aten::index operator with indices of type Byte. "
                 "Only 1-D indices are supported. In any other case, "
-                "this will produce an incorrect ONNX graph."
+                "this will produce an incorrect ONNX graph.",
+                stacklevel=2,
             )
             index = symbolic_helper._squeeze_helper(g, nonzero(g, index), [1])
         return index
@@ -5370,7 +5378,8 @@ def index(g: jit_utils.GraphContext, self, index):
                 f"{GLOBALS.export_onnx_opset_version}"
                 " is achieved by combination of multiple ONNX operators, "
                 "including Reshape, Transpose, Concat, and Gather. "
-                "If indices include negative values, the exported graph will produce incorrect results."
+                "If indices include negative values, the exported graph will produce incorrect results.",
+                stacklevel=2,
             )
             adv_idx_count = len(adv_idx_indices)
             shape_tensor = _shape_as_tensor(g, self)
@@ -6061,7 +6070,8 @@ def fill(g: jit_utils.GraphContext, self, value):
 def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
     warnings.warn(
         "Warning: ONNX export does not support duplicated values in 'index' field, "
-        + "this will cause the ONNX model to be incorrect."
+        + "this will cause the ONNX model to be incorrect.",
+        stacklevel=2,
     )
 
     # ONNX does not support "alpha" argument, unlike aten index_add

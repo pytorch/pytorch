@@ -1074,6 +1074,11 @@ class Pointwise(Loops):
 
         return self.inner_fn
 
+    def __str__(self) -> str:
+        return self._to_str(("ranges",))
+
+    __repr__ = __str__
+
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return []
 
@@ -1142,6 +1147,7 @@ REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "min": ops_wrapper("minimum"),
     "prod": ops_wrapper("mul"),
     "sum": ops_wrapper("add"),
+    "dot": ops_wrapper("add"),
     "xor_sum": ops_wrapper("bitwise_xor"),
 }
 
@@ -1302,8 +1308,13 @@ class Reduction(Loops):
             )
             and config.split_reductions
         )
+
         if not (_is_static(reduction_numel_hint) and _is_static(numel_hint)):
             # We don't support unbacked symints
+            return ReductionHint.DEFAULT, 1
+
+        if reduction_type == "dot":
+            # Don't split when doing native matmul
             return ReductionHint.DEFAULT, 1
 
         props = DeviceProperties.create(device)
@@ -1559,7 +1570,10 @@ class Reduction(Loops):
             and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
+            and reduction_type != "dot"
         ):
+            # When native matmul, don't unroll the dot reduction.
+
             # NB: This works around https://github.com/pytorch/pytorch/issues/140457
             # since turning reductions into pointwise ops can exacerbate this problem
             return Pointwise.create(
@@ -1672,6 +1686,7 @@ class Reduction(Loops):
         return {
             "sum": zero,
             "prod": one,
+            "dot": zero,
             "xor_sum": zero,
             "any": zero,
             "welford_reduce": (zero, zero, zero),
@@ -4527,9 +4542,7 @@ class ComputedBuffer(OperationBuffer):
             unbacked_only
         ) | self.data.get_free_symbol_uses(unbacked_only)
 
-        if self.has_store_function() and isinstance(
-            self.get_store_function(), LoopBody
-        ):
+        if self.has_store_function():
             result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
         return result
 
@@ -4708,22 +4721,49 @@ class ComputedBuffer(OperationBuffer):
             Callable[[Sequence[int]], Sequence[int]],
             Callable[[Sequence[int]], Sequence[int]],
         ]:
-            sizes, reindex0, reindex1 = self._apply_loop_reordering(
+            newsizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, support_vars, sizes, memory_addrs
             )
+
+            # When using native matmul, the codegen assumes the following loop order,
+            # regardless of the stride of A and B:
+            #
+            #   for z -> y -> x -> r:  C[z, y, x] += A[z, y, r] * B[z, r, x]
+            # or
+            #   for z -> x -> y -> r:  C[z, y, x] += A[z, y, r] * B[z, r, x]
+            #
+            # The critical point is the position of the "z" (batch) axis in bmm.
+            # It is fine to swap the y and x axes (e.g., (z, y, x, r) or (z, x, y, r)),
+            # but reordering the z axis (e.g., (y, x, z, r)) breaks codegen.
+            #
+            # Therefore, if loop reordering changes the "z" location in bmm,
+            # it should be reverted to the default.
+            # This may not always produce the optimal loop order when strides
+            # do not align with the default assumption.
+            #
+            # TODO: Consider extending tl.dot codegen to support arbitrary loop orders.
+            if self.get_reduction_type() == "dot" and len(sizes) == 3:
+                order = list(range(len(sizes)))  # default order
+
+                # if z axis is not the outermost, use the default reorder.
+                if reindex0(order)[0] != 0:
+                    newsizes = [sizes[i] for i in order]
+                    reindex0 = same_reorder(order)
+                    reindex1 = inverse_reorder(order)
+
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
+                newsizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
-                    sizes,
-                    index_prevent_reordering(index_formulas, x_vars, sizes),
+                    newsizes,
+                    index_prevent_reordering(index_formulas, x_vars, newsizes),
                 )
                 reindex = fuse_reindexing(reindex1, reindex2)
             else:
                 reindex = reindex1
-            return sizes, reindex, reindex1
+            return newsizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
         should_merge_loops = (

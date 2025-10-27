@@ -18,8 +18,9 @@ of compilation.
 
 import logging
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from unittest import mock
 
 import torch
@@ -98,14 +99,14 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
                 )
             )
 
-    if len(rows):
+    if rows:
         log.info(
             "\nDDPOptimizer used bucket cap %s and created %d buckets. Enable debug logs for detailed bucket info.",
             bucket_bytes_cap,
             len(buckets),
         )
 
-        if len(extended_buckets):
+        if extended_buckets:
             log.warning(
                 "Some buckets were extended beyond their requested parameter capacities"
                 " in order to ensure each subgraph has an output node, required for fx graph partitioning."
@@ -122,7 +123,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
                 tabulate(rows, headers=headers, tablefmt="simple_grid"),
             )
 
-            if len(extended_buckets):
+            if extended_buckets:
                 log.warning(
                     "DDPOptimizer extended these buckets to ensure per-subgraph output nodes:\n%s",
                     tabulate(

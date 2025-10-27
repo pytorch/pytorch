@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
@@ -47,9 +47,20 @@ class CoordescTuner:
     """
 
     def __init__(
-        self, is_mm=False, name="unknown", size_hints=None, inductor_meta=None
+        self,
+        is_mm=False,
+        is_native_matmul=False,
+        name="unknown",
+        size_hints=None,
+        inductor_meta=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
+
+        # Native matmul codegen assumes ZBLOCK=1 always.
+        # This is because 3d tl.dot is slow and so we want to tile y and x only.
+        # tl.dot also does not support size smaller than 16; we put this restriction.
+        self.is_native_matmul = is_native_matmul
+        assert not (self.is_mm and self.is_native_matmul)
         self.cached_benchmark_results = {}
         self.name = name
         self.size_hints = size_hints
@@ -101,6 +112,9 @@ class CoordescTuner:
             out.append("num_stages")
         if self.inductor_meta.get("is_hip") is True:
             out.append("waves_per_eu")
+        if self.is_native_matmul:
+            out.append("num_stages")
+            out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
 
         return out
 
@@ -115,6 +129,15 @@ class CoordescTuner:
             return val > 8
 
         return False
+
+    def value_too_small(self, name: str, val: int) -> bool:
+        # In native matmul, block size should be >= 16 for tl.dot
+        if self.is_native_matmul:
+            if name in ["YBLOCK", "XBLOCK", "R0_BLOCK"]:
+                return val < 16
+
+        # Break if value becomes 0/neg
+        return val <= 0
 
     def get_neighbour_values(self, name, orig_val, radius=1, include_self=False):
         """
@@ -148,7 +171,7 @@ class CoordescTuner:
         cur_val = orig_val
         for _ in range(radius):
             cur_val = update(cur_val, False)
-            if cur_val <= 0:
+            if self.value_too_small(name, cur_val):
                 break
             out.append(cur_val)
 
@@ -163,6 +186,7 @@ class CoordescTuner:
 
     def check_all_tuning_directions(
         self,
+        # pyrefly: ignore  # missing-attribute
         func: Callable[["triton.Config"], float],
         best_config,
         best_timing,
@@ -215,7 +239,7 @@ class CoordescTuner:
         try:
             candidate_timing = self.call_func(func, candidate_config)
         except Exception as e:
-            log.debug("Got exception %s", e)
+            log.debug("Got exception %s", e)  # noqa: G200
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):
@@ -232,10 +256,12 @@ class CoordescTuner:
 
     def autotune(
         self,
+        # pyrefly: ignore  # missing-attribute
         func: Callable[["triton.Config"], float],
+        # pyrefly: ignore  # missing-attribute
         baseline_config: "triton.Config",
-        baseline_timing: Optional[float] = None,
-    ) -> "triton.Config":
+        baseline_timing: float | None = None,
+    ) -> "triton.Config":  # pyrefly: ignore  # missing-attribute
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 

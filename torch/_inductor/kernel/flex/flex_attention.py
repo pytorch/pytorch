@@ -29,7 +29,7 @@ from .common import (
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
-    load_template,
+    load_flex_template,
     maybe_realize,
     set_head_dim_values,
     SubgraphResults,
@@ -79,9 +79,9 @@ def get_float32_precision():
 flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
-    source=load_template("flex_attention")
-    + load_template("utilities")
-    + load_template("common"),
+    source=load_flex_template("flex_attention")
+    + load_flex_template("utilities")
+    + load_flex_template("common"),
 )
 
 
@@ -193,7 +193,12 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-    if _use_flex_flash_attention(subgraph, mask_graph, kernel_options):
+    if _use_flex_flash_attention(
+        subgraph,
+        mask_graph,
+        kernel_options,
+        num_score_mod_placeholders=len(placeholder_inps),
+    ):
         return create_flex_flash_attention_kernel(
             query,
             key,
@@ -464,7 +469,7 @@ def flex_attention_backward_grid(
 flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
-    source=load_template("flex_backwards") + load_template("utilities"),
+    source=load_flex_template("flex_backwards") + load_flex_template("utilities"),
 )
 
 

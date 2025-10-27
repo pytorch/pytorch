@@ -3,6 +3,7 @@
 
 import math
 from collections.abc import Sequence
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -36,6 +37,7 @@ from ...lowering import (
     to_dtype,
 )
 from ...select_algorithm import realize_inputs
+from ...utils import load_template
 
 
 SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
@@ -337,13 +339,8 @@ def next_power_of_two(n):
     return 2 ** math.ceil(math.log2(n))
 
 
-_TEMPLATE_DIR = Path(__file__).parent / "templates"
-
-
-def load_template(name: str) -> str:
-    """Load a template file and return its content."""
-    with open(_TEMPLATE_DIR / f"{name}.py.jinja") as f:
-        return f.read()
+_FLEX_TEMPLATE_DIR = Path(__file__).parent / "templates"
+load_flex_template = partial(load_template, template_dir=_FLEX_TEMPLATE_DIR)
 
 
 # Template strings have been moved to templates/common.py.jinja
