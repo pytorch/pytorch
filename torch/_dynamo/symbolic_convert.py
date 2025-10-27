@@ -45,8 +45,8 @@ import types
 import weakref
 from collections import deque
 from traceback import StackSummary
-from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing_extensions import TypeIs
 
 import torch
 import torch._logging
@@ -186,7 +186,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -565,7 +565,7 @@ def log_graph_break(
         )
     else:
         user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         user_stack = collapse_resume_frames(user_stack)
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
@@ -1051,7 +1051,7 @@ class BytecodeDispatchTableMeta(type):
             op: getattr(cls, opname, functools.partial(_missing, opname))
             for opname, op in dis.opmap.items()
         }
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
@@ -1358,14 +1358,15 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process,
         # Used repr for byte processing and limiting the length to 2048
-        try:
-            stack_repr = repr(self.stack)
-        except ValueError:
-            # Handle large integers that exceed sys.int_info.str_digits_check_threshold
-            stack_repr = "<self.stack repr truncated due to large integer>"
-        self.latest_bytecode_queue.append(
-            f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
-        )
+        if config.verbose:
+            try:
+                stack_repr = repr(self.stack)
+            except ValueError:
+                # Handle large integers that exceed sys.int_info.str_digits_check_threshold
+                stack_repr = "<self.stack repr truncated due to large integer>"
+            self.latest_bytecode_queue.append(
+                f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
+            )
 
         self.update_block_stack(inst)
 
@@ -1958,17 +1959,17 @@ class InstructionTranslatorBase(
                 source = self.import_source(module_name)
 
         if self.exec_recorder:
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         if istype(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented_v2(
                 gb_type="Bad import result",
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 context=typestr(value),
                 explanation="Import result is not a Python module.",
                 hints=[],
@@ -2047,7 +2048,7 @@ class InstructionTranslatorBase(
         exit, exc = self.popn(2)
         assert exc is None
         self.push(exc)
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
 
     def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
@@ -2471,7 +2472,7 @@ class InstructionTranslatorBase(
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
                 exc_instance.fn,
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 expected_type.fn,
             ):
                 return True
@@ -2532,37 +2533,37 @@ class InstructionTranslatorBase(
             assert isinstance(null, NullVariable)
 
         if not isinstance(
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             argsvars,
             BaseListVariable,
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
         ) and argsvars.has_force_unpack_var_sequence(self):
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
 
         # Unpack for cases like fn(**obj) where obj is a map
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         if isinstance(kwargsvars, UserDefinedObjectVariable):
             kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             kwargsvars,
             ConstDictVariable,
         ):
             unimplemented_v2(
                 gb_type="Variadic function call with bad args/kwargs type",
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",
                 explanation="Expected args to be a list and kwargs to be a dict",
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
         # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore  # unbound-name, missing-attribute
+        # pyrefly: ignore [unbound-name, missing-attribute]
         kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore  # unbound-name, missing-attribute
+        # pyrefly: ignore [unbound-name, missing-attribute]
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(push=1)
@@ -2626,7 +2627,7 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             if inst.arg % 2:
                 self.LOAD_METHOD(inst)
                 return
@@ -3425,17 +3426,17 @@ class InstructionTranslatorBase(
                 "(i.e. `a, b, c = d`).",
                 hints=[*graph_break_hints.USER_ERROR],
             )
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         if len(val) != inst.argval:
             unimplemented_v2(
                 gb_type="Length mismatch when unpacking object for UNPACK_SEQUENCE",
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 context=f"expected length: {inst.argval}, actual: {len(val)}",
                 explanation=f"{seq} unpacked to a list for the UNPACK_SEQUENCE bytecode "
                 "(i.e. `a, b, c = d`) with unexpected length.",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         for i in reversed(val):
             self.push(i)
 
@@ -3702,11 +3703,13 @@ class InstructionTranslatorBase(
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
         tos = self.stack[-1]
+        assert isinstance(tos, TupleVariable)
+        keys = tos.unpack_var_sequence(self)
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
 
-        if all(k in tos1 for k in tos):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(self, k) for k in tos]))  # type: ignore[attr-defined,arg-type]
+        if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
+            self.push(TupleVariable([tos1.getitem_const(self, k) for k in keys]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -3811,13 +3814,13 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             args = args + contents[2 : -len(kw_names)]
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             kwargs_list = contents[-len(kw_names) :]
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             kwargs = dict(zip(kw_names, kwargs_list))
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             assert len(kwargs) == len(kw_names)
         else:
             args = args + contents[2:]
@@ -4525,7 +4528,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
             self.stack[-1] = ListIteratorVariable(
-                # pyrefly: ignore  # unbound-name
                 tos.force_unpack_var_sequence(self),
                 mutation_type=ValueMutationNew(),
             )
@@ -4594,7 +4596,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
     symbolic_result: Optional[VariableTracker]
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     parent: InstructionTranslatorBase
 
     @classmethod
@@ -4637,7 +4639,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # trace through.
             if (
                 hasattr(getattr(func, "fn", None), "_origin")
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4712,14 +4714,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 tracing_ctx.previously_inlined_functions[code] = result
 
         try:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
             raise ArgsMismatchError(  # noqa: B904
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
                     args=[arg.python_type() for arg in args],
                     kwargs=kwargs,
@@ -4803,7 +4805,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 func,
             )
         return tracer

@@ -4565,6 +4565,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
+        def test_pixel_shuffle_large_upscale_factor():
+            with self.assertRaises(ValueError):
+                ps = nn.PixelShuffle(545460846592)
+                ps(torch.randn(2, 16, 9, 3))
+
         def test_pixel_shuffle_unshuffle_1D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
@@ -4580,6 +4585,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         def test_pixel_shuffle_unshuffle_5D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
 
+        test_pixel_shuffle_large_upscale_factor()
         test_pixel_shuffle_unshuffle_1D()
         test_pixel_shuffle_unshuffle_2D()
         test_pixel_shuffle_unshuffle_3D()
@@ -8489,6 +8495,14 @@ class TestNNDeviceType(NNTestCase):
         y_cuda_ch_last = pool(x_cuda)
         y_cuda_contig = pool(x_cuda.contiguous())
         self.assertEqual(y_cuda_ch_last, y_cuda_contig)
+
+    @onlyCUDA
+    def test_large_reflect_pad(self, device):
+        # https://github.com/pytorch/pytorch/issues/165861
+        x = torch.rand(2**16, 2, device="cuda")
+        c = F.pad(x, (1, 1), mode="reflect")
+        c_cpu = F.pad(x.cpu(), (1, 1), mode="reflect")
+        self.assertEqual(c, c_cpu)
 
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")

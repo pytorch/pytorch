@@ -1,8 +1,11 @@
+import copy
 import inspect
 import logging
 import traceback
+import types
 from collections import namedtuple
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -26,6 +29,7 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.utils._pytree import TreeSpec
 
 
 log = logging.getLogger(__name__)
@@ -286,7 +290,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             else:
                 placeholder.node.meta["val"] = self.flat_inputs[i]
 
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             self.new_input_nodes[i] = placeholder
 
     def _create_placeholder_mapping(self) -> None:
@@ -361,18 +365,18 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Copy module metadata like the original implementation
         if hasattr(self.module, "meta"):
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     "dynamo_flat_name_to_original_fqn"
                 ]
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     "dynamo_compile_id"
                 ]
 
@@ -404,11 +408,10 @@ def _suggest_or_raise_constraint_violation(
             torch._ops.OpOverloadPacket | torch._ops.OpOverload,
         )
     ):
-        # pyrefly: ignore  # unbound-name
         dim_constraints.solve()
-        # pyrefly: ignore  # unbound-name
+
         forced_specializations = dim_constraints.forced_specializations()
-        # pyrefly: ignore  # unbound-name
+
         msg = dim_constraints.prettify_results(
             inspect.signature(orig_callable),  # type: ignore[attr-defined]
             dynamic_shapes,
@@ -429,11 +432,10 @@ def _suggest_or_raise_constraint_violation(
                 )
 
         # Error if we have any constraints on static values
-        # pyrefly: ignore  # unbound-name
+
         for k in shape_env.var_to_range.keys():
             if isinstance(k, sympy.Integer):
                 constraint_violation_error = ConstraintViolationError(
-                    # pyrefly: ignore  # unbound-name
                     f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                     "It appears that you're trying to set a constraint on a "
                     f"value which we evaluated to have a static value of {k}. "
@@ -444,6 +446,140 @@ def _suggest_or_raise_constraint_violation(
             constraint_violation_error, orig_callable, args, kwargs
         )
         raise constraint_violation_error
+
+
+def pytreeify(
+    out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
+    """
+    Given a dynamo capture output, return a callable graph module that
+    contain the following information:
+    1. input/output pytree spec
+    2. input/output shuffle functions
+    Input shuffle functions are the converters taking pytree falttened inputs
+    and reorder them to the calling convention of dynamo raw graph module.
+    Output shuffle functions are the converters taking the outputs of the
+    dynamo raw graph module and convert them to the pytree format.
+
+    This function will replay any side effects that happened during the bytecode,
+    so it is important to check against side effects before calling this function.
+    """
+    assert out.backend_input is not None
+    backend_input = out.backend_input
+    backend = out.backend_input.graph_module
+
+    if isinstance(mod, torch.nn.Module):
+        args = (mod,) + args
+    elif inspect.ismethod(mod):
+        args = (mod.__self__,) + args
+
+    flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
+
+    class Yield(Exception):
+        pass
+
+    class InShuffle(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.mod = mod
+            self.num_inputs = len(flat_real_args)
+            self.gm_inputs = None
+
+        def forward(self, *flat_proxy_args):
+            args, kwargs = pytree.tree_unflatten(
+                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
+            )
+
+            def backend_dummy(*example_inputs):
+                self.gm_inputs = example_inputs
+                raise Yield
+
+            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
+            try:
+                out.forward_callable()(*args, **kwargs)
+            except Yield:
+                assert self.gm_inputs is not None
+                return self.gm_inputs
+            finally:
+                backend_input.graph_module = backend
+            raise RuntimeError
+
+    in_shuffle_graph = torch.fx.symbolic_trace(InShuffle())
+
+    class OutShuffle(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_inputs = len(flat_real_args)
+            self.num_outputs = len(
+                next(iter(reversed(backend_input.graph_module.graph.nodes))).args[0]
+            )
+            self.out_spec: Optional[TreeSpec] = None
+
+        def forward(self, *flat_proxy_args):
+            args, kwargs = pytree.tree_unflatten(
+                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
+            )
+
+            def backend_dummy(*example_inputs):
+                return [
+                    flat_proxy_args[self.num_inputs + i]
+                    for i in range(self.num_outputs)
+                ]
+
+            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
+            try:
+                results = out.forward_callable()(*args, **kwargs)
+            finally:
+                backend_input.graph_module = backend
+            ret, self.out_spec = pytree.tree_flatten(results)
+            return ret
+
+    out_shuffle = OutShuffle()
+    out_shuffle_graph = torch.fx.symbolic_trace(out_shuffle)
+
+    def pytree_call(*args, **kwargs):
+        import torch.export._unlift
+
+        flat_args, in_spec_runtime = pytree.tree_flatten((args, kwargs))
+        if not torch.export._unlift.eq_spec(in_spec_runtime, in_spec):
+            raise RuntimeError(
+                f"Model input mismatch. Expected input spec: {in_spec}. Actual input spec: {in_spec_runtime}"
+            )
+        flat_outs = backend_input.graph_module(*in_shuffle_graph(*flat_args))
+        assert out_shuffle.out_spec is not None
+        return pytree.tree_unflatten(
+            out_shuffle_graph(*flat_args, *flat_outs), out_shuffle.out_spec
+        )
+
+    if isinstance(mod, torch.nn.Module):
+        compiled_mod = copy.copy(mod)
+        compiled_mod.forward = types.MethodType(pytree_call, compiled_mod)
+        if not hasattr(compiled_mod, "meta"):
+            compiled_mod.meta = {}  # type: ignore[attr-defined]
+        if isinstance(compiled_mod.meta, dict) and "fake_mode" not in compiled_mod.meta:
+            compiled_mod.meta["fake_mode"] = out.backend_input.fake_mode
+        return compiled_mod
+    elif inspect.ismethod(mod):
+        return types.MethodType(pytree_call, mod.__self__)
+    else:
+        return pytree_call
+
+
+def dynamo_graph_capture_for_export(
+    mod: Callable[..., Any],
+) -> Callable[..., Any]:
+    def inner(*args: Any, **kwargs: Any) -> Any:
+        with (
+            get_metrics_context(),
+            dynamo_timed("fullgraph_capture"),
+        ):
+            out = fullgraph_capture(mod, args, kwargs)
+
+        # TODO filter out side effects.
+
+        return pytreeify(out, mod, args, kwargs)
+
+    return inner
 
 
 def _dynamo_graph_capture_for_export(
