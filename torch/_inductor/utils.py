@@ -709,6 +709,21 @@ def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
     return cache_on_self(fn)
 
 
+def cache_on_self_and_args(
+    fn: Callable[Concatenate[Any, P], RV],
+) -> Callable[Concatenate[Any, P], RV]:
+    cache = {}
+
+    @functools.wraps(fn)
+    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs):
+        key = (args, tuple(sorted(kwargs.items())))
+        if key not in cache:
+            cache[key] = fn(self, *args, **kwargs)
+        return cache[key]
+
+    return wrapper
+
+
 def aggregate_origins(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
 ) -> OrderedSet[Node]:
