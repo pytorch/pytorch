@@ -255,7 +255,9 @@ class BaseTorchVariable(VariableTracker):
             value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        elif is_wrapper_or_member_descriptor(value):
+        elif is_wrapper_or_member_descriptor(value) or isinstance(
+            value, torch._dynamo.compiled_autograd.Op
+        ):
             # Dont need to guard on wrappers
             pass
         return cls(value, source=source)
