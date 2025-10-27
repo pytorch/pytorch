@@ -384,6 +384,44 @@ class EventList(list):
         total_stat.key = "Total"
         return total_stat
 
+    def print_tree(self, indent="  ", show_cpu_time=True, show_device_time=False):
+        if not self._tree_built:
+            self._build_tree()
+
+        def format_event(evt, depth=0):
+            """Recursively format an event and its children as a tree."""
+            result = []
+            prefix = indent * depth
+
+            # Build the event line
+            line_parts = [f"{prefix}{evt.name}"]
+
+            if evt.dispatch_key is not None and (dk := evt.dispatch_key.name) != "Undefined":
+                line_parts.append(f"[{dk}]")
+
+            # if show_cpu_time:
+                # line_parts.append(f"(CPU: {evt.cpu_time_total_str})")
+
+            if show_device_time and evt.device_time_total > 0:
+                device_name = evt.use_device or "device"
+                line_parts.append(f"({device_name.upper()}: {evt.device_time_total_str})")
+
+            result.append(" ".join(line_parts))
+
+            # Recursively process children
+            for child in evt.cpu_children:
+                result.append(format_event(child, depth + 1))
+
+            return "\n".join(result)
+
+        # Find all top-level events (those without a parent)
+        top_level_events = [evt for evt in self if evt.cpu_parent is None][:10]
+
+        # Format each top-level event and its subtree
+        tree_parts = [format_event(evt) for evt in top_level_events]
+
+        return "\n".join(tree_parts)
+
 
 def _format_time(time_us):
     """Define how to format time in FunctionEvent."""
@@ -501,6 +539,7 @@ class FunctionEvent(FormattedTimesMixin):
         kwinputs=None,
         is_user_annotation=False,
         metadata_json=None,
+        dispatch_key=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -543,6 +582,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.total_cpu_percent = -1
         self.total_device_percent = -1
         self.metadata_json = metadata_json
+        self.dispatch_key = dispatch_key
 
     def append_kernel(self, name, device, duration):
         if self.device_type != DeviceType.CPU:

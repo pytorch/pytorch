@@ -2597,14 +2597,37 @@ def forward(self, arg0_1, arg1_1):
     def test_triton_kernel_emulate_precision_mm_kernels_do_not_change(self):
         from torch._inductor.utils import run_and_get_code
 
-        @torch.compile(mode="max-autotune")
         def fn(a, b):
             return a @ b
 
         t1 = torch.rand(512, 512, device=GPU_TYPE)
         t2 = torch.rand(512, 512, device=GPU_TYPE)
         try:
-            _, (code,) = run_and_get_code(fn, t1, t2)
+            from torch.profiler import profile, ProfilerActivity
+
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=True,
+            ) as prof:
+                fn(t1, t2)
+
+            with open("triton_kernel_gemm.out", "w") as outf:
+                outf.write(prof.events().print_tree())
+            prof.export_chrome_trace("triton_kernel_gemm_eager_trace.json")
+
+            fn = torch.compile(fn, mode="max-autotune")
+            fn(t1, t2)
+            
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=True,
+            ) as prof:
+                fn(t1, t2)
+
+            with open("triton_kernel_gemm.out", "a") as outf:
+                outf.write(prof.events().print_tree())
+            prof.export_chrome_trace("triton_kernel_gemm_compiled_trace.json")
+
             self.assertTrue("enable_fp_fusion" not in code)
         except Exception as e:
             if "NoValidChoicesError" in str(e):

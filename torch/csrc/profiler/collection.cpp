@@ -338,7 +338,8 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.handle(),
           fn.debugHandle(),
           fn.name(),
-          overload_name});
+          overload_name,
+          fn.dispatchKey()});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());

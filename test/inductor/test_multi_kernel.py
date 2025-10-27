@@ -154,8 +154,21 @@ class MultiKernelTest(TestCase):
         x = torch.randn(4096, 4096, device=GPU_TYPE)
         y = torch.randn(4096, 4096, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(x, 0)
-        act, wrapper_code = run_and_get_code(compiled_fn, x, y)
-        ref = fn(x, y)
+        
+        from torch.profiler import profile, ProfilerActivity
+
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=True,
+            with_stack=True,
+            experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True),
+        ) as prof:
+            act, wrapper_code = run_and_get_code(compiled_fn, x, y)
+            ref = fn(x, y)
+
+        prof.export_chrome_trace("triton_relu_fused_gemm_trace.json")
+        print(prof.events().print_tree())
+        breakpoint()
 
         # wrapper_code will contains 2 entries if cpp_wrapper=True.
         # One for the first pass and one for the second pass.

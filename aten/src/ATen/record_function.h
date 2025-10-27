@@ -305,6 +305,18 @@ struct TORCH_API RecordFunction {
   void before(
       FunctionDescriptor fn,
       c10::ArrayRef<const c10::IValue> args,
+      int64_t current_sequence_nr,
+      c10::DispatchKey dispatch_key) {
+    if (!isActive()) {
+      return;
+    }
+    inputs_ = args;
+    before(fn, current_sequence_nr, dispatch_key);
+  }
+
+  void before(
+      FunctionDescriptor fn,
+      c10::ArrayRef<const c10::IValue> args,
       const std::unordered_map<std::string, IValue>* kwargs,
       int64_t current_sequence_nr = -1) {
     if (!isActive()) {
@@ -427,6 +439,12 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void before(FunctionDescriptor schema, int64_t sequence_nr = -1);
 
+  // before with dispatch key information
+  void before(
+      FunctionDescriptor schema,
+      int64_t sequence_nr,
+      c10::DispatchKey dispatch_key);
+
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
   // Gets node ID for distributed profiling
@@ -487,6 +505,14 @@ struct TORCH_API RecordFunction {
     debug_handle_ = debug_handle;
   }
 
+  c10::DispatchKey dispatchKey() const {
+    return dispatch_key_;
+  }
+
+  void setDispatchKey(c10::DispatchKey dispatch_key) {
+    dispatch_key_ = dispatch_key;
+  }
+
   void invalidateInputs() {
 #ifndef NDEBUG
     inputs_valid_ = false;
@@ -541,6 +567,9 @@ struct TORCH_API RecordFunction {
 
   // Whether this RecordFunction is used for NCCL metadata collection
   bool is_nccl_meta_{false};
+
+  // Dispatch key that was used for this operator call
+  c10::DispatchKey dispatch_key_{c10::DispatchKey::Undefined};
 };
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);

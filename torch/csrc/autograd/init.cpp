@@ -315,6 +315,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // KinetoEvent metadata
       .def("metadata_json", [](const KinetoEvent& e) {
         return e.metadataJson();
+      })
+      // dispatch key
+      .def("dispatch_key", [](const KinetoEvent& e) {
+        return e.dispatchKey();
       });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);

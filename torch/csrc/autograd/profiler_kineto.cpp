@@ -1079,6 +1079,14 @@ std::string KinetoEvent::metadataJson() const {
       [](const auto&) -> std::string { return std::string(""); }));
 }
 
+c10::DispatchKey KinetoEvent::dispatchKey() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) -> c10::DispatchKey {
+        return e.dispatch_key_;
+      },
+      [](const auto&) -> c10::DispatchKey { return c10::DispatchKey::Undefined; }));
+}
+
 #define FORWARD_FROM_RESULT(method_name, result_expr)                        \
   decltype(std::declval<KinetoEvent>().method_name())                        \
   KinetoEvent::method_name() const {                                         \
