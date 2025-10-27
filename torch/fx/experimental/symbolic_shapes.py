@@ -59,6 +59,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+from torch.utils._sympy.functions import OrderedAnd
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
@@ -3765,6 +3766,8 @@ class ShapeEnv:
         self.guards: list[ShapeGuard] = []
         self.axioms: dict[sympy.Expr, sympy.Expr] = {}
 
+        self.ra_prelude: Optional[sympy.Expr] = None
+
         # A set of ids that have already been allocated. This is used
         # for when we allocate symbol ids using the hash of the source
         # names to ensure we don't have collisions via linear probing
@@ -6282,6 +6285,11 @@ class ShapeEnv:
         self, e: SympyBoolean
     ) -> tuple[tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...]:
         """Given a expression, it returns a list of predicates that follow from it"""
+
+        if isinstance(e, OrderedAnd):
+            # We can't assume anything globally with OrderedAnd.
+            return tuple()
+
         equiv: dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
 
         def add_expr(expr: SympyBoolean) -> None:
@@ -7787,6 +7795,9 @@ class ShapeEnv:
         """
         expr = orig_expr
 
+        if self.ra_prelude is not None:
+            expr = OrderedAnd(self.ra_prelude, expr)
+
         # TODO: split conjunctions and evaluate them separately
 
         static_expr = self._maybe_evaluate_static(expr)
@@ -7938,6 +7949,25 @@ class ShapeEnv:
             log.info(
                 "constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper
             )
+
+
+    @contextmanager
+    def patch_ra_prelude(
+        self, prelude: sympy.Expr
+    ) -> Iterator[None]:
+        """
+        Context manager that ensures all runtime asserts generated while this context manager
+        is active include a prelude expression. This is mainly used in torch.cond to guarantee
+        that runtime asserts in subgraphs are guarded by the original cond predicate, preventing
+        them from leaking into the main graph.
+        """
+        prev = self.ra_prelude
+        self.ra_prelude = prelude
+        try:
+            yield
+        finally:
+            self.ra_prelude = prev
+
 
 
 def _is_int(expr: object) -> bool:

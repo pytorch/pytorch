@@ -1353,23 +1353,26 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # NB: 0 is predicate
             ix = 1 if branch else 2
             # TODO: Support kwargs
-            (
-                (ret_val, ret_spec),
-                ret_graph,
-                ret_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                args[ix],
-                operands_seq,
-                {},
-                "cond",
-                source_target=self.value,
-                should_flatten_outputs=True,
-                # TODO - removing consts from control flow ops need more work
-                remove_consts_from_outputs=False,
-                supports_input_mutation=self.supports_input_mutation,
-                supports_aliasing=self.supports_aliasing,
-            )
+            pred = args[0].sym_num.node.expr
+            prelude = pred if branch else ~pred
+            with tx.output.shape_env.patch_ra_prelude(prelude):
+                (
+                    (ret_val, ret_spec),
+                    ret_graph,
+                    ret_lifted_freevars,
+                ) = speculate_subgraph(
+                    tx,
+                    args[ix],
+                    operands_seq,
+                    {},
+                    "cond",
+                    source_target=self.value,
+                    should_flatten_outputs=True,
+                    # TODO - removing consts from control flow ops need more work
+                    remove_consts_from_outputs=False,
+                    supports_input_mutation=self.supports_input_mutation,
+                    supports_aliasing=self.supports_aliasing,
+                )
 
             if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(

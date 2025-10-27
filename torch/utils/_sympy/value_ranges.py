@@ -514,6 +514,10 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.coordinatewise_increasing_map(a, b, sympy.And)
 
     @staticmethod
+    def ordered_and(a, b):
+        return ValueRanges.unknown()
+
+    @staticmethod
     def _bool_to_int(x):
         if x.is_singleton():
             return ValueRanges.wrap(sympy.Integer(1 if x.lower else 0))
