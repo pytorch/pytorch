@@ -516,7 +516,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
-        # pyrefly: ignore  # missing-argument
+        # pyrefly: ignore [missing-argument]
         reduction_dim = next(t for t in self.range_trees if t.is_reduction)
         # Only one thread in the reduction group needs to store the results
         line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
@@ -583,7 +583,7 @@ class MetalKernel(SIMDKernel):
         reduction_idx = ""
         acc_buf_size = 1
         for rd in self.range_trees:
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             if not rd.is_reduction:
                 continue
             if reduction_idx:
@@ -682,7 +682,7 @@ class MetalKernel(SIMDKernel):
                 idx_var = next(
                     t
                     for t in self.range_tree_nodes.values()
-                    # pyrefly: ignore  # missing-argument
+                    # pyrefly: ignore [missing-argument]
                     if t.is_reduction
                 )
                 cmp_op = ">" if reduction_type == "argmax" else "<"
@@ -750,7 +750,7 @@ class MetalKernel(SIMDKernel):
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
-        # pyrefly: ignore  # missing-argument
+        # pyrefly: ignore [missing-argument]
         if not entry.is_reduction or (
             isinstance(entry.root.numel, sympy.Integer)
             and entry.root.numel <= self.max_threadgroup_size
@@ -864,7 +864,7 @@ class MetalKernel(SIMDKernel):
                 total_reduction_size = math.prod(
                     t.numel
                     for t in self.range_trees
-                    # pyrefly: ignore  # missing-argument
+                    # pyrefly: ignore [missing-argument]
                     if t.is_reduction
                 )
                 # If using dynamic shapes, set the threadgroup size to be the
@@ -967,7 +967,7 @@ class MetalKernel(SIMDKernel):
             else:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree).inner
 
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             if not tree.is_reduction or self.inside_reduction:
                 args.append(str(expr))
                 arg_types.append(int)
@@ -987,7 +987,7 @@ class MetalKernel(SIMDKernel):
             threads = [
                 expr_printer(
                     sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
-                    # pyrefly: ignore  # missing-argument
+                    # pyrefly: ignore [missing-argument]
                     if v.is_reduction
                     else v.numel
                 )
@@ -1003,7 +1003,7 @@ class MetalKernel(SIMDKernel):
         if self.inside_reduction:
             threads = [
                 expr_printer(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
-                # pyrefly: ignore  # missing-argument
+                # pyrefly: ignore [missing-argument]
                 if v.is_reduction
                 else "1"
                 for v in self.active_range_trees()
