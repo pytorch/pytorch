@@ -2428,14 +2428,14 @@ def triton_config_reduction(
             # vectorized loads, assuming bf16/fp16
             # xblock is usually 1-2, default to giving each thread more work
             num_warps = r // 128
+            # Workaround here since less warps cause register spills on XPU.
+            # TODO: remove this workaround after https://github.com/intel/intel-xpu-backend-for-triton/issues/5367
+            # resolved.
+            if torch.xpu.is_available():
+                num_warps = total_numel() // 128
         else:
             num_warps = total_numel() // 128
 
-    # Workaround here since less warps cause register spills on XPU.
-    # TODO: remove this workaround after https://github.com/intel/intel-xpu-backend-for-triton/issues/5367
-    # resolved.
-    if torch.xpu.is_available():
-        num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
