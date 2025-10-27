@@ -127,7 +127,6 @@ class AdaptiveRoundingOptimizer:
     @torch.no_grad()
     def feed_forward(self, x, weight, module):
         if isinstance(module, torch.nn.Conv1d):
-            # pyrefly: ignore  # no-matching-overload
             out = torch.nn.functional.conv1d(
                 x,
                 weight,

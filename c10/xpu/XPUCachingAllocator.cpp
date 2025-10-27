@@ -14,16 +14,6 @@ using namespace c10::CachingDeviceAllocator;
 
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
-// all sizes are rounded to at least 512 bytes
-constexpr size_t kMinBlockSize = 512;
-// largest "small" allocation is 1 MiB
-constexpr size_t kSmallSize = 1048576;
-// "small" allocations are packed in 2 MiB blocks
-constexpr size_t kSmallBuffer = 2097152;
-// allocations between 1 and 10 MiB may use kLargeBuffer
-constexpr size_t kMinLargeAlloc = 10485760;
-// round up large allocations to 2 MiB
-constexpr size_t kRoundLarge = 2097152;
 
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;

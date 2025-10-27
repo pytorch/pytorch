@@ -290,7 +290,6 @@ def _shard_dict_of_args(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
             )
 
-        # pyrefly: ignore  # no-matching-overload
         for _flat_split_result, _v_split in zip(
             flat_split_results, v_splits, strict=True
         ):
