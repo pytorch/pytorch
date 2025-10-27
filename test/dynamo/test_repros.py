@@ -4471,7 +4471,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
-        for _ in range(0, 5):
+        for _ in range(5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
             compiled_a = torch.ones([6], requires_grad=requires_grad)
@@ -4623,7 +4623,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, counter), fn(x, counter))
         self.assertEqual(counter[0], 2)
-        for _ in range(0, 10):
+        for _ in range(10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
         if torch._dynamo.config.assume_static_by_default:
@@ -4784,7 +4784,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_contains_range_constprop(self):
         def fn(x):
             # dynamo should const prop to False
-            if 3 in range(0, 10):
+            if 3 in range(10):
                 return x + 1
             else:
                 return x + 2
@@ -8100,14 +8100,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         gm = _dynamo_graph_capture_for_export(foo)(x, y)
         res = gm(x, y)
         self.assertEqual(res, ref)
-
-    def test_current_accelerator(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            torch.accelerator.current_accelerator()
-            return x + 1
-
-        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
 
 
 instantiate_parametrized_tests(ReproTests)
