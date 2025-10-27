@@ -2681,6 +2681,7 @@ class InstructionTranslatorBase(
             if sys.version_info < (3, 12):
                 assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
 
+            assert self.current_instruction.offset is not None
             # compile_subgraph did not codegen any NULLs,
             # so we should not count NullVariables
             stack_len = len(cur_tx.stack) - len(meta.stack_null_idxes)
@@ -2688,7 +2689,8 @@ class InstructionTranslatorBase(
             new_code: types.CodeType = ContinueExecutionCache.lookup(
                 cur_tx.f_code,
                 cur_tx.lineno,
-                resume_inst.offset,
+                self.current_instruction.offset,
+                resume_inst.offset,  # type: ignore[arg-type]
                 tuple(b.target.offset for b in cur_tx.block_stack),
                 stack_len,
                 argnames,
