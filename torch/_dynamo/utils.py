@@ -51,16 +51,18 @@ from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
+    Literal,
     Optional,
     overload,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, ParamSpec, TypeAlias, TypeGuard, TypeIs
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
@@ -96,6 +98,7 @@ from .graph_utils import _get_flat_args
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
+        Callable,
         Container,
         Generator,
         ItemsView,
@@ -1377,7 +1380,7 @@ class CompilationMetrics:
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
     pytorch_version: Optional[str] = None
-    inductor_provenance: Optional[str] = None
+    inductor_provenance: Optional[set[str]] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -2768,14 +2771,25 @@ def slice_length(s: slice, seq_len: int) -> int:
     return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
 
 
-def raise_args_mismatch(tx: InstructionTranslatorBase, name: str) -> None:
+def raise_args_mismatch(
+    tx: InstructionTranslatorBase,
+    name: str,
+    expect: str = "",
+    actual: str = "",
+) -> None:
     from torch._dynamo.exc import raise_observed_exception
     from torch._dynamo.variables import ConstantVariable
+
+    msg_str = (
+        f"wrong number of arguments or keyword arguments for {name}() call.\n"
+        f"  Expect: {expect}\n"
+        f"  Actual: {actual}"
+    )
 
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+        args=[ConstantVariable(msg_str)],
     )
 
 
@@ -4200,7 +4214,6 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # (x) + (y)
             # ~~^~~~~~~
             while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
-                # pyrefly: ignore  # unbound-name
                 if ch in "\\#":
                     cur_lineno, cur_col = nextline(cur_lineno, cur_col)
                 else:

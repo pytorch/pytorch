@@ -2224,15 +2224,15 @@ def run_and_get_code(
 ) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
-    source_codes: list[str] = []
+    source_codes: OrderedSet[str] = OrderedSet()
 
     def save_output_code(code: str) -> None:
-        source_codes.append(code)
+        source_codes.add(code)
 
     with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
         torch._dynamo.reset()
         result = fn(*args, **kwargs)
-    return result, source_codes
+    return result, list(source_codes)
 
 
 def run_and_get_kernels(
@@ -3764,7 +3764,6 @@ def maybe_log_cudagraph_partition(
         and (fx_node := ir_node.get_origin_node())
         and (stack_trace := fx_node.meta.get("stack_trace", None))
     ):
-        # pyrefly: ignore  # unbound-name
         warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
 
     perf_hint_log.warning(warning_msg)
