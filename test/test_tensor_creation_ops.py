@@ -1200,6 +1200,13 @@ class TestTensorCreation(TestCase):
         res = torch.cat(xs, dim=-1)
         ref = torch.cat(xs_cpu, dim=-1)
         self.assertEqual(res, ref)
+        xs = [torch.randn(16, 15, 15, device=device, dtype=dtype) for _ in range(130)]
+        xs[128] = torch.randn(15, 15, 15, device=device, dtype=dtype)
+        xs[129] = torch.randn(17, 15, 15, device=device, dtype=dtype)
+        xs_cpu = [x.cpu() for x in xs]
+        res = torch.cat(xs, dim=0)
+        ref = torch.cat(xs_cpu, dim=0)
+        self.assertEqual(res, ref)
 
     @dtypes(torch.float)
     @largeTensorTest("16GB")

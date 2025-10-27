@@ -468,6 +468,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             FlexConfig(128, 64, 3, 4),
             FlexConfig(128, 128, 3, 4),
             FlexConfig(128, 128, 2, 8),
+            FlexConfig(128, 128, 1, 8),
             FlexConfig(64, 128, 3, 4),
             FlexConfig(64, 64, 3, 4),
         ]
@@ -914,12 +915,15 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         self.sm_100_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 3, 4),
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
+            (torch.float32, 192): FlexConfig(32, 64, 2, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.bfloat16, 192): FlexConfig(128, 128, 1, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.float16, 192): FlexConfig(128, 128, 1, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
 
@@ -946,6 +950,16 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
             (torch.float16, 256): FlexConfig(32, 64, 3, 4),
         }
+
+        # Overwriting the configs omitting BLOCK_N of size 128 that cause ULFs
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
+            FlexBwDConfig(BLOCK_M, BLOCK_N, BLOCK_N, BLOCK_M, s, 4)
+            for BLOCK_M in [32, 64]
+            for BLOCK_N in [32, 64]
+            for s in [1, 3, 4, 5]  # num_stages
+            if BLOCK_N % BLOCK_M == 0
+        ]
 
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
@@ -1021,9 +1035,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 FlexBwDConfig(64, 64, 64, 64, 2, 4)
             ),
             "sm10x": lambda h: (
-                FlexBwDConfig(64, 128, 128, 64, 3, 4)
-                if h <= 128
-                else FlexBwDConfig(64, 64, 64, 64, 2, 4)
+                FlexBwDConfig(64, 128, 128, 64, 3, 4) if h <= 128 else
+                FlexBwDConfig(64, 64, 64, 64, 1, 8) if h <= 192 else
+                FlexBwDConfig(64, 64, 64, 64, 1, 4)
             ),
             "sm8x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
@@ -1638,7 +1652,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         )
 
         # Build options dict
-        # pyrefly: ignore  # no-matching-overload
+
         options_dict = dict(
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
@@ -1721,7 +1735,7 @@ class TMAWorkspaceMixin(MMTemplateConfigMixin):
         )
         return kwargs
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering, as num_warps=2 not safe for TMA
@@ -1943,7 +1957,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering:
@@ -1984,7 +1998,7 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -2117,7 +2131,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)

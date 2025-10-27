@@ -16,9 +16,9 @@ computations.
 """
 
 import collections
-from collections.abc import ItemsView, KeysView, Sequence, ValuesView
+from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
