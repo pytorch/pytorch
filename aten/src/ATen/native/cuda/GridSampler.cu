@@ -357,13 +357,20 @@ namespace {
     // Bilinear interpolation for an output pixel at (y, x) needs to write gradients to input pixels at (y_in, x_in), (y_in+1, x_in), (y_in, x_in+1), and (y_in+1, x_in+1).
     // This ensures the LDS tile can accommodate contributions for pixels just outside the tile.
     // TODO: Bicubic interpolation samples from a 4x4 area will need more halo.
-    constexpr int HALO = 1;
+    constexpr int HALO = (INTERP_MODE == GridSamplerInterpolation::Bicubic) ? 2 : 1;
     // Full dimensions of the LDS tile, including the halo.
     constexpr int SMEM_H = TILE_H + 2 * HALO;
     constexpr int SMEM_W = TILE_W + 2 * HALO;
     // 1 more pixel to the inner dimension to avoid LDS bank conflicts.
     constexpr int SMEM_W_PAD = SMEM_W + 1;
+    // TODO
     // Process channels in chunks of 4 to avoid using too much LDS.
+    // - CCHUNK=4: 5.5KB LDS per block (good for high occupancy)
+    // - CCHUNK=8: 11KB LDS (better for channel-heavy workloads)
+    // - CCHUNK=2: 2.75KB LDS (for very high occupancy)
+    // Adaptive chunking based on channel count
+    //index_t C = input.sizes(1);
+    //constexpr int CCHUNK = C < 64 ? 8 : 4;
     constexpr int CCHUNK = 4;
 
     // Dynamic shared memory layout: [CCHUNK][SMEM_H][SMEM_W_PAD]
@@ -401,9 +408,10 @@ namespace {
       }
       __syncthreads();
 
-      // The unique global output coord for each thread to process.
-      const index_t h_out = tile_h_out + threadIdx.y;
-      const index_t w_out = tile_w_out + threadIdx.x;
+      // Each thread processes one output pixel.
+      // The unique global coord of the pixel:
+      const index_t h_out = tile_h_out + threadIdx.y;  // Range: [tile_h_out, tile_h_out + TILE_H)
+      const index_t w_out = tile_w_out + threadIdx.x;  // Range: [tile_w_out, tile_w_out + TILE_W)
 
       // Ensure the thread is within the bounds of the output grid.
       if (h_out < out_H && w_out < out_W) {
@@ -455,6 +463,7 @@ namespace {
                   // Core optimization: `atomicAdd` to LDS instead of global memory.
                   atomicAdd(reinterpret_cast<float*>(&smem_idx(c_idx, s_iy, s_ix)), static_cast<float>(weight * gOut));
                 } else {
+                  // FIXME:
                   // Simply ignore the coord outside the tile.
                 }
               }
@@ -523,9 +532,12 @@ namespace {
           grid.size(0));  // Launch per-N
       auto stream = at::cuda::getCurrentCUDAStream();
 
+      // TODO
       // Calculate dynamic shared memory size
+      //index_t C = input.sizes(1);
+      // constexpr int CCHUNK = C < 64 ? 8 : 4;
       constexpr int CCHUNK = 4;
-      constexpr int HALO = 1;
+      constexpr int HALO = INTERP_MODE == GridSamplerInterpolation::Bicubic ? 2 : 1;
       constexpr int SMEM_H = TILE_H + 2 * HALO;
       constexpr int SMEM_W = TILE_W + 2 * HALO;
       constexpr int SMEM_W_PAD = SMEM_W + 1;
