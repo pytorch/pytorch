@@ -220,7 +220,19 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       const std::optional<Tensor>& bias,
       Tensor& out) {
 #if !defined(USE_ROCM) && defined(USE_FBGEMM_GENAI)
-  // Checks
+  // Typing checks
+  TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2,
+      "mat_a must be Float4_e2n1fn_2, got: ", mat_a.scalar_type());
+  TORCH_CHECK_VALUE(mat_b.scalar_type() == at::kFloat4_e2m1fn_x2,
+      "mat_b must be Float4_e2n1fn_2, got: ", mat_b.scalar_type());
+  TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e4m3fn,
+      "scale_a must be Float8_e4m3fn, got: ", scale_a.scalar_type());
+  TORCH_CHECK_VALUE(scale_b.scalar_type() == at::kFloat8_e4m3fn,
+      "scale_b must be Float8_e4m3fn, got: ", scale_b.scalar_type());
+  TORCH_CHECK_VALUE(global_scale_a.scalar_type() == at::kFloat,
+      "global_scale_a must be Float, got: ", global_scale_a.scalar_type());
+  TORCH_CHECK_VALUE(global_scale_b.scalar_type() == at::kFloat,
+      "global_scale_b must be Float, got: ", global_scale_b.scalar_type());
   auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
       mat_a,
       mat_b,
@@ -274,7 +286,14 @@ void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int
   }
 }
 
-void _check_scales_mxfp8(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
+void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
+  // if nvfp4, will need to modify K later
+  bool is_nvfp4 = (mat.scalar_type() == kFloat4_e2m1fn_x2);
+  int blocksize = 32;
+  if (is_nvfp4) {
+    blocksize = 16;
+  }
+
   // Checks scales for 2d or 3d target tensors (`mat`).
   if (mat.dim() == 2) {
     // For MXFP8, 2d tensors have variable size groups represented as subtensors,
@@ -282,17 +301,19 @@ void _check_scales_mxfp8(const Tensor& mat, const Tensor& scale, const int dim, 
     // so we can't check the scale sizes without doing a d2h sync to get the group sizes here.
     TORCH_CHECK(
       scale.dim() == mat.dim(),
-      "for mxfp8, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(), " and scale.dim() = ", scale.dim(), " for arg ", arg_idx);
+      "for block-scaled, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(),
+      " and scale.dim() = ", scale.dim(), " for arg ", arg_idx
+    );
 
-    // LHS mat shape (M, total_K) -> scale shape (rounded_up(M, 128), rounded_up_per_group(K/32, 4))
-    // RHS mat shape (total_K, N) -> scale shape (rounded_up(N, 128), rounded_up_per_group(K/32, 4))
+    // LHS mat shape (M, total_K) -> scale shape (rounded_up(M, 128), rounded_up_per_group(K/blocksize, 4))
+    // RHS mat shape (total_K, N) -> scale shape (rounded_up(N, 128), rounded_up_per_group(K/blocksize, 4))
     //   * weight is transposed prior to the call, scale stays non-transposed.
     bool LHS = arg_idx == 0;
     int scale_dim_to_check = 0;
     int mat_dim_to_check = LHS ? 0 : 1;
     TORCH_CHECK(
         scale.size(scale_dim_to_check) >= mat.size(mat_dim_to_check),
-        "for mxfp8, arg ", arg_idx, " tensor shape (", mat.size(0), ", ", mat.size(1), ") ",
+        "for block-scaled, arg ", arg_idx, " tensor shape (", mat.size(0), ", ", mat.size(1), ") ",
         "must have scale.shape[", scale_dim_to_check, "] >= ", mat.size(mat_dim_to_check), " but got scale.shape=(", scale.size(0), ", ", scale.size(1), ")");
   } else {
     // For MXFP8, 3d tensors have static group sizes (stack of 2d tensors),
@@ -305,18 +326,23 @@ void _check_scales_mxfp8(const Tensor& mat, const Tensor& scale, const int dim, 
     // We'll need to support 3d-3d and 3d-2d cases once mxfp8 grouped gemm supports them.
     int64_t G = mat.size(0);
     int64_t K = mat.size(1);
+    if (is_nvfp4) {
+      K *= 2;
+    }
     int64_t N = mat.size(2);
-    int64_t blocked_scale_K = round_up(K/32, 4);
+    int64_t blocked_scale_K = round_up(K/blocksize, 4);
     int64_t blocked_scale_N = round_up(N, 128);
 
     // fbgemm expects stack of flattened blocked scales for 3d tensor, shape (G, blocked_scale_K * blocked_scale_N).
     TORCH_CHECK(
       scale.dim() == mat.dim() - 1,
-      "for mxfp8 2d-3d grouped GEMM, the 3d tensor of shape (G,K,N) must have a 2d scale of shape (G, blocked_scale_K * blocked_scale_N), but scale is ", scale.dim(), "D for arg ", arg_idx
+      "for block-scaled 2d-3d grouped GEMM, the 3d tensor of shape (G,K,N) must have a 2d scale of shape (G, blocked_scale_K * blocked_scale_N),",
+      "but scale is ", scale.dim(), "D for arg ", arg_idx
     );
     TORCH_CHECK(
       scale.size(0) == G && scale.size(1) == blocked_scale_K * blocked_scale_N,
-      "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx
+      "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx,
+      ", got: ", scale.size(0), ", ", scale.size(1)
     );
   }
 }
@@ -327,7 +353,7 @@ void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const in
   if (using_fp8_rowwise) {
     _check_scales_fp8_rowwise(mat, scale, dim, arg_idx, scale_multiplier);
   } else if (using_mxfp8) {
-    _check_scales_mxfp8(mat, scale, dim, arg_idx);
+    _check_scales_blocked(mat, scale, dim, arg_idx);
   } else {
     TORCH_CHECK(false, "scale must be float32 or float8_e8m0fnu, but got ", scale.dtype());
   }
@@ -555,8 +581,9 @@ _scaled_grouped_mm_cuda_v2(
           out);
     }
     case ScaledGemmImplementation::MXFP8_MXFP8: {
-      _check_scales_mxfp8(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      _check_scales_mxfp8(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      // scale shape checks
+      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
+      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
       return _mx8_mx8_bf16_grouped_mm_fbgemm(
           mat_a,
           mat_b,
@@ -568,16 +595,19 @@ _scaled_grouped_mm_cuda_v2(
           out);
     }
     case ScaledGemmImplementation::NVFP4_NVFP4: {
-        return _f4_f4_bf16_grouped_mm_fbgemm(
-            mat_a,
-            mat_b,
-            scale_a[0], /* block-scale A */
-            scale_a[1], /* global-scale A */
-            scale_b[0], /* block-scale B */
-            scale_b[1], /* global-scale A */
-            offs.value(),
-            std::nullopt, /* bias */
-            out);
+      // scale shape checks
+      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
+      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      return _f4_f4_bf16_grouped_mm_fbgemm(
+          mat_a,
+          mat_b,
+          scale_a[0], /* block-scale A */
+          scale_a[1], /* global-scale A */
+          scale_b[0], /* block-scale B */
+          scale_b[1], /* global-scale A */
+          offs.value(),
+          std::nullopt, /* bias */
+          out);
     }
     default:
       TORCH_CHECK_NOT_IMPLEMENTED(false,
