@@ -3845,7 +3845,6 @@ class StatefulMapDataset(Dataset):
             self.access_count = state_dict["access_count"]
 
 
-
 class TestStatefulDataLoaderMapDataset(TestCase):
     """Test stateful DataLoader with map-style datasets."""
 
@@ -3874,7 +3873,7 @@ class TestStatefulDataLoaderMapDataset(TestCase):
         remaining_batches_original = list(it)
 
         # Create new loader and resume from checkpoint
-        dataset2 = StatefulMapDataset(50)  
+        dataset2 = StatefulMapDataset(50)
         dl2 = DataLoader(
             dataset=dataset2,
             num_workers=num_workers,
@@ -3885,13 +3884,10 @@ class TestStatefulDataLoaderMapDataset(TestCase):
         dl2.load_state_dict(state_dict)
 
         # Collect all batches from resumed loader
-        remaining_batches_resumed = []
-        for batch in dl2:
-            remaining_batches_resumed.append(batch)
+        remaining_batches_resumed = list(dl2)
 
         # Verify that resumed loader continues exactly where original left off
         self.assertEqual(remaining_batches_original, remaining_batches_resumed)
-
 
 
 class StatefulSampler(torch.utils.data.Sampler):
@@ -3951,14 +3947,13 @@ class StatefulSamplerIterator:
         self.i = state_dict["i"]
 
 
-
 class TestStatefulDataLoaderSampler(TestCase):
     """Test stateful DataLoader with stateful samplers."""
 
     @parametrize("num_workers", [0])
     def test_stateful_sampler(self, num_workers):
         """Test state_dict/load_state_dict functionality with stateful samplers
-        
+
         Ensures that stateful samplers use state_dict/load_state_dict for state restoration
         rather than fast-forwarding via repeated next() calls.
         """
@@ -3984,12 +3979,13 @@ class TestStatefulDataLoaderSampler(TestCase):
         # Save state after consuming 2 batches
         state_dict = dl.state_dict()
         self.assertIsInstance(state_dict, dict)
-        
+
         # Verify that state_dict was called on the stateful sampler during save
         self.assertIn("_sampler_iter_state", state_dict)
         self.assertIsNotNone(state_dict["_sampler_iter_state"])
-        self.assertTrue(sampler.state_dict_called,
-                        "state_dict should be called on stateful sampler")
+        self.assertTrue(
+            sampler.state_dict_called, "state_dict should be called on stateful sampler"
+        )
 
         # Continue with original iterator and collect remaining batches
         remaining_batches_original = list(it)
@@ -4005,15 +4001,17 @@ class TestStatefulDataLoaderSampler(TestCase):
             batch_size=4,
             sampler=sampler2,
         )
-        
+
         dl2.load_state_dict(state_dict)
         it2 = iter(dl2)
         # Verify that load_state_dict was called on the stateful sampler
-        self.assertTrue(sampler2.load_state_dict_called,
-                        "load_state_dict should be called on stateful sampler")
+        self.assertTrue(
+            sampler2.load_state_dict_called,
+            "load_state_dict should be called on stateful sampler",
+        )
         # The sampler's state should have been restored (i should be 8, since we consumed 2 batches of 4)
         self.assertEqual(sampler2._iterator.i, 8)
-        
+
         # CRITICAL CHECK: Verify that next() was NOT called for fast-forwarding
         # If fast-forwarding occurred, we would see multiple next() calls here
         # Since we restored via load_state_dict, next_call_count should be 0 before we start consuming
@@ -4021,7 +4019,7 @@ class TestStatefulDataLoaderSampler(TestCase):
             self.assertEqual(
                 sampler2._iterator.next_call_count,
                 0,
-                "Stateful sampler should NOT be fast-forwarded via next() calls after load_state_dict"
+                "Stateful sampler should NOT be fast-forwarded via next() calls after load_state_dict",
             )
 
         # Collect all batches from resumed loader
@@ -4035,7 +4033,6 @@ class TestStatefulDataLoaderSampler(TestCase):
             self.assertEqual(len(orig), len(resumed))
             for o, r in zip(orig, resumed):
                 self.assertEqual(o, r)
-
 
 
 class TestStatefulDataLoaderRandomState(TestCase):
@@ -4138,9 +4135,7 @@ class TestStatefulDataLoaderRandomState(TestCase):
 
         # Save state and get remaining items
         state_dict = dl2.state_dict()
-        remaining_original = []
-        for batch in it:
-            remaining_original.extend(batch)
+        remaining_original = list(it)
 
         # Resume from checkpoint
         generator3 = torch.Generator()
@@ -4171,7 +4166,6 @@ class TestStatefulDataLoaderRandomState(TestCase):
         self.assertEqual(remaining_original, remaining_resumed)
 
 
-
 class TestStatefulDataLoaderMultiEpoch(TestCase):
     """Test stateful DataLoader across multiple epochs and at epoch boundaries."""
 
@@ -4180,15 +4174,13 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         """Test that DataLoader state is preserved across multiple epochs"""
         dataset = StatefulMapDataset(12)
 
-
-
         dl = DataLoader(
             dataset=dataset,
             num_workers=num_workers,
             stateful=True,
             batch_size=4,
             shuffle=True,
-            generator=torch.Generator().manual_seed(42)
+            generator=torch.Generator().manual_seed(42),
         )
 
         # Run through 2 full epochs and collect all items
@@ -4209,7 +4201,6 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
 
         # Now test resumption: Create new loader and resume from checkpoint
 
-
         dataset2 = StatefulMapDataset(12)
         dl2 = DataLoader(
             dataset=dataset2,
@@ -4217,7 +4208,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
             stateful=True,
             batch_size=4,
             shuffle=True,
-            generator=torch.Generator().manual_seed(42)
+            generator=torch.Generator().manual_seed(42),
         )
         dl2.load_state_dict(state_dict)
 
@@ -4247,11 +4238,12 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         state_dict_during_epoch = None
 
         it = iter(dl)
-        for batch in it:  # 4 batches of 2 items each = 8 items total
+        for batches_consumed, batch in enumerate(
+            it
+        ):  # 4 batches of 2 items each = 8 items total
             epoch1_items.extend(batch)
-            batches_consumed += 1
 
-            if batches_consumed == 3:  # Save state after 3rd batch (6 items consumed)
+            if batches_consumed == 2:  # Save state after 3rd batch (6 items consumed)
                 state_dict_during_epoch = dl.state_dict()
 
         # We should have consumed all 8 items (4 batches of 2)
@@ -4340,9 +4332,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
                 state_dict = dl_test.state_dict()
 
                 # Get remaining items from original iterator
-                remaining_original = []
-                for batch in it:
-                    remaining_original.extend(batch)
+                remaining_original = list(it)
 
                 # If we're at end of epoch, continue to next epoch
                 if not remaining_original:
@@ -4369,7 +4359,6 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
                     self.assertEqual(orig, resumed)
 
 
-
 class TestStatefulDataLoaderSerialization(TestCase):
     """Test stateful DataLoader state dict serialization compatibility."""
 
@@ -4393,40 +4382,30 @@ class TestStatefulDataLoaderSerialization(TestCase):
         state_dict = dl.state_dict()
         self.assertIsInstance(state_dict, dict)
 
-        # Test JSON serialization
         import json
 
-        try:
-            json_str = json.dumps(state_dict)
-            deserialized_state = json.loads(json_str)
+        json_str = json.dumps(state_dict)
+        deserialized_state = json.loads(json_str)
 
-            # Should be able to load the deserialized state
-            dataset2 = StatefulIterableDataset([0, 50, 25], shuffle=False)
-            dl2 = DataLoader(
-                dataset=dataset2,
-                num_workers=0,
-                collate_fn=identity_collate,
-                stateful=True,
-                batch_size=5,
-            )
+        # Should be able to load the deserialized state
+        dataset2 = StatefulIterableDataset([0, 50, 25], shuffle=False)
+        dl2 = DataLoader(
+            dataset=dataset2,
+            num_workers=0,
+            collate_fn=identity_collate,
+            stateful=True,
+            batch_size=5,
+        )
 
-            # This should not raise an error
-            dl2.load_state_dict(deserialized_state)
+        # This should not raise an error
+        dl2.load_state_dict(deserialized_state)
 
-            # Verify functionality by getting remaining data
-            remaining_original = []
-            for batch in it:
-                remaining_original.append(batch)
+        # Verify functionality by getting remaining data
+        remaining_original = list(it)
 
-            remaining_deserialized = []
-            for batch in dl2:
-                remaining_deserialized.append(batch)
+        remaining_deserialized = list(dl2)
 
-            self.assertEqual(remaining_original, remaining_deserialized)
-
-        except (TypeError, ValueError) as e:
-            # If state dict contains non-JSON-serializable objects, skip gracefully
-            self.skipTest(f"State dict contains non-JSON-serializable objects: {e}")
+        self.assertEqual(remaining_original, remaining_deserialized)
 
     def test_pickle_serialization(self):
         """Test that state dict can be pickle serialized and deserialized"""
@@ -4468,13 +4447,9 @@ class TestStatefulDataLoaderSerialization(TestCase):
             dl2.load_state_dict(unpickled_state)
 
             # Verify functionality
-            remaining_original = []
-            for batch in it:
-                remaining_original.append(batch)
+            remaining_original = list(it)
 
-            remaining_unpickled = []
-            for batch in dl2:
-                remaining_unpickled.append(batch)
+            remaining_unpickled = list(dl2)
 
             self.assertEqual(len(remaining_original), len(remaining_unpickled))
             for orig, unpick in zip(remaining_original, remaining_unpickled):
@@ -4507,9 +4482,8 @@ class TestStatefulDataLoaderSerialization(TestCase):
         mid_state = dl.state_dict()
         self.assertIsInstance(mid_state, dict)
 
-        # State dicts should have consistent structure but different values
-        # (exact keys depend on implementation, but both should be dicts)
-        self.assertIsInstance(initial_state, type(mid_state))
+        # State dicts should have consistent structure (same keys) but different values
+        self.assertEqual(initial_state.keys(), mid_state.keys())
 
 
 class ErrorDataset_SDL(Dataset):
@@ -4683,7 +4657,6 @@ class DynamicStateIterable(IterableDataset):
         self.i = sd["i"]
 
 
-
 class TestDynamicStateGrowth(TestCase):
     @parametrize("num_workers", [0])
     def test_state_is_immutable_post_fetch(self, num_workers):
@@ -4709,7 +4682,6 @@ class TestDynamicStateGrowth(TestCase):
         for _ in range(2):
             exp.append(next(it2))
         self.assertTrue(len(exp) > 0)
-
 
 
 class TestStateInitializationResumeCompleteness(TestCase):
@@ -4750,7 +4722,6 @@ class TestStateInitializationResumeCompleteness(TestCase):
     #     self._run(2)
 
 
-
 class TestConcurrentLoaderParity(TestCase):
     @parametrize("num_workers", [0])
     def test_parity_with_standard_loader(self, num_workers):
@@ -4769,14 +4740,13 @@ class TestConcurrentLoaderParity(TestCase):
         self.assertEqual(got, exp)
 
 
-
 class TestStatefulDataLoaderEmptyStateDict(TestCase):
     """Test behavior when passing an empty dict to load_state_dict."""
 
     def test_load_empty_state_dict_resets_state(self):
         """Test that passing empty dict to load_state_dict resets the dataloader state."""
         dataset = StatefulMapDataset(20)
-        
+
         # Create initial dataloader
         dl = DataLoader(
             dataset=dataset,
@@ -4784,43 +4754,43 @@ class TestStatefulDataLoaderEmptyStateDict(TestCase):
             stateful=True,
             batch_size=4,
         )
-        
+
         # Consume some batches
         it = iter(dl)
         _ = next(it)
         _ = next(it)
-        
+
         # Save state after consuming 2 batches
         state_dict = dl.state_dict()
         self.assertIsNotNone(state_dict)
         self.assertNotEqual(state_dict, {})
-        
+
         # Now load empty state dict
         dl.load_state_dict({})
-        
+
         # Check that internal state was reset
         self.assertIsNone(dl._iterator)
         self.assertFalse(dl._initial_iter_for_state_dict)
         self.assertIsNone(dl.next_iter_state)
-    
+
     def test_load_empty_state_dict_then_load_real_state(self):
         """Test that after loading empty dict, we can still load a real state dict."""
         dataset = StatefulMapDataset(20)
-        
+
         dl = DataLoader(
             dataset=dataset,
             num_workers=0,
             stateful=True,
             batch_size=4,
         )
-        
+
         # Consume some batches and save state
         it = iter(dl)
         _ = next(it)
         _ = next(it)
         state_dict = dl.state_dict()
         batch3_original = next(it)
-        
+
         # Load empty dict first
         dl2 = DataLoader(
             dataset=dataset,
@@ -4829,22 +4799,22 @@ class TestStatefulDataLoaderEmptyStateDict(TestCase):
             batch_size=4,
         )
         dl2.load_state_dict({})
-        
+
         # Now load the real state dict
         dl2.load_state_dict(state_dict)
-        
+
         # Verify we can resume from the saved state
         it2 = iter(dl2)
         batch3_resumed = next(it2)
-        
+
         self.assertEqual(len(batch3_original), len(batch3_resumed))
         for o, r in zip(batch3_original, batch3_resumed):
             self.assertEqual(o, r)
-    
+
     def test_load_empty_state_dict_iteration_behavior(self):
         """Test iteration behavior after loading empty state dict."""
         dataset = StatefulMapDataset(20)
-        
+
         # Create dataloader and consume some data
         dl = DataLoader(
             dataset=dataset,
@@ -4852,39 +4822,39 @@ class TestStatefulDataLoaderEmptyStateDict(TestCase):
             stateful=True,
             batch_size=4,
         )
-        
+
         it = iter(dl)
         _ = next(it)
         _ = next(it)
-        
+
         # Load empty state dict
         dl.load_state_dict({})
-        
+
         # Create new iterator - should start from beginning
         # (or have some defined behavior)
         it2 = iter(dl)
         batch1_new = next(it2)
-        
+
         # Document current behavior: With empty dict, it may behave unexpectedly
         # The test passes if iteration is possible, but the behavior needs to be clarified
         self.assertIsNotNone(batch1_new)
-    
+
     def test_empty_state_dict_multiple_times(self):
         """Test loading empty state dict multiple times."""
         dataset = StatefulMapDataset(20)
-        
+
         dl = DataLoader(
             dataset=dataset,
             num_workers=0,
             stateful=True,
             batch_size=4,
         )
-        
+
         # Load empty dict multiple times - should not cause errors
         dl.load_state_dict({})
         dl.load_state_dict({})
         dl.load_state_dict({})
-        
+
         # Should still be able to iterate
         it = iter(dl)
         batch = next(it)
