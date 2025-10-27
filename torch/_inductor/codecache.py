@@ -1286,7 +1286,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             },
             payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
-        if get_metrics_context().in_progress():
+        if (
+            get_metrics_context().in_progress()
+            and graph.inductor_provenance_stack_traces_str
+        ):
             get_metrics_context().add_to_set(
                 "inductor_provenance", graph.inductor_provenance_stack_traces_str
             )

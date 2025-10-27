@@ -299,9 +299,9 @@ class ShardedTensor(ShardedTensorBase):
         if self._init_rrefs:
             with _sharded_tensor_lock:
                 global _sharded_tensor_current_id, _sharded_tensor_map
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self._sharded_tensor_id = _sharded_tensor_current_id
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 _sharded_tensor_map[self._sharded_tensor_id] = weakref.ref(self)
                 _sharded_tensor_current_id += 1
 
@@ -470,7 +470,8 @@ class ShardedTensor(ShardedTensorBase):
                 src = shard.tensor.flatten()
                 if src.nelement() == 0:
                     warnings.warn(
-                        "Gathering a tensor with zero elements on rank " + str(rank)
+                        "Gathering a tensor with zero elements on rank " + str(rank),
+                        stacklevel=2,
                     )
                     continue
                 shard_offset = shard_placement[shard.metadata][1]
@@ -671,7 +672,8 @@ class ShardedTensor(ShardedTensorBase):
             if device_to.index != current_idx:
                 warnings.warn(
                     "ShardedTensor.to only move tensor to its current device"
-                    "If you want to put to different device, use `reshard` instead."
+                    "If you want to put to different device, use `reshard` instead.",
+                    stacklevel=2,
                 )
             device_to = torch.device(current_idx)
 

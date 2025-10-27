@@ -289,14 +289,15 @@ IF(USE_FBGEMM_GENAI)
 
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-    set(fbgemm_genai_mx8mx8bf16_grouped
+    set(fbgemm_genai_cuh
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
+      "${FBGEMM_GENAI_SRCS}/"
     )
 
     target_include_directories(fbgemm_genai PRIVATE
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
-      ${fbgemm_genai_mx8mx8bf16_grouped}
+      ${fbgemm_genai_cuh}
       ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
       ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
     )

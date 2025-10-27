@@ -30,7 +30,7 @@ from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
-from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap  # noqa: F401
 from .virtualized import V
 
 
@@ -620,7 +620,6 @@ class _OutOfProcessFxCompile(_SerializedFxCompile):
 
         if output.warning_replay:
             for w in output.warning_replay:
-                # pyrefly: ignore  # no-matching-overload
                 warnings.warn_explicit(
                     message=w.message,
                     category=w.category,

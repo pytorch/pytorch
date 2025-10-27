@@ -5,14 +5,14 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
-from typing import Any, Callable, overload, TYPE_CHECKING, TypeVar
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 from ..decorators import substitute_in_graph
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)

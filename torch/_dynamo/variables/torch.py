@@ -33,8 +33,8 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -147,7 +147,6 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.accelerator.current_device_index,
-    torch.accelerator.current_accelerator,
     torch.cuda.current_device,
     torch.cuda.is_initialized,
     torch.xpu.current_device,
@@ -245,7 +244,12 @@ class BaseTorchVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        if inspect.isclass(value):
+            install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
+        elif inspect.ismodule(value):
+            install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
+        else:
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
@@ -1969,7 +1973,7 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
             return variables.EnumVariable(self.value.key())
         elif name == "process":
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(self.value.process.__func__),
+                VariableTracker.build(tx, self.value.process.__func__),
                 [self] + args,
                 kwargs,
             )
