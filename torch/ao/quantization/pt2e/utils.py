@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
@@ -89,6 +90,7 @@ def _find_q_dq_node_for_user(
         and arg.op == "call_function"
         and arg.target in _QUANTIZE_OPS
     ):
+        # pyrefly: ignore  # unbound-name
         q_node = arg
     return (q_node, dq_node)
 
@@ -121,7 +123,8 @@ def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
 def _get_tensor_constant_from_node(node, m):
     if node is None:
         return None
-    assert node.op == "get_attr"
+    if node.op != "get_attr":
+        raise AssertionError(f"Expected node.op to be 'get_attr', got {node.op}")
     target_atoms = node.target.split(".")
     attr_itr = m
     for i, atom in enumerate(target_atoms):
@@ -246,7 +249,10 @@ def fold_bn_weights_into_conv_node(
 
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
-    assert isinstance(weight_attr_name, str)
+    if not isinstance(weight_attr_name, str):
+        raise AssertionError(
+            f"Expected conv_weight_node.target to be a string attribute name, got {type(weight_attr_name)}"
+        )
     _assign_attr(fused_weight, m, weight_attr_name, _AttrKind.PARAMETER)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target

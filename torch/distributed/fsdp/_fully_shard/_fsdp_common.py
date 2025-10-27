@@ -17,9 +17,10 @@ _compiled_autograd_enabled: bool = False
 
 
 def detect_compiled_autograd():
-    assert not torch.compiler.is_compiling(), (
-        "`detect_compiled_autograd()` is designed to be called in eager mode"
-    )
+    if torch.compiler.is_compiling():
+        raise AssertionError(
+            "`detect_compiled_autograd()` is designed to be called in eager mode"
+        )
     global _compiled_autograd_enabled
     import torch._dynamo.compiled_autograd as ca
 

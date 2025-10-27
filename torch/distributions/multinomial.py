@@ -50,6 +50,7 @@ class Multinomial(Distribution):
         logits (Tensor): event log probabilities (unnormalized)
     """
 
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     total_count: int
 
@@ -92,6 +93,7 @@ class Multinomial(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @constraints.dependent_property(is_discrete=True, event_dim=1)
+    # pyrefly: ignore  # bad-override
     def support(self):
         return constraints.multinomial(self.total_count)
 

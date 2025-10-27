@@ -41,6 +41,7 @@ def format_frame(frame: dict[str, str]) -> str:
 def format_frames(frames: list[dict[str, str]]) -> str:
     formatted_frames = []
     for frame in frames:
+        # pyrefly: ignore  # bad-argument-type
         formatted_frames.append(format_frame(frame))
     return "\n".join(formatted_frames)
 
@@ -695,6 +696,7 @@ def check_version(version_by_ranks: dict[str, str], version: str) -> None:
 
 
 def get_version_detail(version: str) -> tuple[int, int]:
+    # pyrefly: ignore  # bad-assignment
     version = version.split(".")
     assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)
@@ -752,6 +754,10 @@ def align_trace_from_beginning(
         # Rank 3: [0, 1, 2, 3, 4, 5, None]
         # Then we should start from collective 2 not 0 because any collective before,
         # we don't have complete records from all ranks so we need to ignore them.
+        # If we don't have any trace from some ranks, ignore them
+        # as well.
+        if len(entries[rank]) == 0:
+            continue
         first_record_id = entries[rank][0]["record_id"]
         maximum_starting_record_id = max(maximum_starting_record_id, first_record_id)
 

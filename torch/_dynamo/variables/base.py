@@ -636,6 +636,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 assert source is not None
 
 
+def raise_type_error_exc(tx: "InstructionTranslator", msg_str: str) -> None:
+    msg = variables.ConstantVariable.create(msg_str)
+    raise_observed_exception(TypeError, tx, args=[msg])
+
+
 def typestr(*objs):
     if len(objs) == 1:
         (obj,) = objs

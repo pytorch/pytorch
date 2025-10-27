@@ -196,6 +196,28 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
        other.size(0) > max_stride_size || other.size(1) > max_stride_size);
 }
 
+void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
+  const auto& status_flat = status.view(-1);
+
+  for (const auto i : c10::irange(status_flat.size(0))) {
+    int code = status_flat[i].item<int>();
+    switch (code) {
+      case MPSMatrixDecompositionStatusSuccess:
+        status_flat[i] = 0;
+        break;
+      case MPSMatrixDecompositionStatusNonPositiveDefinite:
+      case MPSMatrixDecompositionStatusSingular:
+        status_flat[i] = 2;
+        break;
+      case MPSMatrixDecompositionStatusFailure:
+        status_flat[i] = -1;
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unknown MPSMatrixDecompositionStatus enum value: ", code);
+    }
+  }
+}
+
 } // anonymous namespace
 
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
@@ -316,6 +338,8 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
           ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
     }
   }
+
+  map_mps_decomposition_error_code_to_blas(info);
 }
 
 static void linalg_solve_out_mps_impl(const Tensor& A,
@@ -487,6 +511,9 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
                   "mpsmatrixdecompositionstatus for details.");
     }
   }
+
+  map_mps_decomposition_error_code_to_blas(info);
+
   if (!left) {
     // If this was a right solve, transpose the result back
     result.copy_(result_t.transpose(-2, -1).contiguous());
@@ -1421,20 +1448,6 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)
  const Tensor& pivots,
  const Tensor& info) {
   mps::linalg_solve_out_mps_impl(A, B, left, check_errors, result, LU, pivots, info);
-}
-
-std::tuple<Tensor&, Tensor&> linalg_lu_factor_out_mps(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
-  Tensor info = at::empty({}, A.options().dtype(kInt));
-  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
-  return std::tie(LU, pivots);
-}
-
-std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
-  Tensor LU = at::empty({0}, A.options());
-  Tensor pivots = at::empty({0}, A.options().dtype(kInt));
-  Tensor info = at::empty({}, A.options().dtype(kInt));
-  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
-  return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
 TORCH_IMPL_FUNC(lu_unpack_out_mps)

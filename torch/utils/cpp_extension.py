@@ -11,6 +11,7 @@ import setuptools
 import subprocess
 import sys
 import sysconfig
+import types
 import collections
 from pathlib import Path
 import errno
@@ -228,7 +229,7 @@ CUDA_NOT_FOUND_MESSAGE = (
 )
 ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hip) else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
-IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
+IS_HIP_EXTENSION = bool(ROCM_HOME is not None and torch.version.hip is not None)
 ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
@@ -787,6 +788,7 @@ class BuildExtension(build_ext):
 
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
+            # pyrefly: ignore  # no-matching-overload
             output_dir = os.path.abspath(output_dir)
 
             # See Note [Absolute include_dirs]
@@ -977,6 +979,7 @@ class BuildExtension(build_ext):
                                    is_standalone=False):
             if not self.compiler.initialized:
                 self.compiler.initialize()
+            # pyrefly: ignore  # no-matching-overload
             output_dir = os.path.abspath(output_dir)
 
             # Note [Absolute include_dirs]
@@ -1528,6 +1531,7 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         # Support CUDA_INC_PATH env variable supported by CMake files
         if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
                 cuda_inc_path != '/usr/include':
+            # pyrefly: ignore  # unbound-name
             paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
@@ -2092,7 +2096,7 @@ def _jit_compile(name,
                  with_sycl: Optional[bool],
                  is_python_module,
                  is_standalone,
-                 keep_intermediates=True) -> None:
+                 keep_intermediates=True) -> Union[types.ModuleType, str]:
     if is_python_module and is_standalone:
         raise ValueError("`is_python_module` and `is_standalone` are mutually exclusive.")
 
@@ -2306,7 +2310,7 @@ def _write_ninja_file_and_build_library(
 def is_ninja_available():
     """Return ``True`` if the `ninja <https://ninja-build.org/>`_ build system is available on the system, ``False`` otherwise."""
     try:
-        subprocess.check_output('ninja --version'.split())
+        subprocess.check_output(['ninja', '--version'])
     except Exception:
         return False
     else:
@@ -2569,6 +2573,7 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
         from setuptools import distutils  # type: ignore[attr-defined]
+        # pyrefly: ignore  # missing-attribute
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         try:

@@ -35,7 +35,8 @@ void eval_frame_callback_set(PyObject* obj) {
 }
 
 // 3.15 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_15_PLUS)
+// 3.14 currently not fully supported on Windows
+#if !(IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32)))
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \

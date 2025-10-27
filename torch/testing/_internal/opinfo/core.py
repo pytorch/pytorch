@@ -8,12 +8,12 @@ import math
 import operator
 import unittest
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 
 import torch
 from torch.testing import make_tensor
@@ -166,7 +166,7 @@ class SampleInput:
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
 explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
-        elif len(var_args) or len(var_kwargs):
+        elif var_args or var_kwargs:
             assert (
                 output_process_fn_grad is None
                 and broadcasts_input is None

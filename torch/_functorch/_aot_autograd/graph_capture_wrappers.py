@@ -12,9 +12,10 @@ It does so by:
 """
 
 import warnings
+from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -159,6 +160,7 @@ def fn_prepped_for_autograd(
     fn: TraceFn,
     args_descs: list[AOTInput],
     meta: ViewAndMutationMeta,
+    aot_config: AOTConfig,
 ) -> PreppedForAutogradTraceFn:
     @simple_wraps(fn)
     def inner_fn(*args):
@@ -239,10 +241,11 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
-        for arg in args_maybe_cloned:
-            if not isinstance(arg, Tensor):
-                continue
-            sync_functional_tensor(arg)
+        if not aot_config.disable_functionalization:
+            for arg in args_maybe_cloned:
+                if not isinstance(arg, Tensor):
+                    continue
+                sync_functional_tensor(arg)
 
         return (fw_outs_to_return, out_grad_mask), (
             fw_outs_to_return_descs,
@@ -429,9 +432,12 @@ def create_joint(
             with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(primals, tangents)
 
-    inner_fn_with_anomaly.handle = joint_fn_handle  # type: ignore[attr-defined]
+    def joint_helper(primals, tangents):
+        return inner_fn_with_anomaly(primals, tangents)
 
-    return cast(JointTraceFn, inner_fn_with_anomaly)  # deal with 'handle' property
+    joint_helper.handle = joint_fn_handle  # type: ignore[attr-defined]
+
+    return joint_helper
 
 
 def create_functionalized_rng_ops_wrapper(
@@ -1304,10 +1310,12 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         without_output_descs(metadata_fn),
+        # pyrefly: ignore  # bad-argument-type
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
+        # pyrefly: ignore  # not-iterable
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
@@ -1339,6 +1347,15 @@ def create_functional_call(
             maybe_disable_thunkify(),
         ):
             if isinstance(mod, torch.fx.GraphModule):
+                if kwargs:
+                    # Handle **kwargs. FX only natively supports positional
+                    # arguments (through placeholders).
+                    arg_list = list(args[params_len:])
+                    arg_list.extend(list(kwargs.values()))
+                    args = tuple(arg_list)
+                else:
+                    args = args[params_len:]
+
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
@@ -1347,9 +1364,7 @@ def create_functional_call(
                         fake_mode = detect_fake_mode()
                         assert fake_mode is not None
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(
-                            *args[params_len:], **kwargs
-                        )
+                        out = PropagateUnbackedSymInts(mod).run(*args)
             else:
                 out = mod(*args[params_len:], **kwargs)
 

@@ -633,7 +633,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         worker_group = agent.get_worker_group()
 
         num_restarts = 3
-        for _ in range(0, num_restarts):
+        for _ in range(num_restarts):
             agent._restart_workers(worker_group)
             self.assertEqual(WorkerState.HEALTHY, worker_group.state)
 

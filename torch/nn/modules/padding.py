@@ -84,6 +84,7 @@ class CircularPad1d(_CircularPadNd):
                  [5., 6., 7., 4., 5., 6., 7., 4.]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
@@ -144,6 +145,7 @@ class CircularPad2d(_CircularPadNd):
                   [8., 6., 7., 8., 6.]]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
@@ -194,6 +196,7 @@ class CircularPad3d(_CircularPadNd):
         >>> output = m(input)
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
@@ -265,6 +268,7 @@ class ConstantPad1d(_ConstantPadNd):
                  [ 3.5000,  3.5000,  3.5000, -3.6372,  0.1182, -1.8652,  3.5000]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t, value: float) -> None:
@@ -316,6 +320,7 @@ class ConstantPad2d(_ConstantPadNd):
     """
 
     __constants__ = ["padding", "value"]
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t, value: float) -> None:
@@ -356,6 +361,7 @@ class ConstantPad3d(_ConstantPadNd):
         >>> output = m(input)
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t, value: float) -> None:
@@ -409,6 +415,7 @@ class ReflectionPad1d(_ReflectionPadNd):
                  [7., 6., 5., 4., 5., 6., 7., 6.]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
@@ -462,6 +469,7 @@ class ReflectionPad2d(_ReflectionPadNd):
                   [7., 6., 7., 8., 7.]]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
@@ -517,6 +525,7 @@ class ReflectionPad3d(_ReflectionPadNd):
                    [1., 0., 1., 0.]]]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
@@ -570,6 +579,7 @@ class ReplicationPad1d(_ReplicationPadNd):
                  [4., 4., 4., 4., 5., 6., 7., 7.]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
@@ -623,6 +633,7 @@ class ReplicationPad2d(_ReplicationPadNd):
                   [6., 6., 7., 8., 8.]]]])
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
@@ -665,6 +676,7 @@ class ReplicationPad3d(_ReplicationPadNd):
         >>> output = m(input)
     """
 
+    # pyrefly: ignore  # bad-override
     padding: tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:

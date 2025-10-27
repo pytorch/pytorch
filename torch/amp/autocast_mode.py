@@ -464,7 +464,11 @@ def _cast(value, device_type: str, dtype: _dtype):
         return value.to(dtype) if is_eligible else value
     elif isinstance(value, (str, bytes)):
         return value
-    elif HAS_NUMPY and isinstance(value, np.ndarray):
+    elif HAS_NUMPY and isinstance(
+        value,
+        # pyrefly: ignore  # missing-attribute
+        np.ndarray,
+    ):
         return value
     elif isinstance(value, collections.abc.Mapping):
         return {
@@ -521,18 +525,18 @@ def custom_fwd(
         args[0]._dtype = torch.get_autocast_dtype(device_type)
         if cast_inputs is None:
             args[0]._fwd_used_autocast = torch.is_autocast_enabled(device_type)
-            return fwd(*args, **kwargs)
+            return fwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
         else:
             autocast_context = torch.is_autocast_enabled(device_type)
             args[0]._fwd_used_autocast = False
             if autocast_context:
                 with autocast(device_type=device_type, enabled=False):
-                    return fwd(
+                    return fwd(  # pyrefly: ignore  # not-callable
                         *_cast(args, device_type, cast_inputs),
                         **_cast(kwargs, device_type, cast_inputs),
                     )
             else:
-                return fwd(*args, **kwargs)
+                return fwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
 
     return decorate_fwd
 
@@ -567,6 +571,6 @@ def custom_bwd(bwd=None, *, device_type: str):
             enabled=args[0]._fwd_used_autocast,
             dtype=args[0]._dtype,
         ):
-            return bwd(*args, **kwargs)
+            return bwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
 
     return decorate_bwd

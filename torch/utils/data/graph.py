@@ -72,6 +72,7 @@ def _list_connected_datapipes(
             p.dump(scan_obj)
         except (pickle.PickleError, AttributeError, TypeError):
             if dill_available():
+                # pyrefly: ignore  # missing-attribute
                 d.dump(scan_obj)
             else:
                 raise

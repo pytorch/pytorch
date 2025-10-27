@@ -54,6 +54,7 @@ class Event:
         if isinstance(data, str):
             data_dict = json.loads(data)
         data_dict["source"] = EventSource[data_dict["source"]]  # type: ignore[possibly-undefined]
+        # pyrefly: ignore  # unbound-name
         return Event(**data_dict)
 
     def serialize(self) -> str:
@@ -108,6 +109,7 @@ class RdzvEvent:
         if isinstance(data, str):
             data_dict = json.loads(data)
         data_dict["node_state"] = NodeState[data_dict["node_state"]]  # type: ignore[possibly-undefined]
+        # pyrefly: ignore  # unbound-name
         return RdzvEvent(**data_dict)
 
     def serialize(self) -> str:

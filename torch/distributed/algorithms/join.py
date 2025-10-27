@@ -210,6 +210,7 @@ class Join:
         """
         process_group = None
         device = None
+        # pyrefly: ignore  # bad-assignment
         for joinable in self._joinables:
             if process_group is None:
                 process_group = joinable.join_process_group

@@ -1,7 +1,8 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch._decomp
@@ -146,7 +147,7 @@ def native_layer_norm_backward(
     inner_dims = input_shape[axis:]
     outer_dims = input_shape[:axis]
     inner_dim_indices = list(range(axis, input_ndim))
-    outer_dim_indices = list(range(0, axis))
+    outer_dim_indices = list(range(axis))
 
     N = 1
     for i in inner_dims:

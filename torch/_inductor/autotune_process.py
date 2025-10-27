@@ -557,6 +557,7 @@ class GPUDeviceBenchmarkMixin:
             res = benchmarker.benchmark_gpu(fn)
             device_interface.synchronize()  # shake out any CUDA errors
 
+        # pyrefly: ignore  # bad-return
         return res
 
 
