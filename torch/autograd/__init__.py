@@ -92,7 +92,7 @@ def _make_grads(
     is_grads_batched: bool,
 ) -> tuple[_OptionalTensor, ...]:
     new_grads: list[_OptionalTensor] = []
-    # pyrefly: ignore  # no-matching-overload
+
     for out, grad in zip(outputs, grads):
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None
