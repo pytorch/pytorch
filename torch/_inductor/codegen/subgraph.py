@@ -112,7 +112,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
 
-        # Use appropriate benchmarker based on layout device type
         if self.layout.device.type == "cpu":
             return benchmarker.benchmark_cpu(lambda: bm_func([*sym_inputs, *args]))
         else:
@@ -220,9 +219,9 @@ class SubgraphTemplate(KernelTemplate):
 
         Args:
             name: Base name for the choices
-            decompositions: List of decomposition functions to compare
-            input_nodes: Input nodes for the operation
-            non_tensor_args: List of non tensor kwargs dicts, one per decomposition
+            decompositions: List of decomposition functions to compete in autotuning
+            input_nodes: List of tensor inputs. All tensor arguments must be passed here.
+            non_tensor_args: List of non-tensor kwargs only, one dict per corresponding decomposition.
             default_impl: Default implementation for layout inference
 
         Returns:
@@ -236,31 +235,19 @@ class SubgraphTemplate(KernelTemplate):
             f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
         )
 
-        # Infer layouts and ensure stride consistency for fair autotuning comparison
+        # Infer layouts and ensure layout consistency for fair autotuning comparison
         layouts = [
-            self._infer_custom_op_layout(input_nodes, [decomp], kwargs, default_impl)
+            self._infer_custom_op_layout(input_nodes, decomp, kwargs, default_impl)
             for decomp, kwargs in zip(decompositions, non_tensor_args)
         ]
 
-        self._validate_stride_consistency(name, decompositions, layouts)
+        # Validate all decompositions produce equivalent layouts for fair comparison
+        self._validate_layout_equivalence(name, decompositions, layouts)
+        layout = layouts[0]  # All layouts are now validated to be equivalent
 
-        # Assert single output layout - assumes custom ops have one output tensor
-        assert len(layouts) > 0, f"No layouts inferred for custom op '{name}'"
-        assert all(
-            layout.device == layouts[0].device
-            and layout.dtype == layouts[0].dtype
-            and layout.size == layouts[0].size
-            for layout in layouts
-        ), f"All decompositions for '{name}' must produce equivalent output layouts"
-
-        layout = layouts[0]  # All layouts have equivalent stride/shape/dtype now
-
-        choices = []
+        choices: list[SubgraphChoiceCaller] = []
         for decomp, decomp_kwargs in zip(decompositions, non_tensor_args):
-            # Create make_fx_graph function for this decomposition with its merged kwargs
-            # decomp should be a clean function (not functools.partial)
-            # decomp_kwargs contains all merged parameters (config params + runtime kwargs)
-
+            # Create make_fx_graph function for this decomposition
             import functools
 
             def make_fx_graph(
@@ -268,69 +255,37 @@ class SubgraphTemplate(KernelTemplate):
                 decomp: Callable[..., Any] = decomp,
                 decomp_kwargs: dict[str, Any] = decomp_kwargs,
             ) -> Any:
+                # decomp_kwargs contains all merged parameters: CustomOpConfig params + runtime kwargs
                 from torch.fx.experimental.proxy_tensor import make_fx
 
                 return make_fx(functools.partial(decomp, **decomp_kwargs))(*args)
 
-            # Generate name from decomp and kwargs
-            decomp_name = decomp.__name__
-            if decomp_kwargs:
-                param_suffix = "_".join(
-                    f"{k}_{v}" for k, v in sorted(decomp_kwargs.items())
-                )
-                full_name = f"{decomp_name}_{param_suffix}"
-            else:
-                full_name = decomp_name
+            # Generate descriptive name for this variant
+            variant_name = self._generate_variant_name(decomp, decomp_kwargs)
 
             choice = self.generate(
-                name=f"{name}_{full_name}",
+                name=f"{name}_{variant_name}",
                 input_nodes=input_nodes,
                 layout=layout,
                 make_fx_graph=make_fx_graph,
-                description=f"CustomOp {decomp_name}",
+                description=f"CustomOp {decomp.__name__}",
             )
             choices.append(choice)
 
         return choices
 
-    def _validate_stride_consistency(
-        self,
-        op_name: str,
-        decompositions: list[Callable[..., Any]],
-        layouts: list[Layout],
-    ) -> None:
-        """Ensure all decompositions produce compatible strides for fair autotuning."""
-        if not layouts:
-            return
+    def _generate_variant_name(
+        self, decomp: Callable[..., Any], kwargs: dict[str, Any]
+    ) -> str:
+        """Generate a descriptive name for a decomposition variant with its parameters."""
+        base_name = decomp.__name__
+        if not kwargs:
+            return base_name
+        param_suffix = "_".join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
+        return f"{base_name}_{param_suffix}"
 
-        strides = [layout.stride for layout in layouts]
-        reference = strides[0]
-        for i, stride in enumerate(strides[1:]):
-            if stride != reference:
-                raise AssertionError(
-                    f"Stride mismatch in custom op '{op_name}' autotuning: "
-                    f"'{decompositions[i].__name__}' produces stride {stride}, "
-                    f"but '{decompositions[0].__name__}' produces {reference}. "
-                    f"All decompositions must have identical output strides."
-                )
-
-    def _infer_custom_op_layout(
-        self,
-        input_nodes: list[Buffer],
-        decompositions: list[Callable[..., Any]],
-        kwargs: dict[str, Any],
-        default_impl: Optional[Callable[..., Any]] = None,
-    ) -> Layout:
-        """Infer output layout for custom ops using the default implementation when available.
-
-        Note that the Subgraph assumes custom ops return exactly one tensor so far.
-        TODO: Add support for multiple output custom ops.
-        """
-        import functools
-
-        from torch._inductor.virtualized import V
-
-        # Assert kwargs contain only non-tensor arguments for functools.partial
+    def _validate_non_tensor_kwargs(self, kwargs: dict[str, Any]) -> None:
+        """Validate that kwargs contains only non-tensor arguments."""
         for key, value in kwargs.items():
             assert not isinstance(value, (torch.Tensor, Buffer)), (
                 f"kwargs['{key}'] contains tensor {type(value)}. "
@@ -338,8 +293,49 @@ class SubgraphTemplate(KernelTemplate):
                 f"Only scalar/non-tensor parameters should be in kwargs."
             )
 
-        # Use default_impl if available, otherwise use first decomposition
-        impl = default_impl if default_impl is not None else decompositions[0]
+    def _validate_layout_equivalence(
+        self,
+        op_name: str,
+        decompositions: list[Callable[..., Any]],
+        layouts: list[Layout],
+    ) -> None:
+        """Ensure all layouts have consistent stride, device, dtype, and sizes for fair autotuning."""
+        if not layouts:
+            return
+
+        reference = layouts[0]
+        for i, layout in enumerate(layouts[1:], start=1):
+            if (layout.device, layout.dtype, layout.size, layout.stride) != (
+                reference.device,
+                reference.dtype,
+                reference.size,
+                reference.stride,
+            ):
+                raise AssertionError(
+                    f"Layout mismatch in custom op '{op_name}': "
+                    f"decomposition '{decompositions[i].__name__}' produces "
+                    f"({layout.device}, {layout.dtype}, {layout.size}, {layout.stride}) "
+                    f"but '{decompositions[0].__name__}' produces "
+                    f"({reference.device}, {reference.dtype}, {reference.size}, {reference.stride})"
+                )
+
+    def _infer_custom_op_layout(
+        self,
+        input_nodes: list[Buffer],
+        function_decomposition: Callable[..., Any],
+        kwargs: dict[str, Any],
+        default_impl: Optional[Callable[..., Any]] = None,
+    ) -> Layout:
+        """Infer output layout for custom ops using the default implementation when available.
+        Note that the Subgraph assumes custom ops return exactly one tensor output.
+        TODO: Add support for multiple output custom ops.
+        """
+        import functools
+
+        from torch._inductor.virtualized import V
+
+        # Assert kwargs contain only non-tensor arguments
+        self._validate_non_tensor_kwargs(kwargs)
 
         with V.fake_mode:
             example_inputs = []
@@ -353,9 +349,7 @@ class SubgraphTemplate(KernelTemplate):
                 )
                 example_inputs.append(fake_tensor)
 
-            fn = functools.partial(
-                impl, **kwargs
-            )  # kwargs must be non-tensor for partial
+            fn = functools.partial(function_decomposition, **kwargs)
             output = fn(*example_inputs)
 
             # Assert single output
