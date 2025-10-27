@@ -1160,6 +1160,7 @@ def _output_json_for_dashboard(
     if not experiments:
         return
 
+    import math
     import platform
     from dataclasses import asdict, dataclass
     from typing import Any, Optional
@@ -1174,6 +1175,10 @@ def _output_json_for_dashboard(
 
         # Process each backend result
         for backend, results in results_dict.items():
+            # Skip backends that were not run (NaN results)
+            if math.isnan(results.fwd_time):
+                continue
+
             # Extract data from experiment
             test_name = f"{backend}_{config.attn_type}_"
             input_config = f"shape: {config.shape}, dtype: {config.dtype}"
@@ -1311,8 +1316,8 @@ def _output_json_for_dashboard(
                 )
                 records.append(asdict(record_fwd_tflops))
 
-            # Add record for backward latency (if available)
-            if config.calculate_bwd_time and results.bwd_time is not None:
+            # Add record for backward latency (if available and not NaN)
+            if config.calculate_bwd_time and results.bwd_time is not None and not math.isnan(results.bwd_time):
                 record_bwd_latency = BenchmarkRecord(
                     benchmark=BenchmarkInfo(
                         name=benchmark_name,
