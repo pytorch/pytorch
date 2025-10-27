@@ -14330,6 +14330,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(4, 6, 8, device=GPU_TYPE),))
 
+        def fn(x):
+            # sliced tensor with gaps in memory
+            sliced = x[:, :10]
+            return (sliced.argmin(), sliced.argmax())
+
+        self.common(fn, (torch.randn(10, 20, device=GPU_TYPE),))
+
+        # Test column major passed as input
+        def fn(x):
+            return (x.argmin(), x.argmax())
+
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
+
     # end of class CommonTemplate - add new tests here
 
 
