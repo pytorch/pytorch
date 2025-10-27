@@ -88,7 +88,7 @@ def _check_if_instances_equal(op1, op2) -> bool:
     if isinstance(op1, (list | tuple)):
         return tuple(op1) == tuple(op2)
 
-    if type(op1) != type(op2):
+    if type(op1) is not type(op2):
         return False
 
     # some classes have __eq__ defined but they may be insufficient
@@ -255,10 +255,7 @@ class TestCutlassBackend(TestCase):
 
         self.assertTrue(try_import_cutlass())
 
-        if config.is_fbcode():
-            import cutlass_cppgen  # noqa: F401
-        else:
-            import cutlass_cppgen as python_cutlass  # noqa: F401
+        import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):

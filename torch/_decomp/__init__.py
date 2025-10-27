@@ -240,7 +240,7 @@ def get_decompositions(
 
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
-    # pyrefly: ignore  # bad-assignment
+
     for opo in registry:
         if isinstance(opo, (OpOverload, OpOverloadPacket)):
             packets_to_overloads[opo.overloadpacket].append(opo)

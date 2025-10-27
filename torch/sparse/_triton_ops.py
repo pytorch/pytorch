@@ -385,7 +385,7 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
                 g1 = c_offsets[r + 1]
                 for g in range(g0, g1):
                     p, q = pq[g]
-                    # pyrefly: ignore  # unsupported-operation
+
                     accumulators[r] += blocks[p] @ others[q]
         else:
             _scatter_mm2(blocks, others, c_offsets, pq, accumulators)

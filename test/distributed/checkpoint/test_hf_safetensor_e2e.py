@@ -587,7 +587,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             print("safetensors not installed")
             return
 
-        tensor = torch.rand(1).cuda()
+        tensor = torch.rand(1).to(self.device_type)
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
         ref_state_dict = {"dtensor": dtensor}
@@ -599,7 +599,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             ),
         )
 
-        tensor = torch.rand(1).cuda()
+        tensor = torch.rand(1).to(self.device_type)
         mesh_2 = init_device_mesh(self.device_type, (2, self.world_size // 2))
         dtensor = distribute_tensor(tensor, mesh_2, [Shard(0), Shard(0)])
         state_dict = {"dtensor": dtensor}

@@ -5,6 +5,7 @@ import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch.testing._internal.common_utils import TestCase
+from torch.utils._ordered_set import OrderedSet
 
 
 class TestAugmentedGraphHelper(TestCase):
@@ -61,9 +62,29 @@ class TestAugmentedGraphHelper(TestCase):
             ]:
                 self.nodes[node.name] = node
 
-        # Get all nodes and create tracker
+        # Get all nodes and compute ancestors
         self.all_nodes = list(self.graph.nodes)
-        self.tracker = AugmentedGraphHelper(self.graph)
+        self.node_ancestors = self._collect_node_ancestors(self.graph)
+
+        # Create tracker with ancestors
+        self.tracker = AugmentedGraphHelper(
+            self.graph, node_ancestors=self.node_ancestors
+        )
+
+    def _collect_node_ancestors(
+        self, graph: fx.Graph
+    ) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """Collect all ancestors for each node."""
+        from collections import defaultdict
+
+        from torch.utils._ordered_set import OrderedSet
+
+        ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node in graph.nodes:
+            for input_node in node.all_input_nodes:
+                ancestors[node].add(input_node)
+                ancestors[node] |= ancestors[input_node]
+        return ancestors
 
     def get_deps(self, node):
         """Helper to get dependencies for a node."""

@@ -822,7 +822,8 @@ def slice_forward(
     # create unbacked if case unknown
     if new_size is None:
         new_size = shape_env.create_unbacked_symint()
-        torch._check_is_size(new_size, max=sizes[dim])
+        torch._check(new_size >= 0)
+        torch._check(new_size <= sizes[dim])
 
     # stride
     new_stride = strides[dim] * step
@@ -1335,7 +1336,7 @@ def make_fast_binary_impl(
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and not op.device.type == "cpu":
+            if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
             # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:

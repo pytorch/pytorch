@@ -138,7 +138,7 @@ void Tensor::_backward(TensorList inputs,
         const std::optional<Tensor>& gradient,
         std::optional<bool> keep_graph,
         bool create_graph) const {
-  return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
+  impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }
 
 const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {

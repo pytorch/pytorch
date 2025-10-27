@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     NoTest,
     raise_on_run_directly,
     skipCUDANonDefaultStreamIf,
-    skipIfRocm,
     TEST_CUDA,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -48,7 +47,6 @@ class TestCUDA(JitTestCase):
         torch.cuda.empty_cache()
         super().tearDown()
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_cuda_synchronize(self):
         # Test device synchronization.
@@ -160,7 +158,6 @@ class TestCUDA(JitTestCase):
         self.assertEqual(0, d2)
         self.assertEqual(d0, d2)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @skipCUDANonDefaultStreamIf(True)

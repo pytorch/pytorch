@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 from torch.ao.quantization.backend_config import BackendConfig

@@ -52,6 +52,7 @@ class CondOp(HigherOrderOperator):
         validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
 
+    # pyrefly: ignore  # bad-override
     def gen_schema(self, pred, true_fn, false_fn, operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -176,6 +177,7 @@ def cond(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
                 UserWarning,
+                stacklevel=2,
             )
         # This is the eager case. We can just run the true or false branch.
         if pred:
@@ -284,6 +286,7 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
 
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         pred,
@@ -325,8 +328,7 @@ class CondAutogradOp(torch.autograd.Function):
 
                 true_outputs = fn(*args)
                 grads_tensor_masks = [
-                    True if isinstance(out, torch.Tensor) else False
-                    for out in true_outputs
+                    bool(isinstance(out, torch.Tensor)) for out in true_outputs
                 ]
                 return filter_with_masks(true_outputs, grads_tensor_masks)
 

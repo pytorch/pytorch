@@ -814,17 +814,31 @@ static void _get_tensors_to_save(
 static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
-    THPFunction* self) {
+    THPFunction* self,
+    PyObject* outputs,
+    int64_t num_outputs) {
   if (tensors_to_save.empty())
     return;
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
+
+  std::unordered_set<at::TensorImpl*> output_impls{};
+  output_impls.reserve(num_outputs);
+  for (const auto i : c10::irange(num_outputs)) {
+    PyObject* obj = PyTuple_GET_ITEM(outputs, i);
+    if (THPVariable_Check(obj)) {
+      const auto& tensor = THPVariable_Unpack(obj);
+      output_impls.insert(tensor.unsafeGetTensorImpl());
+    }
+  }
+
   for (const auto& opt_tensor : tensors_to_save) {
     if (!opt_tensor.has_value()) {
       self->saved_variables.emplace_back();
     } else {
-      bool is_output = opt_tensor.value().grad_fn().get() == cdata_ptr.get();
+      bool is_output =
+          output_impls.count(opt_tensor.value().unsafeGetTensorImpl()) > 0;
       self->saved_variables.emplace_back(opt_tensor.value(), is_output);
     }
   }
@@ -1139,7 +1153,8 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(tensors_to_save, cdata, grad_fn);
+    _save_variables(
+        tensors_to_save, cdata, grad_fn, outputs.get(), num_outputs);
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);
