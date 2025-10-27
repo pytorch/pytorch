@@ -65,6 +65,7 @@ from ..utils import (
     guard_if_dyn,
     has_torch_function,
     hashable,
+    is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
     unwrap_if_wrapper,
@@ -254,6 +255,9 @@ class BaseTorchVariable(VariableTracker):
             value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        elif is_wrapper_or_member_descriptor(value):
+            # Dont need to guard on wrappers
+            pass
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
