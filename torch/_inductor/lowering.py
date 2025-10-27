@@ -6100,7 +6100,10 @@ def _make_reduction_inner(
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
-        elif isinstance(x.data, (ir.ReinterpretView, ir.StorageBox)):
+        elif isinstance(x.data, ir.ReinterpretView) or (
+            isinstance(x.data, ir.StorageBox)
+            and isinstance(x.data.data, ir.InputBuffer)
+        ):
             layout = x.get_layout()
             should_compute_logical_index = (
                 layout.is_transposed() or not layout.is_contiguous()
