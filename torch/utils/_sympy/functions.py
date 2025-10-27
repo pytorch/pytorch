@@ -1465,16 +1465,17 @@ BitwiseFn_bitwise_or = make_opaque_bitwise_fn("bitwise_or", "or_")
 
 from sympy.logic.boolalg import BooleanFunction
 
+
 class OrderedAnd(BooleanFunction):
     @classmethod
     def eval(cls, *args):
-        # Short-circuit False
         for a in args:
-            if a == False:
+            if not a:
                 return False
-        # All True → True
-        if all(a == True for a in args):
+
+        if all(a for a in args):
             return True
+
         # Returning None tells SymPy not to simplify further
         return None
 

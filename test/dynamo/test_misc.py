@@ -13465,7 +13465,11 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         def chunked_compute(x, w):
             return torch.cond(x.shape[0] > 0, compute, nop, (x, w))
 
-        x, w = torch.randn(4, 16, requires_grad=True), torch.randn(16, 16, requires_grad=True)
+        x, w = (
+            torch.randn(4, 16, requires_grad=True),
+            torch.randn(16, 16, requires_grad=True),
+        )
+
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -13476,7 +13480,9 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
         orig_mod = Model()
-        mod = torch._dynamo.functional_export._dynamo_graph_capture_for_export(orig_mod)(x)
+        mod = torch._dynamo.functional_export._dynamo_graph_capture_for_export(
+            orig_mod
+        )(x)
         torch.export._trace._restore_state_dict(orig_mod, mod)
 
         # Previously, this would cause an error because torch._check(x.shape[0] == 0)

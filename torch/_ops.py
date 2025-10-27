@@ -366,7 +366,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                     else:
                         raise
 
-
             return fn(*args, **kwargs)
 
         self.py_impl(DispatchKey.Autograd)(maybe_run_autograd)

@@ -59,7 +59,6 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-from torch.utils._sympy.functions import OrderedAnd
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
@@ -85,6 +84,7 @@ from torch.utils._sympy.functions import (
     IsNonOverlappingAndDenseIndicator,
     Max,
     Mod,
+    OrderedAnd,
     PythonMod,
     TruncToInt,
 )
@@ -7954,11 +7954,8 @@ class ShapeEnv:
                 "constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper
             )
 
-
     @contextmanager
-    def patch_ra_prelude(
-        self, prelude: sympy.Expr
-    ) -> Iterator[None]:
+    def patch_ra_prelude(self, prelude: sympy.Expr) -> Iterator[None]:
         """
         Context manager that ensures all runtime asserts generated while this context manager
         is active include a prelude expression. This is mainly used in torch.cond to guarantee
@@ -7971,7 +7968,6 @@ class ShapeEnv:
             yield
         finally:
             self.ra_prelude = prev
-
 
 
 def _is_int(expr: object) -> bool:
