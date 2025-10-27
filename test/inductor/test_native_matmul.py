@@ -152,5 +152,6 @@ if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    # TODO: support native matmul on xpu
+    if HAS_GPU and GPU_TYPE != "xpu":
         run_tests()
