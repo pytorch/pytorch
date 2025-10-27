@@ -29,7 +29,7 @@ build:cpu-only --platform_suffix=-cpu-only
 # doing this. We must also do it for the "-cpu-only" platform suffix.
 build --copt=-isystem --copt=bazel-out/k8-fastbuild-cpu-only/bin
 # rules_cuda configuration
-build:cpu-only --@rules_cuda//cuda:enable_cuda=False
+build:cpu-only --@rules_cuda//cuda:enable_cuda=false
 
 # Definition of --config=shell
 # interactive shell immediately before execution
