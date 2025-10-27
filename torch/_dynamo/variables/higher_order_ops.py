@@ -1371,6 +1371,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 supports_aliasing=self.supports_aliasing,
             )
 
+            # need to ensure we increase epoch so we don't memoize unbacked bindings
+            # across different subgraphs which can interfere with runtime assertion
+            # generation.
+            tx.fake_mode.epoch += 1
+
             if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
                     "Expected branches to return a possibly nested pytree of tensors "
@@ -2835,8 +2840,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
-
-        tx: InstructionTranslator = tx
 
         def create_scalar():
             return query.call_method(
