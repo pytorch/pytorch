@@ -2568,7 +2568,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # we shouldn't broadly catch all errors here;
                 # some come from real-kernel mutation/aliasing checks we want to run.
                 # add more exception types as needed.
-                log.debug(
+                log.debug(  # noqa: G200
                     "real-tensor fallback failed for %s: %s; silently ignoring",
                     func,
                     exc,
@@ -2620,7 +2620,7 @@ class FakeTensorMode(TorchDispatchMode):
                         and s.rhs == 1
                     ):
                         assert self.shape_env is not None
-                        # pyrefly: ignore  # unbound-name
+
                         self.shape_env.set_unbacked_var_to_val(s, int(real_t))
 
             if real_out is not nil:
@@ -2674,7 +2674,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
         # If there's a Python meta, prefer that over the decomposition
-        from torch._decomp import meta_table as meta_table
+        from torch._decomp import meta_table
 
         if (
             func not in meta_table
