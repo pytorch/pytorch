@@ -558,8 +558,8 @@ def has_pointwise_use(
     is_pointwise_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
 ) -> bool:
     """
-    Is there an immediate pointwise use (tagged with torch.Tag.pointwise
-    or True for optional `is_pointwise_fn`) of an op.
+    Is there an immediate pointwise use, i.e. a descendant in a graph
+    (tagged with torch.Tag.pointwise or True for optional `is_pointwise_fn`) of an op.
 
     Uses in view ops will follow the views uses.
     """
