@@ -660,7 +660,8 @@ class _FileSystemWriter(StorageWriter):
                 warnings.warn(
                     f"Detected an existing checkpoint in {self.path}, overwriting since {self.overwrite=}."
                     " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
-                    " maintain this functionality or False to raise when an existing checkpoint is found."
+                    " maintain this functionality or False to raise when an existing checkpoint is found.",
+                    stacklevel=2,
                 )
             else:
                 raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
