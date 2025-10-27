@@ -42,16 +42,24 @@ then running all the fibers for this.
 """
 
 import contextlib
+import copy
 import functools
 import operator
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
-from typing import Any, Callable, Generator, Optional, Union
+from typing import Any, Optional, Union
 
-import numpy as np
+
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
 
 import torch
 from torch import Size, SymBool, SymInt, Tensor
@@ -104,7 +112,7 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
     return val
 
 
-def collect_cuda_rng_states() -> list[torch.Tensor]:
+def _collect_cuda_rng_states() -> list[torch.Tensor]:
     """
     Collects RNG state from all available CUDA devices.
 
@@ -126,7 +134,7 @@ def collect_cuda_rng_states() -> list[torch.Tensor]:
     return rng_states
 
 
-def set_cuda_rng_states(rng_states: list[torch.Tensor]) -> None:
+def _set_cuda_rng_states(rng_states: list[torch.Tensor]) -> None:
     """
     Sets RNG state for all CUDA devices from a list of states.
 
@@ -147,7 +155,7 @@ def _get_rng_state() -> tuple[torch.Tensor, list[torch.Tensor]]:
     """
     Gets CPU and CUDA rng states from all devices.
     """
-    return (torch.get_rng_state(), collect_cuda_rng_states())
+    return (torch.get_rng_state(), _collect_cuda_rng_states())
 
 
 def _set_rng_state(cpu_state: torch.Tensor, cuda_states: list[torch.Tensor]) -> None:
@@ -157,7 +165,57 @@ def _set_rng_state(cpu_state: torch.Tensor, cuda_states: list[torch.Tensor]) -> 
     will get their rng state set.
     """
     torch.set_rng_state(cpu_state)
-    set_cuda_rng_states(cuda_states)
+    _set_cuda_rng_states(cuda_states)
+
+
+def _combine_int_rank_results(rank_results: dict[int, int]) -> int | torch.SymInt:
+    any_v = next(iter(rank_results.values()))
+
+    if all(v == any_v for v in rank_results.values()):
+        return any_v
+
+    return torch.SymInt(LocalIntNode(rank_results))
+
+
+def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
+    any_v = next(iter(rank_results.values()))
+
+    if isinstance(any_v, Tensor):
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(rank_results)
+
+    if isinstance(any_v, int):
+        return _combine_int_rank_results(rank_results)
+
+    assert all(v == any_v for v in rank_results.values()), (
+        "Non Tensor or int rank results must be equal for all ranks"
+    )
+
+    return any_v
+
+
+def _combine_rank_results(rank_results: dict[int, Any], default: Any | None) -> Any:
+    rank_ids = rank_results.keys()
+    rank_value = rank_results[next(iter(rank_ids))]
+
+    if isinstance(rank_value, (list, tuple)):
+        max_rank_result_len = max(len(v) for v in rank_results.values())
+        ret_list = []
+        for i in range(max_rank_result_len):
+            rank_col_results = {
+                r: v[i] if i < len(v) else default for r, v in rank_results.items()
+            }
+            ret_list.append(_combine_any_rank_results(rank_col_results))
+        return type(rank_value)(ret_list)
+    else:
+        return _combine_any_rank_results(rank_results)
+
+
+def _zero_sized_like(tensor: torch.Tensor, dim: int) -> torch.Tensor:
+    tensor_size = list(tensor.size())
+    tensor_size[dim] = 0
+    empty_tensor = torch.empty(*tensor_size, dtype=tensor.dtype, device=tensor.device)
+    return empty_tensor
 
 
 def _for_each_rank_run_func(
@@ -180,6 +238,7 @@ def _for_each_rank_run_func(
     rng_state = _get_rng_state()
     flat_rank_rets = {}
 
+    default_value: Tensor | None = None
     for r in sorted(ranks):
         _set_rng_state(*rng_state)
         rank_flat_args = [_map_to_rank_local_val(a, r) for a in flat_args]
@@ -187,33 +246,16 @@ def _for_each_rank_run_func(
         rank_ret = func(*rank_args, **rank_kwargs)
         flat_rank_rets[r] = rank_ret
 
-    rr_key = next(iter(flat_rank_rets.keys()))
-    rr_val = flat_rank_rets[rr_key]
+        if default_value is None and func is torch.ops.aten.split.Tensor:
+            # If split happens over the dimension smaller than the number of chunks
+            # it is possible that some ranks will produce shorter lists of chunks.
+            # In order to make the result across all ranks of the same length we
+            # append empty tensors (zero size on the split dimension).
+            tensor = rank_flat_args[0]
+            split_dim = 0 if len(rank_flat_args) < 3 else rank_flat_args[2]
+            default_value = _zero_sized_like(tensor, split_dim)
 
-    if isinstance(rr_val, Tensor):
-        ret = LocalTensor({r: flat_rank_rets[r] for r in sorted(ranks)})
-    elif isinstance(rr_val, (list, tuple)):
-        ret_list = []
-        for i in range(len(rr_val)):
-            rets = {r: flat_rank_rets[r][i] for r in sorted(ranks)}
-            v_it = iter(rets.values())
-            v = next(v_it)
-            if isinstance(v, Tensor):
-                ret_list.append(LocalTensor(rets))
-            elif isinstance(v, int) and not all(v == v2 for v2 in v_it):
-                ret_list.append(torch.SymInt(LocalIntNode(rets)))
-            else:
-                assert all(v == v2 for v2 in v_it)
-                ret_list.append(v)
-        ret = type(rr_val)(ret_list)
-    else:
-        v_it = iter(flat_rank_rets.values())
-        v = next(v_it)
-        if all(v == v2 for v2 in v_it):
-            return v
-        if isinstance(v, int):
-            return torch.SymInt(LocalIntNode(flat_rank_rets))
-        raise AssertionError(f"Unexpected return type {type(v)}")
+    ret = _combine_rank_results(flat_rank_rets, default_value)
 
     if alias:
         return return_and_correct_aliasing(func, args, kwargs, ret)
@@ -290,6 +332,9 @@ class LocalIntNode:
             }
         )
 
+    def neg(self) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode({r: -self._local_ints[r] for r in self._local_ints})
+
     def add(
         self, other: "int | LocalIntNode | ConstantIntNode"
     ) -> "LocalIntNode | ConstantIntNode":
@@ -335,6 +380,10 @@ class LocalIntNode:
     def eq(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] == _int_on_rank(other, r) for r in self._local_ints}
         return torch._C._get_constant_bool_symnode(len(r) == 1 and next(iter(r)))
+
+    def ne(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
+        r = {self._local_ints[r] != _int_on_rank(other, r) for r in self._local_ints}
+        return torch._C._get_constant_bool_symnode(len(r) > 1 or next(iter(r)))
 
     def gt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] > _int_on_rank(other, r) for r in self._local_ints}
@@ -458,10 +507,17 @@ class LocalTensor(torch.Tensor):
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__()
 
+    def __deepcopy__(self, memo: dict[Any, Any] | None) -> "LocalTensor":
+        local_tensors_copy = {
+            r: copy.deepcopy(t, memo) for r, t in self._local_tensors.items()
+        }
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors_copy)
+
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -484,6 +540,7 @@ class LocalTensor(torch.Tensor):
             "Expecting spec to be not None from `__tensor_flatten__` return value!"
         )
         local_tensors = inner_tensors["_local_tensors"]
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return LocalTensor(local_tensors)
 
     @classmethod
@@ -524,8 +581,13 @@ class LocalTensor(torch.Tensor):
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
 
-    def numpy(self, *, force: bool = False) -> np.ndarray:
-        return self.reconcile().numpy(force=force)
+    def numpy(
+        self, *, force: bool = False
+    ) -> np.ndarray:  # pyrefly: ignore  # missing-attribute
+        if HAS_NUMPY:
+            return self.reconcile().numpy(force=force)
+        else:
+            raise RuntimeError("Numpy is not available")
 
     def __lt__(
         self, other: torch.Tensor | bool | complex | float | int
@@ -544,6 +606,28 @@ class LocalTensor(torch.Tensor):
         if isinstance(other, LocalTensor):
             other_rec = other.reconcile()
         return self_rec > other_rec
+
+    def contiguous(
+        self,
+        memory_format: torch.memory_format = torch.contiguous_format,
+    ) -> torch.Tensor:
+        # pyrefly: ignore [bad-argument-type]
+        return LocalTensor(
+            # pyrefly: ignore [bad-argument-count]
+            {
+                r: t.contiguous(memory_format=memory_format)
+                for r, t in self._local_tensors.items()
+            }
+        )
+
+    def is_contiguous(
+        self,
+        memory_format: torch.memory_format = torch.contiguous_format,
+    ) -> bool:
+        return all(
+            t.is_contiguous(memory_format=memory_format)
+            for t in self._local_tensors.values()
+        )
 
     def tolist(self) -> list[Any]:
         """
@@ -701,10 +785,17 @@ class LocalTensorMode(TorchDispatchMode):
             raise NotImplementedError(f"{func} not implemented")
 
         if func.namespace == "_c10d_functional" or func.namespace == "_dtensor":
-            with LocalTensorMode(self.ranks):
-                return func._op_dk(
-                    DispatchKey.CompositeExplicitAutograd, *args, **kwargs
-                )
+            if func is torch.ops._dtensor.shard_dim_alltoall.default:
+                return _c10d._local_functional_shard_dim_alltoall(*args, **kwargs)
+            elif func is torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return _c10d._local_functional_all_gather_into_tensor(*args, **kwargs)
+            elif func is torch.ops._c10d_functional.reduce_scatter_tensor.default:
+                return _c10d._local_functional_reduce_scatter_tensor(*args, **kwargs)
+            else:
+                with LocalTensorMode(self.ranks):
+                    return func._op_dk(
+                        DispatchKey.CompositeExplicitAutograd, *args, **kwargs
+                    )
 
         if func.namespace == "profiler":
             return func(*args, **kwargs)
@@ -739,6 +830,7 @@ class LocalTensorMode(TorchDispatchMode):
         """
 
         with self.disable():
+            # pyrefly: ignore [bad-argument-type, bad-argument-count]
             return LocalTensor({r: cb(r) for r in self.ranks})
 
     def _patch_device_mesh(self) -> None:
@@ -749,7 +841,7 @@ class LocalTensorMode(TorchDispatchMode):
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self._old_get_coordinate = None
 
 
@@ -852,7 +944,7 @@ def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(func)
     def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
         lm = local_tensor_mode()
-        if lm is None:
+        if lm is None or lm._disable:
             return func(*args, **kwargs)
         ret = None
         with lm.disable():
@@ -861,3 +953,11 @@ def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
         return ret
 
     return wrapper
+
+
+def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:
+    """
+    Context manager that disables LocalTensorMode for the duration of the context.
+    """
+    lm = local_tensor_mode()
+    return lm.disable() if lm is not None else contextlib.nullcontext()
