@@ -560,7 +560,7 @@ class TestPatternMatcher(TestCase):
                 torch.randn(16, 16, device=GPU_TYPE),
                 torch.randn(16, 16, device=GPU_TYPE),
                 torch.randn(16, 16, device=GPU_TYPE),
-                True,
+                False,
             ),
             (
                 torch.randn(8, device=GPU_TYPE),
@@ -694,17 +694,20 @@ class TestPatternMatcher(TestCase):
         FileCheck().check("call").check_not(".run").run(code[0])
 
     def test_cat_addmm(self):
-        def fn(a, b, c):
+        def fn(b1, b2, b3, mat1, mat2, mat3):
             return torch.cat(
                 [
-                    torch.addmm(a, b, c),
-                    torch.addmm(b, c, a),
-                    torch.addmm(c, a, b),
+                    torch.addmm(b1, mat1, mat2),
+                    torch.addmm(b2, mat1, mat3),
+                    torch.addmm(b3, mat2, mat3),
                 ],
                 1,
             )
 
         args = [
+            torch.randn(16, device=GPU_TYPE),
+            torch.randn(16, device=GPU_TYPE),
+            torch.randn(16, device=GPU_TYPE),
             torch.randn(16, 16, device=GPU_TYPE),
             torch.randn(16, 16, device=GPU_TYPE),
             torch.randn(16, 16, device=GPU_TYPE),

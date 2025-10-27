@@ -51,8 +51,8 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
+    has_pointwise_use,
     is_gpu,
-    is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -1505,13 +1505,40 @@ def view_to_reshape(gm):
         nd.target = torch.ops.aten.reshape.default
 
 
+# Relevant for addmm and (add + mm)/(mm + add)
+# Follows the dispatch logic for cuBLASLt at
+# aten/src/ATen/native/cuda/Blas.cpp::isInputCompliesAddmmCudaLt
+def _cublaslt_can_fuse_bias_epilogue(inp, mat1, mat2):
+    if config.max_autotune_gemm:
+        return False
+
+    # match the dispatch logic for cuBLASLT at aten/src/ATen/native/cuda/Blas.cpp
+    if not (inp.is_cuda and inp.dim() == 1 and inp.is_contiguous()):
+        return False
+
+    if not (mat1.dim() == 2 and mat2.dim() == 2):
+        return False
+
+    if inp.size(0) != mat2.size(1):
+        return False
+
+    if inp.dtype != mat1.dtype or inp.dtype != mat2.dtype:
+        return False
+
+    return True
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
-    return all(is_pointwise_use(use) for use in output.users)
+    if any(has_pointwise_use(use) for use in output.users):
+        return True
+    else:
+        args_val = (arg.meta["val"] for arg in (inp, *match.args))
+        return not _cublaslt_can_fuse_bias_epilogue(*args_val)
 
 
 @register_graph_pattern(
