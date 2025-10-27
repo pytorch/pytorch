@@ -4135,7 +4135,9 @@ class TestStatefulDataLoaderRandomState(TestCase):
 
         # Save state and get remaining items
         state_dict = dl2.state_dict()
-        remaining_original = list(it)
+        remaining_original = []
+        for batch in it:
+            remaining_original.extend(batch)
 
         # Resume from checkpoint
         generator3 = torch.Generator()
@@ -4332,7 +4334,9 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
                 state_dict = dl_test.state_dict()
 
                 # Get remaining items from original iterator
-                remaining_original = list(it)
+                remaining_original = []
+                for batch in it:
+                    remaining_original.extend(batch)
 
                 # If we're at end of epoch, continue to next epoch
                 if not remaining_original:
