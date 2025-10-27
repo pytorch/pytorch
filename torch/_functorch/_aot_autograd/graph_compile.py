@@ -89,6 +89,7 @@ from .schemas import (
 )
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
+    _get_symint_hints,
     contain_metadata_mutation_ops,
     get_cuda_generator_meta_val,
     make_boxed_func,
@@ -1757,12 +1758,14 @@ def _aot_stage2b_bw_compile(
                 # we assume they are not. 
                 # Inductor can choose different strdies for activations than 
                 # what backwars graph has. 
+                # import fbvscode
+                # fbvscode.set_trace()
                 with suppress_ctx:
                     for i in range(len(ph_arg.stride())):
-                        if guard_or_true(ph_arg.stride()[i] != real_stride[i]):
+                        if guard_or_true(ph_arg.stride()[i] != int(real_stride[i])):
                             stride_different = True
                             break
-
+          
                 if stride_different:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
