@@ -200,7 +200,7 @@ def _get_fqns(
                 return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
             curr_obj = getattr(curr_obj, FSDP_WRAPPED_MODULE)
             if curr_obj_name != FSDP_WRAPPED_MODULE:
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 fqn_obj_names.append(curr_obj_name)
                 curr_obj = getattr(curr_obj, curr_obj_name)
         elif isinstance(curr_obj, torch._dynamo.eval_frame.OptimizedModule):
@@ -218,7 +218,7 @@ def _get_fqns(
                 ):
                     if hasattr(curr_obj, removed_fqn):
                         curr_obj = getattr(curr_obj, removed_fqn)
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             fqn_obj_names.append(curr_obj_name)
             if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
                 if i != len(obj_names) - 1:
@@ -290,6 +290,7 @@ def _verify_options(
             "will be removed in 2.5. This feature can be achieved by manually "
             "filtering out the state_dict returned from get_state_dict.",
             FutureWarning,
+            stacklevel=2,
         )
     if optim_only and not optims:
         raise RuntimeError(
@@ -1234,6 +1235,7 @@ def _unflatten_model_state_dict(
             "feature, please preprocessing the model_state_dict to achieve the "
             "same functionality.",
             FutureWarning,
+            stacklevel=2,
         )
         cast_state_dict = cast(dict[nn.Module, dict[str, ValueType]], state_dict)
         new_state_dict: dict[str, ValueType] = {}
