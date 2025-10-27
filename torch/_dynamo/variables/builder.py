@@ -918,11 +918,13 @@ class VariableBuilder:
         elif trace_rules.is_numpy(value):
             assert np
             if istype(value, types.MethodType):
-                install_guard(
-                    AttrSource(self.source, "__func__").make_guard(
-                        GuardBuilder.CLOSURE_MATCH
+                # Dont guard on cython functions as they dont change ids
+                if inspect.isfunction(value.__func__):
+                    install_guard(
+                        AttrSource(self.source, "__func__").make_guard(
+                            GuardBuilder.CLOSURE_MATCH
+                        )
                     )
-                )
             elif inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)
             elif callable(value):
