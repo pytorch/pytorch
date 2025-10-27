@@ -15177,7 +15177,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_native_layer_norm_relu",
+                    "triton_poi_fused_addmm_native_layer_norm",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -15190,7 +15190,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_LayerNorm_Linear_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

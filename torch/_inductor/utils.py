@@ -553,6 +553,32 @@ def is_pointwise_use(
     return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
 
 
+def has_pointwise_use(
+    use: Node,
+    is_pointwise_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
+) -> bool:
+    """
+    Is there an immediate pointwise use, i.e. a descendant in a graph
+    (tagged with torch.Tag.pointwise or True for optional `is_pointwise_fn`) of an op.
+
+    Uses in view ops will follow the views uses.
+    """
+
+    if use.op != "call_function":
+        return False
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
+        return False
+
+    # Process getitem and view
+    target = cast(torch._ops.OpOverload, use.target)
+    if target is operator.getitem or is_view(target):
+        return any(has_pointwise_use(user, is_pointwise_fn) for user in use.users)
+
+    return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
+
+
 def gen_gm_and_inputs(
     target: Any, args: list[Any], kwargs: dict[str, Any]
 ) -> tuple[GraphModule, list[torch.Tensor]]:
