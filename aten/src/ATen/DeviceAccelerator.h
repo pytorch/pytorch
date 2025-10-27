@@ -73,9 +73,9 @@ TORCH_API c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index);
 // original device index that was active before the change.
 TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
 
-TORCH_API inline void emptyCache() {
+TORCH_API inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
   const auto device_type = getAccelerator(true).value();
-  at::getDeviceAllocator(device_type)->emptyCache();
+  at::getDeviceAllocator(device_type)->emptyCache(mempool_id);
 }
 
 TORCH_API inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
