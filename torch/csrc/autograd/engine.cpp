@@ -1203,7 +1203,7 @@ void Engine::evaluate_function(
           std::move(output),
           opt_parent_stream,
           opt_next_stream,
-          next.function);
+          next.function.get());
 
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
@@ -1223,7 +1223,7 @@ void Engine::evaluate_function(
           std::move(output),
           opt_parent_stream,
           opt_next_stream,
-          next.function);
+          next.function.get());
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
@@ -1377,7 +1377,7 @@ auto Engine::execute(
         std::move(input),
         input_stream,
         opt_next_stream,
-        root_edges.at(0).function);
+        root_edges.at(0).function.get());
 
     execute_with_graph_task(
         graph_task, std::move(graph_root), std::move(input_buffer));
