@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
@@ -83,6 +84,27 @@ def _arg_to_str(arg, attributes) -> str:
     return str(arg)
 
 
+def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
+    """
+    from Observer (genai/llama4x/tools/hash/observer.py)
+
+    Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
+    replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
+    This is used to generate a deterministic summary value for tensor comparison.
+    """
+    if not (t.is_floating_point() or t.is_complex()):
+        t = t.float()
+    t = t.contiguous()
+    # Clean the tensor to handle NaN/inf values, then compute norm
+    t_clean = torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0)
+
+    dtype = torch.complex128 if t.is_complex() else torch.float64
+    out = t_clean.norm(p=1, dtype=dtype)
+    if use_scalar:
+        return out.item()
+    return out
+
+
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
 
@@ -102,7 +124,9 @@ class _DebugCall:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
         """
-        raise NotImplementedError("Subclasses must implement stringify_args(), even if no-op")
+        raise NotImplementedError(
+            "Subclasses must implement stringify_args(), even if no-op"
+        )
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
@@ -453,6 +477,23 @@ class DebugMode(TorchDispatchMode):
             return {"output": out}
 
         with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
+            yield
+
+    @staticmethod
+    @contextlib.contextmanager
+    def log_output_hashes(hash_fn: Optional[Callable] = None):
+        if hash_fn is None:
+            hash_fn = functools.partial(default_hash_fn, use_scalar=True)
+
+        def _dispatch_hash_hook(func, types, args, kwargs, result):
+            with torch._C._DisablePythonDispatcher():
+                out = tree_map(
+                    lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None,
+                    result,
+                )
+            return {"hash": out}
+
+        with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
             yield
 
 

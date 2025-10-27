@@ -75,7 +75,11 @@ class TestDTensorDebugMode(TestCase):
         eager_out = mm(x_dtensor, y_dtensor)
 
         # check recording hook for compiled variant
-        with DebugMode() as debug_mode, DebugMode.record_outputs():
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.record_outputs(),
+            DebugMode.log_output_hashes(),
+        ):
             compiled_out = torch.compile(mm, backend="aot_eager")(x_dtensor, y_dtensor)
 
         # check numerical equivalence
@@ -84,10 +88,13 @@ class TestDTensorDebugMode(TestCase):
             iter(
                 op
                 for op in debug_mode.operators
-                if isinstance(op, _OpCall) and str(op.op) == "aten::sum"
+                if isinstance(op, _OpCall) and str(op.op) == "aten.sum.default"
             )
         )
         self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
+        self.assertTrue(
+            "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
+        )
 
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
