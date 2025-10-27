@@ -216,7 +216,7 @@ def matrix_norm(
     # shape
     check_is_matrix(A, "linalg.matrix_norm")
     # dim
-    # pyrefly: ignore  # no-matching-overload
+
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
