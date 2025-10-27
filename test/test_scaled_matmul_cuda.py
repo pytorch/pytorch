@@ -478,7 +478,7 @@ def unpack_uint4(uint8_data) -> torch.Tensor:
     uint8_data_as_uint8 = uint8_data.view(torch.uint8).view(-1)
 
     out[1::2] = uint8_data_as_uint8[:] >> 4
-    out[ ::2] = uint8_data_as_uint8 & 15
+    out[::2] = uint8_data_as_uint8 & 15
 
     return out.view(shape)
 
@@ -548,7 +548,7 @@ def _2d_grouped_tensor_to_mxfp8_blocked_scaled(t, MN, G, offs, format='mxfp8'):
                 )
                 t_global_scale_list.append(tq_global)
             else:
-                raise ValueError(f"format must be mxfp8|nvfp4, got \"{format}\"")
+                raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
             t_list.append(tq_slice)
             th_list.append(th_slice)
 
@@ -666,8 +666,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("N", [8192])
     @parametrize("K", [16640])
     @parametrize("format", ["mxfp8"] + (["nvfp4"] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True]) # Note: NVFP4 only supported through torch.nn.functional.scaled_grouped_mm
-    #                                       so disable torch._scaled_grouped_mm test use.
+    @parametrize("wrap_v2", [True])  # Note: NVFP4 only supported through torch.nn.functional.scaled_grouped_mm
+    #                                        so disable torch._scaled_grouped_mm test use.
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, wrap_v2):
         torch.manual_seed(42)
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
@@ -677,8 +677,12 @@ class TestFP8Matmul(TestCase):
         X = torch.randn((M, total_K), dtype=torch.bfloat16, device="cuda") * 0.1
         W = torch.randn((N, total_K), dtype=torch.bfloat16, device="cuda") * 0.01
 
-        xh, xq, x_blocked_scales, x_global_scales = _2d_grouped_tensor_to_mxfp8_blocked_scaled(X, M, G, input_group_end_offsets, format=format)
-        wh, wq, w_blocked_scales, w_global_scales = _2d_grouped_tensor_to_mxfp8_blocked_scaled(W, N, G, input_group_end_offsets, format=format)
+        xh, xq, x_blocked_scales, x_global_scales = _2d_grouped_tensor_to_mxfp8_blocked_scaled(
+            X, M, G, input_group_end_offsets, format=format
+        )
+        wh, wq, w_blocked_scales, w_global_scales = _2d_grouped_tensor_to_mxfp8_blocked_scaled(
+            W, N, G, input_group_end_offsets, format=format
+        )
 
         if format == "mxfp8":
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -695,7 +699,7 @@ class TestFP8Matmul(TestCase):
                 format,
             )
         else:
-            raise ValueError(f"format must be mxfp8|nvfp4, got \"{format}\"")
+            raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
 
         if format == 'nvfp4':
             assert x_global_scales.numel() == w_global_scales.numel()
@@ -750,10 +754,13 @@ class TestFP8Matmul(TestCase):
             for i in range(G):
                 if format == "mxfp8":
                     wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(W[i])
-                else: # format == "nvfp4"
+                elif format == "nvfp4":
                     w_scale, wq = to_mxfp8(W[i])
                     wh, wq, w_scale, w_global_scale = _convert_to_nvfp4_with_hp_ref(W[i])
                     w_global_scale_list.append(w_global_scale)
+                else:
+                    raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
+
                 # Swizzle scaled
                 # TODO(slayton): gate on cuda/hip
                 w_scale = to_blocked(w_scale)
@@ -788,9 +795,11 @@ class TestFP8Matmul(TestCase):
                     x_slice = X[prev_group_end:curr_group_end, :]
                     if format == "mxfp8":
                         xh, xq, x_scale = _convert_to_mxfp8_with_hp_ref(x_slice)
-                    else: # format == nvfp4
+                    elif format == "nvfp4":
                         xh, xq, x_scale, x_global_scale = _convert_to_nvfp4_with_hp_ref(x_slice)
                         x_global_scale_list.append(x_global_scale)
+                    else:
+                        raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
 
                     x_scale = to_blocked(x_scale)
                     xh_list.append(xh)
@@ -818,13 +827,15 @@ class TestFP8Matmul(TestCase):
                 input_group_end_offsets,
                 format,
             )
-        else: # format == "nvfp4
+        elif format == "nvfp4":
             kwargs = _build_scaled_grouped_mm_kwargs(
                 [x_blocked_scales, x_global_scales],
                 [w_blocked_scales, w_global_scales],
                 input_group_end_offsets,
                 format,
             )
+        else:
+            raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
 
         if format == 'nvfp4':
             assert x_global_scales.numel() == w_global_scales.numel()

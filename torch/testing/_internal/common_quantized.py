@@ -462,13 +462,12 @@ def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
 
     # Swizzled scales are padded to tiles of 128x4, we need to replicate how that padding
     # happened for offset purposes.
-    num_row_tiles = ceil_div(input.size(0), 128)
     # There are K//blocksize scales, padded to groups of 4.
     num_col_tiles = ceil_div(ceil_div(input.size(1), blocksize), 4)
 
     # (Very) slow reference implementation using horrifying loops.
-    for i in range(0, input.size(0)):
-        for j in range(0, input.size(1) // blocksize):
+    for i in range(input.size(0)):
+        for j in range(input.size(1) // blocksize):
             # which 128x4 tile of scaling factors am I in
             scale_tile_h = i // 128
             scale_tile_w = j // 4
@@ -478,8 +477,8 @@ def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
             tile_offset = 512 * (scale_tile_h * num_col_tiles + scale_tile_w)
 
             # indices within the tile - use nomenclature directly from cublas docs
-            outer = i % 128 # "outer" in cublas docs
-            inner = j % 4   # "inner" in cublas docs
+            outer = i % 128  # "outer" in cublas docs
+            inner = j % 4    # "inner" in cublas docs
 
             # Note: "offset" is given in terms of bytes, in cublas docs, but our scales are e8m0,
             #       anyway, and so 1B == 1 value => use offset directly.
