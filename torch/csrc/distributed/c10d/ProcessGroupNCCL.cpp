@@ -4770,6 +4770,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   bool same_size = check_same_size(outputTensors_);
   if (same_size) {
     // Flatten a vector of tensors into a single, stacked tensor.
+    // we can handle only contiguous inputs, because we are
+    // just sending ptr and numel to nccl
+    inputTensor = inputTensor.contiguous();
     at::Tensor outputFlattened = newLikeFlat(outputTensors_);
 
     return collective(
@@ -4917,6 +4920,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   bool same_size = check_same_size(inputTensors_);
   if (same_size) {
     // Flatten a vector of tensors into a single, stacked tensor.
+    outputTensor = outputTensor.contiguous();
     at::Tensor inputFlattened = newLikeFlat(inputTensors_);
 
     return collective(

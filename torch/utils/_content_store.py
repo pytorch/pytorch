@@ -217,10 +217,7 @@ class ContentStoreReader:
             weights_only=True,
             map_location=device,
         )._untyped_storage
-        if s is None:
-            raise AssertionError(
-                f"expected storage for hash {h} in {os.path.join(self.loc, 'storages')}, got None"
-            )
+        assert s is not None
         if self.storage_cache is not None:
             self.storage_cache[device][h] = StorageWeakRef(s)
         return s
