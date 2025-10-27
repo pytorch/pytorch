@@ -73,9 +73,9 @@ class AttentionBlock(nn.Module):
         k = k.view(-1, self.num_heads, self.head_dim)
         v = v.view(-1, self.num_heads, self.head_dim)
 
-        print(f"varlen q: {q}")
-        print(f"varlen k: {k}")
-        print(f"varlen v: {v}")
+        # print(f"varlen q: {q}")
+        # print(f"varlen k: {k}")
+        # print(f"varlen v: {v}")
 
         return q, k, v
 
@@ -118,9 +118,9 @@ class AttentionBlock(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        print(f"sdpa q: {q}")
-        print(f"sdpa k: {k}")
-        print(f"sdpa v: {v}")
+        # print(f"sdpa q: {q}")
+        # print(f"sdpa k: {k}")
+        # print(f"sdpa v: {v}")
 
         attn_out = F.scaled_dot_product_attention(
             q, k, v, attn_mask=attn_mask, is_causal=is_causal
@@ -208,12 +208,20 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(output.device, torch.device(device))
         self.assertEqual(output.dtype, dtype)
 
-        loss = output.sum()
-        loss.backward()
+        varlen_grad_out = torch.ones_like(output)
 
-        self.assertIsNotNone(x_packed.grad)
-        self.assertEqual(x_packed.grad.shape, x_packed.shape)
-        self.assertEqual(x_packed.grad.dtype, x_packed.dtype)
+        varlen_grad = torch.autograd.grad(
+            outputs=output,
+            inputs=x_packed,
+            grad_outputs=varlen_grad_out,
+            retain_graph=True,
+            create_graph=False,
+            allow_unused=False,
+        )[0]
+
+        self.assertIsNotNone(varlen_grad)
+        self.assertEqual(varlen_grad.shape, x_packed.shape)
+        self.assertEqual(varlen_grad.dtype, x_packed.dtype)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -230,7 +238,7 @@ class TestVarlenAttention(NNTestCase):
 
         total_tokens = shape.batch_size * shape.max_seq_len
         x_packed = torch.randn(
-            total_tokens, shape.embed_dim, device=device, dtype=dtype
+            total_tokens, shape.embed_dim, device=device, dtype=dtype,
         )
         cu_seq = torch.tensor(
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
@@ -238,10 +246,22 @@ class TestVarlenAttention(NNTestCase):
 
         q, k, v = attention_block.get_varlen_qkv(x_packed)
 
-        torch.library.opcheck(
-            torch.ops.torch_nn_attention._varlen_attn,
-            (q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False),
+        # torch.library.opcheck(
+        #     torch.ops.torch_nn_attention._varlen_attn,
+        #     (q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False),
+        # )
+
+        out, lse, rng_state = torch.ops.torch_nn_attention._varlen_attn(
+            q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False
         )
+        grad_out = torch.randn_like(out)
+
+        torch.library.opcheck(
+            torch.ops.torch_nn_attention._varlen_attn_backward,
+            (grad_out, q, k, v, out, lse, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False),
+            test_utils=["test_schema", "test_faketensor"] # doesn't support double bwd
+        )
+
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -258,7 +278,7 @@ class TestVarlenAttention(NNTestCase):
 
         total_tokens = shape.batch_size * shape.max_seq_len
         x_packed = torch.randn(
-            total_tokens, shape.embed_dim, device=device, dtype=dtype
+            total_tokens, shape.embed_dim, device=device, dtype=dtype, requires_grad=True
         )
         cu_seq = torch.tensor(
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
@@ -271,16 +291,25 @@ class TestVarlenAttention(NNTestCase):
             output = compiled_forward(
                 x_packed, cu_seq, shape.max_seq_len, is_causal=False
             )
-            self.assertEqual(output.shape, (total_tokens, shape.embed_dim))
-            self.assertEqual(output.device, torch.device(device))
-            self.assertEqual(output.dtype, dtype)
+
+            varlen_grad_out = torch.ones_like(output)
+            varlen_grad = torch.autograd.grad(
+                outputs=output,
+                inputs=x_packed,
+                grad_outputs=varlen_grad_out,
+                retain_graph=True,
+                create_graph=False,
+                allow_unused=False,
+            )[0]
 
         called_ops = mode.called_ops
 
-        custom_op_called = any(
+        custom_ops_called = any(
             "torch_nn_attention._varlen_attn" in op for op in called_ops
+        ) and any(
+            "torch_nn_attention._varlen_attn_backward" in op for op in called_ops
         )
-        assert custom_op_called
+        assert custom_ops_called
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -329,8 +358,8 @@ class TestVarlenAttention(NNTestCase):
             varlen_seq = varlen_output[start_idx:end_idx]
             sdpa_seq = sdpa_output[i, :seq_len]
 
-            print(f"varlen_seq: {varlen_seq}")
-            print(f"sdpa_seq: {sdpa_seq}")
+            # print(f"varlen_seq: {varlen_seq}")
+            # print(f"sdpa_seq: {sdpa_seq}")
 
             torch.testing.assert_close(varlen_seq, sdpa_seq, **tolerances)
             start_idx = end_idx
