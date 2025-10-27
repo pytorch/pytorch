@@ -51,16 +51,18 @@ from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
+    Literal,
     Optional,
     overload,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, ParamSpec, TypeAlias, TypeGuard, TypeIs
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
@@ -96,6 +98,7 @@ from .graph_utils import _get_flat_args
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
+        Callable,
         Container,
         Generator,
         ItemsView,
@@ -295,13 +298,13 @@ def increment_op_count(cnt: int) -> None:
 def calculate_time_spent() -> dict[str, float]:
     total_by_key = {}
     for phase, timing in cumulative_time_spent_ns.items():
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         total_by_key[phase] = timing / 1e9
 
     total_by_key["total_wall_time"] = total_by_key.get(
         "entire_frame_compile", 0
     ) + total_by_key.get("entire_backward_compile", 0)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return total_by_key
 
 
@@ -800,7 +803,7 @@ def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
+# pyrefly: ignore [inconsistent-overload]
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
 ) -> tuple[list[str], list[object]]: ...
@@ -1377,7 +1380,7 @@ class CompilationMetrics:
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
     pytorch_version: Optional[str] = None
-    inductor_provenance: Optional[str] = None
+    inductor_provenance: Optional[set[str]] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1461,7 +1464,7 @@ class CompilationMetrics:
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
 
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return cls(**all_metrics)
 
 
@@ -2278,7 +2281,7 @@ def is_jit_model(
     Union[
         torch.jit._trace.TopLevelTracedModule,
         torch.jit._script.RecursiveScriptModule,
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         torch.jit.ScriptFunction[Any, Any],
         torch.jit.ScriptModule,
     ]
@@ -2387,7 +2390,7 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
         saved_state = [
             (param, param._version, torch.clone(param))
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             for param in itertools.chain(gm.parameters(), gm.buffers())
         ]
 
@@ -2653,16 +2656,16 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
     if istype(obj, (dict, OrderedDict)):
         return obj.items()
     elif isinstance(obj, OrderedDict):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
 def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     torch.nn.Module.__init__(obj)
     return obj
 
@@ -2709,7 +2712,7 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     dict_class = dict
     if isinstance(d, OrderedDict):
         dict_class = OrderedDict
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
@@ -2768,14 +2771,25 @@ def slice_length(s: slice, seq_len: int) -> int:
     return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
 
 
-def raise_args_mismatch(tx: InstructionTranslatorBase, name: str) -> None:
+def raise_args_mismatch(
+    tx: InstructionTranslatorBase,
+    name: str,
+    expect: str = "",
+    actual: str = "",
+) -> None:
     from torch._dynamo.exc import raise_observed_exception
     from torch._dynamo.variables import ConstantVariable
+
+    msg_str = (
+        f"wrong number of arguments or keyword arguments for {name}() call.\n"
+        f"  Expect: {expect}\n"
+        f"  Actual: {actual}"
+    )
 
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+        args=[ConstantVariable(msg_str)],
     )
 
 
@@ -3262,10 +3276,10 @@ def format_func_info(code: CodeType) -> str:
 @contextlib.contextmanager
 def disable_cache_limit() -> Generator[None, None, None]:
     prior = config.recompile_limit
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     config.recompile_limit = sys.maxsize
     prior_acc_limit = config.accumulated_recompile_limit
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     config.accumulated_recompile_limit = sys.maxsize
 
     try:
@@ -4000,7 +4014,7 @@ class numpy_operator_wrapper(Generic[_P, R]):
     def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
         assert not kwargs
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         args = (
             tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
         )
@@ -4200,7 +4214,6 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # (x) + (y)
             # ~~^~~~~~~
             while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
-                # pyrefly: ignore  # unbound-name
                 if ch in "\\#":
                     cur_lineno, cur_col = nextline(cur_lineno, cur_col)
                 else:
@@ -4551,7 +4564,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args: Any) -> Any:
-        # pyrefly: ignore  # annotation-mismatch
+        # pyrefly: ignore [annotation-mismatch]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
