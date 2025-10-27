@@ -24,7 +24,8 @@ import functools
 import types
 import warnings
 import weakref
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -115,9 +116,9 @@ def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         out = f(*args, **kwargs)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return pytree.tree_map_only(np.ndarray, lambda x: torch.as_tensor(x), out)
 
     return wrap

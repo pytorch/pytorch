@@ -322,7 +322,7 @@ class MaskedTensor(torch.Tensor):
             "In the case that the semantics for the operator are not trivial, it would be appreciated "
             "to also include a proposal for the semantics."
         )
-        warnings.warn(msg)
+        warnings.warn(msg, stacklevel=2)
         return NotImplemented
 
     def __lt__(self, other):
