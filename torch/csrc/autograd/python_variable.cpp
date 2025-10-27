@@ -2195,28 +2195,11 @@ static int THPVariable_clear(THPVariable* self) {
   return 0;
 }
 
-// NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc
-// on subclasses.  It's never valid to construct a THPVariable so it's not
-// necessary to implement the dealloc for that case
 static void THPVariable_dealloc(PyObject* self) {
-  // printf("dealloc %p\n", self);
   PyObject_GC_UnTrack(self);
   THPVariable_clear((THPVariable*)self);
   ((THPVariable*)self)->cdata.~MaybeOwned<Variable>();
   Py_TYPE(self)->tp_free(self);
-}
-
-// Creates a new Python object for a Variable without modifying the var
-static PyObject* THPVariable_New(
-    PyTypeObject* type,
-    const at::TensorBase& _var) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  if (!obj) {
-    throw py::error_already_set();
-  }
-  auto v = (THPVariable*)obj;
-  v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
-  return obj;
 }
 
 // Creates a new Python object for a Variable.
