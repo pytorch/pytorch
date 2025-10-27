@@ -46,6 +46,7 @@ device
 hooks
 autoload
 operators
+guard
 amp
 ```
 
