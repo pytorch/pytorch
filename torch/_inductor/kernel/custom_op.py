@@ -58,8 +58,8 @@ class CustomOpConfig:
         if self.decomposition is not None:
             return self.decomposition
 
-        # If no decomposition specified, get Python implementation from custom op
-        if default_impl and isinstance(default_impl, (_ops.OpOverload, str)):
+        # If no decomposition specified in config, get Python implementation from custom op registration
+        if default_impl and isinstance(default_impl, _ops.OpOverload):
             from torch._library.custom_ops import _maybe_get_opdef
 
             op_def = _maybe_get_opdef(default_impl)
@@ -71,26 +71,11 @@ class CustomOpConfig:
             f"Please register customop or provide a decomposition function."
         )
 
-    def get_name(self) -> str:
-        """Get the name for this config variant."""
-        param_suffix = (
-            "_".join(f"{k}_{v}" for k, v in sorted(self.params.items()))
-            if self.params
-            else ""
-        )
-
-        base_name = self.decomposition.__name__ if self.decomposition else "default"
-
-        return f"{base_name}_{param_suffix}" if param_suffix else base_name
-
     def __repr__(self) -> str:
+        decomp_name = self.decomposition.__name__ if self.decomposition else "default"
         if self.params:
             params_str = ", ".join(f"{k}={v}" for k, v in self.params.items())
-            decomp_name = (
-                self.decomposition.__name__ if self.decomposition else "default"
-            )
             return f"CustomOpConfig({decomp_name}, {params_str})"
-        decomp_name = self.decomposition.__name__ if self.decomposition else "default"
         return f"CustomOpConfig({decomp_name})"
 
 
@@ -169,7 +154,7 @@ def _merge_config_and_runtime_kwargs(
     return merged_kwargs
 
 
-def _create_user_input_gen_fns(
+def _adapt_user_input_gen_fns(
     inputs: list[Any],
     arg_names: list[str],
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
@@ -338,9 +323,7 @@ def autotune_custom_op(
             if decompositions
             else []
         )
-        input_gen_fns = _create_user_input_gen_fns(
-            inputs, arg_names, user_input_gen_fns
-        )
+        input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
     return autotune_select_algorithm(
         name=name,

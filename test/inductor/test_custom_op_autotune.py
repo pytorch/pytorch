@@ -2,13 +2,9 @@
 """
 Tests for custom operation autotuning with PyTorch Inductor.
 
-Users can register custom ops with multiple decomposition implementations and let
-Inductor automatically select the best performing variant. Key features tested:
-
-- Name-based input generators (use argument names instead of indices)
-- Dynamic shape handling across multiple compilations
-- Parametric tuning with tuning_knob for combinatorial parameter exploration
-- Numerical correctness and performance validation
+Validates that custom ops can be registered with multiple CustomOpConfigs, where each
+config specifies an optional decomposition function and its associated parameters.
+Inductor benchmarks all variants and automatically selects the best performing one.
 """
 
 import torch
@@ -33,13 +29,6 @@ class TestCustomOpAutoTune(TestCase):
         super().setUp()
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
-
-    def _create_test_configs(self):
-        """Create common test configurations for different sizes."""
-        return [
-            {"batch_size": 1, "seq_len": 32, "hidden_dim": 128},
-            {"batch_size": 2, "seq_len": 64, "hidden_dim": 256},
-        ]
 
     def _run_autotune_test(self, op_object, inputs, expected, test_name):
         """Shared test infrastructure for autotuning tests."""
@@ -155,7 +144,12 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_rmsnorm_custom_op_autotune_with_dynamic_shape(self):
-        """Test RMSNorm autotuning decomposition variants compared to fallback default with dynamic shapes."""
+        """Test RMSNorm autotuning with multiple decomposition variants and dynamic shapes.
+
+        Validates:
+        - Multiple decomposition implementations with different computational approaches
+        - Dynamic shape handling across multiple compilations
+        """
         test_op_name = f"test_lib::rmsnorm_{id(self)}"
 
         def rmsnorm_decomposition1(
@@ -169,28 +163,12 @@ class TestCustomOpAutoTune(TestCase):
         def rmsnorm_decomposition2(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
+            """Separate normalization and scaling: compute normalized value then scale."""
             x_var = x
-
             variance = x_var.pow(2).mean(dim=-1, keepdim=True)
-
             x = x * torch.rsqrt(variance + eps)
-
-            if weight is not None:
-                x = x * weight
+            x = x * weight
             return x
-
-        def rmsnorm_decomposition3(
-            x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
-        ) -> torch.Tensor:
-            x_squared = x.pow(2)
-            variance = x_squared.mean(dim=-1, keepdim=True)
-
-            rstd = torch.rsqrt(variance + eps)
-            normalized = x * rstd
-
-            if weight is not None:
-                normalized = normalized * weight
-            return normalized
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_rmsnorm_op(
@@ -210,7 +188,6 @@ class TestCustomOpAutoTune(TestCase):
         decompositions = [
             rmsnorm_decomposition1,
             rmsnorm_decomposition2,
-            rmsnorm_decomposition3,
         ]
 
         register_custom_op_autotuning(
@@ -227,16 +204,8 @@ class TestCustomOpAutoTune(TestCase):
         test_shapes = [(2, 16, 128), (8, 32, 256)]
 
         for i, (batch_size, seq_len, hidden_dim) in enumerate(test_shapes):
-            input_tensor = torch.randn(
-                batch_size,
-                seq_len,
-                hidden_dim,
-                device=self.device,
-                dtype=self.dtype,
-                requires_grad=False,
-            )
-            weight = torch.randn(
-                hidden_dim, device=self.device, dtype=self.dtype, requires_grad=False
+            input_tensor, weight = self._create_rmsnorm_inputs(
+                batch_size, seq_len, hidden_dim
             )
 
             # Test numerical equivalence for all decompositions
@@ -252,7 +221,11 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_mlp_custom_op_autotune(self):
-        """Test MLP autotuning with method parameter controlling different decomposition variants"""
+        """Test MLP autotuning with method parameter controlling different decomposition variants.
+
+        Validates parametric tuning where the same decomposition function uses different
+        algorithmic approaches based on a method parameter (standard matmul, batched mm, fused weights).
+        """
         test_op_name = f"test_lib::mlp_{id(self)}"
 
         def mlp_variants(
@@ -272,7 +245,6 @@ class TestCustomOpAutoTune(TestCase):
                 return torch.matmul(gated, down_weight)
 
             elif method == 1:
-                # Batched approach: uses torch.mm with reshaped tensors
                 batch_shape = input_tensor.shape[:-1]
                 hidden_dim = input_tensor.shape[-1]
                 output_dim = down_weight.shape[-1]
@@ -288,8 +260,6 @@ class TestCustomOpAutoTune(TestCase):
                 return output_2d.view(*batch_shape, output_dim)
 
             elif method == 2:
-                # Fused weights approach: concatenate then split weights
-                # Concatenate gate and up weights for one matrix multiply
                 fused_weight = torch.cat([gate_weight, up_weight], dim=1)
                 fused_proj = torch.matmul(input_tensor, fused_weight)
 
@@ -397,7 +367,11 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_decompose_k_custom_op_autotune(self):
-        """Test decompose_k autotuning with parameter tuning for k_splits values using decomposition functions."""
+        """Test decompose_k autotuning with parametric tuning for k_splits values.
+
+        Validates numerical parameter sweep where k_splits controls how the K dimension
+        is decomposed for matrix multiplication (k_splits in [32, 64, 128, 256]).
+        """
         test_op_name = f"test_lib::decompose_k_{id(self)}"
 
         def decompose_k_implementation(
@@ -462,7 +436,11 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_multi_parameter_tuning(self):
-        """Test autotuning with multiple parameters using scale_mode and chunk_size."""
+        """Test autotuning with multiple parameters for combinatorial parameter exploration.
+
+        Validates parametric tuning with multiple parameters (scale_mode and chunk_size)
+        to test combinatorial exploration of the parameter space.
+        """
         op_name = f"test_lib::multi_param_{id(self)}"
 
         def multi_param_scaling(
