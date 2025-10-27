@@ -756,11 +756,12 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     try {
       at::IntArrayRef shape(
           prototype->shape, prototype->shape + prototype->ndim);
-      at::TensorOptions options =
-          at::TensorOptions()
-              .dtype(at::toScalarType(prototype->dtype))
-              .device(at::getATenDevice(
-                  prototype->device.device_type, prototype->device.device_id));
+      at::TensorOptions options = at::TensorOptions()
+                                      .dtype(at::toScalarType(prototype->dtype))
+                                      .device(
+                                          at::dlDeviceToTorchDevice(
+                                              prototype->device.device_type,
+                                              prototype->device.device_id));
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
