@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 import torch
 import torch._inductor.config
+from torch._environment import is_fbcode
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
@@ -77,6 +78,9 @@ class WindowsCrossCompilationTestFramework:
                     "This test should run on Linux for cross-compilation"
                 )
 
+            if is_fbcode():
+                raise unittest.SkipTest("requires x86_64-w64-mingw32-gcc")
+
             self.assertTrue("WINDOWS_CUDA_HOME" in os.environ)
 
             with torch.no_grad():
@@ -127,6 +131,9 @@ class WindowsCrossCompilationTestFramework:
         def load_test(self):
             if platform.system() != "Windows":
                 raise unittest.SkipTest("This test should run on Windows")
+
+            if is_fbcode():
+                raise unittest.SkipTest("requires x86_64-w64-mingw32-gcc")
 
             if not HAS_GPU:
                 raise unittest.SkipTest("Test requires GPU")
