@@ -3903,7 +3903,7 @@ class Scheduler:
 
         # Calculate node1 writes that can be removed through fusion,
         # i.e. node1 writes that are only read by node2
-        writes_removed_through_fusion = OrderedSet()
+        writes_removed_through_fusion: OrderedSet[str] = OrderedSet()
         for write_dep in node1.read_writes.writes:
             if self.can_buffer_be_removed_through_fusion(
                 write_dep.name, fused_node_names
@@ -3911,16 +3911,14 @@ class Scheduler:
                 writes_removed_through_fusion.add(write_dep.name)
 
         # Get all unique reads (union of both nodes' reads)
-        all_read_names = (
-            OrderedSet(dep.name for dep in node1.read_writes.reads)
-            | OrderedSet(dep.name for dep in node2.read_writes.reads)
-        )
+        all_read_names = OrderedSet(
+            dep.name for dep in node1.read_writes.reads
+        ) | OrderedSet(dep.name for dep in node2.read_writes.reads)
 
         # Get all unique writes (union of both nodes' writes)
-        all_write_names = (
-            OrderedSet(dep.name for dep in node1.read_writes.writes)
-            | OrderedSet(dep.name for dep in node2.read_writes.writes)
-        )
+        all_write_names = OrderedSet(
+            dep.name for dep in node1.read_writes.writes
+        ) | OrderedSet(dep.name for dep in node2.read_writes.writes)
 
         # Remove reads that become internal
         unique_reads = all_read_names - reads_removed_through_fusion

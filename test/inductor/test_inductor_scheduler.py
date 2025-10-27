@@ -136,7 +136,6 @@ class TestScheduler(TestCase):
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 
-
     def test_fusion_prevent_too_many_reads_and_writes_prevents_fusion(self):
         """Test that fusion is prevented when unique I/O buffers exceed threshold"""
         # Setup: Create nodes with many unique I/O buffers
@@ -148,14 +147,10 @@ class TestScheduler(TestCase):
         scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
 
         node1 = self._create_mock_node(
-            name="node1",
-            reads=["A", "B", "C"],
-            writes=["D"]
+            name="node1",reads=["A", "B", "C"],writes=["D"]
         )
         node2 = self._create_mock_node(
-            name="node2",
-            reads=["D", "E", "F"],
-            writes=["G"]
+            name="node2",reads=["D", "E", "F"],writes=["G"]
         )
 
         # Execute: Check with threshold of 5 (should prevent fusion since 6 > 5)
@@ -176,16 +171,8 @@ class TestScheduler(TestCase):
         scheduler = Mock(spec=Scheduler)
         scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
 
-        node1 = self._create_mock_node(
-            name="node1",
-            reads=["A", "B"],
-            writes=["C"]
-        )
-        node2 = self._create_mock_node(
-            name="node2",
-            reads=["C", "D"],
-            writes=["E"]
-        )
+        node1 = self._create_mock_node(name="node1", reads=["A", "B"], writes=["C"])
+        node2 = self._create_mock_node(name="node2", reads=["C", "D"], writes=["E"])
 
         # Execute: Check with threshold of 5 (should allow fusion since 4 <= 5)
         result = Scheduler.fusion_prevent_too_many_reads_and_writes(
