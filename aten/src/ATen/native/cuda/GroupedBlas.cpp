@@ -328,7 +328,10 @@ void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim
     int64_t G = mat.size(0);
     int64_t K = mat.size(1);
     if (is_fp4) {
-      K *= 2;
+      // FP4 packs 2 values into a single 8b word - the "real" K is 2x the
+      // reported K. Reverse that adjustment.
+      const int fp4_elems_per_byte = 2;
+      K *= fp4_elems_per_byte;
     }
     int64_t N = mat.size(2);
     int64_t blocked_scale_K = round_up(K/blocksize, 4);
@@ -605,7 +608,7 @@ _scaled_grouped_mm_cuda_v2(
           scale_a[0], /* block-scale A */
           scale_a[1], /* global-scale A */
           scale_b[0], /* block-scale B */
-          scale_b[1], /* global-scale A */
+          scale_b[1], /* global-scale B */
           offs.value(),
           std::nullopt, /* bias */
           out);
