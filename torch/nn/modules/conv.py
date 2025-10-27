@@ -145,7 +145,7 @@ class _ConvNd(Module):
                     dilation,
                     kernel_size,
                     range(len(kernel_size) - 1, -1, -1),
-                    strict=True,
+                    strict=False,
                 ):
                     total_padding = d * (k - 1)
                     left_pad = total_padding // 2

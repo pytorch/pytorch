@@ -212,7 +212,7 @@ def object_annotation(obj):
     """
 
     def format_sequence(obj):
-        body = ','.join(repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__ for i, x in zip(range(8), obj, strict=True))
+        body = ','.join(repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__ for x in obj[:8])
         if len(obj) > 8:
             body = f'{body}, ...{len(obj) - 8}'
         return body

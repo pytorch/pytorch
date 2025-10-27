@@ -151,7 +151,7 @@ class Sequential(Module):
         # To preserve numbering
         str_indices = [str(i) for i in range(len(self._modules))]
         self._modules = OrderedDict(
-            list(zip(str_indices, self._modules.values(), strict=True))
+            zip(str_indices, self._modules.values(), strict=True)
         )
 
     @_copy_to_script_wrapper
@@ -398,7 +398,7 @@ class ModuleList(Module):
         # To preserve numbering, self._modules is being reconstructed with modules after deletion
         str_indices = [str(i) for i in range(len(self._modules))]
         self._modules = OrderedDict(
-            list(zip(str_indices, self._modules.values(), strict=True))
+            zip(str_indices, self._modules.values(), strict=True)
         )
 
     @_copy_to_script_wrapper
