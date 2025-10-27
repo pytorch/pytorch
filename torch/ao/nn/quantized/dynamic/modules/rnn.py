@@ -521,6 +521,7 @@ class LSTM(RNNBase):
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
 
+    # pyrefly: ignore  # bad-override
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -806,6 +807,7 @@ class GRU(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
+    # pyrefly: ignore  # bad-override
     _FLOAT_MODULE = nn.GRU
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -1062,15 +1064,15 @@ class RNNCellBase(torch.nn.Module):
 
         qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
-        if type(mod) == torch.nn.LSTMCell:
+        if type(mod) is torch.nn.LSTMCell:
             qRNNCellBase = LSTMCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.GRUCell:
+        elif type(mod) is torch.nn.GRUCell:
             qRNNCellBase = GRUCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.RNNCell:
+        elif type(mod) is torch.nn.RNNCell:
             qRNNCellBase = RNNCell(
                 mod.input_size,
                 mod.hidden_size,

@@ -106,3 +106,5 @@ COPY --from=arm_compute /acl /acl
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/acl/build/:$LD_LIBRARY_PATH
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh

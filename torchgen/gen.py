@@ -8,7 +8,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Literal, TYPE_CHECKING, TypeVar
 from typing_extensions import assert_never
 
 import yaml
@@ -96,7 +96,7 @@ from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from typing import Optional
 
 

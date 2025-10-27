@@ -202,6 +202,51 @@ class TestExportAPIDynamo(common_utils.TestCase):
             dynamic_axes={"b": [0, 1, 2], "b_out": [0, 1, 2]},
         )
 
+    def test_from_dynamic_axes_to_dynamic_shapes_deprecation_warning(self):
+        with self.assertWarnsRegex(
+            DeprecationWarning,
+            "from_dynamic_axes_to_dynamic_shapes is deprecated and will be removed in a future release. "
+            "This function converts 'dynamic_axes' format \\(including custom axis names\\) to 'dynamic_shapes' format. "
+            "Instead of relying on this conversion, provide 'dynamic_shapes' directly with custom names.",
+        ):
+            self.assert_export(
+                SampleModelForDynamicShapes(),
+                (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
+                dynamic_axes={
+                    "x": [0, 1, 2],
+                    "b": [0, 1, 2],
+                },
+            )
+
+    def test_from_dynamic_axes_to_dynamic_shapes_keeps_custom_axis_names(self):
+        model = SampleModelForDynamicShapes()
+        input = (
+            torch.randn(2, 2, 3),
+            {"b": torch.randn(2, 2, 3)},
+        )
+        dynamic_axes = {
+            "x": {0: "customx_x_0", 1: "customx_x_1", 2: "customx_x_2"},
+            "b": {0: "customb_b_0", 1: "customb_b_1", 2: "customb_b_2"},
+            "x_out": {0: "customx_out_x_0", 1: "customx_out_x_1", 2: "customx_out_x_2"},
+            "b_out": {0: "customb_out_b_0", 1: "customb_out_b_1", 2: "customb_out_b_2"},
+        }
+        onnx_program = torch.onnx.export(
+            model,
+            input,
+            dynamic_axes=dynamic_axes,
+            input_names=["x", "b"],
+            output_names=["x_out", "b_out"],
+            dynamo=True,
+        )
+
+        # Check whether the dynamic dimension names are preserved
+        self.assertIs(onnx_program.model.graph.inputs[0].shape[0].value, "customx_x_0")
+        self.assertIs(onnx_program.model.graph.inputs[0].shape[1].value, "customx_x_1")
+        self.assertIs(onnx_program.model.graph.inputs[0].shape[2].value, "customx_x_2")
+        self.assertIs(onnx_program.model.graph.inputs[1].shape[0].value, "customb_b_0")
+        self.assertIs(onnx_program.model.graph.inputs[1].shape[1].value, "customb_b_1")
+        self.assertIs(onnx_program.model.graph.inputs[1].shape[2].value, "customb_b_2")
+
     def test_saved_f_exists_after_export(self):
         with common_utils.TemporaryFileName(suffix=".onnx") as path:
             _ = torch.onnx.export(

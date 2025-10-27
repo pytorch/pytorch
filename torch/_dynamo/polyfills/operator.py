@@ -30,10 +30,12 @@ _Us = TypeVarTuple("_Us")
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def attrgetter(attr: str, /) -> Callable[[Any], _U]: ...
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def attrgetter(
     attr1: str, attr2: str, /, *attrs: str
 ) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
@@ -68,10 +70,12 @@ def attrgetter(*attrs: str) -> Callable[[Any], Any | tuple[Any, ...]]:
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def itemgetter(item: _T, /) -> Callable[[Any], _U]: ...
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def itemgetter(
     item1: _T1, item2: _T2, /, *items: Unpack[_Ts]
 ) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...

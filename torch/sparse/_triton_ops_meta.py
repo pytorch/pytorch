@@ -232,8 +232,10 @@ def dump():
     part2 = current_content[end_data_index:]
     data_part = []
     for op_key in sorted(_operation_device_version_data, key=sort_key):
+        # pyrefly: ignore  # bad-argument-type
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
+        # pyrefly: ignore  # bad-argument-type
         data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
@@ -367,6 +369,7 @@ def minimize(
                 if next_target < minimal_target:
                     minimal_target = next_target
                     parameters = next_parameters
+                    # pyrefly: ignore  # unsupported-operation
                     pbar.total += i + 1
                     break
         else:

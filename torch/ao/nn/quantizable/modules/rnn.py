@@ -203,7 +203,7 @@ class LSTMCell(torch.nn.Module):
 
     @classmethod
     def from_float(cls, other, use_precomputed_fake_quant=False, split_gates=False):
-        assert type(other) == cls._FLOAT_MODULE
+        assert type(other) is cls._FLOAT_MODULE
         assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
         observed = cls.from_params(
             other.weight_ih,
@@ -376,6 +376,7 @@ class _LSTMLayer(torch.nn.Module):
             bidirectional,
             split_gates=split_gates,
         )
+        # pyrefly: ignore  # bad-argument-type
         layer.qconfig = getattr(other, "qconfig", qconfig)
         wi = getattr(other, f"weight_ih_l{layer_idx}")
         wh = getattr(other, f"weight_hh_l{layer_idx}")
@@ -454,6 +455,7 @@ class LSTM(torch.nn.Module):
 
         if (
             not isinstance(dropout, numbers.Number)
+            # pyrefly: ignore  # unsupported-operation
             or not 0 <= dropout <= 1
             or isinstance(dropout, bool)
         ):
@@ -462,6 +464,7 @@ class LSTM(torch.nn.Module):
                 "representing the probability of an element being "
                 "zeroed"
             )
+        # pyrefly: ignore  # unsupported-operation
         if dropout > 0:
             warnings.warn(
                 "dropout option for quantizable LSTM is ignored. "
@@ -573,6 +576,7 @@ class LSTM(torch.nn.Module):
             other.bidirectional,
             split_gates=split_gates,
         )
+        # pyrefly: ignore  # bad-argument-type
         observed.qconfig = getattr(other, "qconfig", qconfig)
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(

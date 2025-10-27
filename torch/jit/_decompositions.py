@@ -6,7 +6,8 @@ from torch import Tensor
 aten = torch.ops.aten
 import inspect
 import warnings
-from typing import Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Optional, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.types import Number
@@ -129,6 +130,7 @@ def var_decomposition(
         else:
             raise RuntimeError("correction must be int or float")
 
+    # pyrefly: ignore  # no-matching-overload
     return sum / max(0, denom)
 
 

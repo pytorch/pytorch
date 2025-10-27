@@ -39,7 +39,9 @@ struct alignas(2) BFloat16 {
     return from_bits_t();
   }
 
-  constexpr C10_HOST_DEVICE BFloat16(unsigned short bits, from_bits_t)
+  constexpr C10_HOST_DEVICE BFloat16(
+      unsigned short bits,
+      from_bits_t /*unused*/)
       : x(bits) {}
   /* implicit */ inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;

@@ -16,7 +16,13 @@ from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented_v2
-from ..utils import cmp_name_to_op_mapping, common_constant_types, istype, np
+from ..utils import (
+    cmp_name_to_op_mapping,
+    common_constant_types,
+    istype,
+    np,
+    raise_args_mismatch,
+)
 from .base import ValueMutationNew, VariableTracker
 
 
@@ -43,7 +49,7 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
-        source = kwargs.get("source", None)
+        source = kwargs.get("source")
 
         # Routing for supported collection literals.
         if isinstance(value, set):
@@ -149,7 +155,13 @@ its type to `common_constant_types`.
                 tx, [self, *args], kwargs
             )
         elif name == "join" and istype(self.value, str):
-            assert len(args) == 1 and len(kwargs) == 0
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             arg_unpacked = args[0].force_unpack_var_sequence(tx)
             try:
                 arg_const = [x.as_python_constant() for x in arg_unpacked]

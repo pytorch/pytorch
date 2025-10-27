@@ -66,14 +66,6 @@
 
 #include <torch/custom_class.h>
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::BuiltinCommHookType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::DebugLevel)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ReduceOp::RedOpType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ProcessGroup::BackendType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::OpType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::WorkResult)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ErrorType)
-
 namespace {
 
 #ifdef USE_C10D_NCCL
@@ -451,7 +443,8 @@ PyTypeObject* GetReduceOpMetaclass() {
     spec.basicsize = base_metaclass->tp_basicsize;
     spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
     spec.slots = slots;
-    PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
+    PyTypeObject* metaclass =
+        reinterpret_cast<PyTypeObject*>(PyType_FromSpec(&spec));
     if (!metaclass)
       throw py::error_already_set();
     return metaclass;
@@ -820,7 +813,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(
-      module, "ReduceOp", py::metaclass((PyObject*)GetReduceOpMetaclass()), R"(
+      module,
+      "ReduceOp",
+      py::metaclass(reinterpret_cast<PyObject*>(GetReduceOpMetaclass())),
+      R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
@@ -3366,6 +3362,20 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             return ::c10d::getNcclVersionTuple();
           });
 
+#ifdef NCCL_HAS_CTA_POLICY
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_DEFAULT",
+      [](const py::object&) { return NCCL_CTA_POLICY_DEFAULT; });
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_EFFICIENCY",
+      [](const py::object&) { return NCCL_CTA_POLICY_EFFICIENCY; });
+#ifdef NCCL_CTA_POLICY_ZERO // requires NCCL version >= 2.28
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_ZERO",
+      [](const py::object&) { return NCCL_CTA_POLICY_ZERO; });
+#endif // NCCL_CTA_POLICY_ZERO
+#endif // NCCL_HAS_CTA_POLICY
+
   module.def(
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
@@ -3522,11 +3532,35 @@ Example::
               py::arg("rank"),
               py::arg("size"),
               py::arg("options"),
-              R"(Create a new ProcessGroupXCCL instance.)");
+              R"(Create a new ProcessGroupXCCL instance.)")
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+
+                auto options = ::c10d::ProcessGroupXCCL::Options::create();
+                options->is_high_priority_stream = false;
+                return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
+                    store, rank, size, options);
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              R"(Create a new ProcessGroupXCCL instance.)")
+          .def_property_readonly(
+              "options",
+              &::c10d::ProcessGroupXCCL::getOptions,
+              R"(Return the options used to create this ProcessGroupXCCL instance.)");
 
   intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
       processGroupXCCL, "Options", backendOptions)
-      .def(py::init<>());
+      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+      .def_readwrite(
+          "is_high_priority_stream",
+          &::c10d::ProcessGroupXCCL::Options::is_high_priority_stream);
   module
       .def(
           "_dump_xccl_trace",
@@ -3820,14 +3854,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective);
   fakeProcessGroup
-      .def(
-          py::init([](int rank,
-                      int size,
-                      c10::intrusive_ptr<::c10d::FakeProcessGroup::Options>
-                          options) {
-            return c10::make_intrusive<::c10d::FakeProcessGroup>(
+      .def_static(
+          "_create_internal",
+          [](int rank,
+             int size,
+             c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
+            return ::c10d::FakeProcessGroup::_create_internal(
                 rank, size, std::move(options));
-          }),
+          },
           py::arg("rank"),
           py::arg("world_size"),
           py::arg("options") =
@@ -4074,6 +4108,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
+  module.def(
+      "_reset_fr_recording_nccl",
+      []() { ::c10d::reset_nccl_trace(); },
+      "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
 
   module.def(

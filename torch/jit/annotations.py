@@ -98,6 +98,7 @@ class EvalEnv:
     def __init__(self, rcb):
         self.rcb = rcb
         if torch.distributed.rpc.is_available():
+            # pyrefly: ignore  # unsupported-operation
             self.env["RRef"] = RRef
 
     def __getitem__(self, name):

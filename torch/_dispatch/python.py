@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import itertools
 import unittest.mock
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Callable, TypeVar, Union
+from typing import TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -154,7 +154,7 @@ def make_crossref_functionalize(
                 maybe_detach, (f_args, f_kwargs)
             )
             with fake_mode:
-                f_r = op(*f_args, **f_kwargs)
+                f_r = op(*f_args, **f_kwargs)  # pyrefly: ignore  # invalid-param-spec
         r = op._op_dk(final_key, *args, **kwargs)
 
         def desc():

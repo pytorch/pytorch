@@ -333,6 +333,7 @@ class IndexPropagation(DefaultHandler):
                 for k, v in self.indirect_var_ranges.items()
             ),
         )
+        # pyrefly: ignore  # bad-argument-type
         return statically_known_true(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(

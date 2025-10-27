@@ -1,7 +1,8 @@
 import os
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 

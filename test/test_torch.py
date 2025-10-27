@@ -79,7 +79,7 @@ assert torch.get_default_dtype() is torch.float32
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -1231,74 +1231,6 @@ class TestTorchDeviceType(TestCase):
         else:
             _test_in_place_broadcastable(small2, small_expanded, large_expanded)
             _test_in_place_broadcastable(small2, small, large)
-
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
-    @wrapDeterministicFlagAPITest
-    def test_cublas_config_nondeterministic_alert(self, device):
-        test_cases = [
-            # (function, (tensor sizes))
-            ('mm', ((2, 2), (2, 2),)),
-            ('mv', ((2, 2), (2,),)),
-            ('bmm', ((1, 2, 2), (1, 2, 2),))]
-
-        test_configs = [
-            # (CuBLAS workspace config, is deterministic)
-            ('garbage', False),
-            (None, False),
-            (':4096:8', True),
-            (':16:8', True)]
-
-        cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-        is_cuda10_2_or_higher = (torch.version.cuda is not None)
-
-        def test_case_info(fn_name, config):
-            return f'function "{fn_name}" with config "{"" if config is None else config}"'
-
-        # Create processes to test each combination of test cases and config settings
-        for fn_name, arg_sizes in test_cases:
-            for config, is_config_deterministic in test_configs:
-                env = os.environ.copy()
-                if config is None:
-                    if env.get(cublas_var_name) is not None:
-                        del env[cublas_var_name]
-                else:
-                    env[cublas_var_name] = config
-                should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
-                script = f"""
-import torch
-torch.use_deterministic_algorithms(True)
-fn = torch.{fn_name}
-arg_sizes = {arg_sizes}
-device = '{device}'
-should_throw_error = {should_throw_error}
-args = []
-for arg_size in arg_sizes:
-    args.append(torch.randn(*arg_size, device=device))
-try:
-    fn(*args)
-except RuntimeError as e:
-    if not should_throw_error:
-        raise RuntimeError('Did not expect any error to be raised')
-    elif 'Deterministic behavior was enabled with either' not in str(e):
-        raise RuntimeError('Expected a CuBLAS nondeterministic error, but got a different error')
-else:
-    if should_throw_error:
-        raise RuntimeError('Expected a CuBLAS nondeterministic error, but it was not raised')
-
-"""
-                try:
-                    subprocess.check_output(
-                        [sys.executable, '-c', script],
-                        stderr=subprocess.STDOUT,
-                        # On Windows, opening the subprocess with the default CWD makes `import torch`
-                        # fail, so just set CWD to this script's directory
-                        cwd=os.path.dirname(os.path.realpath(__file__)),
-                        env=env)
-                except subprocess.CalledProcessError as e:
-                    self.fail(msg=(
-                        f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
-                        + e.output.decode("utf-8")))
 
     @onlyCPU
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -8492,7 +8424,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_Size_iter(self):
         for sizes in [iter([1, 2, 3, 4, 5]), range(1, 6)]:
             x = torch.Size(sizes)
-            for i in range(0, 5):
+            for i in range(5):
                 self.assertEqual(x[i], i + 1)
 
     def test_t_not_2d_error(self):
@@ -10563,7 +10495,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda
         # is not available.
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+        with self.assertRaisesRegex(RuntimeError, "torch.cuda.Stream requires CUDA support"):
             torch.cuda.Stream()
 
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):

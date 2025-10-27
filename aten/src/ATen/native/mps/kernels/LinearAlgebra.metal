@@ -441,7 +441,7 @@ kernel void applySYRK(
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]) {
+    uint warp_id [[simdgroup_index_in_threadgroup]]) {
   const uint tx = tid.x;
   const uint ty = tid.y;
   const uint simdGroupsPerThreadgroup = (tpg.x * tpg.y + 31) / 32;
@@ -474,11 +474,8 @@ kernel void applySYRK(
       (actSize_j % 8 == 0) && (actSize_h % 8 == 0) && (actSize_k % 8 == 0);
 
   if (use_simdgroup) {
-    uint warp_id = sgitg;
-
     simdgroup_matrix<float, 8, 8> negative_identity =
         simdgroup_matrix<float, 8, 8>(-1.0);
-    simdgroup_matrix<float, 8, 8> identity = simdgroup_matrix<float, 8, 8>(1.0);
     simdgroup_matrix<float, 8, 8> Prod;
     simdgroup_matrix<float, 8, 8> Afrag;
     simdgroup_matrix<float, 8, 8> Bfrag;
@@ -521,8 +518,7 @@ kernel void applySYRK(
             /* transpose = */ upper);
 
         simdgroup_multiply(Prod, Afrag, Bfrag);
-        simdgroup_multiply(Prod, Prod, negative_identity);
-        simdgroup_multiply_accumulate(Cfrag, Cfrag, identity, Prod);
+        simdgroup_multiply_accumulate(Cfrag, Prod, negative_identity, Cfrag);
       }
 
       simdgroup_store(

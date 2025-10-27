@@ -5,8 +5,9 @@ import itertools
 import math
 import operator
 import sys
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._custom_op
@@ -592,6 +593,21 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     raise ValueError(msg)
 
 
+@register_op_impl(aten._reshape_copy.default)
+def _reshape_copy(fake_mode, func, a, *shape):
+    if a.is_sparse or a.is_mkldnn:
+        return NotImplemented
+
+    shape = utils.infer_size(*shape, a.numel())
+    if is_contiguous_or_false(a):
+        view = _view_meta(fake_mode, func, a, *shape)
+        return view.clone(memory_format=torch.contiguous_format)
+    else:
+        return _view_meta(
+            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+        )
+
+
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(fake_mode, func, a, *shape):
@@ -806,7 +822,8 @@ def slice_forward(
     # create unbacked if case unknown
     if new_size is None:
         new_size = shape_env.create_unbacked_symint()
-        torch._check_is_size(new_size, max=sizes[dim])
+        torch._check(new_size >= 0)
+        torch._check(new_size <= sizes[dim])
 
     # stride
     new_stride = strides[dim] * step
@@ -1319,7 +1336,7 @@ def make_fast_binary_impl(
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and not op.device.type == "cpu":
+            if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
             # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:

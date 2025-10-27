@@ -372,7 +372,7 @@ def _check_dependencies(m):
 
     if dependencies is not None:
         missing_deps = [pkg for pkg in dependencies if not _check_module_exists(pkg)]
-        if len(missing_deps):
+        if missing_deps:
             raise RuntimeError(f"Missing dependencies: {', '.join(missing_deps)}")
 
 
@@ -421,7 +421,7 @@ def set_dir(d: Union[str, os.PathLike]) -> None:
         d (str): path to a local folder to save downloaded models & weights.
     """
     global _hub_dir
-    _hub_dir = os.path.expanduser(d)
+    _hub_dir = os.path.expanduser(d)  # pyrefly: ignore  # no-matching-overload
 
 
 def list(

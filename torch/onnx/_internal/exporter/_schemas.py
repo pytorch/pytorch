@@ -541,6 +541,7 @@ class OpSignature:
                 if (
                     return_param_name := _get_type_constraint_name(return_type_i)
                 ) in type_constraints:
+                    # pyrefly: ignore  # index-error
                     type_constraint = type_constraints[return_param_name]
                 else:
                     return_param_name = f"TReturn{i}"
@@ -553,6 +554,7 @@ class OpSignature:
                     type_constraints[return_param_name] = type_constraint
                 outputs.append(
                     Parameter(
+                        # pyrefly: ignore  # bad-argument-type
                         name=return_param_name,
                         type_constraint=type_constraint,
                         required=True,

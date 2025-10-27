@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 
@@ -71,6 +72,7 @@ class FPGMPruner(BaseStructuredSparsifier):
         dist_matrix = self.dist_fn(t_flatten)
 
         # more similar with other filter indicates large in the sum of row
+        # pyrefly: ignore  # bad-argument-type
         distance = torch.sum(torch.abs(dist_matrix), 1)
 
         return distance
