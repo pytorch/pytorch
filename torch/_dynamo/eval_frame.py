@@ -42,7 +42,7 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union, Sized
+from typing import Any, NamedTuple, Optional, Sized, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
