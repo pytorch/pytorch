@@ -252,7 +252,6 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
   if (!Py_IsInitialized())
     return;
 
-  // printf("decref %p (%s)\n", pyobj, Py_TYPE(pyobj)->tp_name);
   pybind11::gil_scoped_acquire gil;
   // Two possibilities:
   // 1. We are decref-ing an object that has a PyObjectSlot, like a Tensor or

@@ -2385,8 +2385,6 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
   THPVariable* var = reinterpret_cast<THPVariable*>(self);
   Py_VISIT(var->backward_hooks);
   Py_VISIT(var->post_accumulate_grad_hooks);
-  // printf("traversing %p of type %s backward_hooks=%p\n", self, type->tp_name,
-  // var->backward_hooks);
   TORCH_INTERNAL_ASSERT(!var->cdata.unsafeIsBorrowed());
   if (!var->cdata.unsafeIsBorrowed()) {
     const auto& tensor = THPVariable_Unpack(var);
