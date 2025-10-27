@@ -4,6 +4,7 @@ import gc
 import itertools
 import json
 import random
+import sys
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -25,6 +26,8 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
 )
+
+from config_utils import heads_input_type, load_config_file, print_default_config
 
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -363,9 +366,9 @@ def run_single_backend_FA(
     mask_kwargs,
     backend: str,
 ) -> ExperimentResults:
-    assert backend in ["fav2", "fav3", "fakv"]
+    assert backend in ["fav3", "fakv"]
     # Generate callable for specific backend.
-    if backend in ["fav2", "fav3"]:
+    if backend in ["fav3"]:
         FA = generate_FA_callable(
             config.attn_type, config.shape, config.dtype, backend, **mask_kwargs
         )
@@ -480,7 +483,7 @@ def run_single_experiment(
                 mask_kwargs,
                 backend,
             )
-        else:  # sdpa
+        else:  # sdpa (also supports fav2)
             results[backend] = run_single_backend_sdpa(
                 config,
                 query,
@@ -562,7 +565,8 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
     softmax_flops = M * N * 2  # Not counting online softmax overhead
     o_flops = M * D * N * 2
     # Not counting split k overhead
-    total_flops = B * Hq * (qk_flops + softmax_flops + o_flops) * (1 - results.sparsity)
+    sparsity = results.sparsity if results.sparsity is not None else 0.0
+    total_flops = B * Hq * (qk_flops + softmax_flops + o_flops) * (1 - sparsity)
     return total_flops / results.fwd_time / 1e6  # in TFLOPs/
 
 
@@ -881,11 +885,7 @@ def generate_FA_callable(
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
-    if backend == "fav2":
-        # Use PyTorch's built-in Flash Attention via SDPA
-        flash_attn_func = None  # We'll define this below using SDPA
-        flash_attn_varlen_func = None
-    elif backend == "fav3":
+    if backend == "fav3":
         try:
             from flash_attn.flash_attn_interface import (
                 flash_attn_func,
@@ -1160,6 +1160,7 @@ def _output_json_for_dashboard(
     if not experiments:
         return
 
+    import math
     import platform
     from dataclasses import asdict, dataclass
     from typing import Any, Optional
@@ -1174,6 +1175,10 @@ def _output_json_for_dashboard(
 
         # Process each backend result
         for backend, results in results_dict.items():
+            # Skip backends that were not run (NaN results)
+            if math.isnan(results.fwd_time):
+                continue
+
             # Extract data from experiment
             test_name = f"{backend}_{config.attn_type}_"
             input_config = f"shape: {config.shape}, dtype: {config.dtype}"
@@ -1199,96 +1204,46 @@ def _output_json_for_dashboard(
                 if device == "cpu"
                 else "unknown"
             )
+            # Create dataclasses for JSON structure
+            @dataclass
+            class BenchmarkInfo:
+                name: str
+                mode: Optional[str]
+                dtype: str
+                extra_info: dict[str, Any]
 
-        # Create dataclasses for JSON structure
-        @dataclass
-        class BenchmarkInfo:
-            name: str
-            mode: Optional[str]
-            dtype: str
-            extra_info: dict[str, Any]
+            @dataclass
+            class ModelInfo:
+                name: str
+                type: str
+                origins: list[str]
+                extra_info: dict[str, Any]
 
-        @dataclass
-        class ModelInfo:
-            name: str
-            type: str
-            origins: list[str]
-            extra_info: dict[str, Any]
+            @dataclass
+            class MetricInfo:
+                name: str
+                unit: str
+                benchmark_values: list[float]
+                target_value: Optional[float]
 
-        @dataclass
-        class MetricInfo:
-            name: str
-            unit: str
-            benchmark_values: list[float]
-            target_value: Optional[float]
-
-        @dataclass
-        class BenchmarkRecord:
-            benchmark: BenchmarkInfo
-            model: ModelInfo
-            metric: MetricInfo
-        
-        # Benchmark extra info
-        benchmark_extra_info={
-            "input_config": input_config,
-            "device": device,
-            "arch": device_arch,
-            "operator_name": backend,
-            "attn_type": config.attn_type,
-            "shape": str(config.shape),
-            "max_autotune": config.max_autotune,
-        },
-        # Add record for forward latency
-        record_fwd_latency = BenchmarkRecord(
-            benchmark=BenchmarkInfo(
-                name=benchmark_name,
-                mode=mode,
-                dtype=dtype,
-                extra_info=benchmark_extra_info,
-            ),
-            model=ModelInfo(
-                name=test_name+str(config.shape),
-                type="attention-benchmark",
-                origins=["pytorch"],
-                extra_info={
-                    "operator_name": backend,
-                    "attn_type": config.attn_type,
-                },
-            ),
-            metric=MetricInfo(
-                name="forward latency",
-                unit="us",
-                benchmark_values=[results.fwd_time],
-                target_value=None,
-            ),
-        )
-        records.append(asdict(record_fwd_latency))
-
-        # Add record for forward memory bandwidth (if available)
-        if config.cal_bandwidth and results.sparsity is not None:
-            record_fwd_bandwidth = BenchmarkRecord(
-                benchmark=BenchmarkInfo(
-                    name=benchmark_name,
-                    mode=mode,
-                    dtype=dtype,
-                    extra_info=benchmark_extra_info,
-                ),
-                model=ModelInfo(
-                    name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
-                    extra_info={"operator_name": backend,}
-                ),
-                metric=MetricInfo(
-                    name="memory bandwidth",
-                    unit="TB/s",
-                    benchmark_values=[calculate_bandwidth(config, results, "fwd")],
-                    target_value=None,
-                ),
-            )
-            records.append(asdict(record_fwd_bandwidth))
-
-        # Add record for forward TFLOPS (if available)
-        if config.cal_bandwidth:
-            record_fwd_tflops = BenchmarkRecord(
+            @dataclass
+            class BenchmarkRecord:
+                benchmark: BenchmarkInfo
+                model: ModelInfo
+                metric: MetricInfo
+            
+            # Benchmark extra info
+            benchmark_extra_info={
+                "input_config": input_config,
+                "device": device,
+                "arch": device_arch,
+                "operator_name": backend,
+                "attn_type": config.attn_type,
+                "shape": str(config.shape),
+                "max_autotune": config.max_autotune,
+            },
+            # Add record for forward latency
+            record_fwd_latency = BenchmarkRecord(
                 benchmark=BenchmarkInfo(
                     name=benchmark_name,
                     mode=mode,
@@ -1301,40 +1256,89 @@ def _output_json_for_dashboard(
                     origins=["pytorch"],
                     extra_info={
                         "operator_name": backend,
-                    }
+                        "attn_type": config.attn_type,
+                    },
                 ),
                 metric=MetricInfo(
-                    name="tflops",
-                    unit="TFLOPS/s",
-                    benchmark_values=[calculate_tflops(config, results)],
-                    target_value=None,
-                ),
-            )
-            records.append(asdict(record_fwd_tflops))
-
-        # Add record for backward latency (if available)
-        if config.calculate_bwd_time and results.bwd_time is not None:
-            record_bwd_latency = BenchmarkRecord(
-                benchmark=BenchmarkInfo(
-                    name=benchmark_name,
-                    mode=mode,
-                    dtype=dtype,
-                    extra_info=benchmark_extra_info,
-                ),
-                model=ModelInfo(
-                    name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
-                    extra_info={
-                        "operator_name": backend,
-                },
-                ),
-                metric=MetricInfo(
-                    name="backward latency",
+                    name="forward latency",
                     unit="us",
-                    benchmark_values=[results.bwd_time],
+                    benchmark_values=[results.fwd_time],
                     target_value=None,
                 ),
             )
-            records.append(asdict(record_bwd_latency))
+            records.append(asdict(record_fwd_latency))
+
+            # Add record for forward memory bandwidth (if available)
+            if config.cal_bandwidth:
+                record_fwd_bandwidth = BenchmarkRecord(
+                    benchmark=BenchmarkInfo(
+                        name=benchmark_name,
+                        mode=mode,
+                        dtype=dtype,
+                        extra_info=benchmark_extra_info,
+                    ),
+                    model=ModelInfo(
+                        name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
+                        extra_info={"operator_name": backend,}
+                    ),
+                    metric=MetricInfo(
+                        name="memory bandwidth",
+                        unit="TB/s",
+                        benchmark_values=[calculate_bandwidth(config, results, "fwd")],
+                        target_value=None,
+                    ),
+                )
+                records.append(asdict(record_fwd_bandwidth))
+
+            # Add record for forward TFLOPS (if available)
+            if config.cal_bandwidth:
+                record_fwd_tflops = BenchmarkRecord(
+                    benchmark=BenchmarkInfo(
+                        name=benchmark_name,
+                        mode=mode,
+                        dtype=dtype,
+                        extra_info=benchmark_extra_info,
+                    ),
+                    model=ModelInfo(
+                        name=test_name+str(config.shape),
+                        type="attention-benchmark",
+                        origins=["pytorch"],
+                        extra_info={
+                            "operator_name": backend,
+                        }
+                    ),
+                    metric=MetricInfo(
+                        name="tflops",
+                        unit="TFLOPS/s",
+                        benchmark_values=[calculate_tflops(config, results)],
+                        target_value=None,
+                    ),
+                )
+                records.append(asdict(record_fwd_tflops))
+
+            # Add record for backward latency (if available and not NaN)
+            if config.calculate_bwd_time and results.bwd_time is not None and not math.isnan(results.bwd_time):
+                record_bwd_latency = BenchmarkRecord(
+                    benchmark=BenchmarkInfo(
+                        name=benchmark_name,
+                        mode=mode,
+                        dtype=dtype,
+                        extra_info=benchmark_extra_info,
+                    ),
+                    model=ModelInfo(
+                        name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
+                        extra_info={
+                            "operator_name": backend,
+                    },
+                    ),
+                    metric=MetricInfo(
+                        name="backward latency",
+                        unit="us",
+                        benchmark_values=[results.bwd_time],
+                        target_value=None,
+                    ),
+                )
+                records.append(asdict(record_bwd_latency))
 
     # Write all records to the output file
     with open(output_file, "w", encoding="utf-8") as f:
@@ -1362,11 +1366,15 @@ def main(
     """Run sweep over sizes and score mods for flex attention.
 
     Usage Examples:
-        # Generate a config template
-        python score_mod.py --print-config > my_config.json
-
-        # Use a config file
+        # Use a yml config file
+        python score_mod.py --config basic_config.yaml
+        
+        # Use a json config file
         python score_mod.py --config my_config.json
+
+        # Generate a config template
+        python score_mod.py --print-config json > my_config.json # For a json config
+        python score_mod.py --print-config yaml > my_config.yaml # For a yaml config
 
         # Override config with CLI args
         python score_mod.py --config my_config.json -dtype float16 --max-autotune
@@ -1398,14 +1406,6 @@ def main(
     if isinstance(dtype, str):
         dtype = getattr(torch, dtype)
 
-    # Parse head configurations (if not already parsed)
-    nh_parsed = []
-    for h in nh:
-        if isinstance(h, tuple):
-            nh_parsed.append(h)
-        else:
-            nh_parsed.append(heads_input_type(h))
-
     # Always calculate throughput
     throughput = True
     print('Backend: ', backend)
@@ -1419,7 +1419,7 @@ def main(
             calculate_bwd,
             dtype,
             b,
-            nh_parsed,
+            nh,
             s,
             d,
             mods,
@@ -1452,14 +1452,6 @@ def main(
         _output_json_for_dashboard(
             results, output_json_for_dashboard, benchmark_name
         )
-
-
-def heads_input_type(s: str) -> tuple[int, int]:
-    try:
-        hq, hkv = map(int, s.split(","))
-        return hq, hkv
-    except Exception as e:
-        raise ValueError("Heads must be Hq,Hkv") from e
 
 
 if __name__ == "__main__":
@@ -1554,101 +1546,37 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
         help="Name of the benchmark for dashboard output",
         default="PyTorch operator microbenchmark",
     )
+    parser.add_argument(
+        "--print-config",
+        type=str,
+        choices=["json", "yaml"],
+        help="Print a default config template in JSON or YAML format and exit",
+        default=None,
+    )
     # Parse arguments
     args = parser.parse_args()
 
-    # Load config file if provided
+    # Handle --print-config
+    if args.print_config:
+        print_default_config(args.print_config)
+        sys.exit(0)
+
+    # Load and merge config if provided
     if args.config:
-        with open(args.config, 'r') as f:
-            # Try to load as JSON first, then fall back to YAML
-            config_str = f.read()
-            try:
-                config = json.loads(config_str)
-            except json.JSONDecodeError:
-                # Simple YAML parser for basic configs (without external dependencies)
-                config = {}
-                for line in config_str.split('\n'):
-                    line = line.split('#')[0].strip()  # Remove comments
-                    if not line or ':' not in line:
-                        continue
-                    key, value = line.split(':', 1)
-                    key = key.strip()
-                    value = value.strip()
+        config = load_config_file(args.config)
 
-                    # Parse value
-                    if value.lower() == 'true':
-                        config[key] = True
-                    elif value.lower() == 'false':
-                        config[key] = False
-                    elif value.lower() in ('null', 'none', ''):
-                        config[key] = None
-                    elif value.startswith('[') and value.endswith(']'):
-                        # Parse list - handle quoted strings properly
-                        import re
-                        # Match quoted strings (with anything inside) or unquoted items
-                        pattern = r'"([^"]+)"|\'([^\']+)\'|([^,\[\]\s]+)'
-                        matches = re.findall(pattern, value[1:-1])  # Remove [ ]
-                        parsed_items = []
-                        for match in matches:
-                            # match is a tuple of (double_quoted, single_quoted, unquoted)
-                            item = match[0] or match[1] or match[2]
-                            item = item.strip()
-                            if item:
-                                try:
-                                    parsed_items.append(int(item))
-                                except ValueError:
-                                    parsed_items.append(item)
-                        config[key] = parsed_items
-                    elif value.startswith('"') or value.startswith("'"):
-                        config[key] = value.strip('"\'')
-                    else:
-                        # Try to parse as number
-                        try:
-                            config[key] = int(value)
-                        except ValueError:
-                            try:
-                                config[key] = float(value)
-                            except ValueError:
-                                config[key] = value
-
-        # Merge config file with command line args (CLI args take precedence)
-        # Only override if the argument wasn't explicitly set on command line
-        for key, value in config.items():
-            # Convert key format (e.g., "calculate_bwd" to "calculate_bwd")
-            key_normalized = key.replace("-", "_")
-
-            # Check if this arg was set on command line by comparing with default
-            if hasattr(args, key_normalized):
-                arg_value = getattr(args, key_normalized)
-                default_value = parser.get_default(key_normalized)
-
-                # If the arg value equals default, use config file value
-                if arg_value == default_value:
-                    # Handle special case for 'nh' which needs conversion
-                    if key_normalized == "nh" and isinstance(value, list):
-                        setattr(args, key_normalized, [heads_input_type(h) if isinstance(h, str) else h for h in value])
-                    else:
-                        setattr(args, key_normalized, value)
+        # Merge config with CLI args (CLI args take precedence)
+        json_args = argparse.Namespace()
+        json_args.__dict__ = config
+        args = parser.parse_args(namespace=json_args)
 
     # Convert dtype string to torch dtype (only if it's still a string)
     if isinstance(args.dtype, str):
         args.dtype = getattr(torch, args.dtype)
 
-    main(
-        dynamic=args.dynamic,
-        calculate_bwd=args.calculate_bwd,
-        dtype=args.dtype,
-        b=args.b,
-        nh=args.nh,
-        s=args.s,
-        d=args.d,
-        mods=args.mods,
-        backend=args.backend,
-        max_autotune=args.max_autotune,
-        decoding=args.decoding,
-        kv_size=args.kv_size,
-        throughput=args.throughput,
-        save_path=args.save_path,
-        output_json_for_dashboard=args.output_json_for_dashboard,
-        benchmark_name=args.benchmark_name,
-    )
+    # Remove config and print_config from args before passing to main
+    args_dict = vars(args)
+    args_dict.pop('config', None)
+    args_dict.pop('print_config', None)
+
+    main(**args_dict)
