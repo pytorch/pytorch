@@ -103,7 +103,7 @@ class Shard(Placement):
         pad_sizes: list[int] = []
         for shard in tensor_list:
             if with_padding:
-                pad_size = full_chunk_size - shard.size(self.dim)
+                pad_size = Shard._get_shard_pad_size(full_chunk_size, shard, self.dim)
                 shard = pad_tensor(shard, self.dim, pad_size)
                 pad_sizes.append(pad_size)
             if contiguous:
@@ -369,6 +369,94 @@ class Shard(Placement):
         """
         return full_size - local_tensor.size(dim)
 
+    @staticmethod
+    def _compute_padding_info(
+        current_logical_shape: list[int],
+        num_chunks: int,
+        old_shard_dim: int,
+        new_shard_dim: int,
+    ) -> tuple[bool, int, int, bool, int, int]:
+        results = []
+        for shard_dim in [old_shard_dim, new_shard_dim]:
+            dim_logical_size = current_logical_shape[shard_dim]
+            dim_padding = dim_logical_size % num_chunks != 0
+            dim_full_chunk_size = (dim_logical_size + num_chunks - 1) // num_chunks
+            results.append((dim_padding, dim_logical_size, dim_full_chunk_size))
+
+        return results[0] + results[1]
+
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _pad_for_new_shard_dim(
+        current_logical_shape: list[int],
+        local_tensor: torch.Tensor,
+        num_chunks: int,
+        old_shard_dim: int,
+        new_shard_dim: int,
+    ) -> torch.Tensor:
+        (
+            old_dim_padding,
+            _,
+            old_dim_full_chunk_size,
+            new_dim_padding,
+            _,
+            new_dim_full_chunk_size,
+        ) = Shard._compute_padding_info(
+            current_logical_shape, num_chunks, old_shard_dim, new_shard_dim
+        )
+
+        if old_dim_padding:
+            old_dim_pad_size = Shard._get_shard_pad_size(
+                old_dim_full_chunk_size, local_tensor, old_shard_dim
+            )
+            local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
+        if new_dim_padding:
+            new_dim_pad_size = Shard._get_shard_pad_size(
+                new_dim_full_chunk_size * num_chunks, local_tensor, new_shard_dim
+            )
+            local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
+        return local_tensor
+
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _unpad_for_new_shard_dim(
+        current_logical_shape: list[int],
+        local_tensor: torch.Tensor,
+        num_chunks: int,
+        old_shard_dim: int,
+        new_shard_dim: int,
+        local_rank: int,
+    ) -> torch.Tensor:
+        (
+            old_dim_padding,
+            _,
+            old_dim_full_chunk_size,
+            new_dim_padding,
+            new_dim_logical_size,
+            new_dim_full_chunk_size,
+        ) = Shard._compute_padding_info(
+            current_logical_shape, num_chunks, old_shard_dim, new_shard_dim
+        )
+
+        if old_dim_padding:
+            old_dim_unpad_size = (
+                old_dim_full_chunk_size * num_chunks
+                - current_logical_shape[old_shard_dim]  # type: ignore[possibly-undefined]
+            )
+            local_tensor = unpad_tensor(local_tensor, old_shard_dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
+
+        if new_dim_padding:
+            local_shard_size_on_new_dim = Shard.local_shard_size_and_offset(
+                new_dim_logical_size, num_chunks, local_rank
+            )[0]
+            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
+            local_tensor = unpad_tensor(local_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
+
+        return local_tensor
+
     def _to_new_shard_dim(
         self,
         local_tensor: torch.Tensor,
@@ -389,46 +477,22 @@ class Shard(Placement):
 
         num_chunks = mesh.size(mesh_dim=mesh_dim)
 
-        old_dim_logical_size = current_logical_shape[self.dim]
-        new_dim_logical_size = current_logical_shape[new_shard_dim]
-        old_dim_padding = old_dim_logical_size % num_chunks != 0
-        new_dim_padding = new_dim_logical_size % num_chunks != 0
-        if old_dim_padding:
-            old_dim_full_chunk_size = (
-                old_dim_logical_size + num_chunks - 1
-            ) // num_chunks
-            old_dim_pad_size = Shard._get_shard_pad_size(
-                old_dim_full_chunk_size, local_tensor, self.dim
-            )
-            local_tensor = pad_tensor(local_tensor, self.dim, old_dim_pad_size)
-        if new_dim_padding:
-            new_dim_full_chunk_size = (
-                new_dim_logical_size + num_chunks - 1
-            ) // num_chunks
-            new_dim_pad_size = Shard._get_shard_pad_size(
-                new_dim_full_chunk_size * num_chunks, local_tensor, new_shard_dim
-            )
-            local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
-
-        if not local_tensor.is_contiguous():
-            local_tensor = local_tensor.contiguous()
+        local_tensor = Shard._pad_for_new_shard_dim(
+            current_logical_shape, local_tensor, num_chunks, self.dim, new_shard_dim
+        )
 
         new_tensor = shard_dim_alltoall(
             local_tensor, self.dim, new_shard_dim, mesh, mesh_dim
         )
 
-        if old_dim_padding:
-            old_dim_unpad_size = (
-                old_dim_full_chunk_size * num_chunks - current_logical_shape[self.dim]  # type: ignore[possibly-undefined]
-            )
-            new_tensor = unpad_tensor(new_tensor, self.dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
-
-        if new_dim_padding:
-            local_shard_size_on_new_dim = self._local_shard_size_and_offset(
-                new_dim_logical_size, num_chunks, my_coordinate[mesh_dim]
-            )[0]
-            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
-            new_tensor = unpad_tensor(new_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
+        new_tensor = Shard._unpad_for_new_shard_dim(
+            current_logical_shape,
+            new_tensor,
+            num_chunks,
+            self.dim,
+            new_shard_dim,
+            my_coordinate[mesh_dim],
+        )
 
         return new_tensor
 

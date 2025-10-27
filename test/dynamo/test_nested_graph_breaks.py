@@ -227,7 +227,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
 
         self.assertEqual(f4(torch.zeros(3)), torch.zeros(3) + 255)
         self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 2)
-        breakpoint()
 
     def test_supported_ctx_manager(self):
         global check, check_disabled, f1, f2, f3
@@ -707,14 +706,21 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         # instruction that can follow STORE_ATTR is RETURN_CONST, which was removed in 3.14+.
 
         # make sure inner3's code options are compatible with the instructions below
+        global y
+
+        def y():
+            pass
+
         def inner3(x):
             x.attr = 1000
+            y.attr = 2000
 
         new_inst = torch._dynamo.bytecode_transformation.create_instruction
         insts = [
             new_inst("LOAD_CONST", argval=1000),
             new_inst("LOAD_CONST", argval=2000),
-            new_inst("LOAD_FAST", argval="x"),
+            new_inst("LOAD_GLOBAL", argval="y"),
+            # NOTE: this should cause a graph break - change y if it doesn't work!
             new_inst("STORE_ATTR", argval="attr"),
             new_inst("RETURN_VALUE"),
         ]
@@ -729,9 +735,12 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         )
         inner3.__code__ = inner3_code
 
+        torch._dynamo.utils.counters.clear()
         x = torch.zeros(3)
         ref = f3(inner3, x)
         self.assertEqual(ref, torch.zeros(3) + 1006)
+        # make sure we're actually STORE_ATTR graph breaking
+        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
 
         # dynamic branching is harder to test - the other tests should be enough cover
 
