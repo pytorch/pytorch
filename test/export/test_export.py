@@ -721,6 +721,20 @@ class TestExport(TestCase):
                 )
                 self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
 
+    def test_fx_annotate(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x += 1
+                with torch.fx.traceback.annotate({"a": "b"}):
+                    x += 1
+                x += 1
+                return x
+
+        ep = export(Foo(), (torch.randn(2),))
+
+        add_1 = list(ep.graph.nodes)[2]
+        self.assertTrue("custom" in add_1.meta and add_1.meta["custom"].get("a") == "b")
+
     @requires_gpu
     def test_flex_attention_export(self):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
