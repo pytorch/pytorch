@@ -43,6 +43,8 @@ def _partition_by_supported_nodes(gm, supported_ops, prefix):
 
 
 def _compile_submod(gm, prefix):
+    from torch._inductor.standalone_compile import AOTCompiledArtifact
+
     for node in gm.graph.nodes:
         if node.op == "call_module" and node.target.startswith(prefix):
             fake_inputs = []
@@ -56,13 +58,12 @@ def _compile_submod(gm, prefix):
 
             submod = getattr(gm, node.target)
 
-            # _dummy_wrapper is to make call_function happy
-            compiled_submod = _dummy_wrapper(
-                torch._inductor.standalone_compile(
-                    submod, fake_inputs, dynamic_shapes="from_tracing_context"
-                )
+            compiled_fn = torch._inductor.standalone_compile(
+                submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
             )
-
+            assert isinstance(compiled_fn, AOTCompiledArtifact)
+            # _dummy_wrapper is to make call_function happy
+            compiled_submod = _dummy_wrapper(compiled_fn)
             with gm.graph.inserting_after(node):
                 new_node = gm.graph.call_function(
                     compiled_submod, args=node.args, kwargs=node.kwargs
