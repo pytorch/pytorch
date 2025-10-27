@@ -249,10 +249,8 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
         elif inspect.ismodule(value):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
-        elif inspect.isfunction(value):
-            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         else:
-            assert False
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
