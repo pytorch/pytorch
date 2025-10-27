@@ -21,8 +21,9 @@ constexpr size_t gPagesize = 4096;
 constexpr size_t gAlloc_threshold_thp = static_cast<size_t>(2) * 1024 * 1024;
 
 // Alignment to avoid false sharing between threads (cache line size).
-// Defaults to 64 bytes because `std::hardware_destructive_interference_size` may vary
-// across compilers or target architectures, making it unsuitable for stable ABI.
+// Defaults to 64 bytes because `std::hardware_destructive_interference_size`
+// may vary across compilers or target architectures, making it unsuitable for
+// stable ABI.
 constexpr std::size_t hardware_destructive_interference_size = 64;
 
 } // namespace c10
