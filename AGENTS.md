@@ -12,6 +12,6 @@
 - Do NOT attempt to install dependencies, you do not have Internet access
 - When you are ready to make a PR, do exactly these steps:
   - git stash -u
-  - git reset --hard $(cat /tmp/orig_work.txt) # NB: reset to the LOCAL branch, do NOT fetch
+  - git reset --hard $(cat /tmp/orig_work.txt) # NB: reset to the LOCAL branch, Do NOT fetch
   - git stash pop
   - Resolve conflicts if necessary
