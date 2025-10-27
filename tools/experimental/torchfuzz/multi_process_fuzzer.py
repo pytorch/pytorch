@@ -97,8 +97,6 @@ IGNORE_PATTERNS: list[re.Pattern] = [
         r"assert bool\(static_expr\)"
     ),  # https://github.com/pytorch/pytorch/issues/166319
     # Add more patterns here as needed, e.g.:
-
-
     # re.compile(r"Some other error message"),
 ]
 
