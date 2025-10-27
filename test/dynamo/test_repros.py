@@ -1006,7 +1006,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_empty = torch.compile(original_empty)
         self.assertEqual(bool(original_empty), bool(compiled_empty))
         self.assertFalse(bool(compiled_empty))
-        # Test with non-empty ModuleList  
+        # Test with non-empty ModuleList
         original_filled = nn.ModuleList([nn.Linear(10, 5)])
         compiled_filled = torch.compile(original_filled)
         self.assertEqual(bool(original_filled), bool(compiled_filled))
