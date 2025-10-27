@@ -1004,7 +1004,22 @@ class TensorVariable(VariableTracker):
         )
 
     def method_data_ptr(self, *args, **kwargs):
-        return DataPtrVariable(self)
+        from ..data_ptr_op import _data_ptr
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            _data_ptr,
+            (self.as_proxy(),),
+            {},
+        )
+
+        return DataPtrVariable(
+            from_tensor=self,
+            proxy=proxy,
+        )
 
     def method_item(self, *args, **kwargs):
         from ..symbolic_convert import InstructionTranslator
@@ -1809,10 +1824,15 @@ class DataPtrVariable(VariableTracker):
     def __init__(
         self,
         from_tensor: TensorVariable,
+        proxy: torch.fx.Proxy,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
+        self.proxy = proxy
+
+    def as_proxy(self):
+        return self.proxy
 
     def python_type(self):
         return int
@@ -1831,38 +1851,42 @@ class DataPtrVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "__eq__" and len(args) == 1:
             other = args[0]
-            if not isinstance(self, type(other)):
+            if not isinstance(other, DataPtrVariable):
+                # Comparing a data_ptr (int) to a non-data_ptr value
+                # If comparing to a tensor, it's always False
+                if isinstance(other, TensorVariable):
+                    return variables.ConstantVariable.create(False)
+                # For other types (e.g., int constants), return NotImplemented
+                # to allow Python's comparison protocol to handle it
                 return variables.ConstantVariable.create(NotImplemented)
 
-            self_example = self.from_tensor.proxy.node.meta.get("example_value")
-            other_example = other.from_tensor.proxy.node.meta.get("example_value")
+            # Runtime approach: Insert the comparison into the graph
+            from .builder import wrap_fx_proxy
 
-            if self_example is None or other_example is None:
-                unimplemented_v2(
-                    gb_type="data_ptr comparison",
-                    context="Comparing data_ptr() when aliasing cannot be determined at compile time.",
-                )
-
-            self_has_storage = self_example.untyped_storage().size() > 0
-            other_has_storage = other_example.untyped_storage().size() > 0
-
-            if not self_has_storage and not other_has_storage:
-                return variables.ConstantVariable.create(True)
-            if not self_has_storage or not other_has_storage:
-                return variables.ConstantVariable.create(False)
-
-            same_storage = torch._C._is_alias_of(self_example, other_example)
-            same_first_element = (
-                self_example.storage_offset() == other_example.storage_offset()
+            proxy = tx.output.create_proxy(
+                "call_function",
+                operator.eq,
+                (self.as_proxy(), other.as_proxy()),
+                {},
             )
-            return variables.ConstantVariable.create(
-                same_storage and same_first_element
-            )
+            return wrap_fx_proxy(tx, proxy)
 
         if name == "__ne__" and len(args) == 1:
-            eq_result = self.call_method(tx, "__eq__", args, kwargs)
-            if eq_result.value is NotImplemented:
-                return eq_result
-            return variables.ConstantVariable.create(not eq_result.value)
+            other = args[0]
+            if not isinstance(other, DataPtrVariable):
+                if isinstance(other, TensorVariable):
+                    return variables.ConstantVariable.create(True)
+                return variables.ConstantVariable.create(NotImplemented)
+
+            # Runtime approach: Insert the comparison into the graph
+            from .builder import wrap_fx_proxy
+
+            proxy = tx.output.create_proxy(
+                "call_function",
+                operator.ne,
+                (self.as_proxy(), other.as_proxy()),
+                {},
+            )
+            return wrap_fx_proxy(tx, proxy)
 
         return super().call_method(tx, name, args, kwargs)

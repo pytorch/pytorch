@@ -317,6 +317,25 @@ class DataPtrTests(TestCase):
         self.assertTrue(opt_fn(zero_sized))
         self.assertEqual(fn(zero_sized), opt_fn(zero_sized))
 
+    def test_data_ptr_comparison_to_tensor(self):
+        """
+        Test that data_ptr() (int) compared to tensor produces a boolean tensor.
+        This is an edge case - comparing an int to a tensor produces a tensor result.
+        """
+
+        def fn(x, y):
+            # Comparing data_ptr (int) to tensor produces boolean tensor
+            result = x.data_ptr() == y
+            # Convert to scalar for testing purposes
+            return result.all().item()
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        # data_ptr (int) should never equal any element in tensor
+        self.assertFalse(opt_fn(x, y))
+        self.assertEqual(fn(x, y), opt_fn(x, y))
+
 
 if __name__ == "__main__":
     run_tests()
