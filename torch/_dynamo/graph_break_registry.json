@@ -2810,5 +2810,15 @@
         "Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict."
       ]
     }
+  ],
+  "GB0279": [
+    {
+      "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
