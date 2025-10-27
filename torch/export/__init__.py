@@ -500,10 +500,10 @@ def load(
             if file_info.filename == "serialized_exported_program.json":
                 serialized_exported_program = file_content
             elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_state_dict = file_content
             elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_constants = file_content
             elif file_info.filename == "serialized_state_dict.pt":
                 serialized_state_dict = file_content

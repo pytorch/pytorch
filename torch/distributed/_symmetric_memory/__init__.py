@@ -1848,7 +1848,7 @@ def empty(
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
+# pyrefly: ignore [inconsistent-overload]
 def empty(
     size: Sequence[_int],
     *,
