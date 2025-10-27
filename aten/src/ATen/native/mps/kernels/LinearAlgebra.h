@@ -1,3 +1,4 @@
+#pragma once
 #include <c10/metal/common.h>
 
 template <unsigned N = c10::metal::max_ndim>
