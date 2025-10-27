@@ -384,6 +384,41 @@ class EventList(list):
         total_stat.key = "Total"
         return total_stat
 
+    def _print_tree(self, attributes=None, max_depth=None, indent="  "):
+        if not self._tree_built:
+            self._build_tree()
+
+        attributes = [] if attributes is None else attributes
+
+        def format_event(evt, depth=0):
+            if max_depth is not None and depth > max_depth:
+                return None
+
+            result = []
+            prefix = indent * depth
+            evt_str = f"{prefix}{evt.name}"
+
+            log = {}
+            for attr in attributes:
+                if hasattr(evt, attr):
+                    log[attr] = getattr(evt, attr)
+
+            if log:
+                log_str = ", ".join(f"{k}: {v}" for k, v in log.items())
+                evt_str = f"{evt_str}  # {{{log_str}}}"
+
+            result.append(evt_str)
+            for child in evt.cpu_children:
+                if (fmt_evt := format_event(child, depth + 1)) is not None:
+                    result.append(fmt_evt)
+
+            return "\n".join(result)
+
+        # Format all top-level events
+        top_level_events = [evt for evt in self if evt.cpu_parent is None]
+        tree_parts = [format_event(evt) for evt in top_level_events]
+        return "\n".join(tree_parts)
+
 
 def _format_time(time_us):
     """Define how to format time in FunctionEvent."""
