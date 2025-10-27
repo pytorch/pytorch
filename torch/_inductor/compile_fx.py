@@ -2445,6 +2445,11 @@ def compile_fx(
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    if CompilerBisector.disable_subsystem("inductor", "pre_grad_graph"):
+        return model_
+
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(

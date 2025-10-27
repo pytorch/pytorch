@@ -491,6 +491,13 @@ class CompilerBisector:
         Run fn repeatedly attempting to bisect torch.compile. fn should return True on success and False on failure.
         """
 
+        # TODO graph bisecting is not well composed with lowering
+        # bisector so far. Use a config to opt-in
+        import torch._inductor.config as inductor_config
+
+        if inductor_config.test_configs.bisect_pre_grad_graph:
+            BACKENDS["inductor"].insert(0, BisectSubsystem("pre_grad_graph"))
+
         if not cli_interface:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()

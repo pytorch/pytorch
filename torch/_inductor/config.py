@@ -2111,6 +2111,9 @@ class test_configs:
         "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
 
+    bisect_pre_grad_graph = False
+    bisect_keep_custom_backend_for_inductor = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
