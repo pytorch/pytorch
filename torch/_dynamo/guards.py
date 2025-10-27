@@ -2286,11 +2286,6 @@ class GuardBuilder(GuardBuilderBase):
                 ],
             )
 
-    def FUNCTION_MATCH(self, guard: Guard) -> None:
-        """things like torch.add and user defined functions"""
-        # don't support this in serialization because it uses unsupported ID_MATCH
-        return self.ID_MATCH(guard)
-
     def CLASS_MATCH(self, guard: Guard) -> None:
         """Equals ID_MATCH on classes - better readability than directly calling ID_MATCH"""
         val = self.get(guard.name)
@@ -2311,14 +2306,13 @@ class GuardBuilder(GuardBuilderBase):
 
     def CLOSURE_MATCH(self, guard: Guard) -> None:
         """matches a closure by __code__ id."""
-        # don't support this in serialization because it uses unsupported FUNCTION_MATCH
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) is types.FunctionType and hasattr(val, "__code__"):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
-            self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)  # type: ignore[arg-type]
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            self.FUNCTION_MATCH(guard)
+            assert False
 
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
@@ -3705,7 +3699,6 @@ class CheckFunctionManager:
         "DICT_VERSION",
         "NN_MODULE",
         "ID_MATCH",
-        "FUNCTION_MATCH",
         "CLASS_MATCH",
         "MODULE_MATCH",
         "CLOSURE_MATCH",
