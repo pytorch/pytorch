@@ -4802,6 +4802,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
             assert x.dtype == y.dtype
 
+    @skipIfTorchDynamo("getrefcount does not work in dynamo")
     def test_serializaion_no_storage_leak(self):
         # Test https://github.com/pytorch/pytorch/issues/149846
         t = torch.rand(10, 10)
