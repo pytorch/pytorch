@@ -5379,9 +5379,22 @@ class ConcatKernel(NopKernel):
         offsets_end = [new_size[dim]]
         assert 0 <= dim < len(new_size)
         for i in range(1, len(inputs)):
-            input_size = inputs[i].get_size()
+            input_size = list(inputs[i].get_size())
             offsets_start.append(new_size[dim])
-            assert len(input_size) == len(new_size)
+
+            # Handle dimension mismatch that can occur with dynamic shapes and squeeze operations
+            # In dynamic shapes mode, squeeze may conditionally remove dimensions, leading to
+            # inputs with different ranks. We normalize by treating missing trailing dimensions as size-1.
+            if len(input_size) != len(new_size):
+                max_len = max(len(input_size), len(new_size))
+
+                # Extend the shorter size vector with size-1 dimensions
+                # This handles the case where squeeze operations have removed trailing size-1 dimensions
+                if len(input_size) < max_len:
+                    input_size = input_size + [Integer(1)] * (max_len - len(input_size))
+                if len(new_size) < max_len:
+                    new_size = new_size + [Integer(1)] * (max_len - len(new_size))
+
             assert inputs[i].get_dtype() == dtype
             assert inputs[i].get_device() == device
             for j in range(len(new_size)):
