@@ -151,7 +151,7 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self.device = device
         self.device_handle = _get_device_handle(device.type)
         self.mp_policy = mp_policy
@@ -237,7 +237,7 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        self._orig_dtype = next(iter(orig_dtypes)) if len(trainable_params) else None
+        self._orig_dtype = next(iter(orig_dtypes)) if trainable_params else None
         if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
             # This can be relaxed if we issue one reduce-scatter per reduce
             # dtype (but we would need a way for users to specify multiple
@@ -245,9 +245,7 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
-        self._reduce_dtype = (
-            next(iter(reduce_dtypes)) if len(trainable_params) else None
-        )
+        self._reduce_dtype = next(iter(reduce_dtypes)) if trainable_params else None
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -623,7 +621,7 @@ class FSDPParamGroup:
             # Prefetch naively using the reverse post-forward order, which may
             # have mistargeted prefetches if not all modules used in forward
             # are used in this backward
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             self._prefetch_unshard(target_fsdp_param_group, "backward")
 
@@ -870,7 +868,7 @@ compile the forward part if you want to use Traceable FSDP2."""
             raise RuntimeError(msg)
 
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
         RegisterPostBackwardFunction._assert_not_tracing_fsdp()
