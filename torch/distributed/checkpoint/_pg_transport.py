@@ -227,7 +227,7 @@ class PGTransport:
         self._work: list[Work] = []
         self._pg = pg
         self._timeout = timeout
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self._device = device
         self._state_dict = state_dict
 
@@ -345,6 +345,7 @@ class PGTransport:
                 values.append(recv(path, v))
             elif isinstance(v, _DTensorMeta):
                 tensor = recv(path, v.local)
+                # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 values.append(DTensor(tensor, v.spec, requires_grad=False))
             elif isinstance(v, _ShardedTensorMeta):
                 # Receive all local shards that were sent to us

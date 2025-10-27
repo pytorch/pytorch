@@ -229,9 +229,10 @@ class AveragedModel(Module):
         use_buffers=False,
     ):  # noqa: D107
         super().__init__()
-        assert avg_fn is None or multi_avg_fn is None, (
-            "Only one of avg_fn and multi_avg_fn should be provided"
-        )
+        if avg_fn is not None and multi_avg_fn is not None:
+            raise AssertionError(
+                "Only one of avg_fn and multi_avg_fn should be provided"
+            )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
@@ -490,6 +491,7 @@ class SWALR(LRScheduler):
                 "To get the last learning rate computed by the scheduler, "
                 "please use `get_last_lr()`.",
                 UserWarning,
+                stacklevel=2,
             )
         # Set in `LRScheduler._initial_step()`
         step = self._step_count - 1

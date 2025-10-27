@@ -683,7 +683,6 @@ def package_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.writable() and f.seekable())
-        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
         or (isinstance(f, tempfile._TemporaryFileWrapper) and f.name.endswith(".pt2"))
     ):
@@ -695,7 +694,6 @@ def package_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
     # pyrefly: ignore  # bad-argument-type
@@ -1086,7 +1084,6 @@ def load_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
-        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
     ):
         # TODO: turn this into an error in 2.9
@@ -1097,7 +1094,6 @@ def load_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
     weights = {}
@@ -1167,7 +1163,6 @@ def load_pt2(
     else:
         aoti_runners = {
             model_name: _load_aoti(
-                # pyrefly: ignore  # bad-argument-type
                 f,
                 model_name,
                 run_single_threaded,
