@@ -5529,7 +5529,7 @@ class ConcatKernel(NopKernel):
             and not isinstance(src.data, ExternKernelAlloc)
         )
 
-    @cache_on_self
+    @cache_on_self_and_args
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
