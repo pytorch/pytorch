@@ -59,6 +59,8 @@ def _compile_submod(gm, prefix):
             submod = getattr(gm, node.target)
 
             # Get inductor configs from annotation
+            # TODO we should change partition when there are multiple differently
+            # annotated regions.
             inductor_options = {}
             for sub_node in submod.graph.nodes:
                 if hasattr(sub_node, "meta") and sub_node.meta.get("custom", None):
@@ -81,6 +83,14 @@ def _compile_submod(gm, prefix):
 
             # Apply config patches before compilation
             import torch._inductor.config as inductor_config
+
+            # Validate that all config keys exist
+            for key in inductor_options:
+                if not hasattr(inductor_config, key):
+                    raise ValueError(
+                        f"Invalid inductor config key '{key}' in regional_inductor annotation. "
+                        f"Available config keys can be found in torch._inductor.config"
+                    )
 
             with inductor_config.patch(inductor_options):
                 compiled_fn = torch._inductor.standalone_compile(

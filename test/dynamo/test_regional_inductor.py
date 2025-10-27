@@ -344,6 +344,32 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         finally:
             torch._inductor.standalone_compile = original_compile
 
+    def test_invalid_inductor_config(self):
+        """Test that invalid inductor config keys are caught with a clear error."""
+
+        def fn(x, y):
+            with fx_traceback.annotate(
+                {
+                    "compile_with_inductor": {
+                        "inductor_configs": {
+                            "invalid_config_key": True,
+                        }
+                    }
+                }
+            ):
+                return x * y + 1
+
+        backend = aot_eager_regional_inductor()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Invalid inductor config key 'invalid_config_key'",
+        ):
+            opt_fn(x, y)
+
     @requires_cuda_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
