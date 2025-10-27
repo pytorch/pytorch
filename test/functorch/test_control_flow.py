@@ -9091,14 +9091,12 @@ class GraphModule(torch.nn.Module):
     class true_graph_0(torch.nn.Module):
         def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
             item: "Sym(u0)" = torch.ops.aten.item.default(b1);  b1 = None
-
             mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
             return (mul,)
 
     class false_graph_0(torch.nn.Module):
         def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
             item: "Sym(u1)" = torch.ops.aten.item.default(b2);  b2 = None
-
             mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
             return (mul,)
 """,  # noqa: B950
@@ -9183,7 +9181,6 @@ class GraphModule(torch.nn.Module):
     class false_graph_0(torch.nn.Module):
         def forward(self, x: "f32[s68, 3]", sym_size_int_4: "Sym(s17)", sym_size_int_5: "Sym(s68)", z: "f32[s68, 3]"):
             mul: "f32[s68, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_5);  z = sym_size_int_5 = None
-
             add: "f32[s68, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
             return (add,)
 """,  # noqa: B950
