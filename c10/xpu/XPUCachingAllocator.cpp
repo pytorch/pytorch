@@ -479,9 +479,10 @@ class DeviceCachingAllocator {
     }
   }
 
-  // returns the smallest possible address in any segment
-  // where there is enough free address space to fit size
-  // may be composed of free and unmapped segments
+  // Finds the first (lowest-address) block in any segment that has sufficient
+  // contiguous free virtual address space to satisfy `size`. The available
+  // space may span multiple adjacent blocks, which can include both free and
+  // unmapped segments.
   Block* find_expandable_block(
       c10::DeviceIndex device,
       sycl::queue* queue,
@@ -505,9 +506,9 @@ class DeviceCachingAllocator {
          it != pool->unmapped.end() && (*it)->queue == queue;
          ++it) {
       Block* c = *it;
-      // we found the lowest address of an unmapped segment
-      // but there might be a free segment we can also use
-      // right before it
+      // Why? The unmapped block might have a free mapped block right before it.
+      // By starting from the previous block, we can use both:
+      // [Free Mapped Block] + [Unmapped Block] = More contiguous space
       if (allocatable(c->prev)) {
         c = c->prev;
       }
