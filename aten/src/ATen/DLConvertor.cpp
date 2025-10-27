@@ -152,7 +152,10 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   return ctx;
 }
 
-Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* data) {
+Device dlDeviceToTorchDevice(
+    DLDeviceType type,
+    c10::DeviceIndex index,
+    void* data) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -422,7 +425,8 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   }
 
   DLTensor& dl_tensor = src->dl_tensor;
-  Device device = getATenDevice(dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
+  Device device = dlDeviceToTorchDevice(
+      dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
 
   if (!dl_tensor.strides) {
@@ -487,7 +491,7 @@ Tensor maybeCopyTensor(
   bool force_move = copy.has_value() && !*copy;
 
   if (optional_dl_device.has_value()) {
-    auto device = at::getATenDevice(
+    auto device = at::dlDeviceToTorchDevice(
         optional_dl_device->device_type,
         static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
 
