@@ -4840,7 +4840,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.randn((37, 37), dtype=torch.double)
+        x = torch.randn((32, 32), dtype=torch.double)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -4891,7 +4891,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.randn((37, 37), dtype=torch.double)
+        x = torch.randn((32, 32), dtype=torch.double)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():

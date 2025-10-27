@@ -5,9 +5,10 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 import functools
 import inspect
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -492,10 +493,16 @@ def substitute_in_graph(
         def dispatch_fn(
             self: VariableBuilder, value: Callable[_P, _R]
         ) -> PolyfilledFunctionVariable:
+            if inspect.isclass(value):
+                guard_type = GuardBuilder.CLASS_MATCH
+            elif inspect.ismodule(value):
+                guard_type = GuardBuilder.MODULE_MATCH
+            else:
+                guard_type = GuardBuilder.ID_MATCH
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                **self.install_guards(guard_type),
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
