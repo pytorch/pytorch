@@ -2,6 +2,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <ATen/xpu/XPUGraph.h>
 #include <ATen/xpu/XPUGraphsUtils.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/CallOnce.h>
@@ -92,6 +93,58 @@ void XPUGeneratorState::increase(uint64_t increment) {
         philox_offset_per_thread_ % 4 == 0,
         "RNG offset must be a multiple of 4.");
     philox_offset_per_thread_ += increment;
+  }
+}
+
+// State can be used by multiple graph
+void XPUGeneratorState::register_graph(xpu::XPUGraph* graph) {
+  // Ensures that the RNG state is not currently being captured.
+  at::xpu::assertNotCapturing(
+      "Cannot register the state during capturing stage.");
+
+  if (registered_graphs_.empty()) {
+    auto options = at::TensorOptions().device(at::kXPU).dtype(at::kLong);
+    seed_extragraph_ = at::empty({1}, options);
+    offset_extragraph_ = at::empty({1}, options);
+  }
+
+  if (registered_graphs_.find(graph) == registered_graphs_.end()) {
+    registered_graphs_.insert(graph);
+  }
+}
+
+void XPUGeneratorState::unregister_graph(xpu::XPUGraph* graph) {
+  TORCH_CHECK(
+      registered_graphs_.find(graph) != registered_graphs_.end(),
+      "The graph should be registered to the state");
+  registered_graphs_.erase(graph);
+
+  if (registered_graphs_.empty()) {
+    seed_extragraph_.reset();
+    offset_extragraph_.reset();
+  }
+}
+
+void XPUGeneratorState::capture_prologue() {
+  capturing_ = true;
+  offset_intragraph_ = 0;
+  seed_extragraph_.fill_(int64_t(seed_));
+  offset_extragraph_.fill_(int64_t(0));
+}
+
+uint64_t XPUGeneratorState::capture_epilogue() {
+  capturing_ = false;
+  return offset_intragraph_;
+}
+
+void XPUGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
+  // Ensures the generator is not in capturing mode.
+  at::xpu::assertNotCapturing(
+      "Cannot prepare for replay during capturing stage.");
+  if (wholegraph_increment) {
+    seed_extragraph_.fill_(int64_t(seed_));
+    offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
+    increase(wholegraph_increment);
   }
 }
 
@@ -202,6 +255,15 @@ void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
 
 uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
   return state_->philox_offset_per_thread_;
+}
+
+void XPUGeneratorImpl::register_graph(xpu::XPUGraph* graph) {
+  graph->register_generator_state(state_);
+  state_->register_graph(graph);
+}
+
+void XPUGeneratorImpl::unregister_graph(xpu::XPUGraph* graph) {
+  state_->unregister_graph(graph);
 }
 
 PhiloxXpuState XPUGeneratorImpl::philox_xpu_state(uint64_t increment) {
