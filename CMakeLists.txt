@@ -263,12 +263,7 @@ cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
 # USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
 cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
-# Check environment variable for USE_FBGEMM before defining option for CUDA 13
-if(DEFINED ENV{USE_FBGEMM} AND NOT "$ENV{USE_FBGEMM}" MATCHES "^(1|ON|YES|TRUE)$")
-  set(USE_FBGEMM OFF CACHE BOOL "Use FBGEMM (quantized 8-bit server operators)" FORCE)
-else()
-  option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
-endif()
+option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_GFLAGS "Use GFLAGS" OFF)
