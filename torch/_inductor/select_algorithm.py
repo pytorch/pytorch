@@ -3720,7 +3720,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             append_to_log(mm_filename, out_dict)
 
-        AlgorithmSelectorCache.maybe_log_flex_attention_results(name, input_nodes, timings)
+        AlgorithmSelectorCache.maybe_log_flex_attention_results(
+            name, input_nodes, timings
+        )
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
