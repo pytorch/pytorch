@@ -1002,6 +1002,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         )
         self.run_model("mm", tensors, {"triton.enable_persistent_tma_matmul": True})
 
+    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @fresh_cache()
     def test_mixed_template_configs(self):
         """Test mixing different template types"""
