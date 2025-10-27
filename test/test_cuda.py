@@ -4584,6 +4584,23 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(ValueError):
             torch._C._accelerator_setAllocatorSettings("foo:1,bar:2")
+        # Test division==1 case.
+        torch.cuda.memory.empty_cache()
+        div1_start_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_start_requested = torch.cuda.memory_stats()[key_requested]
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:1")
+        torch.rand(nelems, device="cuda")
+        div1_end_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_end_requested = torch.cuda.memory_stats()[key_requested]
+
+        self.assertEqual(div1_start_mem - start_mem, nbytes)
+        if not TEST_CUDAMALLOCASYNC:
+            # not supported with the cudaMallocAsync backend
+            self.assertEqual(div1_end_mem - div1_start_mem, power2_div(nbytes, 1))
+            self.assertEqual(div1_end_requested - div1_start_requested, nbytes)
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
         with self.assertRaises(ValueError):
             torch._C._accelerator_setAllocatorSettings(
@@ -4630,6 +4647,7 @@ print(torch.cuda.get_allocator_backend())
 """
         rc = check_output(test_script)
         self.assertEqual(rc, "cudaMallocAsync")
+
 
     def test_cachingAllocator_raw_alloc(self):
         # Test that raw_alloc respects the setting that
