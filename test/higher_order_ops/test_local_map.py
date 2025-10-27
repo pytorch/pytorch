@@ -832,7 +832,7 @@ class GraphModule(torch.nn.Module):
             in_grad_placements=None,
             device_mesh=self.mesh,
         )
-        def _forward(num_tokens_per_expert, routed_input, axis_name):
+        def _forward(num_tokens_per_expert, x, axis_name):
             ep_size = axis_size(axis_name)
 
             # generate the input splits and output splits for all-to-all
@@ -858,16 +858,19 @@ class GraphModule(torch.nn.Module):
                 output_splits = output_splits.tolist()
 
             # perform all-to-all
-            routed_input = all_to_all(
-                routed_input,
+            routed_inputs = all_to_all(
+                x,
                 output_splits,
                 input_splits,
                 axis_name,
             )
 
-            # add some tensor activations
-            out = routed_input * routed_input.t()
-            return out
+            # noop routed experts
+            routed_outputs = routed_inputs
+            # noop shared experts
+            out = x.clone()
+
+            return out.add_(routed_outputs)
 
         class MyModule(torch.nn.Module):
             def __init__(self):

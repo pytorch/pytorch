@@ -25,6 +25,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -250,15 +251,6 @@ def create_hop_fw_bw(
             with ctx():
                 fw_outs = fw_gm(*fw_inputs)
 
-            has_unbacked_outputs = any(
-                [
-                    not fw_out.node.has_hint()
-                    for fw_out in fw_outs
-                    if isinstance(fw_out, torch.SymInt)
-                ]
-            )
-            assert not has_unbacked_outputs
-
             example_grads = pytree.tree_map(
                 _new_tensor,
                 fw_outs,
@@ -296,6 +288,9 @@ def create_hop_fw_bw(
             fw_outs, grads = create_joint(
                 prepare_fw_with_masks(fw_gm), aot_config=dummy_aot_config
             )(primals, tangents)
+            assert not has_free_unbacked_symbols((*fw_outs, *grads)), (
+                "Unbacked symints leaking outside of the joint graph is not yet supported."
+            )
 
             maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
             # put grads first to work with existing hop utils
