@@ -232,7 +232,7 @@ class FSDPParam:
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self.device = device
         self.mp_policy = mp_policy
         self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
@@ -289,8 +289,8 @@ class FSDPParam:
         if self.is_dtensor:
             self._tp_spec = cast(DTensor, param)._spec
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
-            dp_global_mesh = _mesh_resources.get_root_mesh(dp_mesh)
-            tp_global_mesh = _mesh_resources.get_root_mesh(tp_mesh)
+            dp_global_mesh = dp_mesh._get_root_mesh() if dp_mesh is not None else None
+            tp_global_mesh = tp_mesh._get_root_mesh() if tp_mesh is not None else None
             if dp_global_mesh != tp_global_mesh or (
                 dp_global_mesh is None or tp_global_mesh is None
             ):
@@ -579,7 +579,7 @@ class FSDPParam:
                 f"world size ({shard_world_size})"
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         sharded_numel = numel // shard_world_size
         self._sharded_post_forward_param_data = (
             self.all_gather_outputs[0].narrow(
@@ -713,7 +713,7 @@ class FSDPParam:
                         self.device, non_blocking=True
                     )
                 pre_all_gather_signature = inspect.signature(
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     sharded_local_tensor.fsdp_pre_all_gather
                 )
                 num_fn_params = len(pre_all_gather_signature.parameters)
@@ -729,7 +729,7 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
                         self.shard_mesh_from_root
                     )
@@ -737,7 +737,7 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
                         self.shard_mesh_from_root,
                         self._orig_size,
@@ -865,7 +865,7 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return

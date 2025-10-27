@@ -580,6 +580,9 @@ class BenchmarkRunner:
                 else "unknown"
             )
 
+            # Extract operator name from test_name
+            operator_name = test_name.split("_")[0]
+
             # Create the record
             @dataclass
             class BenchmarkInfo:
@@ -593,6 +596,7 @@ class BenchmarkRunner:
                 name: str
                 type: str
                 origins: list[str]
+                extra_info: dict[str, Any]
 
             @dataclass
             class MetricInfo:
@@ -618,10 +622,14 @@ class BenchmarkRunner:
                         "device": device,
                         "arch": device_arch,
                         "use_compile": use_compile,
+                        "operator_name": operator_name,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="micro-benchmark", origins=["pytorch"]
+                    name=test_name,
+                    type="micro-benchmark",
+                    origins=["pytorch"],
+                    extra_info={"operator_name": operator_name},
                 ),
                 metric=MetricInfo(
                     name="latency",
