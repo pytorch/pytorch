@@ -1469,13 +1469,6 @@ from sympy.logic.boolalg import BooleanFunction
 class OrderedAnd(BooleanFunction):
     @classmethod
     def eval(cls, *args):
-        for a in args:
-            if not a:
-                return False
-
-        if all(a for a in args):
-            return True
-
         # Returning None tells SymPy not to simplify further
         return None
 

@@ -191,10 +191,11 @@ def insert_deferred_runtime_asserts(
             calculate_meta = (
                 node.target != operator.not_
                 and node.target != any
-                and any(hasattr(a, "target") and a.target != any for a in node.args)  # type: ignore[union-attr]
+                and not any(hasattr(a, "target") and a.target == any for a in node.args)  # type: ignore[union-attr]
             )
             if calculate_meta:
                 node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
+
         except NotImplementedError:
             # This can happen when attempting to reify a symbol with an unsupported call_function node,
             # e.g. with NestedTensors + sym_size.int via match_symbol().

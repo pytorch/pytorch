@@ -7963,6 +7963,10 @@ class ShapeEnv:
         them from leaking into the main graph.
         """
         prev = self.ra_prelude
+
+        if prev:
+            prelude = OrderedAnd(prev, prelude)
+
         self.ra_prelude = prelude
         try:
             yield
