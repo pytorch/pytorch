@@ -49,7 +49,6 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
     std::string key = std::string("kthvalue:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":k" +
         std::to_string(k) + ":dim" + std::to_string(dim);
-    std::cout << key << std::endl;
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
