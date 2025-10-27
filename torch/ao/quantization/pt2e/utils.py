@@ -90,7 +90,6 @@ def _find_q_dq_node_for_user(
         and arg.op == "call_function"
         and arg.target in _QUANTIZE_OPS
     ):
-        # pyrefly: ignore  # unbound-name
         q_node = arg
     return (q_node, dq_node)
 
