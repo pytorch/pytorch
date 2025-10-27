@@ -158,7 +158,8 @@ class TorchDispatchMode:
     @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn(
-            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`"
+            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`",
+            stacklevel=2,
         )
         instance = cls(*args, **kwargs)
         return instance
@@ -556,7 +557,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                assert type(arg) == type(
+                assert type(arg) is type(
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""

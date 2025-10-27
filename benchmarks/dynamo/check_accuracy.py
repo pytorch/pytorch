@@ -10,13 +10,13 @@ import pandas as pd
 
 flaky_models = {
     "yolov3",
-    "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
-    "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
     "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
     # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
     "mobilenetv3_large_100",
+    # https://github.com/pytorch/pytorch/issues/163670
+    "vision_maskrcnn",
 }
 
 
@@ -34,19 +34,15 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
     if "rocm" in expected_filename:
         flaky_models.update(
             {
+                "Background_Matting",
                 "alexnet",
-                "cait_m36_384",
                 "demucs",
                 "densenet121",
                 "detectron2_fcos_r_50_fpn",
                 "doctr_det_predictor",
                 "doctr_reco_predictor",
-                "hf_BigBird",
-                "hf_Longformer",
-                "hf_Reformer",
-                "hf_Roberta_base",
-                "hf_T5",
-                "hf_T5_base",
+                "dpn107",
+                "fbnetv3_b",
                 "levit_128",
                 "llava",
                 "microbench_unbacked_tolist_sum",
@@ -64,20 +60,21 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "squeezenet1_1",
                 "stable_diffusion_text_encoder",
                 "stable_diffusion_unet",
-                "timm_efficientdet",
-                "timm_efficientnet",
-                "timm_nfnet",
-                "timm_regnet",
-                "timm_resnest",
-                "timm_vovnet",
+                "swsl_resnext101_32x16d",
                 "torchrec_dlrm",
                 "vgg16",
+                "BERT_pytorch",
+                "coat_lite_mini",
+                "mobilenet_v3_large",
+                "vision_maskrcnn",
                 # LLM
                 "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",
                 "google/gemma-3-4b-it",
                 "openai/whisper-tiny",
                 "Qwen/Qwen3-0.6B",
+                "mistralai/Mistral-7B-Instruct-v0.3",
+                "openai/gpt-oss-20b",
             }
         )
 

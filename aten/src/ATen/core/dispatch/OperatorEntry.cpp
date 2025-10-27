@@ -62,17 +62,7 @@ static const auto& getDispatchTableIndexToKey() {
 }
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
-: name_(std::move(operator_name))
-, schema_()
-#ifndef C10_MOBILE
-, tags_()
-#endif
-, dispatchTable_()
-, dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-, kernels_()
-, cpp_signature_()
-, sym_cpp_signature_()
-, is_observed_(ObservedOperators::isObserved(name_))
+: name_(std::move(operator_name)), dispatchTable_(), dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized()), is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
   // OperatorEntry being created.

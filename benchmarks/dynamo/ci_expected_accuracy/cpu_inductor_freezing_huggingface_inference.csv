@@ -6,10 +6,6 @@ AlbertForMaskedLM,pass,0
 
 
 
-AlbertForQuestionAnswering,pass,0
-
-
-
 AllenaiLongformerBase,pass,4
 
 
@@ -18,15 +14,7 @@ BartForCausalLM,pass,0
 
 
 
-BartForConditionalGeneration,pass,0
-
-
-
 BertForMaskedLM,pass,0
-
-
-
-BertForQuestionAnswering,pass,0
 
 
 
@@ -34,31 +22,11 @@ BlenderbotForCausalLM,pass_due_to_skip,0
 
 
 
-BlenderbotSmallForCausalLM,pass,0
-
-
-
-BlenderbotSmallForConditionalGeneration,pass,0
-
-
-
-CamemBert,pass,0
-
-
-
 DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
 
-DebertaV2ForQuestionAnswering,pass,0
-
-
-
 DistilBertForMaskedLM,pass,0
-
-
-
-DistilBertForQuestionAnswering,pass,0
 
 
 
@@ -67,10 +35,6 @@ DistillGPT2,pass,2
 
 
 ElectraForCausalLM,pass,0
-
-
-
-ElectraForQuestionAnswering,pass,0
 
 
 
@@ -86,19 +50,11 @@ LayoutLMForMaskedLM,pass,0
 
 
 
-LayoutLMForSequenceClassification,pass,0
-
-
-
 M2M100ForConditionalGeneration,pass,0
 
 
 
 MBartForCausalLM,pass,0
-
-
-
-MBartForConditionalGeneration,pass,0
 
 
 
@@ -110,15 +66,7 @@ MegatronBertForCausalLM,pass,0
 
 
 
-MegatronBertForQuestionAnswering,pass,0
-
-
-
 MobileBertForMaskedLM,pass,0
-
-
-
-MobileBertForQuestionAnswering,pass,0
 
 
 
@@ -130,23 +78,11 @@ PLBartForCausalLM,pass,0
 
 
 
-PLBartForConditionalGeneration,pass,0
-
-
-
 PegasusForCausalLM,pass,0
 
 
 
-PegasusForConditionalGeneration,pass,0
-
-
-
 RobertaForCausalLM,pass,0
-
-
-
-RobertaForQuestionAnswering,pass,0
 
 
 
@@ -191,3 +127,11 @@ openai/whisper-tiny,pass_due_to_skip,0
 
 
 Qwen/Qwen3-0.6B,pass_due_to_skip,0
+
+
+
+mistralai/Mistral-7B-Instruct-v0.3,pass_due_to_skip,0
+
+
+
+openai/gpt-oss-20b,pass_due_to_skip,0

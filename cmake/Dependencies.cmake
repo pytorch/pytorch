@@ -821,9 +821,9 @@ if(NOT Python_Interpreter_FOUND)
   message(FATAL_ERROR "Python3 could not be found.")
 endif()
 
-if(${Python_VERSION} VERSION_LESS 3.9)
+if(${Python_VERSION} VERSION_LESS 3.10)
   message(FATAL_ERROR
-    "Found Python libraries version ${Python_VERSION}. Python < 3.9 is no longer supported by PyTorch.")
+    "Found Python libraries version ${Python_VERSION}. Python < 3.10 is no longer supported by PyTorch.")
 endif()
 
 # ---[ Python + Numpy
@@ -1013,7 +1013,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
@@ -1044,6 +1043,17 @@ if(USE_ROCM)
        list(APPEND HIP_CXX_FLAGS -O0)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
+    # Get EnVar 'USE_LAYERNORM_FAST_RECIPROCAL' (or default to on).
+    if(DEFINED ENV{USE_LAYERNORM_FAST_RECIPROCAL})
+      set(USE_LAYERNORM_FAST_RECIPROCAL $ENV{USE_LAYERNORM_FAST_RECIPROCAL})
+    else()
+      set(USE_LAYERNORM_FAST_RECIPROCAL ON)
+    endif()
+
+    if(USE_LAYERNORM_FAST_RECIPROCAL)
+      add_definitions(-DUSE_LAYERNORM_FAST_RECIPROCAL)
+    endif()
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
@@ -1134,7 +1144,7 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
-if(USE_TENSORPIPE)
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
@@ -1541,6 +1551,11 @@ if(NOT INTERN_BUILD_MOBILE)
     if(HAVE_MALLOC_USABLE_SIZE)
       add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
     endif(HAVE_MALLOC_USABLE_SIZE)
+    set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
+    CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
+    if(HAVE_POSIX_FALLOCATE)
+      add_definitions(-DHAVE_POSIX_FALLOCATE=1)
+    endif(HAVE_POSIX_FALLOCATE)
   endif(UNIX)
 
   add_definitions(-DUSE_EXTERNAL_MZCRC)
@@ -1552,6 +1567,12 @@ endif()
 #
 # End ATen checks
 #
+
+# Install `fmtlib` header.
+# This was the default behavior before version 12.0.0.
+# Since PyTorch C API depends on it, make it available for projects that
+# depend on PyTorch.
+set(FMT_INSTALL ON)
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
@@ -1617,38 +1638,7 @@ if(USE_KINETO)
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
 
   if(NOT LIBKINETO_NOCUPTI)
-    set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
-    message(STATUS "  CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
-    message(STATUS "  CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
-
-    if(NOT MSVC)
-      if(USE_CUPTI_SO)
-        set(CUPTI_LIB_NAME "libcupti.so")
-      else()
-        set(CUPTI_LIB_NAME "libcupti_static.a")
-      endif()
-    else()
-      set(CUPTI_LIB_NAME "cupti.lib")
-    endif()
-
-    find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        ${CUDA_SOURCE_DIR}/lib
-        ${CUDA_SOURCE_DIR}/lib64
-        NO_DEFAULT_PATH)
-
-    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_INCLUDE_DIRS}
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/include
-        NO_DEFAULT_PATH)
-
-    if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
-      message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
-      set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
-      message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+    if(TARGET CUDA::cupti)
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
 
@@ -1661,7 +1651,7 @@ if(USE_KINETO)
         if(NOT APPLE)
           set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl" "pthread")
         endif()
-        set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
+        set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} $<LINK_LIBRARY:WHOLE_ARCHIVE,CUDA::cupti_static>)
         check_cxx_source_runs("#include <stdexcept>
   int main() {
     try {

@@ -3,8 +3,9 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -266,6 +267,7 @@ class FunctionalTensor(torch.Tensor):
                 device=self.device,
                 layout=self.layout,
             )
+        # pyrefly: ignore [not-iterable]
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):
@@ -403,7 +405,8 @@ class FunctionalTensorMode(TorchDispatchMode):
                         warnings.warn(
                             f"At pre-dispatch tracing, we assume that any custom op marked with "
                             f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
-                            f"Found {func} to be one such op."
+                            f"Found {func} to be one such op.",
+                            stacklevel=2,
                         )
                     return False
                 return True

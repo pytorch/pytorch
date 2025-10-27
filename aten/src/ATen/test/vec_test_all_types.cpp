@@ -526,6 +526,41 @@ namespace {
             [](const vec& v) { return v.expm1(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    TYPED_TEST(Exponents, ExpU20) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        using UVT = UvalueType<TypeParam>;
+
+        // Explicit edge values
+        VT v_too_small = VT(-100.0); // much less than -87.3
+        VT exp_too_small = std::exp(v_too_small);
+        VT v_neg_edge = VT(-0x1.5d5e2ap+6f);   // just at the edge
+        VT exp_neg_edge = std::exp(v_neg_edge);
+        VT v_zero = VT(0.0);         // middle, normal case
+        VT exp_zero = std::exp(v_zero);
+        VT v_pos_edge = VT(0x1.5d5e2ap+6f);    // just at the edge
+        VT exp_pos_edge = std::exp(v_pos_edge);
+        VT v_too_large = VT(100.0);  // much more than 87.3
+        VT exp_too_large = std::exp(v_too_large);
+
+        auto test_case = TestingCase<vec>::getBuilder()
+            // Randoms in normal range, but the .addCustom() below guarantees we hit the special/fallback cases
+            .addDomain(CheckWithinDomains<UVT>{{{-100, 100}}, false, getDefaultTolerance<UVT>()})
+            .addCustom({ {v_too_small}, exp_too_small })
+            .addCustom({ {v_neg_edge}, exp_neg_edge })
+            .addCustom({ {v_zero}, exp_zero })
+            .addCustom({ {v_pos_edge}, exp_pos_edge })
+            .addCustom({ {v_too_large}, exp_too_large })
+            .setTrialCount(65536)
+            .setTestSeed(TestSeed());
+
+        test_unary<vec>(
+            NAME_INFO(exp_u20_edge_cases),
+            RESOLVE_OVERLOAD(std::exp),
+            [](const vec& v) { return v.exp_u20(); },
+            test_case
+        );
+    }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -1553,6 +1588,38 @@ namespace {
             for(int64_t l = 0; l < 4; l++) {
               ref[k * N * 4 + n * 4 + l] =
                   c10::load(&(x[k * ld_src * 4 + l * ld_src + n]));
+            }
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
+#if defined(CPU_CAPABILITY_AVX512)
+    TYPED_TEST(Quantization8BitTests, TransposePackVNNI4) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto K = 197;
+        constexpr auto N = 64;
+        constexpr auto L = K * N;
+        constexpr auto ld_src = N;
+        constexpr auto ld_dst = K * 4;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::vec::transpose_pack_vnni4(x, y, ld_src, K, N);
+        int64_t _N = N / 4;
+        for (int64_t k = 0; k < K; k++) {
+          for(int64_t n = 0; n < _N; n++) {
+            for(int64_t l = 0; l < 4; l++) {
+              ref[n * ld_dst + k * 4 + l] =
+                  c10::load(&(x[k * ld_src + n * 4 + l]));
             }
           }
         }

@@ -6,8 +6,8 @@ import itertools
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
@@ -38,11 +38,13 @@ T = TypeVar("T", bound="Module")
 
 
 class _IncompatibleKeys(
+    # pyrefly: ignore [invalid-inheritance]
     namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"]),
 ):
     __slots__ = ()
 
     def __repr__(self) -> str:
+        # pyrefly: ignore [missing-attribute]
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
         return super().__repr__()
@@ -91,6 +93,7 @@ class _WrappedHook:
     def __getstate__(self) -> dict:
         result = {"hook": self.hook, "with_module": self.with_module}
         if self.with_module:
+            # pyrefly: ignore [unsupported-operation]
             result["module"] = self.module()
 
         return result
@@ -976,7 +979,9 @@ class Module:
                         # Decrement use count of the gradient by setting to None
                         param.grad = None
                     param_applied = torch.nn.Parameter(
-                        param_applied, requires_grad=param.requires_grad
+                        # pyrefly: ignore [bad-argument-type]
+                        param_applied,
+                        requires_grad=param.requires_grad,
                     )
                     torch.utils.swap_tensors(param, param_applied)
                 except Exception as e:
@@ -987,11 +992,13 @@ class Module:
                     ) from e
                 out_param = param
             elif p_should_use_set_data:
+                # pyrefly: ignore [bad-assignment]
                 param.data = param_applied
                 out_param = param
             else:
                 assert isinstance(param, Parameter)
                 assert param.is_leaf
+                # pyrefly: ignore [bad-argument-type]
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
@@ -1042,7 +1049,7 @@ class Module:
             >>> @torch.no_grad()
             >>> def init_weights(m):
             >>>     print(m)
-            >>>     if type(m) == nn.Linear:
+            >>>     if type(m) is nn.Linear:
             >>>         m.weight.fill_(1.0)
             >>>         print(m.weight)
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
@@ -1330,7 +1337,9 @@ class Module:
 
         """
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
-            *args, **kwargs
+            # pyrefly: ignore [not-iterable]
+            *args,
+            **kwargs,
         )
 
         if dtype is not None:
@@ -1344,7 +1353,8 @@ class Module:
                     "Complex modules are a new feature under active development whose design may change, "
                     "and some modules might not work as expected when using complex tensors as parameters or buffers. "
                     "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
-                    "if a complex module does not work as expected."
+                    "if a complex module does not work as expected.",
+                    stacklevel=2,
                 )
 
         def convert(t):
@@ -1754,11 +1764,7 @@ class Module:
         if recording_scopes:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
-            name = (
-                torch.jit._trace._trace_module_map[self]  # type: ignore[index]
-                if self in torch.jit._trace._trace_module_map  # type: ignore[operator]
-                else None
-            )  # noqa: B950
+            name = torch.jit._trace._trace_module_map.get(self, None)  # type: ignore[operator, union-attr]
             if name:
                 tracing_state.push_scope(name)
             else:
@@ -1850,7 +1856,7 @@ class Module:
                 if not isinstance(result, (torch.Tensor, tuple)):
                     warnings.warn("For backward hooks to be called,"
                                   " module output should be a Tensor or a tuple of Tensors"
-                                  f" but received {type(result)}")
+                                  f" but received {type(result)}", stacklevel=2)
                 result = bw_hook.setup_output_hook(result)
 
             # Handle the non-full backward hooks
@@ -1893,7 +1899,7 @@ class Module:
                             result = hook_result
                     except Exception as e:
                         warnings.warn("global module forward hook with ``always_call=True`` raised an exception "
-                                      f"that was silenced as another error was raised in forward: {str(e)}")
+                                      f"that was silenced as another error was raised in forward: {str(e)}", stacklevel=2)
                         continue
 
             for hook_id, hook in self._forward_hooks.items():
@@ -1907,7 +1913,7 @@ class Module:
                             result = hook_result
                     except Exception as e:
                         warnings.warn("module forward hook with ``always_call=True`` raised an exception "
-                                      f"that was silenced as another error was raised in forward: {str(e)}")
+                                      f"that was silenced as another error was raised in forward: {str(e)}", stacklevel=2)
                         continue
             # raise exception raised in try block
             raise
@@ -2253,6 +2259,7 @@ class Module:
 
         if destination is None:
             destination = OrderedDict()
+            # pyrefly: ignore [missing-attribute]
             destination._metadata = OrderedDict()
 
         local_metadata = dict(version=self._version)
@@ -2402,7 +2409,9 @@ class Module:
             if k not in self._non_persistent_buffers_set
         }
         local_name_params = itertools.chain(
-            self._parameters.items(), persistent_buffers.items()
+            self._parameters.items(),
+            # pyrefly: ignore [bad-argument-type]
+            persistent_buffers.items(),
         )
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
@@ -2449,7 +2458,8 @@ class Module:
                         f"for {key}: copying from a non-meta parameter in the checkpoint to a meta "
                         "parameter in the current model, which is a no-op. (Did you mean to "
                         "pass `assign=True` to assign items in the state dictionary to their "
-                        "corresponding key in the module instead of copying them in place?)"
+                        "corresponding key in the module instead of copying them in place?)",
+                        stacklevel=2,
                     )
 
                 try:
@@ -2948,7 +2958,8 @@ class Module:
                 "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
                 "The parameters are copied (in a differentiable manner) from the original module. "
                 "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
-                "If you need gradients in your forward method, consider using autograd.grad instead."
+                "If you need gradients in your forward method, consider using autograd.grad instead.",
+                stacklevel=2,
             )
 
         for p in self.parameters():

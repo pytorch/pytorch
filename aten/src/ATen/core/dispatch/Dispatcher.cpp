@@ -76,13 +76,7 @@ void _print_dispatch_trace(const std::string& label, const std::string& op_name,
 
 OpRegistrationListener::~OpRegistrationListener()= default;
 
-Dispatcher::Dispatcher()
-: operators_()
-, operatorLookupTable_()
-, backendFallbackKernels_()
-, listeners_(std::make_unique<detail::RegistrationListenerList>())
-, cond_var_()
-, guard_(std::make_shared<Guard>())
+Dispatcher::Dispatcher(): backendFallbackKernels_(), listeners_(std::make_unique<detail::RegistrationListenerList>()), guard_(std::make_shared<Guard>())
 {}
 
 Dispatcher::~Dispatcher() {
@@ -448,11 +442,17 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 
   auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
+  // NB: Perserve BC for registering fallback for AutogradPrivateUse1 multiple time,
+  // refer to https://github.com/pytorch/pytorch/issues/163979 for more informations.
   TORCH_CHECK(
-    !backendFallbackKernels_[idx].kernel.isValid(),
-    "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
-    backendFallbackKernels_[idx].debug, ", new registration ", debug
-  );
+      dispatchKey == DispatchKey::AutogradPrivateUse1 ||
+          !backendFallbackKernels_[idx].kernel.isValid(),
+      "Tried to register multiple backend fallbacks for the same dispatch key ",
+      dispatchKey,
+      "; previous registration ",
+      backendFallbackKernels_[idx].debug,
+      ", new registration ",
+      debug);
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
   // cannot be unboxed
   backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));

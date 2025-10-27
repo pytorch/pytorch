@@ -30,6 +30,7 @@ ReductionType = Literal[
     "min",
     "prod",
     "sum",
+    "dot",
     "xor_sum",
     "online_softmax_reduce",
 ]
@@ -687,6 +688,10 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     # triton-only
+    def dot(self, x: T, y: T) -> T:
+        raise NotImplementedError
+
+    # triton-only
     def inline_asm_elementwise(
         self,
         *inputs: T,
@@ -790,9 +795,6 @@ class DefaultHandler(OpsHandler[Any]):
         for target, impl in ctx.items():
             if target in OP_NAMES:
                 setattr(cls, target, impl)
-
-    def device_assert_async(self, cond, msg):
-        return None
 
 
 DefaultHandler._init_cls()
@@ -939,9 +941,6 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
-    def device_assert_async(self, cond, msg):
-        return None
-
 
 class KernelFormatterHandler(DefaultHandler):
     def __init__(self, parent_handler: OpsHandler[Any]):
@@ -1007,9 +1006,6 @@ class KernelFormatterHandler(DefaultHandler):
     def getvalue(self, result):
         self._output.writeline(f"return {result}")
         return self._output.getvalue()
-
-    def device_assert_async(self, cond, msg: str):
-        return f"ops.device_assert_async({cond}, {msg})"
 
 
 class WrapperHandler(DefaultHandler):
@@ -1158,3 +1154,8 @@ class SimpleCSEHandler(WrapperHandler):
         val = getattr(self._inner, name)(*args, **kwargs)
         self.cse_cache[key] = val
         return val
+
+    def device_assert_async(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )

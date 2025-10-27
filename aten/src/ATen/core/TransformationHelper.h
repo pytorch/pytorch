@@ -117,7 +117,7 @@ C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
 template <>
 C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
   // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
-  return median + sigma * at::tan(c10::pi<double> * (val - static_cast<double>(0.5)));
+  return median + sigma * at::tan(c10::pi<double> * (val - 0.5));
 }
 
 /**

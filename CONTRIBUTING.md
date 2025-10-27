@@ -81,7 +81,7 @@ git remote add upstream git@github.com:pytorch/pytorch.git
 make setup-env
 # Or run `make setup-env-cuda` for pre-built CUDA binaries
 # Or run `make setup-env-rocm` for pre-built ROCm binaries
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 ### Tips and Debugging
@@ -182,28 +182,36 @@ You can use this script to check out a new nightly branch with the following:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --cuda
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --rocm
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
-./tools/nightly.py pull -p my-env
-source my-env/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+./tools/nightly.py pull
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+To create the virtual environment with a specific Python interpreter, you can
+pass in the `--python` argument:
+
+```bash
+./tools/nightly.py --python /path/to/python3.12
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 Pulling will recreate a fresh virtual environment and reinstall the development

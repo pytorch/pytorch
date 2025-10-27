@@ -6,6 +6,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import gc
 import functools
 import inspect
 import io
@@ -19,6 +20,7 @@ import traceback
 import types
 import typing
 import unittest
+import weakref
 import warnings
 from math import sqrt
 from torch.multiprocessing import Process
@@ -35,7 +37,8 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
+from collections.abc import Callable
 
 import torch
 
@@ -1622,6 +1625,25 @@ class TestFX(JitTestCase):
         g.erase_node(neg)
 
         self.assertTrue(neg not in relu.users)
+
+    @skipIfTorchDynamo("Dynamo does not free right away")
+    def test_prepend_does_not_leak(self):
+        g = Graph()
+        x = g.placeholder("x")
+        relu = g.call_function(torch.relu, (x,))
+        neg = g.call_function(torch.neg, (x,))
+
+        relu.prepend(neg)
+
+        ref = weakref.ref(neg)
+        g.erase_node(neg)
+        del g
+        del x
+        del relu
+        del neg
+        gc.collect()
+
+        self.assertIsNone(ref())
 
     def test_remove_uses_with_custom_filter(self):
         g: torch.fx.Graph = Graph()
@@ -3583,7 +3605,7 @@ class TestFX(JitTestCase):
 
         class LeafTracerNotB(Tracer):
             def is_leaf_module(self, module, name):
-                return False if "b" in name else True
+                return "b" not in name
 
         # Recompile calls added "for fun", since they
         # chain __call__ wrappers.
@@ -3784,25 +3806,6 @@ class TestFX(JitTestCase):
         scripted(x, y)
 
         FileCheck().check("Tuple[()]").check("Tuple[str, Tuple[()]]").run(scripted.code)
-
-    @unittest.skipIf(
-        IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108"
-    )
-    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
-    def test_assert(self):
-        def f(x):
-            assert x > 1
-            return x + 1
-
-        try:
-            torch.fx.proxy.TracerBase.trace_asserts = True
-            traced = symbolic_trace(f)
-        finally:
-            torch.fx.proxy.TracerBase.trace_asserts = False
-
-        self.assertEqual(f(2), traced(2))
-        with self.assertRaises(AssertionError):
-            traced(0)
 
     def test_pytree(self):
         # Used to test that you can use your own placeholder class
@@ -4819,7 +4822,6 @@ class TestFunctionalTracing(JitTestCase):
         def functional_test(self):
             if (
                 func_name in self.UNTRACEABLE_FUNCTIONALS_PY38
-                and sys.version_info >= (3, 8)
                 and sys.version_info < (3, 12)
             ):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]

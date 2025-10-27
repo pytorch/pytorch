@@ -36,8 +36,9 @@ import traceback
 import types
 import unittest
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -177,7 +178,6 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
-    "torch.autograd._profiler_enabled": SkipFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
@@ -450,6 +450,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
+        "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
         "torch._C._activate_gpu_trace",
@@ -506,7 +507,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_clearCublasWorkspaces",
         "torch._C._cuda_cudaCachingAllocator_raw_alloc",
         "torch._C._cuda_cudaCachingAllocator_raw_delete",
-        "torch._C._cuda_cudaCachingAllocator_set_allocator_settings",
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
@@ -2443,6 +2443,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.atleast_3d",
         "torch.autograd._calculate_shape",
         "torch.autograd._is_checkpoint_valid",
+        "torch.autograd._profiler_enabled",
         "torch.autograd._make_grads",
         "torch.autograd._register_py_tensor_class_for_device",
         "torch.autograd._tensor_or_tensors_to_tuple",
@@ -3367,6 +3368,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch.nn.attention.flex_attention",
+    "torch.ao.quantization.stubs",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",
@@ -3406,6 +3408,7 @@ MOD_INLINELIST = [
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._dynamo.test_case",
+    "torch._export.non_strict_utils",
     "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
@@ -3426,11 +3429,13 @@ MOD_INLINELIST = [
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export._tree_utils",
+    "torch.export._unlift",
     "torch.export._wrapper_utils",
     "torch.fx._pytree",
     "torch.fx._symbolic_trace",
     "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
+    "torch.fx.traceback",
     "torch.nn",
     "torch.overrides",
     "torch.random",

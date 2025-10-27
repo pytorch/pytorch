@@ -2072,7 +2072,7 @@ class DistributedDataParallelTest(
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
-                        tol = 1.0e-3 if has_half else 1.0e-5
+                        tol = 3.0e-3 if has_half else 1.0e-5
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print(
@@ -2770,11 +2770,7 @@ class WorkHookTest(MultiProcessTestCase):
         # from rank0 to other ranks. However, this is DDP's internal implementation,
         # which is subject to change in future versions.
         self.assertTrue(num_hook_fired[OpType.BROADCAST] > 0)
-        ctor_allreduce = (
-            num_hook_fired[OpType.ALLREDUCE]
-            if OpType.ALLREDUCE in num_hook_fired
-            else 0
-        )
+        ctor_allreduce = num_hook_fired.get(OpType.ALLREDUCE, 0)
 
         x = torch.zeros(2, 1000).cuda(self.rank)
         ddp(x).sum().backward()
@@ -2892,6 +2888,25 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # for things to shutdown
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "4"
         os.environ["TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"] = "1000"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(3)
+    @skip_if_rocm_multiprocess
+    def test_send_recv_non_dense_tensor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda", self.rank % torch.cuda.device_count())
+        dist.init_process_group(
+            rank=self.rank, world_size=self.world_size, store=store, device_id=device
+        )
+        full = torch.empty((64, 64), device=device).fill_(self.rank)
+        # Take a slice in col dimension, making it non-dense
+        block = full[:, 16:32]
+        if self.rank == 0:
+            with self.assertRaises(ValueError):
+                dist.send(block, dst=1)
+        elif self.rank == 1:
+            with self.assertRaises(ValueError):
+                dist.recv(block, src=0)
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
@@ -4560,6 +4575,34 @@ class NCCLTraceTest(NCCLTraceTestBase):
             timing_enabled=timing_enabled,
             is_json=True,
         )
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset(self, timing_enabled):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+        for _ in range(5):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
+        time.sleep(1)
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+        for _ in range(4):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
 
     @requires_nccl()

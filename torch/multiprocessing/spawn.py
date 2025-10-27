@@ -119,6 +119,7 @@ class ProcessContext:
         """Attempt to join all processes with a shared timeout."""
         end = time.monotonic() + timeout
         for process in self.processes:
+            # pyrefly: ignore  # no-matching-overload
             time_to_wait = max(0, end - time.monotonic())
             process.join(time_to_wait)
 
@@ -222,7 +223,9 @@ class ProcessContext:
 
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_files):
-        warnings.warn("SpawnContext is renamed to ProcessContext since 1.4 release.")
+        warnings.warn(
+            "SpawnContext is renamed to ProcessContext since 1.4 release.", stacklevel=2
+        )
         super().__init__(processes, error_files)
 
 
@@ -274,7 +277,7 @@ def start_processes(
         tf.close()
         os.unlink(tf.name)
 
-        process = mp.Process(
+        process = mp.Process(  # pyrefly: ignore  # missing-attribute
             target=_wrap,
             args=(fn, i, args, tf.name),
             daemon=daemon,

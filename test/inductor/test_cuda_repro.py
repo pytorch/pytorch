@@ -39,6 +39,8 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
+    MI350_ARCH,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
@@ -218,6 +220,7 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -1438,6 +1441,128 @@ class CudaReproTests(TestCase):
         self.assertEqual(ref, res)
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_norm_rounding(self):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+
+        x = torch.rand(1000, device="cuda", dtype=torch.bfloat16)
+        scalar = torch.rand([], device="cuda", dtype=torch.float32)
+
+        def fn(inp, scale):
+            y = inp.norm()
+            return y, y + scale
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+        expected = fn(x, scalar)
+        actual = opt_fn(x, scalar)
+
+        self.assertEqual(expected, actual)
+
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_min_pow_chain(self):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+
+        with dynamo_config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+            arg0 = torch.rand(
+                [383, 55, 2, 3],
+                dtype=torch.float16,
+                device="cuda",
+                requires_grad=True,
+            )
+            arg1 = torch.rand(
+                [383, 55], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            )
+            arg2 = torch.rand(
+                [383, 55], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg3 = torch.rand(
+                [383, 55], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+
+            def fn(a0, a1, a2, a3):
+                t1 = a0.min(dim=2).values
+                t2 = t1.sum(dim=2)
+                t6 = ((((a1) - a2) - a3) - a3) - a3
+                t7 = t6 + t2
+                t8 = torch.pow(torch.pow(torch.pow(torch.pow(t2, t7), t7), t7), t7)
+                return t7, t8
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+            eager_out = fn(arg0, arg1, arg2, arg3)
+            compiled_args = [
+                arg0.clone().detach().requires_grad_(True),
+                arg1.clone().detach().requires_grad_(True),
+                arg2.clone().detach().requires_grad_(True),
+                arg3.clone().detach().requires_grad_(True),
+            ]
+            compiled_out = opt_fn(*compiled_args)
+
+            for eager_tensor, compiled_tensor in zip(eager_out, compiled_out):
+                torch.testing.assert_close(
+                    eager_tensor,
+                    compiled_tensor,
+                    rtol=1e-3,
+                    atol=1e-3,
+                )
+
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_mean_ratio_chain(self):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+
+        with dynamo_config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+            arg0 = torch.rand(
+                [125070], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            )
+            arg1 = torch.rand(
+                [1895, 3, 11], dtype=torch.float16, device="cuda", requires_grad=True
+            )
+            arg2 = torch.rand(
+                [1895, 3, 11], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg3 = torch.rand(
+                [1895, 3, 11], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg4 = torch.rand(
+                [1895, 3, 11], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg5 = torch.rand(
+                [5, 379, 165], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+
+            def fn(a0, a1, a2, a3, a4, a5):
+                t2 = a0.view(379, 165, 2).mean(dim=2)
+                t7 = ((((a1) - a2) - a3) - a2) - a4
+                t8 = t7.view(379, 165)
+                t11 = torch.nn.functional.relu(a5).mean(dim=0)
+                t12 = t2 - t11
+                t13 = (((t2) / t8) / t11) / t12
+                return t13
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+            eager_out = fn(arg0, arg1, arg2, arg3, arg4, arg5)
+            compiled_args = [
+                tensor.clone().detach().requires_grad_(True)
+                for tensor in (arg0, arg1, arg2, arg3, arg4, arg5)
+            ]
+            compiled_out = opt_fn(*compiled_args)
+
+            torch.testing.assert_close(
+                eager_out,
+                compiled_out,
+                rtol=5e-3,
+                atol=1e-1,
+            )
+
+    @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_dont_inplace_disjoint_accesses(self):
         # TODO - would not need mms if we could annotate donated buffer..
         def forward(  # noqa: F821, F722
@@ -2069,6 +2194,40 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(f(x_ref, y_ref), out)
 
+    def test_red_dtype_mismatch(self):
+        for per in (True, False):
+            torch._dynamo.reset()
+            if not per:
+                torch._inductor.config.triton.persistent_reductions = False
+
+            def f(arg0_1, arg1_1):
+                embedding = torch.ops.aten.embedding.default(arg1_1, arg0_1)
+                view = torch.ops.aten.view.default(embedding, [64, 3072])
+                unsqueeze = torch.ops.aten.unsqueeze.default(view, 0)
+                expand = torch.ops.aten.expand.default(unsqueeze, [576, -1, -1])
+                view_1 = torch.ops.aten.view.default(expand, [2, 8, 36, 64, 3072])
+                permute = torch.ops.aten.permute.default(view_1, [0, 1, 3, 2, 4])
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                view_2 = torch.ops.aten.view.default(clone, [2, 18432, 3072])
+                iota = torch.ops.prims.iota.default(
+                    36,
+                    start=0,
+                    step=1,
+                    dtype=torch.int64,
+                    device="cuda",
+                    requires_grad=False,
+                )
+                view_3 = torch.ops.aten.view.default(iota, [1, 36])
+                max_1 = torch.ops.aten.max.default(view_3)
+                return (max_1,)
+
+            x = torch.ones(1, 64, device="cuda", dtype=torch.int64)
+            y = torch.randn(64, 3072, device="cuda", dtype=torch.bfloat16)
+            out = f(x, y)
+            self.assertEqual(torch.compile(f)(x, y), out)
+
     @unittest.skipIf(
         not config.is_fbcode(),
         "bfloat16 atomic add is only supported in fbcode today #97016",
@@ -2282,6 +2441,42 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 
+    def test_identity_load(self):
+        device = "cuda"
+
+        def f(x, y):
+            y2 = torch.cat(
+                [
+                    x[:, 1:],
+                    y[:, None] + 32 * 2048,
+                ],
+                dim=1,
+            )
+
+            x2 = x[:, 1:, None]
+            y3 = y2[:, -1:, None]
+
+            return (
+                torch.cat([x2, y3], dim=1)
+                + torch.arange(-2048, 0, device=device)[None, None, :]
+            ).reshape(1, 32 * 2048)
+
+        # This succeeds
+        eager_out = f(
+            torch.zeros(1, 32, dtype=torch.int64, device=device),
+            torch.zeros(1, dtype=torch.int32, device=device),
+        )
+        # This crashes
+        compile_out, code = run_and_get_code(
+            torch.compile(f),
+            torch.zeros(1, 32, dtype=torch.int64, device=device),
+            torch.zeros(1, dtype=torch.int32, device=device),
+        )
+        # make sure the identity is maintained
+        FileCheck().check("(1 + ((31)").run(code[0])
+
+        self.assertEqual(eager_out, compile_out)
+
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
         device = "cuda"
@@ -2384,6 +2579,52 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         correct = forward(*example_inputs)
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
+
+    @config.patch({"emulate_divison_rounding": True})
+    def test_truediv_emulate_divison_rounding(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        @torch.compile
+        def compiled_divide(x, y):
+            return x / y
+
+        for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
+            for x_dtype in [
+                torch.float16,
+                torch.bfloat16,
+                torch.float32,
+                torch.float64,
+            ]:
+                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
+                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
+
+                torch._dynamo.reset()
+                compiled_div = Decimal(compiled_divide(x_ten, y_ten).item())
+                eager_div = Decimal((x_ten / y_ten).item())
+
+                self.assertEqual(eager_div, compiled_div)
+
+    @config.patch({"emulate_divison_rounding": False})
+    def test_truediv_base_not_bitwise_equivalent(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        y_ten = torch.tensor([y], dtype=torch.float32, device="cuda")
+        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
+
+        compile_out, code = run_and_get_code(
+            torch.compile(lambda x, y: x / y),
+            x_ten,
+            y_ten,
+        )
+        compiled_div = Decimal(compile_out.item())
+        eager_div = Decimal((x_ten / y_ten).item())
+
+        self.assertNotEqual(eager_div, compiled_div)
+        self.assertTrue("div_rn" not in code)
 
 
 if __name__ == "__main__":

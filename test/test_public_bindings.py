@@ -7,7 +7,7 @@ import logging
 import os
 import pkgutil
 import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._utils_internal import get_file_path_2  # @manual
@@ -123,6 +123,7 @@ class TestPublicBindings(TestCase):
             "FutureType",
             "Generator",
             "GeneratorType",
+            "GreenContext",
             "get_autocast_cpu_dtype",
             "get_autocast_dtype",
             "get_autocast_ipu_dtype",

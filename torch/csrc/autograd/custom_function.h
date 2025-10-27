@@ -24,7 +24,8 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_self_fn_t& view_as_self_fn);
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -228,30 +229,32 @@ inline variable_list CppNode_apply_functional(
     }
   }
 
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got ";
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
+  TORCH_CHECK(
+      num_outputs == num_forward_inputs,
+      "function ",
+      name,
+      " returned an incorrect number of gradients (expected ",
+      num_forward_inputs,
+      ", got ",
+      num_outputs,
+      ")");
 
   variable_list results;
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
-      if (outputs[i].defined()) {
-        std::string msg("function ");
-        msg += name +
-            " returned a gradient different that is defined at position ";
-        msg += std::to_string(i + 1) +
-            ", std the corresponding forward input was not a Variable";
-        throw std::runtime_error(msg);
-      }
+      TORCH_CHECK(
+          outputs[i].defined() == false,
+          "function ",
+          name,
+          " returned a gradient different that is defined at position ",
+          i + 1,
+          ", std the corresponding forward input was not a Variable");
       continue;
     }
     results.emplace_back(outputs[i]);
   }
+
   return results;
 }
 
@@ -521,7 +524,8 @@ auto Function<T>::apply(Args&&... args)
       is_executable ? node : nullptr,
       jvp_fn,
       {},
-      view_as_self_fn);
+      view_as_self_fn,
+      false);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {

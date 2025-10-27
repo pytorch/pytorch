@@ -16,9 +16,10 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
-from copy import copy
+from collections.abc import Callable
+from copy import copy, deepcopy
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override
 
 import torch
@@ -234,7 +235,7 @@ def check_node_safe(node: Node):
                 f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
             )
         if (
-            type(method_name) != str
+            type(method_name) is not str
             and type(method_name).__name__ != "method_descriptor"
         ):
             raise BypassAOTAutogradCache(
@@ -282,19 +283,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
         # We have guarantee of unpack sugraph existence if pack subgraph exists
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
-
-
-def check_metadata_cacheable(metadata: ViewAndMutationMeta):
-    """
-    When view replay is turned on, we bypass autograd cache if
-    the output is aliased.
-    """
-    if config.view_replay_for_aliased_outputs:
-        for info in metadata.output_info:
-            if info.functional_tensor is not None:
-                raise BypassAOTAutogradCache(
-                    "Cannot cache a graph with functional tensor"
-                )
 
 
 class AOTAutogradCacheDetails(FxGraphHashDetails):
@@ -396,6 +384,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
+        # pyrefly: ignore  # bad-override
         self.dispatch_table: dict
         self.dispatch_table.update(
             {
@@ -520,7 +509,7 @@ def autograd_cache_key(
 TOut = TypeVar("TOut", bound=OutputCode)
 
 
-class InductorOutput(Generic[TOut], ABC):
+class InductorOutput(ABC, Generic[TOut]):
     """
     Class representing a single inductor output
     """
@@ -803,7 +792,6 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
         """
         Perform any preparations to make the cache entry ready for serialization.
         """
-        check_metadata_cacheable(self.runtime_metadata)
         self.compiled_fw.pre_save()
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()
@@ -975,10 +963,6 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
             )
 
         # Add serialization function back onto object
-        compiled_function = SerializableCompiledFunction(
-            compiled_function, lambda: self
-        )
-
         compiled_function, _ = post_compile(
             self.dispatch_wrappers,
             compiled_function,
@@ -1067,14 +1051,30 @@ def deserialize_bundled_cache_entry(entry: BundledAOTAutogradCacheEntry) -> Call
     # so we don't have a place to track cudagraphs here.
     cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
     boxed_forward_device_index = BoxedDeviceIndex(None)
-    compiled_fn = entry.wrap_post_compile(
-        [],
-        entry.sanitized_aot_config,
-        {
-            "cudagraphs": cudagraphs,
-            "boxed_forward_device_index": boxed_forward_device_index,
-        },
-    )
+    # We need to make a clean copy of the cache entry
+    # in case it needs to be serialized again
+    serializable_copy = deepcopy(entry)
+
+    from torch._subclasses import FakeTensorMode
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    context = torch._guards.TracingContext.try_get()
+    if context is None:
+        # Create a clean environment when running fx graph post compile
+        # if one is not available
+        context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+    with torch._guards.tracing(context):
+        compiled_fn = entry.wrap_post_compile(
+            [],
+            entry.sanitized_aot_config,
+            {
+                "cudagraphs": cudagraphs,
+                "boxed_forward_device_index": boxed_forward_device_index,
+            },
+        )
+    # Ensure the deserialized cache entry is still serializable
+
+    compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: serializable_copy)
 
     # TODO: this ignores flat_params, which can exist
     # if inline_builtin_nn_modules=False
@@ -1167,13 +1167,19 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                entry: Optional[GenericAOTAutogradCacheEntry] = (
+                result: Optional[tuple[GenericAOTAutogradCacheEntry, bytes]] = (
                     AOTAutogradCache._lookup(
                         cache_key, local, remote, args, cache_info, aot_config
                     )
                 )
-                if entry is not None:
+                if result is not None:
+                    (entry, pickled_content) = result
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
+                    # Make the compiled_fn serializable, where the serialize function just
+                    # makes a copy of the original entry before post compile via the pickled content
+                    compiled_fn = SerializableCompiledFunction(
+                        compiled_fn, lambda: pickle.loads(pickled_content)
+                    )
                     log.info("AOTAutograd cache hit for key %s", cache_key)
 
                     counters["aot_autograd"]["autograd_cache_hit"] += 1
@@ -1211,7 +1217,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_state = "miss"
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.caching_precompile
+                    or torch._dynamo.config.strict_precompile
                 ):
                     raise e
             # Most often this is BypassAOTAutogradCache, but
@@ -1226,7 +1232,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             except Exception as e:
                 cache_key = None
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1
-                log.info("Bypassing autograd cache due to: %s", e)
+                log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
                 cache_state = "bypass"
                 cache_event_time = time.time_ns()
                 cache_info["cache_bypass_reason"] = str(e)
@@ -1244,7 +1250,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     log_cache_bypass("bypass_aot_autograd", str(e))
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.caching_precompile
+                    or torch._dynamo.config.strict_precompile
                 ):
                     raise e
             if compiled_fn is None:
@@ -1333,7 +1339,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         args: list[Any],
         cache_info: dict[str, Any],
         aot_config: Optional[AOTConfig],
-    ) -> Optional[GenericAOTAutogradCacheEntry]:
+    ) -> Optional[tuple[GenericAOTAutogradCacheEntry, bytes]]:
         """Given a key generated by AOTAutogradCachePickler, look up its location in the cache."""
         remote_cache: Optional[RemoteCache[JsonDataTy]] = None
         if remote:
@@ -1342,6 +1348,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         symints = AOTAutogradCache._filter_backed_symints(args)
         hints = [hint_int(s) for s in symints]
         entry = None
+        pickled_content = None
         try:
             (
                 entry,
@@ -1372,10 +1379,14 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                         ),
                     )
         except Exception as e:
-            log.info("AOTAutograd cache unable to load compiled graph: %s", e)
+            log.info("AOTAutograd cache unable to load compiled graph: %s", e)  # noqa: G200
             if config.strict_autograd_cache:
                 raise e
-        return entry
+        if entry is not None:
+            assert pickled_content is not None
+            return (entry, pickled_content)
+        else:
+            return None
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes):
@@ -1414,12 +1425,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             if remote:
                 log_cache_bypass("bypass_aot_autograd", str(e))
             return None
         except Exception as e:
-            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
             if remote:
                 log_cache_bypass(
                     "bypass_aot_autograd", "Unable to serialize: " + str(e)

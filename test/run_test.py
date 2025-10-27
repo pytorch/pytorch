@@ -284,6 +284,7 @@ RUN_PARALLEL_BLOCKLIST = [
     # temporarily sets a global config
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
+    "test_privateuseone_python_backend",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -400,6 +401,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
+QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
 
 def _is_cpp_test(test):
@@ -772,6 +774,9 @@ def run_test_retries(
                 "Test succeeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
+            # This is for log classifier so it can prioritize consistently
+            # failing tests instead of reruns. [1:-1] to remove quotes
+            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -836,7 +841,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         "--root",
         "./install",
     ]
-    wheel_cmd = [sys.executable, "-m", "pip", "wheel", ".", "-w", "./dist"]
+    wheel_cmd = [sys.executable, "-m", "build", "--wheel", "--no-isolation"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
@@ -949,10 +954,7 @@ def test_openreg(test_module, test_directory, options):
 
 
 def test_distributed(test_module, test_directory, options):
-    # MPI tests are broken with Python-3.9
-    mpi_available = subprocess.call(
-        "command -v mpiexec", shell=True
-    ) == 0 and sys.version_info < (3, 9)
+    mpi_available = shutil.which("mpiexec")
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
 
@@ -1120,6 +1122,9 @@ def run_doctests(test_module, test_directory, options):
 
     if torch.mps.is_available():
         os.environ["TORCH_DOCTEST_MPS"] = "1"
+
+    if torch.distributed.is_available():
+        os.environ["TORCH_DOCTEST_DISTRIBUTED"] = "1"
 
     if 0:
         # TODO: could try to enable some of these
@@ -1471,6 +1476,11 @@ def parse_args():
         help="exclude inductor tests",
     )
     parser.add_argument(
+        "--exclude-quantization-tests",
+        action="store_true",
+        help="exclude quantization tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1642,6 +1652,9 @@ def get_selected_tests(options) -> list[str]:
 
     if options.exclude_aot_dispatch_tests:
         options.exclude.extend(AOT_DISPATCH_TESTS)
+
+    if options.exclude_quantization_tests:
+        options.exclude.extend(QUANTIZATION_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
