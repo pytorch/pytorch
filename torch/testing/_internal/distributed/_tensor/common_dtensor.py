@@ -20,6 +20,7 @@ from torch.distributed._local_tensor import (
     LocalIntNode,
     LocalTensor,
     LocalTensorMode,
+    maybe_disable_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
 from torch.distributed.tensor import (
@@ -738,6 +739,10 @@ class LocalDTensorTestBase(DTensorTestBase):
 
         return types.MethodType(wrapper, self)
 
+    def build_device_mesh(self) -> DeviceMesh:
+        with maybe_disable_local_tensor_mode():
+            return super().build_device_mesh()
+
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
@@ -802,3 +807,8 @@ def create_local_tensor_test_class(orig_cls, skipped_tests=None):
 @maybe_run_for_local_tensor
 def map_local_tensor_for_rank(tensor, rank, func):
     return func(tensor, rank)
+
+
+@maybe_run_for_local_tensor
+def map_local_for_rank(rank, func):
+    return func(rank)
