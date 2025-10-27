@@ -1647,6 +1647,29 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         self.assertEqual(opt_fn(x), fn(x))
 
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_nonlocal_mutation(self):
+        counter = 0
+
+        def gn(x):
+            nonlocal counter
+            counter += 1
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=True)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        fn(x).sum().backward()
+        # The mutation is reapplied in the backward as well
+        self.assertEqual(counter, 2)
+        counter = 0
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn(x).sum().backward()
+        # The mutation is not reapplied in the backward because the flag was on.
+        self.assertEqual(counter, 1)
+
 
 devices = ["cuda", "hpu"]
 instantiate_device_type_tests(

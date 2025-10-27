@@ -357,24 +357,11 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             if add_root:
 
                 def normalize_path(path):
-                    try:
-                        parts = []
-
-                        class Path:
-                            def __getattr__(self, name):
-                                if name != "_modules":
-                                    parts.append(name)
-                                return self
-
-                            def __getitem__(self, idx):
-                                # pyrefly: ignore  # bad-argument-type
-                                parts.append(str(idx))
-                                return self
-
-                        eval(path, {"L": {"self": Path()}})
-                        return ".".join(parts)
-                    except Exception:  # TODO(zhxchen17) Remove this.
-                        return path
+                    if path == "L['self']":
+                        return ""
+                    if path.startswith("L['self']."):
+                        return path[len("L['self'].") :]
+                    return path
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
@@ -527,7 +514,6 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
                 simplify=True,
             )
         ):
-            # pyrefly: ignore  # unbound-name
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
@@ -2127,7 +2113,7 @@ def _export_for_training(
                 if torch._export.config.error_on_lifted_constant_tensors:
                     raise RuntimeError(error_msg)
                 else:
-                    warnings.warn(error_msg)
+                    warnings.warn(error_msg, stacklevel=2)
 
     export_graph_signature = export_artifact.aten.sig
 
@@ -2203,7 +2189,8 @@ def _export_for_training(
                 f"This is likely result of torch.export.export not being able to track side effects "
                 f"that is happening outside of model scope.\n\n"
                 f"Leaked tensors:\n  {leak_details}\n\n"
-                f"Alternatively, please file a bug report to PyTorch team for further debugging help."
+                f"Alternatively, please file a bug report to PyTorch team for further debugging help.",
+                stacklevel=2,
             )
 
             del legit_leak
