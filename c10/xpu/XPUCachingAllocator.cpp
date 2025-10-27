@@ -29,7 +29,7 @@ struct BlockPool {
         unmapped(BlockComparatorAddress),
         is_small(small) {}
   std::set<Block*, Comparison> blocks;
-  set::set<Block*, Comparison> unmapped;
+  std::set<Block*, Comparison> unmapped;
   const bool is_small;
 };
 
@@ -138,7 +138,7 @@ struct ExpandableSegment {
             .get_info<sycl::info::device::global_mem_size>();
     // The extra 1/8 allows flexibility for remapping or moving pages within the
     // segment when unmapping earlier regions.
-    max_handles_ = numSegments(device_total * (1 + l.0 / 8));
+    max_handles_ = numSegments(device_total * (1 + 1.0 / 8));
     ptr_ = sycl::ext::oneapi::experimental::reserve_virtual_mem(
         segment_size_ * max_handles_, xpu::get_device_context());
   }
@@ -524,7 +524,7 @@ class DeviceCachingAllocator {
     ExpandableSegment* es = expandable_segments_.back();
     Block* candidate = new Block(device, queue, es->size(), pool, es->ptr());
     candidate->mapped = false;
-    candidate->expandable_segment_ = es;
+    candidate->expandable_segment = es;
     pool->unmapped.insert(candidate);
     return candidate;
   }
@@ -532,7 +532,7 @@ class DeviceCachingAllocator {
   bool map_block(Block* to_map, size_t size) {
     TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size);
     auto mapped_range =
-        to_map->expandable_segment_->map(SegmentRange{to_map->ptr, size});
+        to_map->expandable_segment->map(SegmentRange{to_map->ptr, size});
     // failed to map the memory
     if (mapped_range.size == 0) {
       return false;
@@ -553,7 +553,7 @@ class DeviceCachingAllocator {
           &pool,
           static_cast<char*>(to_map->ptr) + mapped_range.size);
       remaining->mapped = false;
-      remaining->expandable_segment_ = to_map->expandable_segment_;
+      remaining->expandable_segment = to_map->expandable_segment;
       remaining->splice(to_map, to_map->next);
       pool.unmapped.insert(remaining);
       to_map->size = mapped_range.size;
@@ -612,7 +612,7 @@ class DeviceCachingAllocator {
     if (it == pool.blocks.end() || (*it)->queue != p.queue()) {
       return false;
     }
-    if ((*it)->expandable_segment_) {
+    if ((*it)->expandable_segment) {
       if (AcceleratorAllocatorConfig::use_expandable_segments()) {
         // if we are allocated to the part of the block that is expandable
         // for the purposes of "best fit" we consider its size to be the size it
@@ -624,7 +624,7 @@ class DeviceCachingAllocator {
         auto next = it;
         next++;
         // Looks for the best fit block with expandable size.
-        while ((*it)->expandable_segment_ && next != pool.blocks.end() &&
+        while ((*it)->expandable_segment && next != pool.blocks.end() &&
                (*next)->queue == p.queue() &&
                expandable_size(*next) < expandable_size(*it)) {
           it = next++;
@@ -637,7 +637,7 @@ class DeviceCachingAllocator {
         // by only finding non-expandable blocks
         do {
           it++;
-        } while (it != pool.blocks.end() && (*it)->expandable_segment_ &&
+        } while (it != pool.blocks.end() && (*it)->expandable_segment &&
                  (*it)->queue == p.queue());
         if (it == pool.blocks.end() || (*it)->queue != p.queue()) {
           return false;
@@ -693,17 +693,17 @@ class DeviceCachingAllocator {
 
   void release_expandable_segment(Block* block) {
     TORCH_INTERNAL_ASSERT(
-        block->size == block->expandable_segment_->size(),
+        block->size == block->expandable_segment->size(),
         "block disagrees with segment");
     TORCH_INTERNAL_ASSERT(!block->mapped);
     auto it = std::find(
         expandable_segments_.begin(),
         expandable_segments_.end(),
-        block->expandable_segment_);
+        block->expandable_segment);
     TORCH_INTERNAL_ASSERT(it != expandable_segments_.end());
     expandable_segments_.erase(it);
     block->pool->unmapped.erase(block);
-    delete block->expandable_segment_;
+    delete block->expandable_segment;
     delete block;
   }
 
@@ -730,8 +730,8 @@ class DeviceCachingAllocator {
   }
 
   void unmap_block(Block* block) {
-    auto unmapped = block->expandable_segment_->unmap(
-        SegmentRange{block->ptr, block->size});
+    auto unmapped =
+        block->expandable_segment->unmap(SegmentRange{block->ptr, block->size});
     if (unmapped.size == 0) {
       return;
     }
@@ -742,7 +742,7 @@ class DeviceCachingAllocator {
       // prev? -> before_free -> block
       Block* before_free = new Block(
           block->device, block->queue, before_size, block->pool, block->ptr);
-      before_free->expandable_segment_ = block->expandable_segment_;
+      before_free->expandable_segment = block->expandable_segment;
       before_free->splice(block->prev, block);
       block->pool.blocks.insert(before_free);
     }
@@ -756,7 +756,7 @@ class DeviceCachingAllocator {
           after_size,
           block->pool,
           unmapped.ptr + unmapped.size);
-      after_free->expandable_segment_ = block->expandable_segment_;
+      after_free->expandable_segment = block->expandable_segment;
       after_free->splice(block, block->next);
       block->pool.blocks.insert(after_free);
     }
@@ -782,7 +782,7 @@ class DeviceCachingAllocator {
     while (it != pool.blocks.end()) {
       Block* block = *it;
       ++it;
-      if (block->expandable_segment_) {
+      if (block->expandable_segment) {
         // Unmapping modifies the free pool, so collect items to free first to
         // avoid iterator invalidation.
         to_unmap.push_back(block);
@@ -845,7 +845,7 @@ class DeviceCachingAllocator {
       remaining = block;
 
       block = new Block(device, queue, size, pool, block->ptr);
-      block->expandable_segment_ = remaining->expandable_segment_;
+      block->expandable_segment = remaining->expandable_segment;
       block->prev = remaining->prev;
       if (block->prev) {
         block->prev->next = block;
