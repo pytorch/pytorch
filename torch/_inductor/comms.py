@@ -465,7 +465,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     while _next[curr] is not None:
         if iterative_recompute_error:
             break
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         if contains_collective(curr):
             if debug_num_collectives_to_reorder is not None and (
                 num_processed_collectives >= debug_num_collectives_to_reorder
@@ -1031,7 +1031,7 @@ def _sink_waits_iterative_internal(
         ):
             break
 
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         if contains_wait(curr) and curr not in processed_waits:
             processed_waits.add(curr)
             info = stats[curr] = SinkWaitInfo()
@@ -1370,7 +1370,7 @@ def reorder_compute_and_comm_for_overlap(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
         print(f"final {peak_memory=}")
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return order
 
 
@@ -1638,7 +1638,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             KeywordArg("group_size"),
             KeywordArg("group_name"),
         ),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
         extra_check=lambda match: match.kwargs["item_idx"] == 0,
     )
@@ -1662,7 +1662,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             return all_gather_into_tensor
 
         match.replace_by_example(
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             repl,
             [
                 kwargs["all_gather_inputs"],

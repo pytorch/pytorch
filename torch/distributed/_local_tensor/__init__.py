@@ -182,6 +182,7 @@ def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
     any_v = next(iter(rank_results.values()))
 
     if isinstance(any_v, Tensor):
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return LocalTensor(rank_results)
 
     if isinstance(any_v, int):
@@ -612,7 +613,9 @@ class LocalTensor(torch.Tensor):
         self,
         memory_format: torch.memory_format = torch.contiguous_format,
     ) -> torch.Tensor:
+        # pyrefly: ignore [bad-argument-type]
         return LocalTensor(
+            # pyrefly: ignore [bad-argument-count]
             {
                 r: t.contiguous(memory_format=memory_format)
                 for r, t in self._local_tensors.items()
