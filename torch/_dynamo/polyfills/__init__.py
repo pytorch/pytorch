@@ -10,9 +10,10 @@ Python polyfills for common builtins.
 
 import types
 from collections import OrderedDict
-from collections.abc import Hashable, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, TYPE_CHECKING
+from operator import eq, ne
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
     # Put the submodules here to avoid circular imports
     from . import (
+        _collections as _collections,
         builtins as builtins,
         functools as functools,
         itertools as itertools,
@@ -105,13 +107,24 @@ def accumulate_grad(x, new_grad):
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+
+    # Optimization: For equality, short-circuit if lengths differ
+    # This avoids iterating through elements and triggering guards on SymInts
+    left_len = len(left)
+    right_len = len(right)
+
+    if op is eq and left_len != right_len:
+        return False
+    if op is ne and left_len != right_len:
+        return True
+
     # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
 
     # No more pairs to compare, so compare sizes.
-    return op(len(left), len(right))
+    return op(left_len, right_len)
 
 
 def dict___eq__(d, other):
@@ -241,6 +254,10 @@ def set_difference_update(set1, *others):
     result = set1.difference(*others)
     set1.clear()
     set1.update(result)
+
+
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
 
 
 def assert_multi_line_equal(self_, first, second, msg=None):

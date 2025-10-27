@@ -97,6 +97,7 @@ tune_bsr_dense_addmm to learn how to register a custom set of optimal
 kernel parameters for addmm-based operations.
 
 """
+
 __all__ = ["get_meta", "tune_bsr_dense_addmm", "tune__int_bsr_dense_addmm"]
 
 import inspect
@@ -193,7 +194,8 @@ def update(op, device_name, version, key, value):
     # skip storing possible optimization failures:
     if not value:
         warnings.warn(
-            f"skipping empty value for {op}: {device_name=} {version=} {key=}"
+            f"skipping empty value for {op}: {device_name=} {version=} {key=}",
+            stacklevel=2,
         )
         return
     if (op, device_name, version) in _operation_device_version_data:
@@ -216,7 +218,8 @@ def dump():
     if begin_data_index == -1 or end_data_index == -1:
         warnings.warn(
             f"{current_file} cannot be updated:"
-            " BEGIN/END GENERATED DATA comment blocks appear to be corrupted"
+            " BEGIN/END GENERATED DATA comment blocks appear to be corrupted",
+            stacklevel=2,
         )
         return
 
@@ -231,8 +234,10 @@ def dump():
     part2 = current_content[end_data_index:]
     data_part = []
     for op_key in sorted(_operation_device_version_data, key=sort_key):
+        # pyrefly: ignore  # bad-argument-type
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
+        # pyrefly: ignore  # bad-argument-type
         data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
@@ -366,6 +371,7 @@ def minimize(
                 if next_target < minimal_target:
                     minimal_target = next_target
                     parameters = next_parameters
+                    # pyrefly: ignore  # unsupported-operation
                     pbar.total += i + 1
                     break
         else:
@@ -432,9 +438,9 @@ def minimize(
 
 
 def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
-    assert (
-        sparsity <= 1.0 and sparsity >= 0.0
-    ), "sparsity should be a value between 0 and 1"
+    assert sparsity <= 1.0 and sparsity >= 0.0, (
+        "sparsity should be a value between 0 and 1"
+    )
     assert M % blocksize[0] == 0
     assert N % blocksize[1] == 0
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]

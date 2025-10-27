@@ -5,8 +5,6 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -87,7 +85,6 @@ Tensor& random_mps_impl(Tensor& self,
           case kFloat:
             return MPSDataTypeFloat32;
           case kBFloat16: {
-            checkSupportsBFloat16();
             return MPSDataTypeBFloat16;
           }
           default:
@@ -418,8 +415,9 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
     MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:subtractTensor name:nil];
     return [mpsGraph divisionWithPrimaryTensor:logTensor secondaryTensor:minusLambdaTensor name:nil];
   };
+  auto eps = std::numeric_limits<float>::epsilon();
   return mps::random_mps_impl<double>(self,
-                                      0.0,
+                                      eps,
                                       1.0,
                                       std::nullopt,
                                       std::nullopt,

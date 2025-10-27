@@ -52,15 +52,16 @@ class AOTIRunnerUtil:
             )
             gm = ep.module()
         else:
-            gm = torch.export._trace._export_to_torch_ir(
-                model,
-                example_inputs,
-                dynamic_shapes=dynamic_shapes,
-                disable_constraint_solver=disable_constraint_solver,
-                # Disabling this flag, because instead we can rely on the mapping
-                # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
-                restore_fqn=False,
-            )
+            with torch._export.config.patch(use_new_tracer_experimental=True):
+                gm = torch.export._trace._export_to_torch_ir(
+                    model,
+                    example_inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    disable_constraint_solver=disable_constraint_solver,
+                    # Disabling this flag, because instead we can rely on the mapping
+                    # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+                    restore_fqn=False,
+                )
 
         if IS_FBCODE:
             from deeplearning.aot_inductor.extern_node_thrift_serializer import (
@@ -148,7 +149,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def compile(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -156,10 +157,17 @@ class AOTIRunnerUtil:
             # This should really be the default behavior of torch.export.export
             model = WrapperModule(model)
 
-        with torch.no_grad():
+        with (
+            torch.no_grad(),
+            torch._export.config.patch(use_new_tracer_experimental=True),
+        ):
             # strict=False needs extra migration work
             ep = torch.export.export(
-                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+                model,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+                strict=True,
+                prefer_deferred_runtime_asserts_over_guards=True,
             )
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=inductor_configs
@@ -169,7 +177,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -185,7 +193,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run_multiple(
         model: Union[torch.nn.Module, types.FunctionType],
-        list_example_inputs: list[list[torch.Tensor]],
+        list_example_inputs: list[tuple[torch.Tensor, ...]],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):

@@ -8,9 +8,9 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -532,16 +532,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
+        gm, new_graph_signature = _remove_unnecessary_copy_op_pass(
             gm, new_graph_signature
         )
 
-        # When we apply parameterixzation rule to unwrap
+        # When we apply parameterization rule to unwrap
         # subclasses, the state dict will now have different
         # desugared parameters. We need to manually filter those
         # and update the ep.state_dict. Ideally, we should just return
         # the state dict of ep.module but ep.module only stores params
-        # buffers that participate in forward. If we undo this behaviour,
+        # buffers that participate in forward. If we undo this behavior,
         # it would break some downstream users.
         new_state_dict = {
             **ep.state_dict,
@@ -590,7 +590,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             ep.graph_module,
             fake_args,
             decompositions=python_decomp_table,
-            trace_joint=True if joint_loss_index is not None else False,
+            trace_joint=joint_loss_index is not None,
             output_loss_index=(
                 joint_loss_index if joint_loss_index is not None else None
             ),
@@ -653,7 +653,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         shape_env = _get_shape_env(gm)
         if shape_env is not None:
             with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                gm,
+                functools.partial(
+                    _node_metadata_hook, metadata={"stack_trace": stack_trace}
+                ),
             ):
                 insert_deferred_runtime_asserts(
                     gm,
@@ -778,7 +781,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     return gm, new_graph_signature, ep.state_dict
 
 
-def _remove_unneccessary_copy_op_pass(
+def _remove_unnecessary_copy_op_pass(
     gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature
 ) -> tuple[torch.fx.GraphModule, ExportGraphSignature]:
     """
@@ -789,9 +792,9 @@ def _remove_unneccessary_copy_op_pass(
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
-                    if (
-                        isinstance(out, torch.fx.Node)
-                        and out.name in new_graph_signature.buffers_to_mutate
+                    if isinstance(out, torch.fx.Node) and (
+                        out.name in new_graph_signature.buffers_to_mutate
+                        or out.name in new_graph_signature.parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
@@ -891,7 +894,7 @@ def _get_updated_module_call_graph(
                     user_input_counter += 1
 
     # For all the parameters and buffers, we first see
-    # if they are result of paramerizaitons and if they
+    # if they are result of parametrizations and if they
     # are, we log them and error later
     old_param_to_desugared = defaultdict(list)
     for name, target in new_graph_params_buffers.items():
@@ -1044,6 +1047,8 @@ class ExportedProgram:
     _verifiers: list[type[Verifier]]
     """List of verifier classes used to validate the exported program."""
 
+    _guards_code: list[str]
+
     def __init__(
         self,
         root: Union[torch.nn.Module, dict[str, Any]],
@@ -1080,6 +1085,8 @@ class ExportedProgram:
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
         self.validate()
+
+        self._guards_code = _convert_guards_to_code(self._graph_module)
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1376,13 +1383,20 @@ class ExportedProgram:
         )
         return string
 
-    def module(self) -> torch.fx.GraphModule:
+    def module(self, check_guards=True) -> torch.fx.GraphModule:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
+
+        - When `check_guards=True` (default), a `_guards_fn` submodule is generated
+          and a call to a `_guards_fn` submodule is inserted right after placeholders
+          in the graph. This module checks guards on inputs.
+        - When `check_guards=False`, a subset of these checks are performed by a
+          forward pre-hook on the graph module. No `_guards_fn` submodule is generated.
+
         """
         from ._unlift import _unlift_exported_program_lifted_states
 
-        module = _unlift_exported_program_lifted_states(self)
+        module = _unlift_exported_program_lifted_states(self, check_guards=check_guards)
 
         def _train(self, mode: bool = True):
             raise NotImplementedError("Calling train() is not supported yet.")
@@ -1486,6 +1500,7 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
+        # pyrefly: ignore  # missing-attribute
         if transformed_gm is self.graph_module and not res.modified:
             return self
 
@@ -1564,6 +1579,7 @@ class ExportedProgram:
             verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
+        # pyrefly: ignore  # missing-attribute
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
@@ -1668,9 +1684,33 @@ def _create_graph_module_for_export(root, graph):
             "Unable to execute the generated python source code from "
             "the graph. The graph module will no longer be directly callable, "
             "but you can still run the ExportedProgram, and if needed, you can "
-            "run the graph module eagerly using torch.fx.Interpreter."
+            "run the graph module eagerly using torch.fx.Interpreter.",
+            stacklevel=2,
         )
         gm = torch.fx.GraphModule(root, torch.fx.Graph())
         gm._graph = graph
 
     return gm
+
+
+def _convert_guards_to_code(graph_module):
+    shape_env = _get_shape_env(graph_module)
+    if shape_env is None:
+        return []
+
+    local_vars = {
+        var
+        for var, sources in shape_env.var_to_sources.items()
+        if all(
+            not isinstance(source, torch._dynamo.source.ConstantSource)
+            for source in sources
+        )
+    }
+    py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
+        shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
+    )
+    return [
+        py_printer.doprint(guard.expr)
+        for guard in shape_env.guards
+        if guard.expr.free_symbols.issubset(local_vars)
+    ]

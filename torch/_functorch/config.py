@@ -4,6 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import Callable
+
+
 """
 Global flags for aot autograd
 """
@@ -13,6 +16,13 @@ import sys
 from typing import Literal, Optional, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
+
+
+# [@compile_ignored: debug]
+_save_config_ignore = [
+    # callable not serializeable
+    "joint_custom_pass",
+]
 
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
@@ -270,7 +280,7 @@ backward_pass_autocast = "same_as_forward"
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = False if is_fbcode() else True
+donated_buffer = not is_fbcode()
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
@@ -281,10 +291,29 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # real tensor outputs.
 generate_fake_kernels_from_real_mismatches = False
 
+# When there are device mismatches in FakeTensor device propagation,
+# prefer a specific device type over others. This is particularly useful
+# in full compiled mode where intermediate tensors with device mismatches
+# represent only logical differences during compilation - these intermediate
+# tensors will never physically materialize in the binary execution, so the
+# device mismatch is not a real runtime concern. Enabling this allows the
+# compiler to proceed with compilation by choosing the preferred device type
+# for consistency. For example, set to "mtia" to prefer MTIA devices over
+# CPU, or "cuda" to prefer CUDA devices over CPU.
+fake_tensor_prefer_device_type: Optional[str] = None
+
 # CUDAGraph save run_with_rng functionalization.
 # TODO: turn on by default
 graphsafe_rng_functionalization = True
 
+# Whether or not to eagerly compile the backward
+# used by AOT compile and other settings
+# TODO: once AOT compile calls aot autograd directly instead of
+# through compile_fx, we can remove this
+force_non_lazy_backward_lowering = False
+
+# only for testing, used to turn functionalization off in AOTDispatcher
+_test_disable_functionalization = True
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
@@ -340,6 +369,10 @@ _sync_decision_cross_ranks = False
 # (this includes parameters and user marked as static)
 # "all" - no filtering, everything saved for backward.
 saved_tensors_hooks_filtering_mode = "donated"
+
+
+# This callback is invoked on the joint graph before partitioning
+joint_custom_pass: Callable = None  # type: ignore[assignment]
 
 
 if TYPE_CHECKING:

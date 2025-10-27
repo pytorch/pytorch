@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -40,10 +40,12 @@ from .contract import _get_registry, contract
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.distributed.tensor import Shard
 
 
-cls_to_fsdp_cls: dict[type, type] = {}
+cls_to_replicate_cls: dict[type, type] = {}
 
 _ROOT_MODULE_PREFIX = ""
 
@@ -51,10 +53,10 @@ logger = logging.getLogger("torch.distributed._composable.replicate_with_fsdp")
 
 
 class _ReplicateStateContext:
-    """This has state shared across FSDP states."""
+    """This has state shared across Replicate states."""
 
     def __init__(self) -> None:
-        # All FSDP states in the root state's module tree
+        # All Replicate states in the root state's module tree
         self.all_states: list[_ReplicateState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
@@ -98,6 +100,7 @@ class _ReplicateState(FSDPState):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
+        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
@@ -148,6 +151,7 @@ class _ReplicateState(FSDPState):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
+            # pyrefly: ignore [bad-argument-type]
             visited_states.add(state)
         if self._fsdp_param_group and self._auto_reshard_after_forward:
             # For the root, do not reshard after forward since for training,
@@ -173,7 +177,7 @@ def replicate_impl(
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: Optional[set[nn.Parameter]] = None,
 ):
-    torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
+    torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"replicate does not support containers that do not implement forward: {module}"
@@ -224,11 +228,11 @@ def replicate_impl(
     # Place Replicate leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        new_cls = cls_to_fsdp_cls.get(cls, None)
+        new_cls = cls_to_replicate_cls.get(cls)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
-            new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
-            cls_to_fsdp_cls[cls] = new_cls
+            new_cls = type(f"Replicate{cls.__name__}", (ReplicateModule, cls), dct)
+            cls_to_replicate_cls[cls] = new_cls
         module.__class__ = new_cls
     return arg_module
 
@@ -262,31 +266,25 @@ def replicate(
         )
 
     device_mesh = kwargs.pop("device_mesh", None)
-    if device_mesh is not None:
-        from torch.distributed.device_mesh import _mesh_resources
-
-        root_mesh = _mesh_resources.get_root_mesh(device_mesh)
-        # if a root mesh is not the same as device_mesh,
-        # meaning the device_mesh is sliced out from the root mesh.
-        if root_mesh != device_mesh:
-            # TODO: This is a temporary work around to enable DDP + TP.
-            # We should do the logic in DDP so that the 2D implementation is
-            # sound and the state_dict works out of the box.
-            #
-            # This won't conflict with what is done in DDP class as the module
-            # replicate is going to pass is NOT the original module.
-            from torch.distributed.tensor.parallel.ddp import (
-                _localize_dtensor,
-                _reconstruct_dtensor,
-            )
-
-            module.register_forward_pre_hook(_reconstruct_dtensor)
-            module.register_forward_hook(_localize_dtensor)
-    else:
+    if device_mesh is None:
         device_mesh = replicate_mesh()
 
     module = replicate_impl(module, mesh=device_mesh, **kwargs)
     return module
+
+
+class ReplicateModule(FSDPModule):
+    def __new__(cls, *args, **kwargs):
+        """
+        Override ``__new__`` to remove the FSDP class and directly construct
+        the original class for cases like indexing into a container module.
+        """
+        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
+        # and index 1 is the `FSDPModule` class itself
+        orig_cls = cls.__mro__[3]
+        self = orig_cls.__new__(orig_cls, *args, **kwargs)
+        self.__init__(*args, **kwargs)
+        return self
 
 
 def _get_managed_modules(

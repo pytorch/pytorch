@@ -1,8 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
-"""Test functions for 1D array set operations.
+"""Test functions for 1D array set operations."""
 
-"""
 from unittest import expectedFailure as xfail, skipIf
 
 import numpy

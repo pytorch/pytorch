@@ -51,8 +51,6 @@ class _HFStorageInfo:
     """This is the per entry storage info."""
 
     relative_path: str
-    offset: int
-    length: int
     shape: torch.Size
     dtype: torch.dtype
 

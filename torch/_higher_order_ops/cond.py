@@ -1,9 +1,11 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 import logging
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,8 +19,10 @@ from torch._C._functorch import (
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
-    _set_compilation_env,
+    check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    fill_none_with_masks,
+    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -28,12 +32,7 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
@@ -52,6 +51,41 @@ class CondOp(HigherOrderOperator):
     def __call__(self, pred, true_fn, false_fn, operands):
         validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
+
+    # pyrefly: ignore  # bad-override
+    def gen_schema(self, pred, true_fn, false_fn, operands):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        then_gm: torch.fx.GraphModule = materialize_as_graph(true_fn, operands)
+        else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
+        (
+            _,
+            _,
+            _,
+            then_mutated_inputs,
+            then_outputs,
+        ) = check_input_alias_and_mutation_return_outputs(then_gm)
+        (
+            _,
+            _,
+            _,
+            else_mutated_inputs,
+            else_outputs,
+        ) = check_input_alias_and_mutation_return_outputs(else_gm)
+        mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("pred", pred)
+        schema_gen.add_arg("true_fn", then_gm)
+        schema_gen.add_arg("false_fn", else_gm)
+        for idx, arg in enumerate(operands):
+            schema_gen.add_arg(f"operand{idx}", arg, is_mutated=idx in mutated_inputs)
+
+        for out in then_outputs:
+            schema_gen.add_output(out)
+        schema_gen.add_schema_tree_spec(pred, true_fn, false_fn, operands)
+        return schema_gen.gen_schema()
 
 
 cond_op = CondOp()
@@ -135,10 +169,6 @@ def cond(
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
-    from torch._dynamo.backends.debugging import (
-        make_eager_backend_with_torch_function_mode,
-    )
-
     if isinstance(pred, (bool, int, float)):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
@@ -147,6 +177,7 @@ def cond(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
                 UserWarning,
+                stacklevel=2,
             )
         # This is the eager case. We can just run the true or false branch.
         if pred:
@@ -184,19 +215,12 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    with (
-        _set_compilation_env(),
-        torch._dynamo.utils.disable_cache_limit(),
-        _temp_remove_pre_dispatch_torch_function_mode(),
-    ):
-        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-            if metadata_mode:
-                backend = make_eager_backend_with_torch_function_mode(metadata_mode)
-            else:
-                backend = "eager"
-            return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-                pred, true_fn, false_fn, operands
-            )
+    from torch._higher_order_ops.utils import setup_compilation_env
+
+    with setup_compilation_env() as backend:
+        return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
+            pred, true_fn, false_fn, operands
+        )
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -262,6 +286,7 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
 
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         pred,
@@ -293,15 +318,31 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
+
+        grads_tensor_masks = []
+
+        def create_fn_remove_none(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                nonlocal grads_tensor_masks
+
+                true_outputs = fn(*args)
+                grads_tensor_masks = [
+                    bool(isinstance(out, torch.Tensor)) for out in true_outputs
+                ]
+                return filter_with_masks(true_outputs, grads_tensor_masks)
+
+            return wrapped
+
         true_bw_gm = materialize_as_graph(
-            ctx._true_bw_fn,
+            create_fn_remove_none(ctx._true_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
         false_bw_gm = materialize_as_graph(
-            ctx._false_bw_fn,
+            create_fn_remove_none(ctx._false_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
@@ -313,7 +354,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_bw_gm,
             args,
         )
-        return None, None, None, *grads
+        return None, None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
 # Note:
@@ -681,4 +722,4 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
     if not isinstance(result, tuple):
         result = (result,)
     lvl = interpreter.level()
-    return tuple([_add_batch_dim(r, 0, lvl) for r in result])
+    return tuple(_add_batch_dim(r, 0, lvl) for r in result)

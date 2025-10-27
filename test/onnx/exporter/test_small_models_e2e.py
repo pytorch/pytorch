@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import logging
 
-import onnx.reference as onnx_ref
-
 import onnxruntime
 import pytest
 import transformers
@@ -20,7 +18,7 @@ from torch.utils import _pytree as torch_pytree
 
 
 def has_onnxruntime_opset_23() -> bool:
-    return version.parse(onnxruntime.__version__) >= version.parse("1.22")
+    return version.parse(onnxruntime.__version__) >= version.parse("1.23")
 
 
 class _WithExport:
@@ -734,7 +732,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
             [node.op_type for node in onnx_program.model.graph],
         )
 
-    def test_graph_attention_opset_23(self):
+    def test_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
                 return torch.nn.functional.scaled_dot_product_attention(
@@ -744,35 +742,99 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        expected = Model()(query, key, value)
 
         onnx_program = self.export(Model(), (query, key, value), opset_version=23)
-        self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
-
-        ref = onnx_ref.ReferenceEvaluator(onnx_program.model_proto)
-        got = ref.run(
-            None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy())
-        )[0]
-        torch.testing.assert_close(torch.from_numpy(got), expected, atol=1e-2, rtol=1)
-
-    def test_graph_accuracy_attention_opset_23(self):
-        class Model(torch.nn.Module):
-            def forward(self, query, key, value):
-                return torch.nn.functional.scaled_dot_product_attention(
-                    query, key, value
-                )
-
-        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-
-        onnx_program = self.export(
-            Model(), (query, key, value), opset_version=23, optimize=True
-        )
         self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
-        # onnxruntime inlines any op defined as a function and without any implemented kernel
+
         if has_onnxruntime_opset_23():
             onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(
+                onnx_program, atol=1e-2, rtol=1, backend="reference"
+            )
+
+    def test_rms_norm(self):
+        """Test RMS normalization with various configurations."""
+
+        class RMSNormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3])
+
+        x = torch.randn(2, 5, 3)
+        onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+        # Test with multi-dimensional normalized_shape
+        class RMSNormModel2D(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [7, 3])
+
+        x = torch.randn(2, 5, 7, 3)
+        onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+    def test_rms_norm_with_weight(self):
+        """Test RMS normalization with weight parameter."""
+
+        class RMSNormWithWeight(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3], weight=self.weight)
+
+        x = torch.randn(2, 5, 3)
+
+        onnx_program = self.export(RMSNormWithWeight(), (x,), opset_version=23)
+
+        # Test with reference evaluator because ORT does not support the op as of version 1.22
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+    def test_rms_norm_with_eps(self):
+        """Test RMS normalization with custom epsilon."""
+
+        class RMSNormWithEps(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3], eps=1e-5)
+
+        x = torch.randn(2, 5, 3)
+
+        onnx_program = self.export(RMSNormWithEps(), (x,), opset_version=23)
+
+        # Test with reference evaluator because ORT does not support the op as of version 1.22
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+    def test_enable_gqa_in_attention_23_with_dropout(self):
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v):
+                return torch.nn.functional.scaled_dot_product_attention(  # pylint: disable=not-callable
+                    q, k, v, enable_gqa=True, dropout_p=0.1
+                )
+
+        model = Model()
+
+        query = torch.randn(2, 4, 8, 16)
+        key = torch.randn(2, 2, 8, 16)
+        value = torch.randn(2, 2, 8, 16)
+
+        onnx_program = self.export(
+            model,
+            (
+                query,
+                key,
+                value,
+            ),
+            opset_version=23,
+        )
+        # opset23 only uses manually gqa path when dropout is enabled,
+        # and dropout makes the output non-deterministic,
+        # so we check for the presence of the ops used in that path.
+        all_ops = [node.op_type for node in onnx_program.model.graph]
+        self.assertIn("Unsqueeze", all_ops)
+        self.assertIn("Expand", all_ops)
+        self.assertIn("Reshape", all_ops)
 
 
 if __name__ == "__main__":

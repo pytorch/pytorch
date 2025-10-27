@@ -19,22 +19,17 @@ except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
 
-if torch._running_with_deploy():
+try:
+    from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
+except Exception:
+    warnings.warn(
+        "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly",
+        stacklevel=2,
+    )
 
-    def is_torchdynamo_compiling():
-        """Can't import torchdynamo in torchdeploy builds currently."""
+    def is_torchdynamo_compiling():  # type: ignore[misc]
         return False
-
-else:
-    try:
-        from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
-    except Exception:
-        warnings.warn(
-            "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
-        )
-
-        def is_torchdynamo_compiling():
-            return False
+        return False
 
 
 """
@@ -639,6 +634,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         if func == torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
+            # pyrefly: ignore [index-error]
             res = func(args[0].elem, args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
@@ -792,6 +788,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
+        # pyrefly: ignore [redundant-cast]
         return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
@@ -821,10 +818,11 @@ def _are_we_tracing() -> bool:
     # If fake mode is turned on, we are almost definitely compiling/tracing.
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
         return True
-
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_initial_trace:
+    # See Note [enable_python_dispatcher in dynamo]
+    if torch._C._dispatch_tls_is_dispatch_key_included(
+        torch._C.DispatchKey.PythonDispatcher
+    ):
         return True
-
     return get_proxy_mode() is not None
 
 
@@ -949,7 +947,7 @@ def _all_to_all_single_meta(
         return input.new_empty(input.size())
     else:
         for s in output_split_sizes:
-            torch._check_is_size(s)
+            torch._check(s >= 0)
         out_size = list(input.size())
         out_size[0] = sum(output_split_sizes)
         return input.new_empty(out_size)
@@ -985,66 +983,58 @@ def _reduce_scatter_tensor_coalesced_native_meta(
     ]
 
 
-if not torch._running_with_deploy():
-    # Library MUST be defined at module scope or it doesn't work
-    # Creating a "DEF" Library always crashes torch::deploy so we create our
-    # Library instances here guarded against running inside it
-    lib_impl = torch.library.Library("_c10d_functional", "IMPL")
-    lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
-    lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
-    lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
-    lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
-    lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
-    lib_impl.impl(
-        "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
-    )
-    lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
-    lib_impl.impl(
-        "all_gather_into_tensor_coalesced",
-        _all_gather_into_tensor_coalesced_native_meta,
-        "Meta",
-    )
-    lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
-    lib_impl.impl(
-        "reduce_scatter_tensor_coalesced",
-        _reduce_scatter_tensor_coalesced_native_meta,
-        "Meta",
-    )
-    lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
-    lib_impl.impl("broadcast", _broadcast_meta, "Meta")
-    lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+# Library MUST be defined at module scope or it doesn't work
+lib_impl = torch.library.Library("_c10d_functional", "IMPL")
+lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
+lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
+lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
+lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+lib_impl.impl(
+    "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
+)
+lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
+lib_impl.impl(
+    "all_gather_into_tensor_coalesced",
+    _all_gather_into_tensor_coalesced_native_meta,
+    "Meta",
+)
+lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+lib_impl.impl(
+    "reduce_scatter_tensor_coalesced",
+    _reduce_scatter_tensor_coalesced_native_meta,
+    "Meta",
+)
+lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+lib_impl.impl("broadcast", _broadcast_meta, "Meta")
+lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
-    # mark these ops has side effect so that they won't be removed by DCE
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
+# mark these ops has side effect so that they won't be removed by DCE
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
 
-    # Register legacy ops for backward compatibility
-    # TODO(yifu): remove these in functional collective beta release
-    legacy_lib = torch.library.Library("c10d_functional", "DEF")
-    legacy_lib_impl = torch.library.Library("c10d_functional", "IMPL")
-    ops_defs = [
-        "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
-        "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
-        "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-        "wait_tensor(Tensor self) -> Tensor",
-        "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
-        "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
-        "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
-        "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-        "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
-    ]
+# Register legacy ops for backward compatibility
+# TODO(yifu): remove these in functional collective beta release
+legacy_lib = torch.library.Library("c10d_functional", "DEF")
+legacy_lib_impl = torch.library.Library("c10d_functional", "IMPL")
+ops_defs = [
+    "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
+    "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+    "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
+    "wait_tensor(Tensor self) -> Tensor",
+    "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
+    "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
+    "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+    "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
+    "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+]
 
-    my_module = sys.modules[__name__]
-    for op_def in ops_defs:
-        op_name = op_def[0 : op_def.index("(")]
-        backend_impl = getattr(fun_col_impl, f"_{op_name}")
-        legacy_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
-        legacy_lib_impl.impl(op_name, backend_impl, "CompositeImplicitAutograd")
-
-else:
-    warnings.warn(
-        "PyTorch Distributed functional collectives do not work with torch::deploy."
-    )
+my_module = sys.modules[__name__]
+for op_def in ops_defs:
+    op_name = op_def[0 : op_def.index("(")]
+    backend_impl = getattr(fun_col_impl, f"_{op_name}")
+    legacy_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
+    legacy_lib_impl.impl(op_name, backend_impl, "CompositeImplicitAutograd")
 
 
 """
@@ -1177,15 +1167,17 @@ def all_gather_inplace(
     for t in tensor_list:
         is_scalar = t.dim() == 0
         t_offset = 1 if is_scalar else t.size(0)
+        # pyrefly: ignore [unsupported-operation]
         out = output[offset] if is_scalar else output[offset : offset + t_offset]
         output_splits.append(out)
+        # pyrefly: ignore [unsupported-operation]
         offset += t_offset
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (
+from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,
@@ -1199,11 +1191,11 @@ from torch.distributed.distributed_c10d import (
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
-    legacy_allgather: all_gather_tensor_inplace,
-    legacy_reducescatter: reduce_scatter_tensor_inplace,
-    legacy_allreduce: all_reduce_inplace,
-    legacy_all_to_all_single: all_to_all_inplace,
-    legacy_all_gather: all_gather_inplace,
-    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
-    legacy_all_gather_base: all_gather_tensor_inplace,
+    legacy_allgather: all_gather_tensor_inplace,  # type: ignore[has-type]
+    legacy_reducescatter: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
+    legacy_allreduce: all_reduce_inplace,  # type: ignore[has-type]
+    legacy_all_to_all_single: all_to_all_inplace,  # type: ignore[has-type]
+    legacy_all_gather: all_gather_inplace,  # type: ignore[has-type]
+    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
+    legacy_all_gather_base: all_gather_tensor_inplace,  # type: ignore[has-type]
 }

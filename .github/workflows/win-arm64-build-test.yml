@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - ciflow/win-arm64/*
+  schedule:
+    # Every 4 hours starting at 00:00 UTC
+    - cron: '0 */4 * * *'
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

@@ -31,7 +31,9 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
       return at::globalContext().getPinnedMemoryAllocator(opt_device_type);
     } else {
       TORCH_CHECK(
-          false, "Need to provide pin_memory allocator to use pin memory.")
+          false,
+          "pin_memory=True requires a CUDA or other accelerator backend; "
+          "no pinned memory allocator is available on this system.")
     }
   }
 

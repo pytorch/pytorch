@@ -4,6 +4,7 @@
 import os
 import re
 import sys
+import threading
 import types
 import typing
 import typing_extensions
@@ -772,6 +773,25 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(mod, (torch.rand(2, 2),))
         mod.foo = None
         self.checkModule(mod, (torch.rand(2, 2),))
+
+    def test_thread_safe_error_stacks(self):
+        # prior to #160386, this causes a segfault. See [Note: Thread-safe CallStack]
+        callstacks = []
+
+        def callstack_creator():
+            factory = torch._C._jit_tree_views.SourceRangeFactory(
+                "source code", "a.py", 1, 0
+            )
+            x = torch._C.CallStack("a", factory.make_range(1, 0, 1))
+            callstacks.append(x)
+            del x
+
+        t = threading.Thread(target=callstack_creator)
+        t.start()
+        t.join()
+        del t
+        del callstacks[0]
+        self.assertTrue(len(callstacks) == 0)
 
     def test_override_instance_method_ignore(self):
         class M(torch.nn.Module):

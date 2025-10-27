@@ -5,10 +5,10 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -161,14 +161,19 @@ class _KinetoProfile:
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = "mtia"
         elif ProfilerActivity.HPU in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
@@ -380,6 +385,7 @@ class _KinetoProfile:
         }
         if backend == "nccl":
             nccl_version = torch.cuda.nccl.version()
+            # pyrefly: ignore  # unsupported-operation
             dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
         return dist_info
 
@@ -506,7 +512,10 @@ def schedule(
         wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
     ), "Invalid profiler schedule arguments"
     if warmup == 0:
-        warn("Profiler won't be using warmup, this can skew profiler results")
+        warn(
+            "Profiler won't be using warmup, this can skew profiler results",
+            stacklevel=2,
+        )
     return schedule_fn
 
 
@@ -527,7 +536,6 @@ def tensorboard_trace_handler(
     ``worker_name`` should be unique for each worker in distributed scenario,
     it will be set to '[hostname]_[pid]' by default.
     """
-    import os
     import socket
     import time
 
@@ -624,8 +632,7 @@ class profile(_KinetoProfile):
             ]
         ) as p:
             code_to_profile()
-        print(p.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1))
+        print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     Using the profiler's ``schedule``, ``on_trace_ready`` and ``step`` functions:
 
@@ -635,16 +642,17 @@ class profile(_KinetoProfile):
         # on different iterations of the training loop;
         # trace_handler is called every time a new trace becomes available
         def trace_handler(prof):
-            print(prof.key_averages().table(
-                sort_by="self_cuda_time_total", row_limit=-1))
+            print(
+                prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1)
+            )
             # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step_num) + ".json")
+
 
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
-
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
@@ -652,20 +660,15 @@ class profile(_KinetoProfile):
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step
-
-            schedule=torch.profiler.schedule(
-                wait=1,
-                warmup=1,
-                active=2,
-                repeat=1),
-            on_trace_ready=trace_handler
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=1),
+            on_trace_ready=trace_handler,
             # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
             # used when outputting for tensorboard
-            ) as p:
-                for iter in range(N):
-                    code_iteration_to_profile(iter)
-                    # send a signal to the profiler that the next iteration has started
-                    p.step()
+        ) as p:
+            for iter in range(N):
+                code_iteration_to_profile(iter)
+                # send a signal to the profiler that the next iteration has started
+                p.step()
 
     The following sample shows how to setup up an Execution Trace Observer (`execution_trace_observer`)
 
@@ -930,7 +933,8 @@ class ExecutionTraceObserver(_ITraceObserver):
                 fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
             except Exception as e:
                 warn(
-                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}"
+                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
+                    stacklevel=2,
                 )
                 return None
             fp.close()
@@ -1015,7 +1019,10 @@ class ExecutionTraceObserver(_ITraceObserver):
                 try:
                     os.mkdir(resource_dir)
                 except Exception:
-                    warn(f"Execution trace exception when creating {resource_dir}")
+                    warn(
+                        f"Execution trace exception when creating {resource_dir}",
+                        stacklevel=2,
+                    )
                     return None
             else:
                 return None
@@ -1031,14 +1038,15 @@ class ExecutionTraceObserver(_ITraceObserver):
                 resource_dir = self.get_resources_dir()
             except Exception as e:
                 warn(
-                    f"Execution trace exception when generating resource directory: {e}"
+                    f"Execution trace exception when generating resource directory: {e}",
+                    stacklevel=2,
                 )
                 return
             if not resource_dir:
                 return
 
             # Save the kernel paths for the generated kernels
-            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+            from torch._inductor.codecache import PyCodeCache
 
             kernel_files = [
                 v.__file__
@@ -1066,7 +1074,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             try:
                 _save_triton_kernels()
             except Exception as e:
-                warn(f"Execution trace failed to save kernels: {e}")
+                warn(f"Execution trace failed to save kernels: {e}", stacklevel=2)
 
             _remove_execution_trace_observer()
             if self.output_file_path.endswith("gz"):

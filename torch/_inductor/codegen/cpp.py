@@ -216,13 +216,17 @@ def reduction_combine(
     reduction_type,
     var,
     next_value,
+    helper_val=None,
     index: Optional[sympy.Symbol] = None,
     src_dtype=None,
 ):
     is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
-        conjunction = "|" if is_bool else "+"
-        return f"{var} {conjunction} {next_value}"
+        if helper_val:
+            return f"cascade_sum_combine({next_value}, &{helper_val})"
+        else:
+            conjunction = "|" if is_bool else "+"
+            return f"{var} {conjunction} {next_value}"
     if reduction_type == "prod":
         return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
@@ -362,6 +366,31 @@ def replace_acc_name(buffer: IndentedBuffer, name: str, new_name: str):
             buffer._lines[i] = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line)
 
 
+def replace_cascade_sum_with_add(buffer: IndentedBuffer):
+    """
+    Replaces `acc = cascade_sum_combine(value, ...)` with `acc = acc + value;`
+    """
+
+    pattern = r"(.*?)\s*=\s*cascade_sum_combine\(([^,]+),.*?\);"
+    for i, line in enumerate(buffer._lines):
+        assert isinstance(
+            line,
+            (
+                str,
+                DeferredLine,
+            ),
+        )
+        content = line.line if isinstance(line, DeferredLine) else line
+        match = re.search(pattern, content)
+        if match:
+            acc, value = match.groups()
+            new_content = re.sub(pattern, f"{acc} = {acc} + {value};", content)
+            if isinstance(line, DeferredLine):
+                line.line = new_content
+            else:
+                buffer._lines[i] = new_content
+
+
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
     if not index.has(var):
@@ -475,6 +504,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         if any(type(node) is OuterLoopFusedSchedulerNode for node in (node1, node2)):
             return cls(
                 node1.scheduler,
+                # pyrefly: ignore [bad-argument-type]
                 (
                     list(node1.get_outer_nodes())
                     if type(node1) is OuterLoopFusedSchedulerNode
@@ -904,8 +934,8 @@ class CppOverrides(OpOverrides):
             return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar(dtype=torch.int32)
-        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32, shape=x.shape)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype, shape=x.shape)
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
@@ -1182,7 +1212,7 @@ class CppVecOverrides(CppOverrides):
             return wrapper
 
         for name, method in vars(CppVecOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in [
+            if getattr(method, "__class__", None) is staticmethod and name not in [
                 "masked",
                 "index_expr",
             ]:
@@ -1687,6 +1717,7 @@ class CppVecOverrides(CppOverrides):
                     body_vec_var.dtype = dtype
                     other_vec_var.dtype = dtype
                     overrides: type[Union[CppOverrides, CppVecOverrides]] = (
+                        # pyrefly: ignore [bad-assignment]
                         V.kernel.overrides
                     )  # type: ignore[has-type]
                     code.writeline(
@@ -1730,6 +1761,7 @@ class CppVecOverrides(CppOverrides):
             csevar = V.kernel._load_or_store_non_contiguous(  # type: ignore[assignment]
                 None, index, dtype, V.kernel.compute
             )
+        # pyrefly: ignore [missing-attribute]
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
 
@@ -1874,6 +1906,15 @@ class CppTile2DOverrides(CppVecOverrides):
 
 
 class CppKernel(Kernel):
+    """
+    Base class for C++ kernel code generation in PyTorch Inductor.
+    This class is responsible for generating C++ code from the intermediate representation.
+
+    Args:
+        args: Kernel arguments used for code generation
+        num_threads: Number of threads for parallel execution
+    """
+
     overrides = CppOverrides  # type: ignore[assignment]
     sexpr = cexpr
     newvar_prefix = "auto "
@@ -1910,6 +1951,9 @@ class CppKernel(Kernel):
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.welford_helper_cse = CSE(
             self.newvar_prefix, self.suffix, name_prefix="welford_helper"
+        )
+        self.cascade_helper_cse = CSE(
+            self.newvar_prefix, self.suffix, name_prefix="cascade_helper"
         )
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
@@ -1995,6 +2039,7 @@ class CppKernel(Kernel):
                 # mask's dtype should be bool
                 mask.dtype = torch.bool
 
+        # pyrefly: ignore [bad-assignment]
         self._load_mask = mask
         try:
             yield mask
@@ -2093,6 +2138,11 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
+    def device_assert_async(self, cond, msg):
+        self.compute.writeline(
+            f'({cond} ? 0 : (throw std::runtime_error("{msg}"), 0));'
+        )
+
     def _gen_reduction_prefix(
         self,
         acc: Union[CSEVariable, str],
@@ -2126,6 +2176,123 @@ class CppKernel(Kernel):
         for gen_fn in self.reduction_prefix_generators:
             self.reduction_prefix.splice(gen_fn(size))
 
+    def need_use_acc_helper(self, reduction_type, dtype, use_scalar):
+        # Check if we need accumulate helper for the reduction operation.
+        # using accumulate helper generates the necessary code to improve precision for
+        # sum and welford
+        # Note: using helper has non-negligible impact on performance
+
+        # keep the original behavior for welford_reduce
+        # acc helper is not used for scalar welford_reduce
+        if reduction_type == "welford_reduce":
+            return not use_scalar
+
+        # TODO add supports for more data types when needed
+        if reduction_type == "sum" and dtype == torch.float:
+            assert self.call_ranges is not None
+            reduction_size = functools.reduce(
+                operator.mul, self.call_ranges[self.reduction_depth :]
+            )
+            if config.cpp.dynamic_threads:
+                # If dynamic threads, to be conservative,
+                # use reduction_size as the range size
+                rt_size = reduction_size
+            else:
+                rt_size = CeilDiv(reduction_size, parallel_num_threads())
+
+            # chunk size to balance accuracy and performance
+            chunk_size = 2**20
+
+            # use acc helper If cannot get size_hint
+            try:
+                rt_size_hint = V.graph.sizevars.size_hint(rt_size)
+            except Exception:
+                return True
+
+            if rt_size_hint > chunk_size:
+                # use helper if the reduction size is too large
+                V.graph.sizevars.check_lt(chunk_size, rt_size)
+                return True
+            else:
+                V.graph.sizevars.check_leq(rt_size, chunk_size)
+        return False
+
+    def _acc_helper_init(
+        self,
+        reduction_type,
+        helper_val,
+        helper_range,
+        dtype,
+        num_threads=None,
+        use_scalar=False,
+    ):
+        num_range_thread = (
+            CeilDiv(helper_range, num_threads) if num_threads else helper_range
+        )
+        num_range_thread_expr = cexpr_index(num_range_thread)
+        assert reduction_type in ["welford_reduce", "sum"]
+        chunk_size = 4096 if reduction_type == "welford_reduce" else 2**20
+        num_chunks = CeilDiv(num_range_thread, chunk_size)
+        helper_type = (
+            "WelfordHelper"
+            if reduction_type == "welford_reduce"
+            else "CascadeSumHelper"
+        )
+        if use_scalar:
+            h_type = DTYPE_TO_CPP[dtype]
+        else:
+            h_type = (
+                self._get_vec_type(dtype)
+                if hasattr(self, "_get_vec_type")
+                else DTYPE_TO_CPP[dtype]
+            )
+        helper_init_line = (
+            f"{helper_type}<{h_type}, {chunk_size}> {helper_val}"
+            f"("
+            f"{num_range_thread_expr}"
+            f");"
+        )
+        if reduction_type == "sum":
+            return helper_init_line
+        if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
+            # When the number of chunks <= 1, there is no need to use cascade summation to improve
+            # reduction accuracy. We can initialize a static WelfordHelper to improve performance.
+            return f"static {helper_init_line}"
+        else:
+            return helper_init_line
+
+    def _use_acc_helper(
+        self, reduction_type, acc, helper_val, helper_range, dtype, use_scalar=False
+    ):
+        num_threads = (
+            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+        )
+        self.non_parallel_reduction_prefix.writeline(
+            self._acc_helper_init(
+                reduction_type, helper_val, helper_range, dtype, None, use_scalar
+            )
+        )
+        self.local_reduction_init.writeline(
+            self._acc_helper_init(
+                reduction_type, helper_val, helper_range, dtype, num_threads, use_scalar
+            )
+        )
+        result = acc if use_scalar else f"{acc}_vec"
+        if reduction_type == "welford_reduce":
+            self.non_parallel_reduction_suffix.writeline(
+                f"{result} = welford_combine({result}, &{helper_val});"
+            )
+            self.local_reduction_stores.writeline(
+                f"{result}_local = welford_combine({result}_local, &{helper_val});"
+            )
+        else:
+            self.non_parallel_reduction_suffix.writeline(
+                f"{result} = cascade_sum_final(&{helper_val});"
+            )
+            self.local_reduction_stores.writeline(
+                f"{result}_local = cascade_sum_final(&{helper_val});"
+            )
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
         reduction_key = src_dtype, reduction_type, value
@@ -2144,13 +2311,36 @@ class CppKernel(Kernel):
                 acc, acc_type, reduction_type, init_dtype, reduction_init
             )
         )
-        assert self.reduction_depth is not None
-        index = self.itervars[self.reduction_depth]
-        for i in range(self.reduction_depth + 1, len(self.itervars)):
-            index = index * self.ranges[i] + self.itervars[i]
-        self.stores.writeline(
-            f"{acc} = {reduction_combine(reduction_type, acc, value, index)};"
-        )
+
+        if self.need_use_acc_helper(reduction_type, dtype, True):
+            # use cascade_helper for vec kernel
+            reduction_size = functools.reduce(
+                operator.mul, self.ranges[self.reduction_depth :]
+            )
+            helper_val = self.cascade_helper_cse.generate(
+                self.compute, f"reduction {reduction_key}", write=False
+            )
+            # rename the helper variable to distinguish it from vectorized version
+            scalar_helper_val = f"scalar_{helper_val}"
+            self._use_acc_helper(
+                reduction_type,
+                acc,
+                scalar_helper_val,
+                reduction_size,
+                dtype,
+                use_scalar=True,
+            )
+            self.stores.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, value, scalar_helper_val)};"
+            )
+        else:
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
+            self.stores.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
+            )
 
         self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, init_dtype)
         result = reduction_project(reduction_type, acc)
@@ -2177,6 +2367,7 @@ class CppKernel(Kernel):
                 sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
                 for n in range(len(self.ranges))
             ]
+            # pyrefly: ignore [bad-assignment]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],
@@ -2418,13 +2609,15 @@ class CppKernel(Kernel):
                     var_id = i
                     break
             if (
-                type(self) == CppKernel
+                type(self) is CppKernel
                 and var_id
                 and start == 0
                 and end == self.ranges[var_id]
             ):
                 end = 1
+            # pyrefly: ignore [bad-argument-type]
             conditions.append(f"{var} >= {cexpr_index(start)}")
+            # pyrefly: ignore [bad-argument-type]
             conditions.append(f"{var} < {cexpr_index(end)}")
             return True
 
@@ -2787,6 +2980,22 @@ class CppVecKernel(CppKernel):
             raise NotImplementedError(f"store mode={mode}")
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        """
+        Perform vectorized reduction operation.
+
+        This method handles vectorized reduction for different reduction types.
+        It manages special cases for low-precision floating point types and
+        employs precision improvement techniques for certain reduction operations.
+
+        Args:
+            dtype: The output data type for the reduction result
+            src_dtype: The source data type of the input value
+            reduction_type: Type of reduction operation (sum, min, max, etc.)
+            value: The input value to reduce
+
+        Returns:
+            The result of the reduction operation
+        """
         # Note: For argmax and argmin on bool type, we always convert bool to float.
         # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
@@ -2812,6 +3021,7 @@ class CppVecKernel(CppKernel):
         )
         assert isinstance(acc, CppCSEVariable)
         acc_vec = f"{acc}_vec"
+        masked_acc = f"masked_{acc}"
         masked_acc_vec = f"masked_{acc_vec}"
         self.reduction_var_names += [f"{acc}", acc_vec, masked_acc_vec]
         self.is_reduction = True
@@ -2829,7 +3039,9 @@ class CppVecKernel(CppKernel):
                 self.reduction_init_vec,
             )
         )
-        if reduction_type == "welford_reduce":
+
+        use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, False)
+        if use_acc_helper:
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -2841,16 +3053,21 @@ class CppVecKernel(CppKernel):
                 )
             )
 
-            # use welford_helper for vec kernel
+            # use welford_helper/cascade_helper for vec kernel
             assert self.reduction_depth is not None
             reduction_size = functools.reduce(
                 operator.mul, self.ranges[self.reduction_depth :]
             )
-            welford_helper_val = self.welford_helper_cse.generate(
-                self.compute, f"reduction {reduction_key}", write=False
-            )
-            masked_welford_helper_val = f"masked_{welford_helper_val}"
-            welford_helper_vec_range = (
+            if reduction_type == "welford_reduce":
+                helper_val = self.welford_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
+            else:
+                helper_val = self.cascade_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
+            masked_helper_val = f"masked_{helper_val}"
+            helper_vec_range = (
                 (
                     FloorDiv(reduction_size, self.ranges[self.tiling_idx])
                     * FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
@@ -2860,7 +3077,7 @@ class CppVecKernel(CppKernel):
                 if FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
                 else sympy.Integer(0)
             )
-            masked_welford_helper_vec_range = (
+            masked_helper_vec_range = (
                 (
                     FloorDiv(reduction_size, self.ranges[self.tiling_idx])
                     if self.tiling_idx >= self.reduction_depth
@@ -2869,24 +3086,41 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            self._use_welford_helper(
-                acc_vec, welford_helper_val, welford_helper_vec_range, dtype
+            # scalar helper for scalar sum is also needed when vec kernel is included
+            # Note: is it different from welford reduction as welford reduction of scalar version
+            # does not need helper, and the helper needs the information of reduction size to initialize
+            if reduction_type == "sum":
+                scalar_helper_val = f"scalar_{helper_val}"
+                self._use_acc_helper(
+                    reduction_type,
+                    acc,
+                    scalar_helper_val,
+                    reduction_size,
+                    dtype,
+                    use_scalar=True,
+                )
+            self._use_acc_helper(
+                reduction_type, acc, helper_val, helper_vec_range, dtype
             )
-            self._use_welford_helper(
-                masked_acc_vec,
-                masked_welford_helper_val,
-                masked_welford_helper_vec_range,
+            self._use_acc_helper(
+                reduction_type,
+                masked_acc,
+                masked_helper_val,
+                masked_helper_vec_range,
                 dtype,
             )
 
             # use masked acc_vec for tail vec kernel
             acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
-            welford_helper_val_ = (
-                masked_welford_helper_val if self.tail_size else welford_helper_val
-            )
-            self.stores.writeline(
-                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, welford_helper_val_)};"
-            )
+            helper_val_ = masked_helper_val if self.tail_size else helper_val
+            if reduction_type == "sum":
+                self.stores.writeline(
+                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
+                )
+            else:
+                self.stores.writeline(
+                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
+                )
         else:
             assert self.reduction_depth is not None
             index = self.itervars[self.reduction_depth]
@@ -2917,7 +3151,7 @@ class CppVecKernel(CppKernel):
             reduction_combine_fn=reduction_combine,
             reduction_init_fn=reduction_init,
         )
-        if reduction_type == "welford_reduce":
+        if use_acc_helper:
             # use masked acc_vec for tail vec kernel
             self._gen_parallel_reduction_buffers(
                 masked_acc_vec,
@@ -2964,7 +3198,11 @@ class CppVecKernel(CppKernel):
                 vec_dtype = torch.float if is_bool else dtype
                 vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
                 vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
-                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
+                result_vec = f"{acc_vec}"
+                if use_acc_helper:
+                    assert reduction_type == "sum"
+                    result_vec = f"{acc_vec} + {masked_acc_vec}"
+                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {result_vec})"
 
             self.reduction_suffix.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
@@ -2977,6 +3215,12 @@ class CppVecKernel(CppKernel):
                 self.reduction_suffix.writeline(
                     f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
                 )
+            elif use_acc_helper:
+                assert reduction_type == "sum"
+                masked_tmpvar = f"masked_{tmpvar}"
+                self.reduction_suffix.writeline(
+                    f"{tmpvar} = {tmpvar} + {masked_tmpvar};"
+                )
 
         result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result
@@ -2986,11 +3230,10 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        dtype = (
-            (out_dtype if out_dtype == torch.double else torch.float)
-            if out_dtype.is_floating_point
-            else torch.int64
-        )
+        if out_dtype.is_floating_point and out_dtype != torch.double:
+            dtype = torch.float
+        else:
+            dtype = out_dtype
         out_num_vectors = V.kernel._get_num_vectors(out_dtype)
         src_num_vectors = V.kernel._get_num_vectors(dtype)
         code = IndentedBuffer()
@@ -3102,59 +3345,12 @@ class CppVecKernel(CppKernel):
             return f"{self._get_mask_type()}"
         return vec_type
 
-    def _welford_helper_init(
-        self, welford_helper_val, welford_helper_vec_range, dtype, num_threads=None
-    ):
-        vec_num_range_thread = (
-            CeilDiv(welford_helper_vec_range, num_threads)
-            if num_threads
-            else welford_helper_vec_range
-        )
-        vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
-        chunk_size = 4096
-        num_chunks = CeilDiv(vec_num_range_thread, chunk_size)
-        welford_helper_init_line = (
-            f"WelfordHelper<{self._get_vec_type(dtype)}, {chunk_size}> {welford_helper_val}"
-            f"("
-            f"{vec_num_range_thread_expr}"
-            f");"
-        )
-        if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
-            # When the number of chunks <= 1, there is no need to use cascade summation to improve
-            # reduction accuracy. We can initialize a static WelfordHelper to improve performance.
-            return f"static {welford_helper_init_line}"
-        else:
-            return welford_helper_init_line
-
-    def _use_welford_helper(
-        self, acc_vec, welford_helper_val, welford_helper_vec_range, dtype
-    ):
-        num_threads = (
-            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-        )
-        self.non_parallel_reduction_prefix.writeline(
-            self._welford_helper_init(
-                welford_helper_val, welford_helper_vec_range, dtype
-            )
-        )
-        self.local_reduction_init.writeline(
-            self._welford_helper_init(
-                welford_helper_val, welford_helper_vec_range, dtype, num_threads
-            )
-        )
-        self.non_parallel_reduction_suffix.writeline(
-            f"{acc_vec} = welford_combine({acc_vec}, &{welford_helper_val});"
-        )
-        self.local_reduction_stores.writeline(
-            f"{acc_vec}_local = welford_combine({acc_vec}_local, &{welford_helper_val});"
-        )
-
     def reduction_combine_vec(
         self,
         reduction_type,
         var,
         next_value,
-        welford_helper_val=None,
+        helper_val=None,
         index: Optional[sympy.Symbol] = None,
         horizontal_reduction: Optional[bool] = None,
         src_dtype: Optional[torch.dtype] = torch.float32,
@@ -3179,11 +3375,17 @@ class CppVecKernel(CppKernel):
                     else f"at::vec::minimum({var}, {next_value})"
                 )
         elif reduction_type == "sum":
-            if self.tail_size:
-                return f"sum_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
+            if helper_val:
+                if self.tail_size:
+                    return f"cascade_sum_combine({next_value}, {cexpr_index(self.tail_size)}, &{helper_val})"
+                else:
+                    return f"cascade_sum_combine({next_value}, &{helper_val})"
             else:
-                conjunction = "|" if is_bool else "+"
-                return f"{var} {conjunction} {next_value}"
+                if self.tail_size:
+                    return f"sum_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
+                else:
+                    conjunction = "|" if is_bool else "+"
+                    return f"{var} {conjunction} {next_value}"
         elif reduction_type == "prod":
             if self.tail_size:
                 return f"prod_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
@@ -3195,13 +3397,11 @@ class CppVecKernel(CppKernel):
             else:
                 return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
-            if welford_helper_val:
+            if helper_val:
                 if self.tail_size:
-                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{welford_helper_val})"
+                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{helper_val})"
                 else:
-                    return (
-                        f"welford_combine({var}, {next_value}, &{welford_helper_val})"
-                    )
+                    return f"welford_combine({var}, {next_value}, &{helper_val})"
             else:
                 if self.tail_size:
                     return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)})"
@@ -3892,6 +4092,7 @@ class CppKernelProxy(CppKernel):
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input
+                    # pyrefly: ignore [bad-argument-type]
                     if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     ops = _node.args[0]
@@ -3902,12 +4103,14 @@ class CppKernelProxy(CppKernel):
                         _node.replace_all_uses_with(
                             to_type_node, lambda n: n is not to_type_node
                         )
+                        # pyrefly: ignore [bad-assignment]
                         metrics.cpp_to_dtype_count += 1
                 elif (
                     _node.target == "store"
                     and (dt := get_input_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     ops, name, _, value_var, _ = _node.args
+                    # pyrefly: ignore [bad-argument-type]
                     if is_lowp_fp_source_no_promote(value_var, dt):
                         continue
                     dtype = V.graph.get_dtype(name)
@@ -3916,6 +4119,7 @@ class CppKernelProxy(CppKernel):
                             "to_dtype", args=(ops, value_var, dtype)
                         )
                         _node.replace_input_with(value_var, to_type_node)
+                        # pyrefly: ignore [bad-assignment]
                         metrics.cpp_to_dtype_count += 1
                 elif _node.target == "reduction":
                     (
@@ -3985,6 +4189,7 @@ class CppKernelProxy(CppKernel):
                                     "to_dtype", args=(ops, value_var, src_dtype)
                                 )
                                 _node.replace_input_with(value_var, to_type_node)
+                                # pyrefly: ignore [bad-assignment]
                                 metrics.cpp_to_dtype_count += 1
 
                     # to_dtype_bitcast act as a lowp fp source:
@@ -4003,9 +4208,8 @@ class CppKernelProxy(CppKernel):
                                 _node.replace_all_uses_with(
                                     to_type_node, lambda n: n is not to_type_node
                                 )
+                                # pyrefly: ignore [bad-assignment]
                                 metrics.cpp_to_dtype_count += 1
-                else:
-                    pass
 
             def eliminate_to_dtype(sub_graph: torch.fx.Graph):
                 def _eliminate_duplicate_to_node(sub_graph: torch.fx.Graph):
@@ -4098,6 +4302,7 @@ class CppKernelProxy(CppKernel):
             with kernel_group.new_kernel(cls, *args) as kernel:
                 # Ugly hack to maintain the metrics kernel count since
                 # we only count in CppKernelProxy, not those contained in it
+                # pyrefly: ignore [bad-assignment]
                 metrics.generated_kernel_count -= 1
 
                 run(kernel)
@@ -4169,6 +4374,7 @@ class CppKernelProxy(CppKernel):
                     )
 
             if len(tiling_indices) == 1:
+                # pyrefly: ignore [bad-assignment]
                 metrics.generated_cpp_vec_kernel_count += 1
                 loop = self.loop_nest.tile(tiling_indices[0], factor=tiling_factors[0])
                 vec_kernel = codegen_kernel(
@@ -4195,6 +4401,7 @@ class CppKernelProxy(CppKernel):
                     and tiling_factors[0] == tiling_factors[1]
                 )
 
+                # pyrefly: ignore [bad-assignment]
                 metrics.generated_cpp_vec_kernel_count += 2
                 outer_loop = self.loop_nest.tile(
                     tiling_indices[0], factor=tiling_factors[0]
@@ -4330,9 +4537,12 @@ class CppKernelProxy(CppKernel):
     def aggregate_reduction_buffers(
         self, inner_loop_reduction_outer_not: bool, outer_loop: Optional["LoopLevel"]
     ):
-        # CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves.
-        # Here, we decide how to aggregate them together and place new reduction buffers
-        # under CppKernelProxy.
+        """
+        CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves.
+        Here, we decide how to aggregate them together and place new reduction buffers
+        under CppKernelProxy.
+        """
+
         def aggregate_reduction_prefix_suffix(outer_loop: "LoopLevel"):
             assert len(self.kernels) >= 2
             main_loop_kernel = self.kernels[0]
@@ -4340,7 +4550,7 @@ class CppKernelProxy(CppKernel):
             assert isinstance(main_loop_kernel, self.vec_kernel_cls)
 
             # Prefix
-            if type(tail_loop_kernel) == self.kernel_cls:
+            if type(tail_loop_kernel) is self.kernel_cls:
                 # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] to
                 # hold the temporary inner loop acc result for outer tail loop
                 tail_loop_kernel.finalize_reduction_prefix(
@@ -4368,7 +4578,7 @@ class CppKernelProxy(CppKernel):
                     suffix_buf, "C10_UNLIKELY", outer_loop.var
                 ):
                     stack.enter_context(suffix_buf.indent())
-                    if type(tail_loop_kernel) == self.kernel_cls:
+                    if type(tail_loop_kernel) is self.kernel_cls:
                         reduction_vars = tail_loop_kernel.reduction_var_names
                         for name in reduction_vars:
                             new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiled_size)}]"
@@ -4376,6 +4586,9 @@ class CppKernelProxy(CppKernel):
                             replace_acc_name(
                                 tail_loop_kernel.reduction_suffix, name, new_name
                             )
+                        # If tail loop kernel is a scalar kernel, use direct sum instead of cascade_sum_combine
+                        # as the reduction vars are extended: tmp_acc -> tmp_acc_arr[].
+                        replace_cascade_sum_with_add(tail_loop_kernel.stores)
                         suffix_buf.splice(
                             move_code_under_inner_loop(
                                 tail_loop_kernel.reduction_suffix,
@@ -4937,10 +5150,12 @@ class CppScheduling(BaseScheduling):
                             contiguous_index_expr = 0
                             stride = 1
                             for var, range in reversed(
+                                # pyrefly: ignore [missing-attribute]
                                 scheduler_node._body.var_ranges.items()
                             ):
                                 contiguous_index_expr += stride * var
                                 stride *= range
+                            # pyrefly: ignore [missing-attribute]
                             write_index_expr = scheduler_node._body.get_write_expr(
                                 scheduler_buffer.get_name()
                             )
@@ -4964,11 +5179,19 @@ class CppScheduling(BaseScheduling):
                         ):
                             continue
                         # Local Buffer is a view of global buffer
+                        local_buffer_stride: list[int] = []
+                        stride = global_buffer_layout.stride[-1]
+                        local_buffer_size = get_call_ranges(scheduler_node)[
+                            size_offset:
+                        ]
+                        for sz in reversed(local_buffer_size):
+                            local_buffer_stride.insert(0, stride)
+                            stride *= sz
                         local_buffer_layout = ir.FixedLayout(
                             global_buffer_layout.device,
                             global_buffer_layout.dtype,
-                            global_buffer_layout.size[size_offset:],
-                            global_buffer_layout.stride[size_offset:],
+                            local_buffer_size,
+                            local_buffer_stride,
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):
@@ -5001,6 +5224,7 @@ class CppScheduling(BaseScheduling):
                             )
                             local_buffers.append(local_buffer_used)
                             local_to_global_buffers[local_buffer_used.name] = []  # type: ignore[index]
+                        # pyrefly: ignore [index-error]
                         local_to_global_buffers[local_buffer_used.name].append(
                             global_buffer,
                         )
@@ -5169,6 +5393,7 @@ class CppScheduling(BaseScheduling):
                 )
                 user.node.mark_run()
 
+        self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
@@ -5184,46 +5409,48 @@ class CppScheduling(BaseScheduling):
 
     def define_kernel(self, src_code, nodes, kernel_args=None):
         wrapper = V.graph.wrapper_code
-        fused_name = (
-            get_fused_kernel_name(nodes, config.cpp.descriptive_names)
-            if config.cpp.descriptive_names
-            else ""
-        )
-        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
-        # below add provenance tracing info for cpu CppKernel types
-        if config.trace.provenance_tracking:
-            set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
+        if src_code in wrapper.src_to_kernel:
+            kernel_name = wrapper.src_to_kernel[src_code]
+        else:
+            fused_name = (
+                get_fused_kernel_name(nodes, config.cpp.descriptive_names)
+                if config.cpp.descriptive_names
+                else ""
+            )
+            kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
+            wrapper.src_to_kernel[src_code] = kernel_name
+            kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
+            src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
+            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+            src_code = src_code.replace("#pragma CMT", "//")
 
-        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
-        src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
-        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-        src_code = src_code.replace("#pragma CMT", "//")
+            # Get the lines in the source code representing the function definition,
+            # excluding the first line including cpp_prefix.h.
+            first_char = src_code.rfind('extern "C"')
+            last_char = src_code.find(")", first_char)
+            if _IS_WINDOWS:
+                # get_export_declaration introduced one more ')' in Windows
+                last_char = src_code.find(")", last_char + 1)
+            kernel_definition = f"{src_code[first_char : last_char + 1]};\n"
 
-        # Get the lines in the source code representing the function definition,
-        # excluding the the first line including cpp_prefix.h.
-        first_char = src_code.rfind('extern "C"')
-        last_char = src_code.find(")", first_char)
-        if _IS_WINDOWS:
-            # get_export_declaration introduced one more ')' in Windows
-            last_char = src_code.find(")", last_char + 1)
-        kernel_definition = f"{src_code[first_char : last_char + 1]};\n"
-
-        compile_wrapper = IndentedBuffer()
-        args = self.kernel_group.args if kernel_args is None else kernel_args
-        _, _, arg_types = args.cpp_argdefs()
-        if not V.graph.cpp_wrapper:
-            compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
-        compile_wrapper.splice(src_code, strip=True)
-        if not V.graph.cpp_wrapper:
-            compile_wrapper.writeline("''')")
-        wrapper.define_kernel(
-            kernel_name,
-            compile_wrapper.getvalue(),
-            gpu=False,
-            cpp_definition=kernel_definition,
-        )
+            compile_wrapper = IndentedBuffer()
+            args = self.kernel_group.args if kernel_args is None else kernel_args
+            _, _, arg_types = args.cpp_argdefs()
+            if not V.graph.cpp_wrapper:
+                compile_wrapper.writeline(
+                    f"async_compile.cpp_pybinding({arg_types!r}, r'''"
+                )
+            compile_wrapper.splice(src_code, strip=True)
+            if not V.graph.cpp_wrapper:
+                compile_wrapper.writeline("''')")
+            wrapper.define_kernel(
+                kernel_name,
+                compile_wrapper.getvalue(),
+                gpu=False,
+                cpp_definition=kernel_definition,
+            )
         return kernel_name
 
     def flush(self):
@@ -5232,9 +5459,20 @@ class CppScheduling(BaseScheduling):
             kernel_name = self.define_kernel(
                 src_code, self.kernel_group.scheduled_nodes
             )
+            self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
             self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
         self.reset_kernel_group()
         self._set_flush_status(False)
+
+    def codegen_comment(self, node_schedule, kernel_name=None):
+        # below add provenance tracing info for cpu CppKernel types
+        wrapper = V.graph.wrapper_code
+        debug_handle = set_kernel_post_grad_provenance_tracing(
+            node_schedule,  # type: ignore[arg-type]
+            # pyrefly: ignore [bad-argument-type]
+            kernel_name,
+        )
+        wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
 
 class KernelGroup:
@@ -5273,7 +5511,7 @@ class KernelGroup:
             "win32",
         ]
         if enable_kernel_profile:
-            code.writelines(["#include <ATen/record_function.h>"])
+            code.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
@@ -5296,7 +5534,10 @@ class KernelGroup:
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                        (
+                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                            f'record_{prefix + kernel_name}_("{prefix + kernel_name}", nullptr);'
+                        )
                     ]
                 )
             for old, new in self.args.aliases():
@@ -5307,7 +5548,10 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, triton=False, arg_types=arg_types
+            kernel_name,
+            call_args,
+            triton=False,
+            arg_types=arg_types,
         )
 
 
@@ -5547,6 +5791,7 @@ class LoopNest:
         loop = self.loops[par_depth.start_depth]
         loop.parallel = par_depth.parallel_depth
         if loop.is_reduction:
+            # pyrefly: ignore [bad-assignment]
             metrics.parallel_reduction_count += 1
         for i in range(par_depth.start_depth + 1, par_depth.parallel_depth):
             self.loops[i].collapsed = True

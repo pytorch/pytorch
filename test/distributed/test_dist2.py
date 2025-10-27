@@ -53,7 +53,13 @@ class ProcessGroupTest(TestCase):
 
 
 class Dist2MultiProcessTestCase(MultiProcessTestCase):
-    device: torch.device
+    @property
+    def device(self) -> torch.device:
+        raise NotImplementedError
+
+    # @device.setter
+    # def device(self, value: torch.device) -> None:
+    #     self._device = value
 
     @property
     def world_size(self) -> int:
@@ -208,12 +214,15 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
 
     def test_group_split(self) -> None:
         group = self.new_group()
-        subgroup = group.split_group([0], timeout=timedelta(seconds=30))
+        subgroup = group.split_group(
+            [0], timeout=timedelta(seconds=30), group_name="subgroup_1"
+        )
         if self.rank == 0:
             assert subgroup is not None
             self.assertEqual(subgroup.size(), 1)
             backend = subgroup._get_backend(self.device)
             self.assertEqual(backend.options._timeout, timedelta(seconds=30))
+            self.assertEqual(subgroup.group_name, "subgroup_1")
         else:
             self.assertEqual(subgroup, None)
 
@@ -235,6 +244,7 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             self.assertEqual(merged_pg.size(), 2)
             backend = merged_pg._get_backend(self.device)
             self.assertEqual(backend.options._timeout, timedelta(seconds=40))
+            self.assertEqual(merged_pg.group_name, "merged_pg")
         else:
             assert subgroup_2 is not None
             tcp_store = dist.TCPStore(
@@ -249,10 +259,13 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             self.assertEqual(merged_pg.size(), 2)
             backend = merged_pg._get_backend(self.device)
             self.assertEqual(backend.options._timeout, timedelta(seconds=40))
+            self.assertEqual(merged_pg.group_name, "merged_pg")
 
 
 class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
-    device = torch.device("cpu")
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cpu")
 
     @requires_gloo()
     def new_group(self) -> torch.distributed.ProcessGroup:
@@ -269,6 +282,10 @@ class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
 
 
 class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def new_group(self) -> torch.distributed.ProcessGroup:
@@ -276,8 +293,6 @@ class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["MASTER_ADDR"] = "127.0.0.1"
         os.environ["MASTER_PORT"] = "29501"
-
-        self.device = torch.device("cuda", self.rank)
 
         return dist2.new_group(
             backend="nccl",

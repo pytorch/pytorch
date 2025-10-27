@@ -31,7 +31,12 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
-from torch._inductor.utils import get_gpu_type, get_ld_library_path, is_gpu
+from torch._inductor.utils import (
+    get_gpu_type,
+    get_ld_library_path,
+    is_gpu,
+    python_subprocess_env,
+)
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
@@ -39,7 +44,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from torch._inductor.select_algorithm import TritonTemplateCaller
+    from torch._inductor.select_algorithm import PartialRender, TritonTemplateCaller
 
 from . import config
 from .runtime.benchmarking import benchmarker
@@ -123,11 +128,8 @@ class TuningProcess:
             f"--read-fd={str(subproc_read_fd)}",
             f"--write-fd={str(subproc_write_fd)}",
         ]
-        extra_env = {
-            # We need to set the PYTHONPATH so the subprocess can find torch.
-            "PYTHONPATH": os.environ.get(
-                "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
-            ),
+        env = {
+            **python_subprocess_env(),
             # We shouldn't be using the Triton async compile subprocess pool,
             # but as a precaution set the env var that disables its creation.
             "TORCH_WARM_POOL": "0",
@@ -139,10 +141,10 @@ class TuningProcess:
             else "0",
         }
         if self.device is not None:
-            extra_env[CUDA_VISIBLE_DEVICES] = str(self.device)
+            env[CUDA_VISIBLE_DEVICES] = str(self.device)
         self.process = subprocess.Popen(
             cmd,
-            env={**os.environ, **extra_env},
+            env=env,
             pass_fds=(subproc_read_fd, subproc_write_fd),
         )
         os.close(subproc_read_fd)
@@ -229,6 +231,13 @@ class TuningProcess:
             self.process.kill()
         self.close()
 
+    def restart(self) -> None:
+        """
+        Gracefully restarts the child process.
+        """
+        self.shutdown(wait=True)
+        self.start()
+
 
 class TuningProcessPool:
     """
@@ -309,11 +318,16 @@ class TuningProcessPool:
             )
             # Set to INF so this choice will be ignored
             return float("inf")
-        except Exception:
+        except Exception as process_exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
+            # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
+            # CUDA context, making it unrecoverable. All subsequent CUDA calls will
+            # fail as well. The process must be restarted to restore CUDA functionality.
+            if "cudaErrorLaunchFailure" in str(process_exception):
+                process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
         finally:
@@ -764,7 +778,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             return
         self.ensure_dll_loaded()
         unique_input_count = len(
-            {meta.name for meta in self.input_tensor_meta}  # noqa: set_linter
+            dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
@@ -872,6 +886,55 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}"
+
+
+class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+    """Benchmark request for CuteDSL (CUTLASS Python DSL) kernels."""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        extra_args: tuple[Any, ...],
+        source_code: PartialRender,
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+
+        finalized_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(finalized_code)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        """
+        Create a function to run the CuteDSL kernel with the given input and output tensors.
+        Similar to TritonBenchmarkRequest.make_run_fn but for CuteDSL kernels.
+        """
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+
+        # Logic replicated async_compile
+        from .codegen.cutedsl.cutedsl_kernel import MAIN_SUFFIX
+
+        main_func_name = f"{self.kernel_name}_{MAIN_SUFFIX}"
+
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
+            )
+
+        kernel_func = getattr(mod, main_func_name)
+
+        def run_kernel():
+            device_interface = get_interface_for_device("cuda")
+            stream = device_interface.get_raw_stream(out.device.index)
+            return kernel_func(*input_tensors, out, stream=stream)
+
+        return run_kernel
+
+    def cleanup_run_fn(self) -> None:
+        """Clean up any resources used by the kernel."""
 
 
 @functools.cache

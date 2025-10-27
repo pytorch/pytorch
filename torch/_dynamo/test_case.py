@@ -16,7 +16,8 @@ import os
 import re
 import sys
 import unittest
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.testing
@@ -101,6 +102,18 @@ class TestCase(TorchTestCase):
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
 
+    def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        if (
+            config.debug_disable_compile_counter
+            and isinstance(x, utils.CompileCounterInt)
+            or isinstance(y, utils.CompileCounterInt)
+        ):
+            return
+        return super().assertEqual(x, y, *args, **kwargs)
+
+    # assertExpectedInline might also need to be disabled for wrapped nested
+    # graph break tests
+
 
 class CPythonTestCase(TestCase):
     """
@@ -140,8 +153,10 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
-    assertDictEqual = unittest.TestCase.assertDictEqual
+    assertDictEqual = polyfills.assert_dict_equal
+    # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
+    # pyrefly: ignore [bad-override]
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
@@ -157,8 +172,10 @@ class CPythonTestCase(TestCase):
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
+
         method = getattr(self, self._testMethodName)
-        method = torch._dynamo.optimize(backend, nopython=nopython)(method)
+        method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
+
         setattr(self, self._testMethodName, method)
         return fn
 

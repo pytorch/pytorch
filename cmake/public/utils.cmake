@@ -362,14 +362,6 @@ function(torch_compile_options libname)
     # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
-    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
-      # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
-      # Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2874029459
-      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/d2implyavx512upperregs->)
-    endif()
-
-
-
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
         ${MSVC_RUNTIME_LIBRARY_OPTION}
@@ -447,10 +439,6 @@ function(torch_compile_options libname)
         $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
-  # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-  target_compile_options(${libname} PRIVATE
-      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
-
 endfunction()
 
 ##############################################################################
@@ -490,6 +478,7 @@ function(torch_update_find_cuda_flags)
 endfunction()
 
 include(CheckCXXCompilerFlag)
+include(CheckLinkerFlag)
 
 ##############################################################################
 # CHeck if given flag is supported and append it to provided outputvar
@@ -517,5 +506,24 @@ function(target_compile_options_if_supported target flag)
   append_cxx_flag_if_supported("${flag}" _compile_options)
   if(NOT "${_compile_options}" STREQUAL "")
     target_compile_options(${target} PRIVATE ${flag})
+  endif()
+endfunction()
+
+# Check if a global link option is supported
+function(add_link_options_if_supported flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    add_link_options("LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
+  endif()
+endfunction()
+
+function(target_link_options_if_supported tgt flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
   endif()
 endfunction()

@@ -714,6 +714,40 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
             self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_1(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.sum()
+            return x + y.item()
+
+        dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
+        for i, dtype in enumerate(dtypes):
+            x = torch.ones(3, 3, dtype=dtype)
+            self.assertEqual(f(x), x + x.sum().item())
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_2(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.item() * x.item() * torch.ones((), dtype=torch.float64)
+
+        x = torch.tensor(1e20, dtype=torch.float32)
+        self.assertEqual(
+            f(x), x.item() * x.item() * torch.ones((), dtype=torch.float64)
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_3(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.item() * 101
+            return y * torch.tensor([1], dtype=torch.float32)
+
+        finfo_float16 = torch.finfo(torch.float16)
+        x = torch.tensor([finfo_float16.max], dtype=torch.float16)
+        self.assertEqual(f(x), x.item() * 101 * torch.tensor([1], dtype=torch.float32))
+
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):
         cnts = torch._dynamo.testing.CompileCounter()

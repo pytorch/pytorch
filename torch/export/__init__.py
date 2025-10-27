@@ -1,8 +1,9 @@
+import logging
 import os
 import warnings
 import zipfile
-from collections.abc import Mapping
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Mapping
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -52,6 +53,8 @@ from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
+log: logging.Logger = logging.getLogger(__name__)
+
 
 @deprecated(
     "`torch.export.export_for_training` is deprecated and will be removed in PyTorch 2.10. "
@@ -66,6 +69,7 @@ def export_for_training(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export_for_training` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -154,6 +158,7 @@ def export_for_training(
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
     )
 
 
@@ -165,6 +170,7 @@ def export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -276,6 +282,7 @@ def export(
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
             pre_dispatch=True,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         )
     except Exception as e:
         draft_export_msg = (
@@ -441,6 +448,7 @@ def load(
             expected_opset_version=expected_opset_version,
         )
     except RuntimeError:
+        log.warning("Ran into the following error when deserializing", exc_info=True)
         pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
@@ -450,10 +458,18 @@ def load(
         return pt2_contents.exported_programs["model"]
 
     # TODO: For backward compatibility, we support loading a zip file from 2.7. Delete this path in 2.9(?)
-    warnings.warn(
-        "This version of file is deprecated. Please generate a new pt2 saved file."
-    )
     with zipfile.ZipFile(f, "r") as zipf:
+        if "version" not in zipf.namelist():
+            raise RuntimeError(
+                "We ran into an error when deserializing the saved file. "
+                "Please check the warnings above for possible errors. "
+            )
+
+        log.warning(
+            "Trying to deserialize for the older format. This version of file is "
+            "deprecated. Please generate a new pt2 saved file."
+        )
+
         # Check the version
         version = zipf.read("version").decode().split(".")
         from torch._export.serde.schema import (
@@ -484,10 +500,10 @@ def load(
             if file_info.filename == "serialized_exported_program.json":
                 serialized_exported_program = file_content
             elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_state_dict = file_content
             elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_constants = file_content
             elif file_info.filename == "serialized_state_dict.pt":
                 serialized_state_dict = file_content
@@ -524,6 +540,7 @@ def draft_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     """
     A version of torch.export.export which is designed to consistently produce
@@ -539,6 +556,7 @@ def draft_export(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         strict=strict,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
     )
 
 

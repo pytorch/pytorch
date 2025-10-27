@@ -120,7 +120,7 @@ inline bool THPUtils_unpackBool(PyObject* obj) {
   } else if (obj == Py_False) {
     return false;
   } else {
-    throw std::runtime_error("couldn't convert python object to boolean");
+    TORCH_CHECK(false, "couldn't convert python object to boolean");
   }
 }
 
@@ -199,12 +199,29 @@ inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking DeviceIndex");
-  }
-  if (value > std::numeric_limits<c10::DeviceIndex>::max() ||
-      value < std::numeric_limits<c10::DeviceIndex>::min()) {
-    throw std::runtime_error("Overflow when unpacking DeviceIndex");
-  }
+  TORCH_CHECK(overflow == 0, "Overflow when unpacking DeviceIndex");
+  TORCH_CHECK(
+      value <= std::numeric_limits<c10::DeviceIndex>::max() &&
+          value >= std::numeric_limits<c10::DeviceIndex>::min(),
+      "Overflow when unpacking DeviceIndex");
   return (c10::DeviceIndex)value;
+}
+
+template <typename T>
+inline T THPUtils_unpackInteger(PyObject* obj) {
+  int overflow = -1;
+  const auto value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (!overflow) {
+    return static_cast<int64_t>(value);
+  }
+  // try unsigned
+  const auto uvalue = PyLong_AsUnsignedLongLong(obj);
+  if (uvalue == static_cast<std::decay_t<decltype(uvalue)>>(-1) &&
+      PyErr_Occurred()) {
+    throw python_error();
+  }
+  return static_cast<uint64_t>(uvalue);
 }

@@ -1,3 +1,4 @@
+#include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_simdgroup>
@@ -65,6 +66,37 @@ kernel void matmul(
   if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
     outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
         static_cast<T>(sum);
+  }
+}
+
+template <typename T>
+kernel void addmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant T* biasData [[buffer(3)]],
+    constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
+    constant array<ulong2, 4>& strides [[buffer(5)]],
+    constant uint3& sizes [[buffer(6)]],
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 thread_id [[thread_position_in_grid]]) {
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = matmul_inner<T>(
+      mat1Data,
+      mat2Data,
+      reinterpret_cast<constant array<ulong2, 3>&>(strides),
+      sizes,
+      A_tile,
+      B_tile,
+      tid,
+      thread_id);
+  if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
+    auto bias =
+        biasData[thread_id.y * strides[3].x + thread_id.x * strides[3].y];
+    outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
+        static_cast<T>(alpha_beta[0] * sum + alpha_beta[1] * bias);
   }
 }
 
@@ -410,7 +442,7 @@ kernel void applySYRK(
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]) {
+    uint warp_id [[simdgroup_index_in_threadgroup]]) {
   const uint tx = tid.x;
   const uint ty = tid.y;
   const uint simdGroupsPerThreadgroup = (tpg.x * tpg.y + 31) / 32;
@@ -443,11 +475,8 @@ kernel void applySYRK(
       (actSize_j % 8 == 0) && (actSize_h % 8 == 0) && (actSize_k % 8 == 0);
 
   if (use_simdgroup) {
-    uint warp_id = sgitg;
-
     simdgroup_matrix<float, 8, 8> negative_identity =
         simdgroup_matrix<float, 8, 8>(-1.0);
-    simdgroup_matrix<float, 8, 8> identity = simdgroup_matrix<float, 8, 8>(1.0);
     simdgroup_matrix<float, 8, 8> Prod;
     simdgroup_matrix<float, 8, 8> Afrag;
     simdgroup_matrix<float, 8, 8> Bfrag;
@@ -490,8 +519,7 @@ kernel void applySYRK(
             /* transpose = */ upper);
 
         simdgroup_multiply(Prod, Afrag, Bfrag);
-        simdgroup_multiply(Prod, Prod, negative_identity);
-        simdgroup_multiply_accumulate(Cfrag, Cfrag, identity, Prod);
+        simdgroup_multiply_accumulate(Cfrag, Prod, negative_identity, Cfrag);
       }
 
       simdgroup_store(
@@ -613,17 +641,173 @@ kernel void applyPivots(
   }
 }
 
-#define INSTANTIATE_NAIVE_MM(DTYPE)                                   \
-  template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>( \
-      constant DTYPE * mat1Data [[buffer(0)]],                        \
-      constant DTYPE * mat2Data [[buffer(1)]],                        \
-      device DTYPE * outputData [[buffer(2)]],                        \
-      constant array<ulong2, 3> & strides [[buffer(3)]],              \
-      constant uint3 & sizes [[buffer(4)]],                           \
-      uint2 tid [[thread_position_in_threadgroup]],                   \
-      uint2 group_id [[threadgroup_position_in_grid]])
+template <typename T>
+static T bool_to_float(bool b) {
+  return static_cast<T>(b);
+}
 
-#define INSTANTIATE_NAIVE_BMM(DTYPE)                                        \
+template <>
+half2 bool_to_float(bool b) {
+  return half2(b ? 1 : 0, 0);
+}
+
+template <>
+float2 bool_to_float(bool b) {
+  return float2(b ? 1 : 0, 0);
+}
+
+template <typename T>
+static T calc_H_irc(
+    device T* A,
+    uint32_t A_stride_r,
+    uint32_t A_stride_c,
+    constant T* tau,
+    uint32_t tau_stride,
+    uint32_t r,
+    uint32_t c,
+    uint32_t i) {
+  T I_val = bool_to_float<T>(r == c);
+  T tau_val = tau[i * tau_stride];
+
+  T A_ci = c10::metal::conj(A[c * A_stride_r + i * A_stride_c]);
+  T A_ri = A[r * A_stride_r + i * A_stride_c];
+
+  T c_eq_i = bool_to_float<T>(c == i);
+  T r_eq_i = bool_to_float<T>(r == i);
+
+  T A_ci_ = (c > i) ? A_ci : c_eq_i;
+  T A_ri_ = (r > i) ? A_ri : r_eq_i;
+
+  return I_val - c10::metal::mul(tau_val, c10::metal::mul(A_ci_, A_ri_));
+}
+
+// Calculate (A @ B)[r, c], the element in the r-th row and c-th column of the
+// result of matrix multiplying A and B together. A and B must be size m-by-m
+// and have the same strides. The formula for this operation, written in Python
+// syntax, is:
+//   (A @ B)[r, c] = A[r, :].dot(B[:, c])
+template <typename T>
+static T calc_matmul_rc(
+    device T* A,
+    device T* B,
+    uint32_t stride_r,
+    uint32_t stride_c,
+    uint32_t m,
+    uint32_t r,
+    uint32_t c) {
+  T AB_rc = 0;
+  auto A_row_offset = r * stride_r;
+  auto B_col_offset = c * stride_c;
+
+  uint32_t A_col_offset = 0;
+  uint32_t B_row_offset = 0;
+
+  for (uint32_t j = 0; j < m;
+       j++, A_col_offset += stride_c, B_row_offset += stride_r) {
+    AB_rc += c10::metal::mul(
+        A[A_row_offset + A_col_offset], B[B_row_offset + B_col_offset]);
+  }
+  return AB_rc;
+}
+
+template <typename T>
+kernel void orgqr(
+    device T* A [[buffer(0)]],
+    constant T* tau [[buffer(1)]],
+    device T* H [[buffer(2)]],
+    device T* H_prod [[buffer(3)]],
+    constant OrgqrParams<>& params [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  constant auto& A_strides = params.A_strides;
+  constant auto& tau_strides = params.tau_strides;
+  constant auto& H_strides = params.H_strides;
+  constant auto& H_sizes = params.H_sizes;
+
+  auto num_batch_dims = params.num_batch_dims;
+  auto m = params.m;
+  auto n = params.n;
+  auto k = params.k;
+
+  auto m2 = m * m;
+  auto batch_idx = tid / m2;
+
+  // Find the matrices for this thread's batch index
+  uint32_t A_offset = 0;
+  uint32_t tau_offset = 0;
+  uint32_t H_offset = 0;
+
+  for (auto dim = num_batch_dims - 1; dim >= 0; dim--) {
+    auto dim_size = H_sizes[dim];
+    auto dim_idx = batch_idx % dim_size;
+
+    A_offset += dim_idx * A_strides[dim];
+    tau_offset += dim_idx * tau_strides[dim];
+    H_offset += dim_idx * H_strides[dim];
+
+    batch_idx /= dim_size;
+  }
+
+  A += A_offset;
+  tau += tau_offset;
+  H += H_offset;
+  H_prod += H_offset;
+
+  auto matrix_idx = tid % m2;
+  auto r = matrix_idx / m;
+  auto c = matrix_idx % m;
+  auto A_stride_r = A_strides[num_batch_dims];
+  auto A_stride_c = A_strides[num_batch_dims + 1];
+  auto tau_stride = tau_strides[num_batch_dims];
+  auto H_stride_r = H_strides[num_batch_dims];
+  auto H_stride_c = H_strides[num_batch_dims + 1];
+
+  // Find the element of H and H_prod that this thread will calculate
+  device T* H_elem_ptr = H + (r * H_stride_r + c * H_stride_c);
+  device T* H_prod_elem_ptr = H_prod + (r * H_stride_r + c * H_stride_c);
+
+  for (uint32_t i = 0; i < k; i++) {
+    // Calculate and write H_i
+
+    T H_irc = calc_H_irc(A, A_stride_r, A_stride_c, tau, tau_stride, r, c, i);
+
+    // Calculate element [r, c] of prod(H_0, ..., H_i)
+    if (i == 0) {
+      *H_prod_elem_ptr = H_irc;
+    } else {
+      *H_elem_ptr = H_irc;
+
+      // Need this sync because the below matmul requires all threads to finish
+      // writing their entries to `H_prod` and `H`.
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+
+      T H_prod_0_to_i_rc =
+          calc_matmul_rc(H_prod, H, H_stride_r, H_stride_c, m, r, c);
+
+      // Need this sync because the above matmul uses the current values in
+      // `H_prod`, and we don't want to overwrite those until all threads are
+      // finished using them.
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+
+      *H_prod_elem_ptr = H_prod_0_to_i_rc;
+    }
+  }
+
+  device T* A_elem_ptr = A + (r * A_stride_r + c * A_stride_c);
+
+  if (c < n) {
+    *A_elem_ptr = *H_prod_elem_ptr;
+  }
+}
+
+#define INSTANTIATE_MM_OPS(DTYPE)                                           \
+  template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant array<ulong2, 3> & strides [[buffer(3)]],                    \
+      constant uint3 & sizes [[buffer(4)]],                                 \
+      uint2 tid [[thread_position_in_threadgroup]],                         \
+      uint2 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
       constant DTYPE * mat1Data [[buffer(0)]],                              \
       constant DTYPE * mat2Data [[buffer(1)]],                              \
@@ -631,22 +815,42 @@ kernel void applyPivots(
       constant array<ulong, 9> & strides [[buffer(3)]],                     \
       constant uint4 & sizes [[buffer(4)]],                                 \
       uint3 tid [[thread_position_in_threadgroup]],                         \
-      uint3 group_id [[threadgroup_position_in_grid]])
+      uint3 group_id [[threadgroup_position_in_grid]]);                     \
+  template [[host_name("addmm_" #DTYPE)]] kernel void addmm<DTYPE>(         \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant DTYPE * biasData [[buffer(3)]],                              \
+      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
+          alpha_beta [[buffer(4)]],                                         \
+      constant array<ulong2, 4> & strides [[buffer(5)]],                    \
+      constant uint3 & sizes [[buffer(6)]],                                 \
+      uint2 tid [[thread_position_in_threadgroup]],                         \
+      uint2 group_id [[threadgroup_position_in_grid]])
 
-INSTANTIATE_NAIVE_MM(float);
-INSTANTIATE_NAIVE_MM(half);
-#if __METAL_VERSION__ >= 310
-INSTANTIATE_NAIVE_MM(bfloat);
-#endif
+INSTANTIATE_MM_OPS(float);
+INSTANTIATE_MM_OPS(half);
+INSTANTIATE_MM_OPS(bfloat);
 
 // Integral MM
-INSTANTIATE_NAIVE_MM(short);
-INSTANTIATE_NAIVE_MM(int);
-INSTANTIATE_NAIVE_MM(long);
-INSTANTIATE_NAIVE_MM(char);
-INSTANTIATE_NAIVE_MM(uchar);
-INSTANTIATE_NAIVE_BMM(short);
-INSTANTIATE_NAIVE_BMM(int);
-INSTANTIATE_NAIVE_BMM(long);
-INSTANTIATE_NAIVE_BMM(char);
-INSTANTIATE_NAIVE_BMM(uchar);
+INSTANTIATE_MM_OPS(long);
+INSTANTIATE_MM_OPS(int);
+INSTANTIATE_MM_OPS(short);
+INSTANTIATE_MM_OPS(char);
+INSTANTIATE_MM_OPS(uchar);
+
+#define REGISTER_ORGQR(T)                            \
+  template [[host_name("orgqr_" #T)]]                \
+  kernel void orgqr<T>(                              \
+      device T * A [[buffer(0)]],                    \
+      constant T * tau [[buffer(1)]],                \
+      device T * H [[buffer(2)]],                    \
+      device T * H_prod [[buffer(3)]],               \
+      constant OrgqrParams<> & params [[buffer(4)]], \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_ORGQR(float);
+REGISTER_ORGQR(half);
+REGISTER_ORGQR(bfloat);
+REGISTER_ORGQR(float2);
+REGISTER_ORGQR(half2);

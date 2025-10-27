@@ -20,12 +20,17 @@ the code needed to recreate values.
 import dataclasses
 import enum
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch._guards import ChainedSource, Guard, GuardSource, Source
 
 from . import utils
-from .bytecode_transformation import create_call_function, create_instruction
+from .bytecode_transformation import (
+    create_binary_subscr,
+    create_build_tuple,
+    create_call_function,
+)
 
 
 if TYPE_CHECKING:
@@ -106,6 +111,13 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
+def _get_source_debug_name(source: Source) -> str:
+    try:
+        return source.name()
+    except NotImplementedError:
+        return "<unknown source>"
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
@@ -159,7 +171,7 @@ class RandomValueSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load(codegen.tx.output.random_values_var))
         codegen.append_output(codegen.create_load_const(self.random_call_index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def name(self) -> str:
         return f"random_value_{self.random_call_index}"
@@ -266,6 +278,38 @@ class GenericAttrSource(ChainedSource):
         return f"object.__getattribute__({self.base.name()}, {self.member!r})"
 
 
+# Represents obj.__dict__ where obj is a type object
+@dataclasses.dataclass(frozen=True)
+class TypeDictSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__dict__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        # type(ob).__dict__ can return a proxy of the dict. But in the C++
+        # guard accessor, we are use type->tp_dict which is a dict. So,
+        # forcefully pass a dict object to ensure that the GuardManager
+        # registers that its working on a dict object.
+        return f"dict({self.base.name()}.__dict__)"
+
+
+# Represents obj.__mro__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class TypeMROSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__mro__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__mro__"
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalCellSource(Source):
     """
@@ -283,6 +327,34 @@ class LocalCellSource(Source):
 
     # All the other methods are intentionally unimplemented because e.g., a
     # local cell object should never be used for guards.
+
+
+# Represents obj.__code__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class CodeSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__code__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__code__"
+
+
+# Represents obj.__closure__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class ClosureSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__closure__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__closure__"
 
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.
@@ -340,6 +412,18 @@ class EphemeralSource(Source):
 
     def is_ephemeral(self) -> bool:
         return True
+
+
+@dataclasses.dataclass(frozen=True)
+class SkipGuardSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.base.reconstruct(codegen)
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return self.base.name()
 
 
 class TensorProperty(enum.Enum):
@@ -448,6 +532,29 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class DynamicScalarSource(ChainedSource):
+    is_int: bool
+
+    def __post_init__(self) -> None:
+        assert self.base is not None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Integer casting at reconstruction helps reduce the amount of DynamicInts returned
+        # to the user, in favor of plain ints.
+        # For example, a compiled region that only does int arithmetic could return a
+        # DynamicInt without the casting here.
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "int"))
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"int({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -516,7 +623,7 @@ class DefaultsSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.field))
         codegen.append_output(codegen.create_load_const(self.idx_key))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def guard_source(self) -> GuardSource:
         return self.base.guard_source()
@@ -543,7 +650,7 @@ class GetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.unpack_slice()))
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def guard_source(self) -> GuardSource:
         return self.base.guard_source()
@@ -618,7 +725,7 @@ class NonSerializableSetGetItemSource(ChainedSource):
 # Used to access an item from the dictionary
 @dataclasses.dataclass(frozen=True)
 class DictGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
@@ -642,7 +749,7 @@ class DictGetItemSource(ChainedSource):
             codegen(self.index)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def name(self) -> str:
         if isinstance(self.index, ConstDictKeySource):
@@ -655,7 +762,7 @@ class DictGetItemSource(ChainedSource):
 # torch.compile does not run the overridden __getitem__ method
 @dataclasses.dataclass(frozen=True)
 class DictSubclassGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
@@ -749,6 +856,19 @@ class TupleIteratorGetItemSource(GetItemSource):
 
     def name(self) -> str:
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
+
+
+@dataclasses.dataclass(frozen=True)
+class NamedTupleFieldsSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("_fields"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"___namedtuple_fields({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -853,7 +973,7 @@ class TorchSource(Source):
         codegen.extend_output(
             [
                 codegen.create_load_const(0),  # level
-                create_instruction("BUILD_TUPLE", arg=0),  # fromlist
+                create_build_tuple(0),  # fromlist
                 codegen.create_import_name("torch"),
             ]
         )
@@ -1006,6 +1126,14 @@ def is_from_nonlocal_source(source: Source) -> bool:
     )
 
 
+def is_from_closure_source(source: Source) -> bool:
+    if isinstance(source, ClosureSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_closure_source(source.base)
+    return False
+
+
 def is_from_source(source: Source, target: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
@@ -1082,4 +1210,15 @@ def is_from_defaults(source: Source) -> bool:
 
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
+    return False
+
+
+@functools.lru_cache
+def is_from_skip_guard_source(source: Source) -> bool:
+    if isinstance(source, SkipGuardSource):
+        return True
+
+    if isinstance(source, ChainedSource):
+        return is_from_skip_guard_source(source.base)
+
     return False

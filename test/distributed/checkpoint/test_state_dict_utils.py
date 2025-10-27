@@ -220,6 +220,13 @@ class TestStateDictUtils(DTensorTestBase):
             self.assertEqual(cpu_state_dict["step"], 7)
             self.assertEqual(cpu_state_dict["nested"], {"list": [1, 2, 3, 4]})
 
+        def _verify_weakref_finalize(cpu_state_dict):
+            import gc
+
+            del cpu_state_dict["tensor1"]
+            del cpu_state_dict
+            gc.collect()
+
         cpu_state_dict = _create_cpu_state_dict(state_dict)
         _verify(cpu_state_dict)
         cpu_state_dict = _create_cpu_state_dict(state_dict, pin_memory=True)
@@ -230,6 +237,7 @@ class TestStateDictUtils(DTensorTestBase):
             state_dict, share_memory=True, pin_memory=True
         )
         _verify(cpu_state_dict)
+        _verify_weakref_finalize(cpu_state_dict)
 
     @with_comms
     @skip_if_lt_x_gpu(2)

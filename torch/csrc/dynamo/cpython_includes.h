@@ -10,7 +10,6 @@
 #endif
 
 // see https://bugs.python.org/issue35886
-#if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
 
 #ifndef __cplusplus
@@ -21,26 +20,32 @@
 
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
-#if IS_PYTHON_3_14_PLUS
-#include <internal/pycore_interpframe_structs.h>
+
+#if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
+#include <internal/pycore_code.h>
+#include <internal/pycore_genobject.h>
+#include <internal/pycore_interpframe.h>
 #include <internal/pycore_stackref.h>
-#endif
+#elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#include <internal/pycore_interpframe_structs.h> // _PyInterpreterFrame
 #endif
 
-#if IS_PYTHON_3_14_PLUS
-#include <internal/pycore_code.h>
 #endif
 
 #undef Py_BUILD_CORE
-#endif // PY_VERSION_HEX >= 0x03080000
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if IS_PYTHON_3_14_PLUS
+#if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
 
-#define F_CODE(x) (PyCodeObject*)PyStackRef_AsPyObjectBorrow(x->f_executable)
+#define F_CODE(x) ((PyCodeObject*)PyStackRef_AsPyObjectBorrow(x->f_executable))
+#define PREV_INSTR(x) (x)->instr_ptr
+
+#elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
+
+#define F_CODE(x) ((PyCodeObject*)((x)->f_executable.bits))
 #define PREV_INSTR(x) (x)->instr_ptr
 
 #else
@@ -55,10 +60,14 @@ extern "C" {
 
 #endif // IS_PYTHON_3_14_PLUS
 
-#if IS_PYTHON_3_12_PLUS
-#define FUNC(x) ((x)->f_funcobj)
+#if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
+#define FUNC(x) ((PyFunctionObject*)PyStackRef_AsPyObjectBorrow((x)->f_funcobj))
+#elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#define FUNC(x) ((PyFunctionObject*)((x)->f_funcobj.bits))
+#elif IS_PYTHON_3_12_PLUS
+#define FUNC(x) ((PyFunctionObject*)(x)->f_funcobj)
 #else
-#define FUNC(x) ((x)->f_func)
+#define FUNC(x) ((PyFunctionObject*)(x)->f_func)
 #endif
 
 #ifdef __cplusplus

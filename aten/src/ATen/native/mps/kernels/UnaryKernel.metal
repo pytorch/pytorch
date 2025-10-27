@@ -5,6 +5,21 @@
 using namespace metal;
 using namespace c10::metal;
 
+struct angle_functor {
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(atan2(x.y, x.x), 0);
+  }
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(isnan(x) ? x : x < 0 ? M_PI_F : 0.0);
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline float operator()(const T x) {
+    return x < 0 ? M_PI_F : 0.0;
+  }
+};
+
 // Implement exp wrapper for both real and complex types
 template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
 inline T exp_(const T x) {
@@ -490,16 +505,22 @@ struct bitwise_not_functor {
   }
 };
 
-template <typename T>
-float erfc(T x) {
-  return 1.0 - erf(x);
-}
-
 struct round_decimals_functor {
   template <typename T>
   inline T operator()(const T x, const long ndigits) {
     return static_cast<T>(
         rint(exp10(float(ndigits)) * x) * exp10(float(-ndigits)));
+  }
+};
+
+struct round_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return static_cast<T>(rint(float(x)));
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return x;
   }
 };
 
@@ -515,6 +536,13 @@ REGISTER_UNARY_OP(neg, char, char);
 REGISTER_UNARY_OP(neg, uchar, uchar);
 REGISTER_UNARY_OP(neg, float, float);
 REGISTER_UNARY_OP(neg, half, half);
+REGISTER_UNARY_OP(round, int, int);
+REGISTER_UNARY_OP(round, long, long);
+REGISTER_UNARY_OP(round, short, short);
+REGISTER_UNARY_OP(round, char, char);
+REGISTER_UNARY_OP(round, uchar, uchar);
+REGISTER_UNARY_OP(round, float, float);
+REGISTER_UNARY_OP(round, half, half);
 
 REGISTER_UNARY_OP(bitwise_not, int, int);
 REGISTER_UNARY_OP(bitwise_not, long, long);
@@ -532,6 +560,7 @@ REGISTER_UNARY_OP(abs, float, float);
 REGISTER_UNARY_OP(abs, half, half);
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
+  REGISTER_UNARY_OP(angle, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(erf, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(erfc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
@@ -556,11 +585,10 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
 
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 REGISTER_UNARY_OP(neg, bfloat, bfloat);
+REGISTER_UNARY_OP(round, bfloat, bfloat);
 REGISTER_UNARY_OP(abs, bfloat, bfloat);
-#endif
 INSTANTIATE_UNARY_KERNELS2(half, half);
 INSTANTIATE_UNARY_KERNELS2(float, float);
 INSTANTIATE_UNARY_KERNELS2(float, bool);
@@ -571,6 +599,7 @@ INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
 #define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)     \
+  REGISTER_UNARY_OP(angle, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);   \
@@ -600,6 +629,4 @@ INSTANTIATE_UNARY_KERNELS_VEC2(float);
 
 REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
-#endif

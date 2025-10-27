@@ -1,10 +1,12 @@
 #include <include/openreg.h>
 
 namespace {
+
 // Total device numbers
 constexpr int DEVICE_COUNT = 2;
 // Current device index
 thread_local int gCurrentDevice = 0;
+
 } // namespace
 
 orError_t orGetDeviceCount(int* count) {

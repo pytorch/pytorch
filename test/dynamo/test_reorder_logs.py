@@ -211,7 +211,7 @@ Unsupported Tensor.item() call with capture_scalar_outputs=False
 
   Developer debug context: call_method TensorVariable() item () {}
 
- For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0124.html""",  # noqa: B950
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html""",  # noqa: B950
         )
 
 

@@ -130,7 +130,7 @@ def _get_qspec_for_arg(
 ) -> Optional[QuantizationSpecBase]:
     while _is_activation_post_process_node(arg, named_modules):
         arg = arg.args[0]  # type: ignore[assignment]
-    return input_qspec_map.get(arg, None)
+    return input_qspec_map.get(arg)
 
 
 def _create_obs_or_fq_from_qspec(
@@ -166,6 +166,7 @@ def _create_obs_or_fq_from_qspec(
         }
         edge_or_nodes = quantization_spec.derived_from
         obs_or_fqs = [obs_or_fq_map[k] for k in edge_or_nodes]
+        # pyrefly: ignore [unsupported-operation]
         kwargs["obs_or_fqs"] = obs_or_fqs
         return _DerivedObserverOrFakeQuantize.with_args(**kwargs)()
     elif isinstance(quantization_spec, FixedQParamsQuantizationSpec):
@@ -478,6 +479,7 @@ def _insert_obs_or_fq(
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
+    model_device: Optional[torch.device] = None,
 ) -> Node:
     """
     Attaches `obs_or_fq` to `model`, and creates a node which calls
@@ -485,7 +487,8 @@ def _insert_obs_or_fq(
 
     obs_or_fq: an instance of Observer or FakeQuantize module
     """
-    model_device = assert_and_get_unique_device(model)
+    if model_device is None:
+        model_device = assert_and_get_unique_device(model)
     if model_device:
         obs_or_fq.to(model_device)
     # add obs_or_fq module as attribute
@@ -805,6 +808,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
     backend_config: Optional[BackendConfig] = None,
+    model_device: Optional[torch.device] = None,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -827,6 +831,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 obs_or_fq_map,
                 is_qat,
                 backend_config,
+                model_device,
             )
             new_arg_to_return.append(new_inner_arg)
         return type(arg)(new_arg_to_return)
@@ -934,7 +939,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             if maybe_obs_node.op == "call_module":
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
-                    type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq)
+                    type(maybe_obs_mod) is type(arg_as_input_act_obs_or_fq)
                     and maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
@@ -945,7 +950,12 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         obs_or_fq_map[(arg, node)] = arg_as_input_act_obs_or_fq
         if existing_obs_node is None:
             new_obs_node = _insert_obs_or_fq(
-                arg, arg_as_input_act_obs_or_fq, model, named_modules, graph
+                arg,
+                arg_as_input_act_obs_or_fq,
+                model,
+                named_modules,
+                graph,
+                model_device,
             )
             # override this arg to be the observed arg
             new_arg = new_obs_node
@@ -966,6 +976,7 @@ def _maybe_insert_input_observers_for_node(
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
     backend_config: Optional[BackendConfig] = None,
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -997,6 +1008,7 @@ def _maybe_insert_input_observers_for_node(
             obs_or_fq_map,
             is_qat,
             backend_config,
+            model_device,
         )
         new_args.append(new_arg)
 
@@ -1014,6 +1026,7 @@ def _maybe_insert_input_observers_for_node(
             obs_or_fq_map,
             is_qat,
             backend_config,
+            model_device,
         )
         new_kwargs[k] = new_kwarg
 
@@ -1042,7 +1055,9 @@ def _maybe_insert_input_equalization_observers_for_node(
         return
 
     if is_branch:
-        warnings.warn(f"Cannot equalize {node} because it is part of a branch.")
+        warnings.warn(
+            f"Cannot equalize {node} because it is part of a branch.", stacklevel=2
+        )
         return
 
     new_args = []
@@ -1663,6 +1678,7 @@ def insert_observers_for_model(
     outputs_seen_counter = 0
     results_node = None
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
+    model_device = assert_and_get_unique_device(model)
 
     # TODO: change this to insert obs/fq by pattern instead of by node
     for node in nodes_before_observation:
@@ -1695,7 +1711,7 @@ def insert_observers_for_model(
 
             skip_inserting_observers = (
                 (qconfig is None) or not output_is_a_tensor
-            ) and (not node.op == "output")
+            ) and (node.op != "output")
 
             # TODO: take a closer look to see if we can remove this check
             # right now it is here because of `observed_node_names`, we are using
@@ -1766,6 +1782,7 @@ def insert_observers_for_model(
                             obs_or_fq_map,
                             is_qat,
                             backend_config,
+                            model_device,
                         )
 
                         # insert equalization input observers if needed
@@ -2071,8 +2088,11 @@ def prepare(
 
     root_node_getter_mapping = get_fusion_pattern_to_root_node_getter(backend_config)
 
+    # pyrefly: ignore [bad-argument-type]
     _update_qconfig_for_fusion(model, qconfig_mapping)
+    # pyrefly: ignore [bad-argument-type]
     _update_qconfig_for_fusion(model, _equalization_config)
+    # pyrefly: ignore [bad-argument-type]
     flattened_qconfig_dict = _get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
@@ -2080,6 +2100,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         _qat_swap_modules(model, module_to_qat_module)
+        # pyrefly: ignore [bad-argument-type]
         _update_qconfig_for_qat(qconfig_mapping, backend_config)
 
     # mapping from fully qualified module name to module instance
@@ -2093,10 +2114,20 @@ def prepare(
 
     # fill node_name_to_qconfig, a map from node name to qconfig, used in _find_matches
     equalization_node_name_to_qconfig = _generate_node_name_to_qconfig(
-        model, named_modules, model.graph, _equalization_config, node_name_to_scope
+        model,
+        named_modules,
+        model.graph,
+        # pyrefly: ignore [bad-argument-type]
+        _equalization_config,
+        node_name_to_scope,
     )
     node_name_to_qconfig = _generate_node_name_to_qconfig(
-        model, named_modules, model.graph, qconfig_mapping, node_name_to_scope
+        model,
+        named_modules,
+        model.graph,
+        # pyrefly: ignore [bad-argument-type]
+        qconfig_mapping,
+        node_name_to_scope,
     )
 
     # match the patterns that will get quantized
@@ -2156,6 +2187,7 @@ def prepare(
         node_name_to_scope,
         prepare_custom_config,
         equalization_node_name_to_qconfig,
+        # pyrefly: ignore [bad-argument-type]
         qconfig_mapping,
         is_qat,
         observed_node_names,

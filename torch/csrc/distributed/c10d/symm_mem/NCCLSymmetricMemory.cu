@@ -93,82 +93,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     return nullptr;
   }
 
-  // TODO: This is up for change.
-  at::Tensor get_buffer(
-      int rank,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype,
-      int64_t storage_offset) override {
-    // TODO: deduplicate
-    const size_t numel = std::accumulate(
-        sizes.begin(),
-        sizes.end(),
-        static_cast<size_t>(1),
-        std::multiplies<size_t>());
-    const auto element_size = c10::elementSize(dtype);
-    const auto req_size = (numel + storage_offset) * element_size;
-    TORCH_CHECK(
-        req_size <= buffer_size_,
-        "NCCLSymmetricMemory::get_buffer: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        buffer_size_,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
-        storage_offset * element_size;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(dtype).device(device);
-    return at::for_blob(data_ptr, sizes)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
-  }
-
-  // TODO: This is up for change.
-  at::Tensor get_signal_pad(
-      int rank,
-      c10::IntArrayRef sizes,
-      std::optional<c10::ScalarType> dtype,
-      int64_t storage_offset) override {
-    // TODO: deduplicate
-    // If the dtype is unspecified, default it to UInt32, as it
-    // is the most common type for signaling purposes.
-    if (!dtype.has_value()) {
-      dtype = c10::ScalarType::UInt32;
-    }
-
-    // If the shape is unspecified, treat the signal pad as a 1d tensor.
-    const auto element_size = c10::elementSize(*dtype);
-    std::vector<int64_t> shape;
-    if (!sizes.empty()) {
-      shape = sizes.vec();
-    } else {
-      shape.push_back(signal_pad_size / element_size);
-    }
-
-    const size_t numel = std::accumulate(
-        shape.begin(),
-        shape.end(),
-        static_cast<size_t>(1),
-        std::multiplies<size_t>());
-    const auto req_size = (numel + storage_offset) * element_size;
-    TORCH_CHECK(
-        req_size <= signal_pad_size,
-        "NCCLSymmetricMemory::get_signal_pad: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        signal_pad_size,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
-        storage_offset * element_size;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(*dtype).device(device);
-    return at::for_blob(data_ptr, shape)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
-  }
-
   void barrier(int channel, size_t timeout_ms) override {
     // TODO
   }
@@ -187,6 +111,10 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   int get_world_size() override {
     return world_size_;
+  }
+
+  c10::Device get_device() override {
+    return c10::Device(c10::DeviceType::CUDA, device_idx_);
   }
 
   virtual std::vector<int>& get_rank_to_global_rank() override {

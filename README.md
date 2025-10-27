@@ -1,4 +1,4 @@
-![PyTorch Logo](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/pytorch-logo-dark.png)
+![PyTorch Logo](https://github.com/pytorch/pytorch/blob/9708fcf92db88b80b9010c68662d634434da3106/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ Elaborating Further:
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
-![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
+![Tensor illustration](https://github.com/pytorch/pytorch/blob/9708fcf92db88b80b9010c68662d634434da3106/docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
@@ -99,7 +99,7 @@ from several research papers on this topic, as well as current and past work suc
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
 
-![Dynamic graph](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/dynamic_graph.gif)
+![Dynamic graph](https://github.com/pytorch/pytorch/blob/9708fcf92db88b80b9010c68662d634434da3106/docs/source/_static/img/dynamic_graph.gif)
 
 ### Python First
 
@@ -161,7 +161,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 #### Prerequisites
 If you are installing from source, you will need:
-- Python 3.9 or later
+- Python 3.10 or later
 - A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
 - Visual Studio or Visual Studio Build Tool (Windows only)
 
@@ -242,9 +242,8 @@ git submodule update --init --recursive
 **Common**
 
 ```bash
-conda install cmake ninja
-# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
-pip install -r requirements.txt
+# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section above
+pip install --group dev
 ```
 
 **On Linux**
@@ -276,7 +275,7 @@ conda install pkg-config libuv
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
-conda install -c conda-forge libuv=1.39
+conda install -c conda-forge libuv=1.51
 ```
 
 #### Install PyTorch
@@ -395,7 +394,7 @@ On macOS
 
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ CMAKE_ONLY=1 python setup.py build
+MACOSX_DEPLOYMENT_TARGET=11.0 CMAKE_ONLY=1 python setup.py build
 ccmake build  # or cmake-gui build
 ```
 
@@ -560,7 +559,7 @@ To learn more about making a contribution to Pytorch, please see our [Contributi
 
 PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
 
-PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
+PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), [Alban Desmaison](https://github.com/albanD), [Piotr Bialecki](https://github.com/ptrblck) and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
 A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jekbradbury), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito). <!-- codespell:ignore -->
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.

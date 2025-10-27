@@ -14,8 +14,9 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Callable, cast, Optional
+from typing import cast, Optional
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
 

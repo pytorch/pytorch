@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import namedtuple
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -120,6 +121,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     "module for further information about the project."
                 ),
                 UserWarning,
+                stacklevel=2,
             )
             cls._PROTOTYPE_WARNING_SHOWN = True
 
@@ -183,6 +185,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         outer_stride,
     ) -> torch.Tensor:
         shape, fuse_transpose_cusparselt, alg_id_cusparselt, requires_grad = tensor_meta
+        # pyrefly: ignore  # no-matching-overload
         return cls(
             shape=shape,
             packed=inner_tensors.get("packed", None),
@@ -412,6 +415,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             sparse_tensor_cutlass,
             meta_tensor_cutlass,
         ) = sparse_semi_structured_from_dense_cutlass(original_tensor)
+        # pyrefly: ignore  # no-matching-overload
         return cls(
             original_tensor.shape,
             packed=sparse_tensor_cutlass,
@@ -465,14 +469,26 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         The equivalent PyTorch code to create the same five outputs from the dense tensor can be found below:
         ```
         from torch.sparse import SparseSemiStructuredTensorCUTLASS
-        from torch.sparse._semi_structured_conversions import _sparse_semi_structured_tile, _compute_compressed_swizzled_bitmask
+        from torch.sparse._semi_structured_conversions import (
+            _sparse_semi_structured_tile,
+            _compute_compressed_swizzled_bitmask,
+        )
 
         pruned = _sparse_semi_structured_tile(dense)
         packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(pruned)
-        packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(pruned.t().contiguous())
+        packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(
+            pruned.t().contiguous()
+        )
         bitmask = _compute_compressed_swizzled_bitmask(pruned)
 
-        SparseSemiStructuredTensorCUTLASS(dense.shape, packed_cutlass, meta_cutlass, packed_t_cutlass, meta_t_cutlass, bitmask)
+        SparseSemiStructuredTensorCUTLASS(
+            dense.shape,
+            packed_cutlass,
+            meta_cutlass,
+            packed_t_cutlass,
+            meta_t_cutlass,
+            bitmask,
+        )
         ```
         """
         # We can either pack to the CUTLASS or cuSPARSELt representation, depending on the use_cutlass flag.
@@ -486,6 +502,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             original_tensor, algorithm=algorithm, use_cutlass=True
         )
 
+        # pyrefly: ignore  # no-matching-overload
         return cls(
             original_tensor.shape,
             packed=packed,
@@ -547,6 +564,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         cls, original_tensor: torch.Tensor
     ) -> "SparseSemiStructuredTensorCUSPARSELT":
         cls._validate_device_dim_dtype_shape(original_tensor)
+        # pyrefly: ignore  # no-matching-overload
         return cls(
             shape=original_tensor.shape,
             packed=torch._cslt_compress(original_tensor),
@@ -564,7 +582,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         cls, original_tensor: torch.Tensor, algorithm=""
     ) -> "SparseSemiStructuredTensor":
         """
-        This function does the same thing as described in SparseSemiStructuredCUTLASS, but uses the cuSPASRELt metadata
+        This function does the same thing as described in SparseSemiStructuredCUTLASS, but uses the cuSPARSELt metadata
         layout and sparse matmul.
 
         The only functional difference is that cuSPARSELt stores `metadata` and `packed` together into a single tensor.
@@ -583,14 +601,19 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         The equivalent PyTorch code to create the same three outputs from the dense tensor can be found below:
         ```
         from torch.sparse import SparseSemiStructuredTensorCUSPARSELT
-        from torch.sparse._semi_structured_conversions import _sparse_semi_structured_tile, _compute_compressed_swizzled_bitmask
+        from torch.sparse._semi_structured_conversions import (
+            _sparse_semi_structured_tile,
+            _compute_compressed_swizzled_bitmask,
+        )
 
         pruned = _sparse_semi_structured_tile(dense)
         packed_cusparselt = torch._cslt_compress(pruned)
         packed_t_cusparselt = torch._cslt_compress(pruned.t().contiguous())
         bitmask = _compute_compressed_swizzled_bitmask(pruned)
 
-        SparseSemiStructuredTensorCUSPARSELT(dense.shape, packed_cutlass, None, packed_t_cutlass, None, bitmask)
+        SparseSemiStructuredTensorCUSPARSELT(
+            dense.shape, packed_cutlass, None, packed_t_cutlass, None, bitmask
+        )
         ```
         """
         (
@@ -603,6 +626,12 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             original_tensor, algorithm=algorithm, use_cutlass=False
         )
 
+        # Map this two 2-dim view of packed data.
+        # TODO: is this proper cuSPARSELt metadata?
+        packed = packed.view(original_tensor.shape[0], -1)
+        packed_t = packed_t.view(original_tensor.shape[1], -1)
+
+        # pyrefly: ignore  # no-matching-overload
         return cls(
             original_tensor.shape,
             packed=packed,

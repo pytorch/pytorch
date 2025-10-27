@@ -196,8 +196,11 @@ static at::Tensor& mul_out(
   const auto& t_output = output.scalar_type();
   TORCH_CHECK(at::native::result_type(self, other) == t_output);
 
-  auto self_sizes = self.sizes();
-  at::native::resize_(output, self_sizes, std::nullopt);
+  at::native::resize_impl_cpu_(
+      output.unsafeGetTensorImpl(),
+      self.sizes(),
+      self.is_contiguous() ? at::OptionalIntArrayRef(std::nullopt)
+                           : self.strides());
 
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf, kBFloat16, t_output, "mul_Scalar_out", [&]() {
@@ -387,6 +390,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.leaky_relu.default", aten_leaky_relu, {
     return;
   }
   auto& out_t = KernelOutput(0).toTensor();
+  fastResizeToZero(out_t);
   at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
 })
 
@@ -898,6 +902,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.repeat.default", aten_repeat, {
     return;
   }
   at::Tensor& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::repeat_out(out, self, repeats);
 })
 
@@ -1014,6 +1019,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.full_like.default", aten_full_like, {
         in0_t, dtype, layout, device, pin_memory, memory_format);
   }
   auto& out_t = KernelOutput(0).toTensor();
+  fastResizeToZero(out_t);
   at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
   at::native::fill_out(out_t, in1_s);
 })
@@ -1043,6 +1049,18 @@ REGISTER_CPU_KERNEL("torch.ops.aten.where.self", aten_where, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::where_self_out(cond, self, other, out);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.fb.scale_gradient.default", fb_scale_gradient, {
+  const auto& in_0 = KernelInput(0).toTensor();
+
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = create_empty_from(in_0);
+  }
+  auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
+  out.resize_(in_0.sizes());
+  out.copy_(in_0);
 })
 
 REGISTER_CPU_KERNEL(
@@ -1120,6 +1138,25 @@ REGISTER_CPU_KERNEL(
 
       KernelInput(1).toCustomClass<LinearPackedParamsBase>()->apply_dynamic_out(
           in_0, out_0, /* reduce_range= */ false);
+    })
+
+REGISTER_CPU_KERNEL(
+    "torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight.default",
+    _quantized_wrapped_fbgemm_linear_fp16_weight,
+    {
+      const auto& in_0 = KernelInput(0).toTensor();
+      const auto& weight = KernelInput(1).toTensor();
+      auto bias = KernelInput(2).toOptional<at::Tensor>();
+
+      if (auto& out_0 = KernelOutput(0); out_0.isNone()) {
+        out_0 = create_empty_from(in_0, at::kFloat);
+      }
+
+      auto& out_0 = KernelOutput(0).toTensor();
+      fastResizeToZero(out_0);
+
+      at::native::fbgemm_linear_fp16_weight(
+          in_0, weight, bias.value_or(at::Tensor()), out_0);
     })
 
 REGISTER_CPU_KERNEL(
@@ -1235,6 +1272,18 @@ REGISTER_CPU_KERNEL("torch.ops.aten.stack.default", aten_stack, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::_stack_out_cpu(inputs, dim, out_t);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.fmod.Scalar", aten_fmod_scalar, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto& other = KernelInput(1).toScalar();
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = at::native::fmod(self, other);
+    return;
+  }
+  auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
+  at::native::fmod_out(self, other, out);
 })
 
 class OpKernel_aten__to_copy : public C10Kernel {
@@ -1374,5 +1423,34 @@ C10_REGISTER_TYPED_CLASS(
     StaticallyDispatchedCPUKernelRegistry,
     "torch.ops.aten._to_copy.default",
     OpKernel_aten__to_copy)
+
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.where.ScalarOther",
+    aten_where_ScalarOther,
+    {
+      const auto& condition = KernelInput(0).toTensor();
+      const auto& self = KernelInput(1).toTensor();
+      const auto& other = KernelInput(2).toScalar();
+
+      KernelOutput(0) = at::where(condition, self, other);
+    })
+
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.repeat_interleave.self_Tensor",
+    aten_repeat_interleave_self_Tensor,
+    {
+      const auto& self = KernelInput(0).toTensor();
+      const auto& repeats = KernelInput(1).toTensor();
+      std::optional<int64_t> dim = std::nullopt;
+      if (!KernelInput(2).isNone()) {
+        dim = KernelInput(2).toInt();
+      }
+      std::optional<int64_t> output_size = std::nullopt;
+      if (!KernelInput(3).isNone()) {
+        output_size = KernelInput(3).toInt();
+      }
+
+      KernelOutput(0) = at::repeat_interleave(self, repeats, dim, output_size);
+    })
 
 } // namespace torch::nativert

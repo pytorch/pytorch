@@ -25,7 +25,8 @@ import functools
 
 import torch
 
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from .. import graph_break_hints
+from ..exc import unimplemented_v2, UnsafeScriptObjectError, Unsupported
 from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
 
@@ -75,14 +76,24 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         method = getattr(self.value, name, None)
         if method is None:
-            unimplemented(
-                f"FakeScriptObject doesn't define method {name}. Did you forget to implement it in the fake class?"
+            unimplemented_v2(
+                gb_type="FakeScriptObject missing method implementation",
+                context=f"value={self.value}, method={name}",
+                explanation=f"TorchScript object {self.value} doesn't define the method {name}.",
+                hints=[
+                    f"Ensure the method {name} is implemented in {self.value}.",
+                    *graph_break_hints.USER_ERROR,
+                ],
             )
 
         if not callable(method):
-            unimplemented(
-                "Only method calls on TorchScript objects can be supported safely."
-                " Please use method calls instead of attribute access."
+            unimplemented_v2(
+                gb_type="Attempted to access non-callable attribute of TorchScript object",
+                context=f"value={self.value}, method={name}",
+                explanation="Attribute accesses of TorchScript objects to non-callable attributes are not supported.",
+                hints=[
+                    "Use method calls instead of attribute access.",
+                ],
             )
 
         return TorchHigherOrderOperatorVariable.make(
@@ -100,4 +111,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         "Dynamo cannot safely trace script object due to graph break."
     )
     def call_method(self, tx, name, args, kwargs):
-        unimplemented(f"call method {name} on script object is not safe.")
+        unimplemented_v2(
+            gb_type="Weird method call on TorchScript object",
+            context=f"value={self.value}, method={name}",
+            explanation=(
+                f"This particular method call ({name}) is not supported (e.g. calling `__setattr__`). "
+                "Most method calls to TorchScript objects should be supported."
+            ),
+            hints=[
+                "Avoid calling this method.",
+            ],
+        )

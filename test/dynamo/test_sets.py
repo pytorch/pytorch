@@ -174,7 +174,7 @@ Attempted to wrap a set with tensors
 
   Developer debug context: Python set containing torch.Tensor elements
 
- For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0222.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0222.html
 
 from user code:
    File "test_sets.py", line N, in fn
@@ -657,7 +657,6 @@ class FrozensetTests(_FrozensetBase, _BaseSetTests):
 class SetTests(_SetBase, _BaseSetTests):
     thetype = set
 
-    @unittest.expectedFailure
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
@@ -668,13 +667,11 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
 
     thetype = CustomSet
 
-    @unittest.expectedFailure
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
-    @unittest.expectedFailure
     def test_equality(self):
-        super().test_in_frozenset()
+        super().test_equality()
 
 
 class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
@@ -683,7 +680,6 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
 
     thetype = CustomFrozenset
 
-    @unittest.expectedFailure
     def test_in_frozenset(self):
         super().test_in_frozenset()
 

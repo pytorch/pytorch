@@ -52,6 +52,9 @@ using AtenGeneratorHandle = AtenGeneratorOpaque*;
 struct AOTIProxyExecutorOpaque;
 using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
 
+struct C10IValueOpaque;
+using C10IValueHandle = C10IValueOpaque*;
+
 using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1

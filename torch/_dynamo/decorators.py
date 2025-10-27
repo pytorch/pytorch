@@ -5,9 +5,10 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 import functools
 import inspect
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -95,6 +96,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -295,6 +297,14 @@ def skip_frame(msg: str = "") -> None:
     """Force a skipped frame"""
 
 
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
+def step_unsupported(msg: str = "") -> None:
+    """Force a step unsupported graph break, which results in compiling
+    the traced FX graph so far, then skipping the rest of the frame.
+    In order to get expected behavior, there should be at least 2 ops
+    and a part of the code not contained in any try/with blocks."""
+
+
 def forbid_in_graph(fn: Any) -> Any:
     """
     Customize which functions TorchDynamo will assert are not present while tracing.
@@ -306,6 +316,7 @@ def forbid_in_graph(fn: Any) -> Any:
     if isinstance(fn, (list, tuple)):
         return [forbid_in_graph(x) for x in fn]
     assert callable(fn), "forbid_in_graph applies only to callables"
+    # pyrefly: ignore [missing-attribute]
     fn._dynamo_forbidden = True
     return fn
 
@@ -482,10 +493,16 @@ def substitute_in_graph(
         def dispatch_fn(
             self: VariableBuilder, value: Callable[_P, _R]
         ) -> PolyfilledFunctionVariable:
+            if inspect.isclass(value):
+                guard_type = GuardBuilder.CLASS_MATCH
+            elif inspect.ismodule(value):
+                guard_type = GuardBuilder.MODULE_MATCH
+            else:
+                guard_type = GuardBuilder.ID_MATCH
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                **self.install_guards(guard_type),
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
@@ -536,19 +553,26 @@ class _DimRange:
 def mark_unbacked(
     t: Any,
     index: Union[int, list[Any], tuple[Any]],
+    hint_override: Optional[int] = None,
     strict: bool = False,
     specialize_on: Optional[list[Any]] = None,
 ) -> None:
     """
-    Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
-    we will always report the size does not equal zero/one, we will turn asserts
-    on this index into runtime asserts, and if you try to get the real value we will
-    raise an exception.  In other words, we will treat this dimension as if it was
-    data dependent (we do not know anything about its value.)
+    Mark a tensor as having an unbacked dimension. This changes the semantics of operations:
+    - The size of the specified dimension will always be reported as not equal to zero or one.
+    - Assertions on this index will be turned into runtime asserts.
+    - Attempting to get the real value of this dimension will raise an exception.
+    - In effect, this dimension is treated as data-dependent (its value is unknown).
 
-    For historical reasons, by default if an unbacked dim is specialized, we will
-    happily specialize it and continue. If you want to error in these cases, pass
-    strict=True.
+    Args:
+        t (Any): The tensor to mark as having an unbacked dimension.
+        index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single integer or a list/tuple of integers.
+        hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
+            This is only used by the inductor backend for size hint queries, such as during autotuning.
+        strict (bool, default=False): If True, an error will be raised if the unbacked dimension is specialized.
+            By default (strict=False), specialization is allowed and will proceed without error.
+        specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
+            If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
     """
     # You could have copied the mark_dynamic behavior but I'm not convinced
     # it's what you want
@@ -566,6 +590,12 @@ def mark_unbacked(
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        if not hasattr(t, "_dynamo_hint_overrides"):
+            t._dynamo_hint_overrides = {}
+
+        if hint_override:
+            t._dynamo_hint_overrides[index] = hint_override
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -585,6 +615,7 @@ def mark_dynamic(
     t: Any,
     index: Union[int, list[Any], tuple[Any]],
     *,
+    hint_override: Optional[int] = None,
     min: Optional[int] = None,
     max: Optional[int] = None,
     specialize_on: Optional[list[Any]] = None,
@@ -611,7 +642,10 @@ def mark_dynamic(
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
-    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    5) If hint_override is passed, the hint_override for the specified dimension will replace the provided value
+    from the first example input as the official size hint.
+
+    6) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
     multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
     per dimension specialization, or in other words we do not generate a cross product of specializations.
     At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
@@ -625,6 +659,7 @@ def mark_dynamic(
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
     2-8x speedups depending on the specific specialization and model architecture.
+
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -635,18 +670,28 @@ def mark_dynamic(
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
+            # pyrefly: ignore [missing-attribute]
             t._dynamo_dynamic_indices = set()
+            # pyrefly: ignore [missing-attribute]
             t._dynamo_dynamic_range = set()
+            # pyrefly: ignore [missing-attribute]
+            t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
+            # pyrefly: ignore [missing-attribute]
             t._specialize_on = {}
 
+        if hint_override:
+            # pyrefly: ignore [missing-attribute]
+            t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
+        # pyrefly: ignore [missing-attribute]
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
+        # pyrefly: ignore [missing-attribute]
         if isinstance(t._specialize_on, dict):
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
@@ -671,8 +716,10 @@ def maybe_mark_dynamic(t: Any, index: Union[int, list[Any], tuple[Any]]) -> None
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
+            # pyrefly: ignore [missing-attribute]
             t._dynamo_weak_dynamic_indices = set()
         # TODO(voz): Should we bounds check?
+        # pyrefly: ignore [missing-attribute]
         t._dynamo_weak_dynamic_indices.add(index)
         return
 
@@ -724,8 +771,11 @@ def mark_static(
         # TODO: Make this configurable via a supported public API
         _apply_func_to_inner_tensors_of_same_dim(mark_static, t, index)
 
+    # pyrefly: ignore [bad-argument-type]
     if not isinstance(t, torch.Tensor) and issubclass(t, torch.nn.Module):
+        # pyrefly: ignore [missing-attribute]
         t._dynamo_marked_static = True
+        # pyrefly: ignore [bad-return]
         return t
 
     if not isinstance(t, torch.Tensor):
@@ -748,12 +798,13 @@ def mark_static(
 
 
 @forbid_in_graph
-def mark_static_address(t: Any, guard: bool = True) -> None:
+def mark_static_address(t: Any, guard: bool = False) -> None:
     """
-    Marks an input tensor whose data_ptr will not change across multiple calls
-    to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
-    is not needed for this input. The data_ptr will be guarded if guard=True. Note:
-    Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
+    Marks an input tensor whose address should be treated as constant across calls to the
+    same dynamo-compiled function. This indicates to cudagraphs that an extra allocation
+    is not needed for this input. The data_ptr will be guarded if guard=True, and cause a full
+    recompile if the data_ptr changes. Note: If this address changes, cudagraphs will re-record
+    if guard=False.
     """
     if not isinstance(t, torch.Tensor):
         raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
@@ -914,15 +965,15 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     return ctx
 
 
-class SetFullgraphDecoratorContextManager:
-    def __init__(self, fullgraph: bool) -> None:
-        self.fullgraph = fullgraph
+class ErrorOnGraphBreakDecoratorContextManager:
+    def __init__(self, error_on_graph_break: bool) -> None:
+        self.error_on_graph_break = error_on_graph_break
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_fullgraph = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.fullgraph)
+        self.prev_error_on_graph_break = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.error_on_graph_break)
 
     def __exit__(
         self,
@@ -930,14 +981,24 @@ class SetFullgraphDecoratorContextManager:
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        _set_error_on_graph_break(self.prev_fullgraph)
+        _set_error_on_graph_break(self.prev_error_on_graph_break)
 
 
-def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
+def error_on_graph_break(
+    error_on_graph_break: bool,
+) -> ErrorOnGraphBreakDecoratorContextManager:
     """
-    Context manager/decorator to toggle fullgraph setting.
+    Context manager/decorator to toggle torch.compile's `error_on_graph_break` setting at compile time.
 
-    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
-    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    If `fullgraph` is set, then `error_on_graph_break` does nothing
+    (i.e. `fullgraph = True` takes higher precedence). If `fullgraph` is False, then
+    `error_on_graph_break` determines whether `torch.compile` throws an error upon
+    encountering a graph break, or attempts to continue tracing.
+
+    `error_on_graph_break` can be toggled during compile time with this decorator to allow graph breaks in some
+    compiled regions but not others. One key difference from `fullgraph` is that `error_on_graph_break = True`
+    does NOT guarantee that a single graph is captured from the compiled function.
+
+    The default value of torch.compile's `error_on_graph_break` setting is False.
     """
-    return SetFullgraphDecoratorContextManager(fullgraph)
+    return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)

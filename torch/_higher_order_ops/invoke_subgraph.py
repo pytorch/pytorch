@@ -3,7 +3,7 @@
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -36,6 +36,10 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
 invoke_subgraph_counter = 0
 
 
@@ -45,7 +49,7 @@ invoke_subgraph_counter = 0
 @dataclass
 class OutputMetadata:
     num_fw_outs: Optional[int] = None
-    indexes_with_none: set[int] = field(default_factory=set)
+    indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
 
 
@@ -74,11 +78,15 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
-        ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
+            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            for o in operands
+        ), (
+            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
+        )
 
         return super().__call__(subgraph, identifier, *operands)
 
+    # pyrefly: ignore  # bad-override
     def gen_schema(self, subgraph, identifier, *operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import (
@@ -86,11 +94,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             materialize_as_graph,
         )
 
-        gm: torch.fx.GraphModule = (
-            subgraph
-            if isinstance(subgraph, torch.fx.GraphModule)
-            else materialize_as_graph(subgraph, operands)
-        )
+        gm: torch.fx.GraphModule = materialize_as_graph(subgraph, operands)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
@@ -101,7 +105,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(gm, operands)
+        ) = check_input_alias_and_mutation_return_outputs(gm)
         for idx, arg in enumerate(operands):
             schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
         for out in outputs:
@@ -134,7 +138,9 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
-                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                    backend: Union[str, Callable[..., Any]] = (
+                        make_eager_backend_with_torch_function_mode(metadata_mode)
+                    )
                 else:
                     backend = "eager"
 
@@ -253,8 +259,8 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
 
             output_metadata.num_fw_outs = num_fw_outs
             for idx, fw_out in enumerate(fw_outs):
-                if fw_out is None:
-                    output_metadata.indexes_with_none.add(idx)
+                if isinstance(fw_out, torch.SymInt):
+                    output_metadata.indexes_with_symint.add(idx)
                 elif not fw_out.requires_grad:
                     output_metadata.indexes_with_no_grad.add(idx)
 
@@ -326,8 +332,8 @@ def get_output_metadata(subgraph, *operands):
 
             output_metadata.num_fw_outs = num_fw_outs
             for idx, fw_out in enumerate(fw_outs):
-                if fw_out is None:
-                    output_metadata.indexes_with_none.add(idx)
+                if isinstance(fw_out, torch.SymInt):
+                    output_metadata.indexes_with_symint.add(idx)
                 elif not fw_out.requires_grad:
                     output_metadata.indexes_with_no_grad.add(idx)
             return output_metadata
@@ -396,6 +402,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         subgraph,
@@ -423,10 +430,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 *operands,
             )
 
-        # Check that None is at expected indexes.
+        # Check that int (coming from symint) is at expected indexes.
         for idx, o in enumerate(out):
-            if o is None:
-                assert idx in output_metadata.indexes_with_none
+            if isinstance(o, int):
+                assert idx in output_metadata.indexes_with_symint
 
         return out
 
@@ -447,7 +454,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         filtered_grad_outs = []
         for idx, o in enumerate(grad_outs):
             if o is None:
-                assert idx in output_metadata.indexes_with_none
+                assert idx in output_metadata.indexes_with_symint
             elif idx in output_metadata.indexes_with_no_grad:
                 # Deliberately skip over the grad_outs which we know should be
                 # None because the corresponding fwd_out does not require_grad.
@@ -472,6 +479,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         for tangent in filtered_grad_outs:
             metadata = extract_tensor_metadata(tangent)
             metadata._flatten_into(tangent_metadata, fake_mode, state)
+        # pyrefly: ignore  # bad-assignment
         tangent_metadata = tuple(tangent_metadata)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and

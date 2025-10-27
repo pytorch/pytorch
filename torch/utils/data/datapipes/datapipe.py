@@ -1,7 +1,7 @@
 import functools
 import pickle
-from collections.abc import Iterable, Iterator
-from typing import Callable, Optional, TypeVar
+from collections.abc import Callable, Iterable, Iterator
+from typing import Optional, TypeVar
 
 from torch.utils._import_utils import import_dill
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -99,7 +99,9 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
             >>> dp = IterableWrapper(range(10))
             >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
-            >>> map_dp_2 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
+            >>> map_dp_2 = dp.map(
+            ...     lambda x: x + 1
+            ... )  # Using functional form (recommended)
             >>> list(map_dp_1)
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
             >>> list(map_dp_2)
@@ -114,7 +116,9 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
             >>> list(it1)
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
             >>> it1 = iter(source_dp)
-            >>> it2 = iter(source_dp)  # The creation of a new iterator invalidates `it1`
+            >>> it2 = iter(
+            ...     source_dp
+            ... )  # The creation of a new iterator invalidates `it1`
             >>> next(it2)
             0
             >>> next(it1)  # Further usage of `it1` will raise a `RunTimeError`
@@ -131,6 +135,7 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
     _fast_forward_iterator: Optional[Iterator] = None
 
     def __iter__(self) -> Iterator[_T_co]:
+        # pyrefly: ignore [bad-return]
         return self
 
     def __getattr__(self, attribute_name):
@@ -375,6 +380,7 @@ class _DataPipeSerializationWrapper:
             value = pickle.dumps(self._datapipe)
         except Exception:
             if HAS_DILL:
+                # pyrefly: ignore [missing-attribute]
                 value = dill.dumps(self._datapipe)
                 use_dill = True
             else:
@@ -384,6 +390,7 @@ class _DataPipeSerializationWrapper:
     def __setstate__(self, state):
         value, use_dill = state
         if use_dill:
+            # pyrefly: ignore [missing-attribute]
             self._datapipe = dill.loads(value)
         else:
             self._datapipe = pickle.loads(value)
@@ -400,6 +407,7 @@ class _DataPipeSerializationWrapper:
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
     def __init__(self, datapipe: IterDataPipe[_T_co]):
         super().__init__(datapipe)
+        # pyrefly: ignore [invalid-type-var]
         self._datapipe_iter: Optional[Iterator[_T_co]] = None
 
     def __iter__(self) -> "_IterDataPipeSerializationWrapper":
@@ -407,7 +415,10 @@ class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataP
         return self
 
     def __next__(self) -> _T_co:  # type: ignore[type-var]
-        assert self._datapipe_iter is not None
+        if self._datapipe_iter is None:
+            raise AssertionError(
+                "Iterator has not been initialized; call __iter__() before __next__()"
+            )
         return next(self._datapipe_iter)
 
 

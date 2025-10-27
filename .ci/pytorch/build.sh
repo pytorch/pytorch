@@ -89,7 +89,28 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
   export USE_MKLDNN_ACL=1
-  export ACL_ROOT_DIR=/ComputeLibrary
+  export ACL_ROOT_DIR=/acl
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source /opt/riscv-cross-env/bin/activate
+  else
+    echo "Activation file not found"
+    exit 1
+  fi
+
+  export CMAKE_CROSSCOMPILING=TRUE
+  export CMAKE_SYSTEM_NAME=Linux
+  export CMAKE_SYSTEM_PROCESSOR=riscv64
+
+  export USE_CUDA=0
+  export USE_MKLDNN=0
+
+  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -152,6 +173,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Enable XCCL build
   export USE_XCCL=1
+  export USE_MPI=0
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
   export TORCH_XPU_ARCH_LIST=pvc
@@ -173,8 +195,16 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]]; then
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
+  J=2  # default to 2 jobs
+  case "$RUNNER" in
+    linux.12xlarge.memory|linux.24xlarge.memory)
+      J=24
+      ;;
+  esac
+  echo "Building FlashAttention with job limit $J"
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -203,13 +233,15 @@ if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-full-debug* ]]; then
+  export CMAKE_BUILD_TYPE=Debug
+elif [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -254,31 +286,26 @@ else
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
       python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
 
-      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        python3 tools/packaging/split_wheel.py bdist_wheel
-      else
-        WERROR=1 python setup.py bdist_wheel
-      fi
+      WERROR=1 python -m build --wheel --no-isolation
     else
       python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
-        exit 1
-      else
-        python setup.py bdist_wheel
-      fi
+      python -m build --wheel --no-isolation
     fi
     pip_install_whl "$(echo dist/*.whl)"
+    if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
+      # Regression test for https://github.com/pytorch/pytorch/issues/164297
+      # Torch should be importable and that's about it
+      pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
+    fi
 
     if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
       install_torchvision
@@ -401,7 +428,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-# don't do this for bazel or s390x as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+# don't do this for bazel or s390x or riscv64 as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi

@@ -151,7 +151,7 @@ def _should_lower_as_one_shot_all_reduce(
         config._collective.auto_select
         and is_symm_mem_enabled_for_group(group_name)
         and can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM)
-        and reduce_op in ("sum",)
+        and reduce_op == "sum"
         and inp_size <= config._collective.one_shot_all_reduce_threshold_bytes
     )
 
@@ -208,8 +208,11 @@ def register_comm_lowerings():
             # in-place reuse. Therefore, we tell the scheduler to not fuse it.
             inp.realize()
             V.graph.no_fuse_buffer_names.add(inp.get_name())
+        # pyrefly: ignore [bad-assignment]
         inp = ir.ExternKernel.require_contiguous(inp)
-        ir._AllReduceKernel.create_inplace(
+        # Because we are lowering as inplace c10d.all_reduce_, we should generate
+        # _AllReduce_Kernel instead of _AllReduceKernel.
+        ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
             inp,  # type: ignore[arg-type]
             reduce_op,
@@ -230,6 +233,7 @@ def register_comm_lowerings():
             return inp
 
         # Lower as c10d.all_reduce_
+        # pyrefly: ignore [bad-assignment]
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,

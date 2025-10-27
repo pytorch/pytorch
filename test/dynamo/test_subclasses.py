@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
@@ -144,8 +144,6 @@ def get_view_test_cases():
 
 VIEW_TEST_CASES = {k: v for v, k in get_view_test_cases()}
 
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
@@ -288,7 +286,7 @@ class OptionalScaledTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         return OptionalScaledTensor(
             inner_tensors["_data"],
-            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
+            inner_tensors.get("_scale", None),
             constant=metadata["_constant"],
         )
 
@@ -664,7 +662,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         "comparison",
         [
             subtest(isinstance, "isinstance"),
-            subtest(lambda instance, type_: type(instance) == type_, "equality"),
+            subtest(lambda instance, type_: type(instance) is type_, "equality"),
             subtest(lambda instance, type_: type(instance) is type_, "identity"),
         ],
     )
@@ -2131,7 +2129,8 @@ class GraphModule(torch.nn.Module):
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
-        from typing import Any, Callable, Optional
+        from collections.abc import Callable
+        from typing import Any, Optional
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -3404,10 +3403,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s71: "Sym(s71)", L_nt_: "f64[3, s71, 5]"):
+    def forward(self, s71: "Sym(s71)", L_nt_: "NestedTensor(f64[3, s71, 5])"):
         l_nt_ = L_nt_
 
-        add: "f64[3, s71, 5]" = l_nt_ + 2;  l_nt_ = None
+        add: "NestedTensor(f64[3, s71, 5])" = l_nt_ + 2;  l_nt_ = None
         return (add,)
 """,  # noqa: B950
         )
@@ -3798,7 +3797,7 @@ class GraphModule(torch.nn.Module):
     def test_basic_autograd(self):
         self._test_autograd("aot_eager")
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
 

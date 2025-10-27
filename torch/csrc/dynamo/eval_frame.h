@@ -11,11 +11,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void);
 
 #endif
 
-#if IS_PYTHON_3_12_PLUS
-extern const size_t sys_monitoring_num_callables;
-PyObject** get_monitoring_callables(PyInterpreterState* interp);
-#endif
-
 // All the eval APIs change in 3.11 so we need to decide which one to use on the
 // fly https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
 #if IS_PYTHON_3_11_PLUS

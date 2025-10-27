@@ -6,9 +6,9 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from threading import Lock
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 
@@ -301,10 +301,11 @@ def strobelight(
         profiler = StrobelightCLIFunctionProfiler(**kwargs)
 
     def strobelight_inner(
-        work_function: Callable[_P, _R]
+        work_function: Callable[_P, _R],
     ) -> Callable[_P, Optional[_R]]:
         @functools.wraps(work_function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
+            # pyrefly: ignore [bad-argument-type]
             return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function

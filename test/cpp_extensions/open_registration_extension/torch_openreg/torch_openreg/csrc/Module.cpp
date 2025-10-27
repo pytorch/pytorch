@@ -90,7 +90,7 @@ static PyMethodDef methods[] = {
  * Therefore, it cannot be named initModule here, otherwise initModule
  * in torch/csrc/Module.cpp will be called, resulting in failure.
  */
-extern "C" PyObject* initOpenRegModule(void) {
+extern "C" OPENREG_EXPORT PyObject* initOpenRegModule(void) {
   static struct PyModuleDef openreg_C_module = {
       PyModuleDef_HEAD_INIT, "torch_openreg._C", nullptr, -1, methods};
   PyObject* mod = PyModule_Create(&openreg_C_module);

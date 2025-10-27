@@ -1,7 +1,8 @@
 # Try to find the Gloo library and headers.
 #  Gloo_FOUND        - system has Gloo lib
 #  Gloo_INCLUDE_DIRS - the Gloo include directory
-#  Gloo_LIBRARY/Gloo_NATIVE_LIBRARY    - libraries needed to use Gloo
+#  Gloo_NATIVE_LIBRARY - base gloo library, needs to be linked
+#  Gloo_CUDA_LIBRARY/Gloo_HIP_LIBRARY - CUDA/HIP support library in Gloo
 
 find_path(Gloo_INCLUDE_DIR
   NAMES gloo/common/common.h
@@ -10,40 +11,32 @@ find_path(Gloo_INCLUDE_DIR
 
 find_library(Gloo_NATIVE_LIBRARY
   NAMES gloo
-  DOC "The Gloo library (without CUDA)"
+  DOC "The Gloo library"
 )
 
+# Gloo has optional CUDA support
+# if Gloo + CUDA is desired, Gloo_CUDA_LIBRARY
+# needs to be linked into desired target
 find_library(Gloo_CUDA_LIBRARY
   NAMES gloo_cuda
-  DOC "The Gloo library (with CUDA)"
+  DOC "Gloo's CUDA support/code"
+)
+
+# Gloo has optional HIP support
+# if Gloo + HIP is desired, Gloo_HIP_LIBRARY
+# needs to be linked to desired target
+find_library(Gloo_HIP_LIBRARY
+  NAMES gloo_hiop
+  DOC "Gloo's HIP support/code"
 )
 
 set(Gloo_INCLUDE_DIRS ${Gloo_INCLUDE_DIR})
 
-# use the CUDA library depending on the Gloo_USE_CUDA variable
-if (DEFINED Gloo_USE_CUDA)
-  if (${Gloo_USE_CUDA})
-    set(Gloo_LIBRARY ${Gloo_CUDA_LIBRARY})
-    set(Gloo_NATIVE_LIBRARY ${Gloo_NATIVE_LIBRARY})
-  else()
-    set(Gloo_LIBRARY ${Gloo_NATIVE_LIBRARY})
-    set(Gloo_NATIVE_LIBRARY ${Gloo_NATIVE_LIBRARY})
-  endif()
-else()
-  # else try to use the CUDA library if found
-  if (${Gloo_CUDA_LIBRARY} STREQUAL "Gloo_CUDA_LIBRARY-NOTFOUND")
-    set(Gloo_LIBRARY ${Gloo_NATIVE_LIBRARY})
-    set(Gloo_NATIVE_LIBRARY ${Gloo_NATIVE_LIBRARY})
-  else()
-    set(Gloo_LIBRARY ${Gloo_CUDA_LIBRARY})
-    set(Gloo_NATIVE_LIBRARY ${Gloo_NATIVE_LIBRARY})
-  endif()
-endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(Gloo
   FOUND_VAR Gloo_FOUND
-  REQUIRED_VARS Gloo_INCLUDE_DIR Gloo_LIBRARY
+  REQUIRED_VARS Gloo_INCLUDE_DIR Gloo_NATIVE_LIBRARY
 )
 
 mark_as_advanced(Gloo_FOUND)

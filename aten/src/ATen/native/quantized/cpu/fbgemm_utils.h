@@ -380,7 +380,7 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
 
   at::Tensor unpack() override;
   static c10::intrusive_ptr<EmbeddingPackedParamsBase> prepack(
-      at::Tensor weight);
+      const at::Tensor& weight);
 
   int64_t bit_rate() const override {
     return bit_rate_;

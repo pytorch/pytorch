@@ -108,24 +108,32 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   enable_ubsan()
 endif()
 
-if(USE_ASAN OR USE_TSAN)
+if(USE_ASAN OR USE_LSAN OR USE_TSAN)
   find_package(Sanitizer REQUIRED)
   if(USE_ASAN)
     if(TARGET Sanitizer::address)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::address)
     else()
-      message(WARNING "Not ASAN found. Suppress this warning with -DUSE_ASAN=OFF.")
+      message(WARNING "ASAN not found. Suppress this warning with -DUSE_ASAN=OFF.")
       caffe2_update_option(USE_ASAN OFF)
     endif()
     if(TARGET Sanitizer::undefined)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::undefined)
     endif()
   endif()
+  if(USE_LSAN)
+    if(TARGET Sanitizer::leak)
+      list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::leak)
+    else()
+      message(WARNING "LSAN not found. Suppress this warning with -DUSE_LSAN=OFF.")
+      caffe2_update_option(USE_LSAN OFF)
+    endif()
+  endif()
   if(USE_TSAN)
     if(TARGET Sanitizer::thread)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::thread)
     else()
-      message(WARNING "Not TSAN found. Suppress this warning with -DUSE_TSAN=OFF.")
+      message(WARNING "TSAN not found. Suppress this warning with -DUSE_TSAN=OFF.")
       caffe2_update_option(USE_TSAN OFF)
     endif()
   endif()
@@ -153,6 +161,7 @@ set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
 set(AT_KLEIDIAI_ENABLED 0)
+set(AT_USE_EIGEN_SPARSE 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -260,7 +269,16 @@ endif()
 # Determine if blas was compiled with the f2c conventions
 if(BLAS_LIBRARIES AND BLAS_CHECK_F2C)
   include(cmake/BLAS_ABI.cmake)
-endif(BLAS_LIBRARIES)
+endif()
+
+if(USE_EIGEN_SPARSE AND BLAS_INFO STREQUAL "mkl")
+  message(WARNING "Disabling USE_EIGEN_SPARSE because MKL is enabled")
+  set(USE_EIGEN_SPARSE OFF)
+endif()
+
+if(USE_EIGEN_SPARSE)
+  set(AT_USE_EIGEN_SPARSE 1)
+endif()
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
@@ -576,7 +594,7 @@ elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   find_library(microkernels-prod_LIBRARY microkernels-prod)
   set_property(TARGET XNNPACK PROPERTY IMPORTED_LOCATION "${XNNPACK_LIBRARY}")
   set_property(TARGET microkernels-prod PROPERTY IMPORTED_LOCATION "${microkernels-prod_LIBRARY}")
-  if(NOT XNNPACK_LIBRARY or NOT microkernels-prod_LIBRARY)
+  if(NOT XNNPACK_LIBRARY OR NOT microkernels-prod_LIBRARY)
     message(FATAL_ERROR "Cannot find XNNPACK")
   endif()
   message("-- Found XNNPACK: ${XNNPACK_LIBRARY}")
@@ -664,55 +682,20 @@ if(USE_FBGEMM)
   if(NOT DEFINED FBGEMM_SOURCE_DIR)
     set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
   endif()
-  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
-    message(WARNING
-      "A compiler with AVX512 support is required for FBGEMM. "
-      "Not compiling with FBGEMM. "
-      "Turn this warning off by USE_FBGEMM=OFF.")
-    set(USE_FBGEMM OFF)
-  endif()
-  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(WARNING
-      "x64 operating system is required for FBGEMM. "
-      "Not compiling with FBGEMM. "
-      "Turn this warning off by USE_FBGEMM=OFF.")
-    set(USE_FBGEMM OFF)
-  endif()
   if(USE_FBGEMM AND NOT TARGET fbgemm)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    if(MSVC AND BUILD_SHARED_LIBS)
-      set(FBGEMM_LIBRARY_TYPE "shared" CACHE STRING "")
-    else()
-      set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
-    endif()
-    if(USE_ASAN)
-      set(USE_SANITIZER "address,undefined" CACHE STRING "-fsanitize options for FBGEMM")
-    endif()
+    set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
-    set_property(TARGET fbgemm_generic PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-    # Disabling autovec in fbgemm due to large library size causing symbol relocation issues, which is only allowed in static builds.
-    # Long-term solution involves modularizing fbgemm targets.
-    target_compile_definitions(fbgemm_generic PUBLIC DISABLE_FBGEMM_AUTOVEC)
-    target_compile_definitions(fbgemm_avx2 PUBLIC DISABLE_FBGEMM_AUTOVEC)
-    target_compile_definitions(fbgemm_avx512 PUBLIC DISABLE_FBGEMM_AUTOVEC)
-
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
-      # See https://github.com/pytorch/pytorch/issues/74352
-      target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
-      target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
-    endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options_if_supported(asmjit -Wno-extra-semi)
       target_compile_options_if_supported(fbgemm -Wno-extra-semi)
     endif()
+    target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
+    target_compile_options_if_supported(asmjit -Wno-unused-variable)
   endif()
   if(USE_FBGEMM)
-    target_compile_definitions(fbgemm PUBLIC DISABLE_FBGEMM_AUTOVEC)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
   endif()
 endif()
@@ -721,9 +704,6 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-  message(WARNING
-    "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
-  caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
 if(USE_OPENCL)
@@ -841,9 +821,9 @@ if(NOT Python_Interpreter_FOUND)
   message(FATAL_ERROR "Python3 could not be found.")
 endif()
 
-if(${Python_VERSION} VERSION_LESS 3.9)
+if(${Python_VERSION} VERSION_LESS 3.10)
   message(FATAL_ERROR
-    "Found Python libraries version ${Python_VERSION}. Python < 3.9 is no longer supported by PyTorch.")
+    "Found Python libraries version ${Python_VERSION}. Python < 3.10 is no longer supported by PyTorch.")
 endif()
 
 # ---[ Python + Numpy
@@ -1033,7 +1013,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
@@ -1044,6 +1023,9 @@ if(USE_ROCM)
     endif()
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
+    endif()
+    if(USE_ROCM_CK_GEMM)
+      list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
     if(WIN32)
@@ -1061,6 +1043,17 @@ if(USE_ROCM)
        list(APPEND HIP_CXX_FLAGS -O0)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
+    # Get EnVar 'USE_LAYERNORM_FAST_RECIPROCAL' (or default to on).
+    if(DEFINED ENV{USE_LAYERNORM_FAST_RECIPROCAL})
+      set(USE_LAYERNORM_FAST_RECIPROCAL $ENV{USE_LAYERNORM_FAST_RECIPROCAL})
+    else()
+      set(USE_LAYERNORM_FAST_RECIPROCAL ON)
+    endif()
+
+    if(USE_LAYERNORM_FAST_RECIPROCAL)
+      add_definitions(-DUSE_LAYERNORM_FAST_RECIPROCAL)
+    endif()
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
@@ -1143,7 +1136,7 @@ if(USE_UCC)
 endif()
 
 # ---[ CUB
-if(USE_CUDA)
+if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   find_package(CUB)
   if(NOT CUB_FOUND)
     message(FATAL_ERROR "Cannot find CUB.")
@@ -1166,17 +1159,10 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-      message(WARNING "Archived TensorPipe forces CMake compatibility mode")
-      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-      unset(CMAKE_POLICY_VERSION_MINIMUM)
-    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
@@ -1242,10 +1228,17 @@ if(USE_GLOO)
       if(NOT Gloo_FOUND)
         message(FATAL_ERROR "Cannot find gloo")
       endif()
-      message("Found gloo: ${Gloo_LIBRARY}")
+      message("Found gloo: ${Gloo_NATIVE_LIBRARY}, cuda lib: ${Gloo_CUDA_LIBRARY}, hip lib: ${Gloo_HIP_LIBRARY}")
       message("Found gloo include directories: ${Gloo_INCLUDE_DIRS}")
       add_library(gloo SHARED IMPORTED)
-      set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${Gloo_LIBRARY})
+      set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${Gloo_NATIVE_LIBRARY})
+      if(USE_CUDA)
+        add_library(gloo_cuda SHARED IMPORTED)
+        set_target_properties(gloo_cuda PROPERTIES IMPORTED_LOCATION ${Gloo_CUDA_LIBRARY})
+      elseif(USE_ROCM)
+        add_library(gloo_hip SHARED IMPORTED)
+        set_target_properties(gloo_hip PROPERTIES IMPORTED_LOCATION ${Gloo_HIP_LIBRARY})
+      endif()
       # need to use Gloo_INCLUDE_DIRS over third_party/gloo to find Gloo's auto-generated config.h
       include_directories(BEFORE SYSTEM ${Gloo_INCLUDE_DIRS})
     endif()
@@ -1558,6 +1551,11 @@ if(NOT INTERN_BUILD_MOBILE)
     if(HAVE_MALLOC_USABLE_SIZE)
       add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
     endif(HAVE_MALLOC_USABLE_SIZE)
+    set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
+    CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
+    if(HAVE_POSIX_FALLOCATE)
+      add_definitions(-DHAVE_POSIX_FALLOCATE=1)
+    endif(HAVE_POSIX_FALLOCATE)
   endif(UNIX)
 
   add_definitions(-DUSE_EXTERNAL_MZCRC)
@@ -1569,6 +1567,12 @@ endif()
 #
 # End ATen checks
 #
+
+# Install `fmtlib` header.
+# This was the default behavior before version 12.0.0.
+# Since PyTorch C API depends on it, make it available for projects that
+# depend on PyTorch.
+set(FMT_INSTALL ON)
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
@@ -1634,38 +1638,7 @@ if(USE_KINETO)
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
 
   if(NOT LIBKINETO_NOCUPTI)
-    set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
-    message(STATUS "  CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
-    message(STATUS "  CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
-
-    if(NOT MSVC)
-      if(USE_CUPTI_SO)
-        set(CUPTI_LIB_NAME "libcupti.so")
-      else()
-        set(CUPTI_LIB_NAME "libcupti_static.a")
-      endif()
-    else()
-      set(CUPTI_LIB_NAME "cupti.lib")
-    endif()
-
-    find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        ${CUDA_SOURCE_DIR}/lib
-        ${CUDA_SOURCE_DIR}/lib64
-        NO_DEFAULT_PATH)
-
-    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_INCLUDE_DIRS}
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/include
-        NO_DEFAULT_PATH)
-
-    if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
-      message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
-      set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
-      message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+    if(TARGET CUDA::cupti)
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
 
@@ -1678,7 +1651,7 @@ if(USE_KINETO)
         if(NOT APPLE)
           set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl" "pthread")
         endif()
-        set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
+        set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} $<LINK_LIBRARY:WHOLE_ARCHIVE,CUDA::cupti_static>)
         check_cxx_source_runs("#include <stdexcept>
   int main() {
     try {
@@ -1691,9 +1664,9 @@ if(USE_KINETO)
         set(CMAKE_REQUIRED_LINK_OPTIONS "")
         if(NOT EXCEPTIONS_WORK)
           message(FATAL_ERROR
-            "Detected that statically linking against CUPTI causes exceptions to stop working. "
-            "See https://github.com/pytorch/pytorch/issues/57744 for more details. "
-            "Perhaps try: USE_CUPTI_SO=1 CMAKE_FRESH=1 python setup.py develop")
+            "Detected that statically linking against CUPTI causes exceptions to stop working.  "
+            "See https://github.com/pytorch/pytorch/issues/57744 for more details.  "
+            "Perhaps try: USE_CUPTI_SO=1 CMAKE_FRESH=1 python -m pip install -e . -v --no-build-isolation")
         endif()
       endif()
 

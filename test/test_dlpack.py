@@ -5,6 +5,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -13,10 +14,14 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocm,
     skipMeta,
 )
-from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.common_dtype import (
+    all_mps_types_and,
+    all_types_and_complex_and,
+)
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
+    skipIfMPS,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -55,6 +60,7 @@ class TestTorchDlPack(TestCase):
             torch.uint64,
         )
     )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat, torch.chalf))
     def test_dlpack_capsule_conversion(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(to_dlpack(x))
@@ -72,6 +78,7 @@ class TestTorchDlPack(TestCase):
             torch.uint64,
         )
     )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat, torch.chalf))
     def test_dlpack_protocol_conversion(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(x)
@@ -80,20 +87,13 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @onlyNativeDeviceTypes
     def test_dlpack_shared_storage(self, device):
-        x = make_tensor((5,), dtype=torch.float64, device=device)
+        dtype = torch.bfloat16 if device.startswith("mps") else torch.float64
+        x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(to_dlpack(x))
         z[0] = z[0] + 20.0
         self.assertEqual(z, x)
 
-    @skipMeta
-    @onlyCUDA
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    def test_dlpack_conversion_with_streams(self, device, dtype):
-        # Create a stream where the tensor will reside
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
-            # Do an operation in the actual stream
-            x = make_tensor((5,), dtype=dtype, device=device) + 1
+    def _dlpack_conversion_with_streams(self, stream, x):
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
@@ -106,7 +106,37 @@ class TestTorchDlPack(TestCase):
         with torch.cuda.stream(stream):
             z = from_dlpack(x)
         stream.synchronize()
+        return z
+
+    @skipMeta
+    @onlyCUDA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_dlpack_conversion_with_streams(self, device, dtype):
+        # Create a stream where the tensor will reside
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            # Do an operation in the actual stream
+            x = make_tensor((5,), dtype=dtype, device=device) + 1
+        z = self._dlpack_conversion_with_streams(stream, x)
         self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyCUDA
+    @dtypes(
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
+    )
+    def test_dlpack_conversion_with_streams_narrow_precision(self, device, dtype):
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+            x = x.view(dtype)
+        z = self._dlpack_conversion_with_streams(stream, x)
+        self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -120,12 +150,14 @@ class TestTorchDlPack(TestCase):
             torch.uint64,
         )
     )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat, torch.chalf))
     def test_from_dlpack(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
         self.assertEqual(x, y)
 
     @skipMeta
+    @skipIfMPS  # MPS crashes with noncontiguous now
     @onlyNativeDeviceTypes
     @dtypes(
         *all_types_and_complex_and(
@@ -178,6 +210,27 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyCUDA
+    @dtypes(
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
+    )
+    def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        with torch.cuda.stream(stream_a):
+            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+            x = x.view(dtype)
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
+
+    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(
         *all_types_and_complex_and(
@@ -189,6 +242,7 @@ class TestTorchDlPack(TestCase):
             torch.uint64,
         )
     )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat, torch.chalf))
     def test_from_dlpack_dtype(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
@@ -329,8 +383,8 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(y.stride(), (3,))
         z = from_dlpack(y)
         self.assertEqual(z.shape, (1,))
-        # gh-83069, make sure __dlpack__ normalizes strides
-        self.assertEqual(z.stride(), (1,))
+        # Stride normalization has been removed, strides should be preserved
+        self.assertEqual(z.stride(), (3,))
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -473,9 +527,7 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @onlyCPU
     def test_dlpack_unsupported_dtype_error(self, device):
-        inp = make_tensor((5,), dtype=torch.float32, device=device).to(
-            torch.float8_e4m3fn
-        )
+        inp = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
 
         with self.assertRaisesRegex(
             BufferError, ".* types are not supported by dlpack"

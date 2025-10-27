@@ -190,7 +190,11 @@ class CppTemplateKernel(CppKernel):
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
-            return f'RECORD_FUNCTION("{prefix}{self.kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+            handle_str = (
+                "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
+            )
+            return handle_str
         else:
             return ""
 
@@ -407,6 +411,7 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
+                    # pyrefly: ignore [bad-argument-type]
                     dst,
                     epilogue_nodes,  # type: ignore[arg-type]
                     offsets,
@@ -418,6 +423,7 @@ class CppTemplateKernel(CppKernel):
                 copy = L.copy(dst, src).data.data
                 with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
+                    # pyrefly: ignore [bad-argument-type]
                     return self.store_pointwise_nodes(dst, [copy])
             else:
                 assert dst.layout == src.layout, f"{dst=}, {src=}"

@@ -64,14 +64,14 @@ def _staged_schema():
                 )
             elif o := typing.get_origin(t):
                 # Lemme know if there's a better way to do this.
-                if o == list:
+                if o is list:
                     yaml_head, cpp_head, thrift_head, thrift_tail = (
                         "List",
                         "std::vector",
                         "list<",
                         ">",
                     )
-                elif o == dict:
+                elif o is dict:
                     yaml_head, cpp_head, thrift_head, thrift_tail = (
                         "Dict",
                         "std::unordered_map",
@@ -81,7 +81,7 @@ def _staged_schema():
                 elif o == Union:
                     assert level == 0, "Optional is only supported at the top level."
                     args = typing.get_args(t)
-                    assert len(args) == 2 and args[1] == type(None)
+                    assert len(args) == 2 and args[1] is type(None)
                     yaml_type, cpp_type, thrift_type = dump_type(args[0], level + 1)
                     return (
                         f"Optional[{yaml_type}]",
@@ -448,6 +448,7 @@ class ForwardRef {{
     ptr_ = std::make_unique<T>(*other.ptr_);
     return *this;
   }}
+  ~ForwardRef();
   const T& operator*() const {{
     return *ptr_;
   }}
@@ -519,6 +520,7 @@ inline void from_json(const nlohmann::json& j, F64& f) {{
 
 template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
 template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
+template <typename T> ForwardRef<T>::~ForwardRef() = default;
 }} // namespace _export
 }} // namespace torch
 """
@@ -621,7 +623,9 @@ class _Commit:
 def update_schema():
     import importlib.resources
 
+    # pyrefly: ignore  # bad-argument-type
     if importlib.resources.is_resource(__package__, "schema.yaml"):
+        # pyrefly: ignore  # bad-argument-type
         content = importlib.resources.read_text(__package__, "schema.yaml")
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", content)
         _check(match is not None, "checksum not found in schema.yaml")
@@ -629,7 +633,9 @@ def update_schema():
         checksum_head = match.group(1)
 
         thrift_content = importlib.resources.read_text(
-            __package__, "export_schema.thrift"
+            # pyrefly: ignore  # bad-argument-type
+            __package__,
+            "export_schema.thrift",
         )
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
         _check(match is not None, "checksum not found in export_schema.thrift")
@@ -652,7 +658,9 @@ def update_schema():
 
     src, cpp_header, thrift_schema = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
+    # pyrefly: ignore  # missing-attribute
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
+    # pyrefly: ignore  # missing-attribute
     thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
     assert yaml_path.startswith(torch_prefix)  # sanity check

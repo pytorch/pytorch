@@ -2,7 +2,6 @@
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/Functions.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 #include <cstddef>
@@ -169,11 +168,9 @@ void CUDAGraph::instantiate() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if !defined(USE_ROCM) || ROCM_VERSION >= 60200
   int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
-#endif
     // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
     // who prefer not to report error message through these arguments moving forward
     // (they prefer return value, or errors on api calls internal to the capture)
@@ -184,13 +181,11 @@ void CUDAGraph::instantiate() {
 #endif
 //Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
 //It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
-#if !defined(USE_ROCM) || ROCM_VERSION >= 60200
   } else {
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch));
   }
-#endif
   has_graph_exec_ = true;
 }
 
@@ -253,6 +248,13 @@ cudaGraph_t CUDAGraph::raw_cuda_graph() {
   return graph_;
 }
 
+cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
+  TORCH_CHECK(
+      has_graph_exec_,
+      "You cannot access the raw cudaGraphExec_t instance until instantiate() has been called");
+  return graph_exec_;
+}
+
 void CUDAGraph::reset() {
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
@@ -305,7 +307,7 @@ CUDAGraph::~CUDAGraph() {
 // There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
 // They wait for next sync point in order to free the memory, this is to ensure that all
 // hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2.
-// We need to ensure all async opreations finish before deleting the object.
+// We need to ensure all async operations finish before deleting the object.
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {

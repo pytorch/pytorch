@@ -10,6 +10,10 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
 from torch._logging import warning_once
+from torch.distributed._local_tensor import (
+    local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
@@ -25,31 +29,22 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
-if not torch._running_with_deploy():
+@torch.library.register_fake("_dtensor::shard_dim_alltoall")
+def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
+    group_size = _get_group_size_by_name(group_name)
+    stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+    group = _resolve_process_group(group_name)
+    group_rank = get_group_rank(group, get_rank())
 
-    @torch.library.register_fake("_dtensor::shard_dim_alltoall")
-    def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-        group_size = _get_group_size_by_name(group_name)
-        stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-        group = _resolve_process_group(group_name)
-        group_rank = get_group_rank(group, get_rank())
-
-        return (
-            torch.cat(stacked_list, dim=gather_dim)
-            .chunk(group_size, dim=shard_dim)[group_rank]
-            .contiguous()
-        )
-
-else:
-    import warnings
-
-    warnings.warn(
-        "PyTorch Distributed functional collectives do not work with torch::deploy."
+    return (
+        torch.cat(stacked_list, dim=gather_dim)
+        .chunk(group_size, dim=shard_dim)[group_rank]
+        .contiguous()
     )
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
-    if mesh.device_type == "cpu":
+    if mesh.device_type == "cpu" and local_tensor_mode() is None:
         # Gloo does not support alltoall, so falling back to allgather + chunk
         warning_once(
             logger,
@@ -176,6 +171,7 @@ def mesh_broadcast(
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
+@maybe_run_for_local_tensor
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
     if pad_size == 0:
         return tensor
@@ -184,6 +180,7 @@ def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tenso
     return torch.nn.functional.pad(tensor, pad)
 
 
+@maybe_run_for_local_tensor
 def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
     if pad_size == 0:
         return tensor

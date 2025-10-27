@@ -296,11 +296,11 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
         for b in range(nbatches):
             for i, r in enumerate(r_offsets):
                 r0, r1 = divmod(r, N)
-                acc = accumulators[b, r0:r0 + Ms, r1:r1 + Ns]
-                for g in range(c_indices[i], c_indices[i+1]):
+                acc = accumulators[b, r0 : r0 + Ms, r1 : r1 + Ns]
+                for g in range(c_indices[i], c_indices[i + 1]):
                     p = p_offsets[g]
                     q0, q1 = divmod(q_offsets[g], N)
-                    acc += blocks[p] @ others[b, q0:q0 + Ks, q1:q1 + Ns]
+                    acc += blocks[p] @ others[b, q0 : q0 + Ks, q1 : q1 + Ns]
 
       where ``Ns = N // meta['SPLIT_N']``, and ``M`` and ``K`` are
       integer multiples of ``Ms`` and ``Ks``, respectively.
@@ -320,11 +320,11 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
                 n = (r % N) // Ns
                 r0, r1 = divmod(r, N)
                 c0, c1 = c_indices[m], c_indices[m + 1]
-                acc = accumulators[b, r0:r0 + Ms, r1:r1 + Ns]
+                acc = accumulators[b, r0 : r0 + Ms, r1 : r1 + Ns]
                 for i, p in enumerate(range(c0, c1)):
                     q = q_offsets[n * c1 + (SPLIT_N - n) * c0 + i]
                     q0, q1 = divmod(q, N)
-                    acc += blocks[p] @ others[b, q0:q0 + Ks, q1:q1 + Ns]
+                    acc += blocks[p] @ others[b, q0 : q0 + Ks, q1 : q1 + Ns]
 
       where ``Ns = N // meta['SPLIT_N']``, and ``M`` and ``K`` are
       integer multiples of ``Ms`` and ``Ks``, respectively.
@@ -385,6 +385,7 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
                 g1 = c_offsets[r + 1]
                 for g in range(g0, g1):
                     p, q = pq[g]
+
                     accumulators[r] += blocks[p] @ others[q]
         else:
             _scatter_mm2(blocks, others, c_offsets, pq, accumulators)
@@ -1296,6 +1297,7 @@ def bsr_dense_addmm(
     assert alpha != 0
 
     def kernel(grid, *sliced_tensors):
+        # pyrefly: ignore  # unsupported-operation
         _bsr_strided_addmm_kernel[grid](
             *ptr_stride_extractor(*sliced_tensors),
             beta,
@@ -1425,6 +1427,7 @@ if has_triton():
 
                 mat1_block = tl.load(
                     mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
+                    # pyrefly: ignore  # index-error
                     mask=mask_k[None, :],
                     other=0.0,
                 )
@@ -1433,6 +1436,7 @@ if has_triton():
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
                     + mat2_row_block_stride * k_offsets[:, None],
+                    # pyrefly: ignore  # index-error
                     mask=mask_k[:, None],
                     other=0.0,
                 )
@@ -1970,6 +1974,7 @@ if has_triton():
         if attn_mask.dtype is not torch.bool:
             check_dtype(f_name, attn_mask, query.dtype)
 
+        # pyrefly: ignore  # not-callable
         sdpa = sampled_addmm(
             attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False
         )
@@ -1981,8 +1986,10 @@ if has_triton():
             )
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         sdpa.values().mul_(scale_factor)
+        # pyrefly: ignore  # not-callable
         sdpa = bsr_softmax(sdpa)
         torch.nn.functional.dropout(sdpa.values(), p=dropout_p, inplace=True)
+        # pyrefly: ignore  # not-callable
         sdpa = bsr_dense_mm(sdpa, value)
         return sdpa
 

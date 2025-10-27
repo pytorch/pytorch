@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
-    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
@@ -46,11 +45,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
     has_triton,
-    HAS_XPU,
+    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -267,9 +266,12 @@ inductor_expected_failures_single_sample["cuda"] = {
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
+        b8,
         f16,
         f32,
         f64,
+        i32,
+        i64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
@@ -284,10 +286,14 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f32, f64},
-    "linalg.eig": {f32, f64},
-    # Double and complex datatype matmul is not supported in oneDNN
-    "byte": {f16, f32},
+    "to_sparse": {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    },  # align with cuda.
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
@@ -295,9 +301,17 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # not implemented for 'Half'
-    "sort": {b8},
-    "argsort": {b8},
+    # [Begin] Incorrect XPU reference due to new driver.
+    "masked.prod": {b8, i32, i64},
+    "masked.amin": {i64},
+    "masked.amax": {i64},
+    "amax": {i64},
+    "amin": {i64},
+    "std": {f64},
+    "var": {f64},
+    "std_mean": {f64},
+    "var_mean": {f64},
+    # [End]
 }
 
 
@@ -641,7 +655,7 @@ inductor_override_kwargs["xpu"] = {
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("nn.functional.embedding_bag", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
-    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
     ("_unsafe_masked_index", f16): {
         "reference_in_float": True,
         "atol": 3e-4,
@@ -676,6 +690,14 @@ inductor_override_kwargs["xpu"] = {
     },
     ("nn.functional.unfold", f16): {
         "reference_in_float": True,
+    },
+    # Reference crash on Intel LTS2 driver.
+    ("nn.functional.interpolate.trilinear", f32): {
+        "check_gradient": False,
+    },
+    # Reference crash on Intel LTS2 driver.
+    ("nn.functional.interpolate.trilinear", f64): {
+        "check_gradient": False,
     },
 }
 if TEST_WITH_ROCM:
@@ -1120,8 +1142,10 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
-    @skipXPUIf(not HAS_XPU, "Skipped! Supported XPU compiler not found")
+    @requires_gpu_and_triton
+    @skipXPUIf(
+        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
+    )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
@@ -1202,7 +1226,7 @@ class TestInductorOpInfo(TestCase):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and not dtype == torch.complex32
+            and dtype != torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 

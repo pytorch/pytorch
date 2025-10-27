@@ -405,9 +405,7 @@ class TestPythonBuiltinOP(JitTestCase):
             def f():
                 x = torch.ones(10, 9, 8, 7, 6)
                 return x{indices}.shape
-            """.format(
-                    indices=indices
-                )
+            """.format(indices=indices)
             )
             test_str = test_str.replace(r"'", r"")
             scope = {}

@@ -13,10 +13,11 @@ import tarfile
 import tempfile
 import threading
 import warnings
+from collections.abc import Callable
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Any, cast, Generic, IO, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -523,7 +524,10 @@ def check_module_version_greater_or_equal(
         if error_if_malformed:
             raise RuntimeError(message) from e
         else:
-            warnings.warn(message + ", but continuing assuming that requirement is met")
+            warnings.warn(
+                message + ", but continuing assuming that requirement is met",
+                stacklevel=2,
+            )
             requirement_is_met = True
 
     return requirement_is_met
@@ -660,6 +664,11 @@ register_package(
     functools.partial(_backend_tag, "xpu"),
     functools.partial(_deserialize, "xpu"),
 )
+register_package(
+    26,
+    functools.partial(_backend_tag, "mtia"),
+    functools.partial(_deserialize, "mtia"),
+)
 
 
 def location_tag(
@@ -781,9 +790,10 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # PyTorchFileWriter only supports ascii filename.
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
+            # pyrefly: ignore  # bad-assignment
             self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
-                torch._C.PyTorchFileWriter(
+                torch._C.PyTorchFileWriter(  # pyrefly: ignore  # no-matching-overload
                     self.file_stream, get_crc32_options(), _get_storage_alignment()
                 )
             )
@@ -1014,7 +1024,8 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 warnings.warn(
                     "Couldn't retrieve source code for container of "
                     "type " + obj.__name__ + ". It won't be checked "
-                    "for correctness upon loading."
+                    "for correctness upon loading.",
+                    stacklevel=2,
                 )
             return ("module", obj, source_file, source)
 
@@ -1125,10 +1136,13 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 
     class PyTorchLegacyPickler(pickle_module.Pickler):
         def persistent_id(self, obj):
-            return persistent_id(obj)
+            return persistent_id(obj)  # noqa: F821
 
     pickler = PyTorchLegacyPickler(f, protocol=pickle_protocol)
     pickler.dump(obj)
+
+    # The class def keeps the persistent_id closure alive, leaking memory.
+    del persistent_id
 
     serialized_storage_keys = sorted(serialized_storages.keys())
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
@@ -1207,10 +1221,14 @@ def _save(
 
     class PyTorchPickler(pickle_module.Pickler):  # type: ignore[name-defined]
         def persistent_id(self, obj):
-            return persistent_id(obj)
+            return persistent_id(obj)  # noqa: F821
 
     pickler = PyTorchPickler(data_buf, protocol=pickle_protocol)
     pickler.dump(obj)
+
+    # The class def keeps the persistent_id closure alive, leaking memory.
+    del persistent_id
+
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
     # .format_version is used to track
@@ -1426,7 +1444,7 @@ def load(
                         "Please file an issue with the following so that we can make "
                         "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
                     )
-            updated_message += message
+            updated_message += "\n\n" + message
         return updated_message + DOCS_MESSAGE
 
     weights_only_not_set = weights_only is None
@@ -1495,6 +1513,7 @@ def load(
                         " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                         " silence this warning)",
                         UserWarning,
+                        stacklevel=2,
                     )
                     if weights_only:
                         raise RuntimeError(
@@ -1514,7 +1533,9 @@ def load(
                     else:
                         shared = False
                     overall_storage = torch.UntypedStorage.from_file(
-                        os.fspath(f), shared, size
+                        os.fspath(f),
+                        shared,
+                        size,
                     )
                 if weights_only:
                     try:
@@ -1594,7 +1615,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             warnings.warn(
                 "Couldn't retrieve source code for container of "
                 "type " + container_type.__name__ + ". It won't be checked "
-                "for correctness upon loading."
+                "for correctness upon loading.",
+                stacklevel=2,
             )
             return
         if original_source != current_source:
@@ -1636,7 +1658,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     "patch tool to revert the changes."
                 )
             msg = f"source code of class '{torch.typename(container_type)}' has changed. {msg}"
-            warnings.warn(msg, SourceChangeWarning)
+            warnings.warn(msg, SourceChangeWarning, stacklevel=2)
 
     def legacy_load(f):
         deserialized_objects: dict[int, Any] = {}
@@ -1940,6 +1962,7 @@ def _load(
             "torch.serialization.set_default_load_endianness to set "
             "the desired default load endianness",
             UserWarning,
+            stacklevel=2,
         )
 
     from torch.utils.serialization import config

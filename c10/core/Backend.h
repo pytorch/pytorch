@@ -223,7 +223,7 @@ inline DispatchKey backendToDispatchKey(Backend b) {
     case Backend::PrivateUse1:
       return DispatchKey::PrivateUse1;
     default:
-      throw std::runtime_error("Unknown backend");
+      TORCH_CHECK(false, "Unknown backend");
   }
 }
 
@@ -237,8 +237,6 @@ inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CPU;
     case Backend::CUDA:
     case Backend::SparseCUDA:
-    case Backend::SparseMPS:
-    case Backend::SparseCsrMPS:
     case Backend::QuantizedCUDA:
     case Backend::SparseCsrCUDA:
       return DeviceType::CUDA;
@@ -276,6 +274,8 @@ inline DeviceType backendToDeviceType(Backend b) {
     case Backend::Meta:
       return DeviceType::Meta;
     case Backend::MPS:
+    case Backend::SparseMPS:
+    case Backend::SparseCsrMPS:
       return DeviceType::MPS;
     case Backend::HPU:
       return DeviceType::HPU;

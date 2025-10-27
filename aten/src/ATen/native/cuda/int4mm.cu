@@ -1,4 +1,4 @@
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -127,13 +127,13 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
-#if defined (__gfx90a__) || defined(__gfx942__)
+#if defined (__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
 #define CDNA2_OR_LATER 1
 #else
 #define CDNA2_OR_LATER 0
 #endif
 
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 
 #if defined(USE_ROCM)
 // TODO: Support RDNA
@@ -143,7 +143,7 @@ template<typename T, uint32_t Rank>
 using VecT = T __attribute__((ext_vector_type(Rank)));
 
 static bool isCDNA2orLater(int index) {
-    return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942"}, index);
+    return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942", "gfx950"}, index);
 }
 
 #else
@@ -1161,7 +1161,7 @@ at::Tensor _weight_int4pack_mm_cuda(
   auto C_final = at::empty(
       {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
   auto stream = at::cuda::getCurrentCUDAStream();
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
   do {                                                               \
@@ -1304,7 +1304,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   constexpr int32_t kKTileSize = 16;
 
   // GPT-FAST assumes nTileSize of 8 for quantized weight tensor.
-  // See https://github.com/pytorch-labs/gpt-fast/blob/091515ab5b06f91c0d6a3b92f9c27463f738cc9b/quantize.py#L510
+  // See https://github.com/meta-pytorch/gpt-fast/blob/091515ab5b06f91c0d6a3b92f9c27463f738cc9b/quantize.py#L510
   // Torch dynamo also requires the torch ops has the same output shape for each device.
   // See https://github.com/pytorch/pytorch/blob/ec284d3a74ec1863685febd53687d491fd99a161/torch/_meta_registrations.py#L3263
   constexpr int32_t kNTileSizeTensor = 8;
@@ -1327,7 +1327,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
       {nTilesTensor, kSuperTiles, 32, innerKTiles / 2},
       at::TensorOptions().dtype(at::kInt).device(in.device()));
 
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(kSuperTiles, nTiles);
 

@@ -70,9 +70,13 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
-        if (mat1.shape[1] < max_other_dimension_decomposition) + (
-            mat1.shape[2] < max_other_dimension_decomposition
-        ) + (mat2.shape[2] < max_other_dimension_decomposition) < 2:
+        # use bool() to deal with BooleanAtom type
+        if (
+            bool(mat1.shape[1] < max_other_dimension_decomposition)
+            + bool(mat1.shape[2] < max_other_dimension_decomposition)
+            + bool(mat2.shape[2] < max_other_dimension_decomposition)
+            < 2
+        ):
             return False
         return True
     elif check_device(mat1, mat2, device="cpu"):
@@ -221,6 +225,7 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
 
     if should_decompose_bmm(mat1, mat2):
         counters["inductor"]["decompose_bmm"] += 1
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
         realize_inputs([mat1, mat2])
@@ -244,6 +249,7 @@ def decompose_addmm(
 
     if should_decompose_mm(mat2, mat3):
         counters["inductor"]["decompose_addmm"] += 1
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2, mat3])
         print_decompose_pattern(match, [mat1, mat2, mat3])
         realize_inputs([mat1, mat2, mat3])
@@ -264,6 +270,7 @@ def decompose_mm(
 
     if should_decompose_mm(mat1, mat2):
         counters["inductor"]["decompose_mm"] += 1
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
         realize_inputs([mat1, mat2])

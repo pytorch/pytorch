@@ -2,12 +2,9 @@ import enum
 import types
 from typing import Optional, overload
 
-from torch._dynamo.types import (
-    DynamoCallback,
-    DynamoGuardCompleteHook,
-    DynamoGuardHook,
-    GuardFn,
-)
+from torch._dynamo.guards import GuardManagerWrapper
+from torch._dynamo.types import DynamoCallback, DynamoGuardCompleteHook, DynamoGuardHook
+from torch._guards import CompileId
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def set_skip_guard_eval_unsafe(value: bool) -> bool: ...
@@ -25,14 +22,20 @@ def raise_sigtrap() -> None: ...
 
 class _CacheEntry:
     def check_fn(self, *args: object, **kwargs: object) -> bool: ...
+    def update_diff_guard_root_manager(self) -> None: ...
     code: types.CodeType
+    compile_id: CompileId
+    # If we run into circular issues, just use object
+    guard_manager: GuardManagerWrapper
     next: _CacheEntry | None
 
 class _PrecompileEntry:
-    guard_manager: GuardFn
+    guard_manager: GuardManagerWrapper
 
 class _ExtraState:
-    def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
+    def invalidate(
+        self, cache_entry: _CacheEntry, guard_manager: GuardManagerWrapper
+    ) -> None: ...
 
 class _FrameAction(enum.IntEnum):
     DEFAULT = 0
@@ -69,7 +72,9 @@ py_opcode_caches: list[int]
 
 def code_framelocals_names(code: types.CodeType) -> tuple[str]: ...
 def _load_precompile_entry(
-    code: types.CodeType, guard_manager: GuardFn, dynamo_code: types.CodeType
+    code: types.CodeType,
+    guard_manager: GuardManagerWrapper,
+    dynamo_code: types.CodeType,
 ) -> None: ...
 def _reset_precompile_entries(code: types.CodeType) -> None: ...
 def _debug_get_precompile_entries(code: types.CodeType) -> list[_PrecompileEntry]: ...

@@ -5,8 +5,7 @@ import enum
 import itertools as it
 import logging
 from collections.abc import Iterator
-from typing import Any, cast, Optional, Union
-from typing_extensions import Literal
+from typing import Any, cast, Literal, Optional, Union
 
 import torch
 from torch._C import FunctionSchema
@@ -231,6 +230,7 @@ class SchemaMatcher:
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
+                # pyrefly: ignore  # unsupported-operation
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
         return tuple(mutable or (None for _ in t.inputs))
@@ -239,10 +239,12 @@ class SchemaMatcher:
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> tuple[FunctionSchema, ...]:
         signature = tuple(
             # Tensor
-            TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
+            TensorKey.from_tensor(i)
+            if isinstance(i, _TensorMetadata)
             #
             # TensorList
-            else [TensorKey.from_tensor(j) for j in i] if isinstance(i, list)
+            else [TensorKey.from_tensor(j) for j in i]
+            if isinstance(i, list)
             #
             # Scalar and uncaptured inputs.
             else i
@@ -670,6 +672,7 @@ class MemoryProfile:
         output: list[tuple[int, Action, KeyAndID, int]] = []
         allocation_times: dict[tuple[TensorKey, bool], int] = {}
         live_unknown: dict[tuple[int, torch.device], Literal[True]] = {}
+
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
@@ -776,6 +779,7 @@ class MemoryProfile:
 
                 if ids:
                     depends_on_gradient.update(ids)
+
                     depends_on_gradient.update(key.id for key in node.outputs)
 
             # We are guaranteed to exit because there is a finite set of
@@ -1080,6 +1084,7 @@ class MemoryProfileTimeline:
 
             if action in (Action.PREEXISTING, Action.CREATE):
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1090,6 +1095,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.INCREMENT_VERSION:
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1098,6 +1104,7 @@ class MemoryProfileTimeline:
                     )
                 )
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1108,6 +1115,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.DESTROY:
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],

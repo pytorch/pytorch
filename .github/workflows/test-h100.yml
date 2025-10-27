@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - .github/workflows/test-h100.yml
+      - test/inductor/test_max_autotune.py
+      - torch/_inductor/kernel/mm.py
+      - torch/_inductor/kernel/mm_grouped.py
+
   workflow_dispatch:
   schedule:
     - cron: 0 4,10,16,22 * * *  # every 6 hours
@@ -56,4 +60,16 @@ jobs:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test:
+    name: linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test
+    uses: ./.github/workflows/_linux-test-stable-fa3.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
+      timeout-minutes: 30
+      s3-bucket: gha-artifacts
     secrets: inherit

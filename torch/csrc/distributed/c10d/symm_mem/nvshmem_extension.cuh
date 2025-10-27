@@ -21,24 +21,29 @@ TORCH_API bool is_nvshmem_available();
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
 
-TORCH_API void nvshmem_put(at::Tensor& tensor, int64_t peer);
+TORCH_API void nvshmem_put(at::Tensor& tensor, const int64_t peer);
 
-TORCH_API void nvshmem_get(at::Tensor& tensor, int64_t peer);
+TORCH_API void nvshmem_get(at::Tensor& tensor, const int64_t peer);
 
-at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
+at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name);
+
+TORCH_API void nvshmem_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer);
+
+TORCH_API void nvshmem_put_with_signal(at::Tensor& tensor, at::Tensor& sigpad, int64_t signal, int64_t peer);
 
 at::Tensor nvshmem_all_to_all(
     at::Tensor& input,
     at::Tensor& out,
     std::string group_name);
 
-at::Tensor all_to_all_vdev(
+void all_to_all_vdev(
     at::Tensor& input,
     at::Tensor& out,
-    at::Tensor& in_out_splits,
+    at::Tensor& in_splits,
+    at::Tensor& out_splits_offsets,
     std::string group_name);
 
-at::Tensor all_to_all_vdev_2d(
+void all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_splits,
@@ -46,11 +51,25 @@ at::Tensor all_to_all_vdev_2d(
     std::string group_name,
     std::optional<int64_t> major_align = std::nullopt);
 
-at::Tensor all_to_all_vdev_2d_offset(
+void all_to_all_vdev_2d_offset(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_splits_offsets,
     at::Tensor& out_splits_offsets,
     std::string group_name);
+
+void tile_reduce(
+    at::Tensor& in_tile,
+    at::Tensor& out_tile,
+    int64_t root,
+    std::string group_name,
+    std::string reduce_op = "sum");
+
+void multi_root_tile_reduce(
+    at::ArrayRef<at::Tensor> in_tiles,
+    at::Tensor& out_tile,
+    at::ArrayRef<int64_t> roots,
+    std::string group_name,
+    std::string reduce_op = "sum");
 
 } // namespace c10d::nvshmem_extension

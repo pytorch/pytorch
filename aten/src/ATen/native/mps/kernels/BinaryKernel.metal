@@ -39,6 +39,13 @@ struct lerp_alpha_functor {
   }
 };
 
+struct native_dropout_mask_and_scale_functor {
+  template <typename TI, typename TA>
+  inline TA operator()(const TI a, const TI b, const TA scale) {
+    return static_cast<TA>(a) * static_cast<TA>(b) * scale;
+  }
+};
+
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -209,38 +216,16 @@ struct hermite_polynomial_he_functor {
 };
 
 struct nextafter_functor {
-#if __METAL_VERSION__ < 310
-  template <typename U>
-  struct bit_type {};
-  template <>
-  struct bit_type<float> {
-    using type = int;
-  };
-  template <>
-  struct bit_type<half> {
-    using type = short;
-  };
-#endif
   template <typename T>
   inline T operator()(const T a, const T b) {
-#if __METAL_VERSION__ >= 310
     return static_cast<T>(::metal::nextafter(a, b));
-#else
-    using U = typename bit_type<T>::type;
-    if (a == b) {
-      return a;
-    }
-    if (::metal::isunordered(a, b)) {
-      return NAN;
-    }
-    if (a == 0) {
-      constexpr auto eps = as_type<T>(static_cast<U>(1));
-      return b > 0 ? eps : -eps;
-    }
-    auto bits = as_type<U>(a);
-    (a > 0) ^ (a > b) ? bits++ : bits--;
-    return as_type<T>(bits);
-#endif
+  }
+};
+
+struct hypot_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
   }
 };
 
@@ -344,12 +329,19 @@ struct fmod_functor {
   }
 };
 
-// Some helper defines
-#if __METAL_VERSION__ >= 310
-#define _METAL_310_PLUS(x) x
-#else
-#define _METAL_310_PLUS(x)
-#endif
+struct igamma_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::igamma(a, b);
+  }
+};
+
+struct igammac_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::igammac(a, b);
+  }
+};
 
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
@@ -370,13 +362,14 @@ struct fmod_functor {
 #define REGISTER_FLOAT_BINARY_OP(NAME)    \
   REGISTER_BINARY_OP(NAME, float, float); \
   REGISTER_BINARY_OP(NAME, half, half);   \
-  _METAL_310_PLUS(REGISTER_BINARY_OP(NAME, bfloat, bfloat))
+  REGISTER_BINARY_OP(NAME, bfloat, bfloat)
 
 #define REGISTER_OPMATH_FLOAT_BINARY_OP(NAME)    \
   REGISTER_OPMATH_BINARY_OP(NAME, float, float); \
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
-  _METAL_310_PLUS(REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat))
+  REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
 
+REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(copysign);
 REGISTER_INT2FLOAT_BINARY_OP(copysign);
 REGISTER_FLOAT_BINARY_OP(fmax);
@@ -422,6 +415,8 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(remainder);
 REGISTER_INTEGER_BINARY_OP(remainder);
 REGISTER_OPMATH_FLOAT_BINARY_OP(fmod);
 REGISTER_INTEGER_BINARY_OP(fmod);
+REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
+REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
@@ -447,11 +442,13 @@ REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
-#if __METAL_VERSION__ >= 310
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, float, float, float);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, half, half, half);
+
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
-#endif
 
 // Complex binary functions
 REGISTER_BINARY_OP(polar, float, float2);

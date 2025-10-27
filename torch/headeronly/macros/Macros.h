@@ -259,7 +259,8 @@ using namespace c10::xpu;
 // to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || \
+    __CUDA_ARCH__ == 1200
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -358,6 +359,7 @@ static inline int C10_WARP_SIZE_INTERNAL() {
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)
 #define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
@@ -394,6 +396,26 @@ __host__ __device__
                _CRT_WIDE(__FILE__),              \
                static_cast<unsigned>(__LINE__)), \
            0);                                   \
+  }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                     \
+  if (C10_UNLIKELY(!(cond))) {                                        \
+    (void)(printf(                                                    \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(           \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: " \
+                      "Assertion failed: `" #cond "`: " msg "\n",     \
+        __func__,                                                     \
+        blockIdx.x,                                                   \
+        blockIdx.y,                                                   \
+        blockIdx.z,                                                   \
+        threadIdx.x,                                                  \
+        threadIdx.y,                                                  \
+        threadIdx.z,                                                  \
+        ##__VA_ARGS__));                                              \
+    (void)(_wassert(                                                  \
+               _CRT_WIDE(#cond),                                      \
+               _CRT_WIDE(__FILE__),                                   \
+               static_cast<unsigned>(__LINE__)),                      \
+           0);                                                        \
   }
 #define SYCL_KERNEL_ASSERT(cond)                 \
   if (C10_UNLIKELY(!(cond))) {                   \
@@ -454,6 +476,10 @@ __host__ __device__
   if C10_UNLIKELY (!(cond)) {             \
     abort();                              \
   }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...) \
+  if C10_UNLIKELY (!(cond)) {                     \
+    abort();                                      \
+  }
 #define SYCL_KERNEL_ASSERT(cond) \
   if C10_UNLIKELY (!(cond)) {    \
     abort();                     \
@@ -468,6 +494,23 @@ __host__ __device__
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
         msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                        \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    printf(                                                            \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(            \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "  \
+            "Assertion failed: `" #cond "`: " msg "\n",                \
+        __func__,                                                      \
+        blockIdx.x,                                                    \
+        blockIdx.y,                                                    \
+        blockIdx.z,                                                    \
+        threadIdx.x,                                                   \
+        threadIdx.y,                                                   \
+        threadIdx.z,                                                   \
+        ##__VA_ARGS__); \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
 #define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
@@ -566,6 +609,61 @@ __host__ __device__
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 1
 #else
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 0
+#endif
+
+// The HIDDEN_NAMESPACE_BEGIN and HIDDEN_NAMESPACE_END below
+// are needed for maintaining robustness in our header APIs in
+// torch/headeronly and torch/csrc/stable under the namespaces
+// torch::headeronly and torch::stable respectively. We enforce
+// hidden visibility for these APIs because we want to enable
+// loading custom extensions compiled against different libtorch
+// versions where these APIs may have changed.
+
+// Helper macros to handle 1-3 hidden namespace levels when not windows
+#define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+#define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden"))) {
+#define _HIDDEN_NS_2(n1, n2) \
+  namespace n1 {             \
+  namespace n2 __attribute__((visibility("hidden"))) {
+#define _HIDDEN_NS_3(n1, n2, n3) \
+  namespace n1::n2 {             \
+  namespace n3 __attribute__((visibility("hidden"))) {
+
+// Helper macros to close namespaces when not windows
+#define _HIDDEN_NS_END_1(n1) }
+#define _HIDDEN_NS_END_N(n1, ...) \
+  }                               \
+  }
+
+// Helper macros to join strs with :: (for win, where symbols are hidden by
+// default)
+#define _EXPAND(...) __VA_ARGS__
+#define _JOIN_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+#define _JOIN_NS1(a) a
+#define _JOIN_NS2(a, b) a::b
+#define _JOIN_NS3(a, b, c) a::b::c
+
+#if !defined(HIDDEN_NAMESPACE_BEGIN)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_BEGIN(...) \
+  _HIDDEN_NS_GET_MACRO(             \
+      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__)
+#else
+#define HIDDEN_NAMESPACE_BEGIN(...)  \
+  namespace _EXPAND(_JOIN_GET_MACRO( \
+      __VA_ARGS__, _JOIN_NS3, _JOIN_NS2, _JOIN_NS1)(__VA_ARGS__)) {
+#endif
+#endif
+
+#if !defined(HIDDEN_NAMESPACE_END)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_END(...)                                         \
+  _HIDDEN_NS_GET_MACRO(                                                   \
+      __VA_ARGS__, _HIDDEN_NS_END_N, _HIDDEN_NS_END_N, _HIDDEN_NS_END_1)( \
+      __VA_ARGS__)
+#else
+#define HIDDEN_NAMESPACE_END(...) }
+#endif
 #endif
 
 #endif // C10_MACROS_MACROS_H_

@@ -4,6 +4,7 @@
 # Skip do not assign a lambda expression, use a def
 import functools
 import logging
+import os
 
 import torch
 import torch._dynamo.testing
@@ -31,7 +32,12 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+    HAS_XPU_AND_TRITON,
+)
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
 # Defines all the kernels for tests
@@ -47,7 +53,7 @@ if HAS_GPU:
     import triton
     from triton import language as tl
 
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         try:
             from triton.language.extra.libdevice import (  # @manual
                 fast_dividef,
@@ -58,7 +64,7 @@ if HAS_GPU:
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
-    elif HAS_XPU:
+    elif HAS_XPU_AND_TRITON:
         from triton.language.extra.intel.libdevice import (  # @manual
             fast_dividef,
             fast_dividef as my_fast_dividef,
@@ -77,6 +83,12 @@ if HAS_GPU:
     STRING_CONSTANT_C: tl.constexpr = tl.constexpr("CONSTANT_C")
     BOOL_CONSTANT_C: tl.constexpr = tl.constexpr(True)
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
+
+    if hasattr(triton, "constexpr_function"):
+
+        @triton.constexpr_function
+        def log2(n):
+            return len(bin(n)) - 3
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -1269,8 +1281,11 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
+    @common_utils.parametrize("dump_launch_params", ["0", "1"])
     @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_equal_to_1_arg(self, dynamic):
+    def test_triton_kernel_equal_to_1_arg(self, dynamic, dump_launch_params):
+        os.environ["TORCHINDUCTOR_DUMP_LAUNCH_PARAMS"] = dump_launch_params
+
         @triton.jit
         def add_kernel_half_n_elements(
             in_ptr0,
@@ -1376,6 +1391,39 @@ def forward(self, x_1, output_1):
         eager_out = f(x)
         compiled_out = torch.compile(f)(x)
 
+        self.assertEqual(compiled_out, eager_out)
+
+    @unittest.skipIf(
+        not HAS_GPU or not hasattr(triton, "constexpr_function"),
+        "newer triton version required",
+    )
+    def test_triton_kernel_with_constexpr_function(self):
+        @triton.jit
+        def kernel(x_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+
+            FIRST_DIM: tl.constexpr = x.shape[0]
+            output = x + log2(FIRST_DIM)
+            tl.store(output_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.zeros_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            kernel[grid](x, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(16, device=GPU_TYPE)
+        eager_out = f(x)
+        compiled_out, (triton_code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x
+        )
+
+        self.assertIn("@triton.constexpr_function", triton_code)
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -2195,7 +2243,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, eager_out)
 
     # TODO enable this test case on XPU.
-    @requires_cuda
+    @requires_cuda_and_triton
     @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
@@ -2518,6 +2566,52 @@ def forward(self, arg0_1, arg1_1):
         actual = fn(inp)
         expected = torch.compile(fn, fullgraph=True)(inp)
         self.assertEqual(actual, expected)
+
+    @requires_gpu
+    @inductor_config.patch("emulate_precision_casts", True)
+    def test_triton_kernel_emulate_precision_unaffected(self):
+        @triton.jit
+        def triton_(in_ptr, out_ptr, numel, add_amount, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            x = tl.load(in_ptr + offsets, mask=(offsets < numel))
+            output = x * x
+            if add_amount is not None:
+                output = output + add_amount
+            tl.store(out_ptr + offsets, output, mask=(offsets < numel))
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            grid = (1,)
+            triton_[grid](x, y, x.numel(), None, BLOCK_SIZE)
+            return y
+
+        t1 = torch.rand(5, device=GPU_TYPE)
+        fn = torch.compile(fn)
+        _, (code,) = run_and_get_code(fn, t1)
+        self.assertTrue("enable_fp_fusion" not in code)
+
+    @requires_gpu
+    @inductor_config.patch("emulate_precision_casts", True)
+    @inductor_config.patch("max_autotune_gemm_backends", "TRITON")
+    def test_triton_kernel_emulate_precision_mm_kernels_do_not_change(self):
+        from torch._inductor.utils import run_and_get_code
+
+        @torch.compile(mode="max-autotune")
+        def fn(a, b):
+            return a @ b
+
+        t1 = torch.rand(512, 512, device=GPU_TYPE)
+        t2 = torch.rand(512, 512, device=GPU_TYPE)
+        try:
+            _, (code,) = run_and_get_code(fn, t1, t2)
+            self.assertTrue("enable_fp_fusion" not in code)
+        except Exception as e:
+            if "NoValidChoicesError" in str(e):
+                raise unittest.SkipTest(
+                    "where inductor has no triton mm kernels available, this test is meaningless"
+                ) from e
+            raise
 
 
 def make_mutation_test(fn):
@@ -2911,7 +3005,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            for i in range(0, BLOCK_SIZE):
+            for i in range(BLOCK_SIZE):
                 i = tl.multiple_of(i, 1)
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
@@ -3066,7 +3160,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(x_block_ptr)
 
             # Compute gating
-            for c2 in range(0, tl.cdiv(C2, BLOCK_SIZE_C2)):
+            for c2 in range(tl.cdiv(C2, BLOCK_SIZE_C2)):
                 # Compute block pointers
                 offs_c2 = c2 * BLOCK_SIZE_C2 + tl.arange(0, BLOCK_SIZE_C2)
                 o_block_ptr = O_ptr + offs_m[:, None] * C2 + offs_c2[None, :]
@@ -3577,6 +3671,40 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         code = "\n".join(codes[0])
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
+
+    @requires_gpu
+    def test_subclass(self):
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+                capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+
+            return output
+
+        def f(x, y):
+            return add(x, y)
+
+        x0 = torch.randn(3, device=GPU_TYPE)
+        y0 = torch.randn(3, device=GPU_TYPE)
+        x1 = torch.randn(3, device=GPU_TYPE)
+        y1 = torch.randn(3, device=GPU_TYPE)
+
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        x = TwoTensor(x0, x1)
+        y = TwoTensor(y0, y1)
+
+        out = torch.compile(f, fullgraph=True)(x, y)
+        expected = f(x, y)
+        self.assertEqual(out.a, expected.a)
+        self.assertEqual(out.b, expected.b)
 
     @requires_gpu
     @dynamo_config.patch("recompile_limit", 1)

@@ -812,7 +812,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
 
   auto is_input_qint8 = input.scalar_type() == c10::ScalarType::QInt8;
   auto input_contig = input.expect_contiguous();
-  auto& w = *(weight_.get());
+  auto& w = *weight_;
   auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
   auto input_dims = {M, K};
   auto input_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
@@ -955,7 +955,10 @@ static at::Tensor fp8_qlinear_onednn_ref(
   std::vector<int64_t> w_scales_new_shape(weight.dim(), 1);
   w_scales_new_shape[0] = -1;
   auto dqw = weight.to(at::kFloat) * weight_scales.reshape(w_scales_new_shape);
-  auto y_f32 = at::linear(dqx, dqw, bias);
+  auto y_f32 = at::linear(dqx, dqw);
+  if (bias.has_value()) {
+      y_f32 += bias.value().to(at::kFloat);
+  }
   if (binary_post_op == "none") {
     if (unary_post_op == "relu") {
       at::relu_(y_f32);
@@ -1009,6 +1012,12 @@ static at::Tensor fp8_qlinear_onednn_ref(
           "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op sum");
     }
     y_f32.div_(output_scale);
+    if (x1.scalar_type() == c10::kFloat8_e4m3fn) {
+      // Avoid NaN
+      y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
+      // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
+      y_f32 = y_f32.to(at::kHalf);
+    }
     x1.copy_(y_f32.to(x1.scalar_type()).view(x1.sizes()));
     return x1;
   } else if (binary_post_op == "add") {
@@ -1035,6 +1044,12 @@ static at::Tensor fp8_qlinear_onednn_ref(
   y_f32.div_(output_scale);
   y_f32 = y_f32.view(output_size);
   auto out_dtype = output_dtype.has_value() ? output_dtype.value() : at::kFloat8_e4m3fn;
+  if (out_dtype == at::kFloat8_e4m3fn) {
+    // Avoid NaN
+    y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
+    // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
+    return y_f32.to(at::kHalf).to(out_dtype);
+  }
   return y_f32.to(out_dtype);
 }
 
@@ -1115,7 +1130,7 @@ static at::Tensor linear_int8_with_onednn_weight(
 #if defined(__powerpc__)
   if (is_fp8) {
 #else
-  if(is_fp8 && !cpuinfo_has_x86_amx_int8()) {
+  if(is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
 #endif
     // Fall back to ref impl on old platforms because not supported
     // Transpose weight to align with behavior in oneDNN
@@ -1152,12 +1167,13 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
+  auto out_dtype = output_dtype.has_value() ? output_dtype.value() : input.scalar_type();
   at::Tensor output = binary_post_op == "sum" ?
       other.value() :
       at::empty(
         dst_dims,
         at::device(c10::kCPU)
-            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : input.scalar_type()))
+            .dtype(out_dtype)
       );
   if (output.numel() == 0) {
     return output;
@@ -1192,6 +1208,16 @@ static at::Tensor linear_int8_with_onednn_weight(
     unary_post_op_args,
     unary_post_op_algorithm
   );
+  // Avoid NaN if output dtype is fp8
+  if (out_dtype == c10::kFloat8_e4m3fn) {
+    // To avoid NaN, we need to clamp the intermediate results (in fp32) to [-488, 488]
+    // before converting to fp8
+    auto post_ops = op_attr.get_post_ops();
+    post_ops.append_eltwise(dnnl::algorithm::eltwise_linear, 1.0/output_scale, 0.0);
+    post_ops.append_eltwise(dnnl::algorithm::eltwise_clip, -FP8E4M3_MAX, FP8E4M3_MAX);
+    op_attr.set_post_ops(post_ops);
+    output_scale = 1.0f;
+  }
   if (input_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
   }
@@ -1362,7 +1388,7 @@ namespace at::native {
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
         "onednn int8 linear: act scale/zp size should be 1/<=1");
     static std::optional<at::Tensor> other = std::nullopt;
-    static const std::string_view binary_post_op = "none";
+    constexpr std::string_view binary_post_op = "none";
     int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zp,

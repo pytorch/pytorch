@@ -5,7 +5,15 @@ set -ex
 # cuSPARSELt license: https://docs.nvidia.com/cuda/cusparselt/license.html
 mkdir tmp_cusparselt && cd tmp_cusparselt
 
-if [[ ${CUDA_VERSION:0:4} =~ ^12\.[5-9]$ ]]; then
+if [[ ${CUDA_VERSION:0:4} =~ "13" ]]; then
+    arch_path='sbsa'
+    export TARGETARCH=${TARGETARCH:-$(uname -m)}
+    if [ ${TARGETARCH} = 'amd64' ] || [ "${TARGETARCH}" = 'x86_64' ]; then
+        arch_path='x86_64'
+    fi
+    CUSPARSELT_NAME="libcusparse_lt-linux-${arch_path}-0.8.0.4_cuda13-archive"
+    curl --retry 3 -OLs https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-${arch_path}/${CUSPARSELT_NAME}.tar.xz
+elif [[ ${CUDA_VERSION:0:4} =~ ^12\.[5-9]$ ]]; then
     arch_path='sbsa'
     export TARGETARCH=${TARGETARCH:-$(uname -m)}
     if [ ${TARGETARCH} = 'amd64' ] || [ "${TARGETARCH}" = 'x86_64' ]; then

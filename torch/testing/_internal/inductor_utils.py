@@ -13,6 +13,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
+from torch._inductor.utils import OrderedSet
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.custom_graph_pass import CustomGraphModulePass
 from torch._inductor.codegen.common import (
@@ -69,13 +70,13 @@ else:
     TRITON_HAS_CPU = False
 
 
-HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
+HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
-HAS_XPU = torch.xpu.is_available() and HAS_TRITON
+HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA or HAS_XPU
+HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
 
 GPU_TYPE = get_gpu_type()
 
@@ -163,16 +164,16 @@ skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
 
 IS_A100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_CUDA_AND_TRITON
     and get_gpu_shared_memory() == 166912
 )
 
 IS_H100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_CUDA_AND_TRITON
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA_AND_TRITON and is_big_gpu())
 
 def dummy_graph() -> GraphLowering:
     """
@@ -306,6 +307,24 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
+class MockGraphHandler(GraphLowering):
+    """Minimal mock graph handler for testing virtualized context."""
+
+    def __init__(self, name_to_buffer=None):
+        import torch._inductor.sizevars
+
+        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
+        self.name_to_buffer = name_to_buffer or {}
+        self.graph_inputs = {}
+        self.mutated_buffers = OrderedSet()
+        self.removed_buffers = OrderedSet()
+        self.constants = {}
+        self.scheduler = None
+
+    def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
+        """Return default dtype for any buffer (for testing)."""
+        return torch.float32
+
 @contextlib.contextmanager
 def patch_inductor_backend(
     device: str,
@@ -323,6 +342,7 @@ def patch_inductor_backend(
     original_scheduling = get_scheduling_for_device(device)
     original_python_wrapper = get_wrapper_codegen_for_device(device, False)
     original_cpp_wrapper = get_wrapper_codegen_for_device(device, True)
+    original_fx_wrapper = get_wrapper_codegen_for_device(device, fx_wrapper=True)
     original_custom_pass = get_custom_backend_pass_for_device(device)
     original_custom_backend_config = get_custom_backend_config_for_device(device)
 
@@ -333,6 +353,7 @@ def patch_inductor_backend(
             original_scheduling,
             python_wrapper_codegen if python_wrapper_codegen is not None else original_python_wrapper,
             original_cpp_wrapper,
+            original_fx_wrapper,
             custom_pass if custom_pass is not None else original_custom_pass,
             custom_backend_config if custom_backend_config is not None else original_custom_backend_config
         )
@@ -344,6 +365,7 @@ def patch_inductor_backend(
             original_scheduling,
             original_python_wrapper,
             original_cpp_wrapper,
+            original_fx_wrapper,
             original_custom_pass,
             original_custom_backend_config
         )

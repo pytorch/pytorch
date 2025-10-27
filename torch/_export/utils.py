@@ -9,16 +9,17 @@ import math
 import operator
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
+from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
@@ -211,6 +212,29 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
     return params_buffers_to_node_meta
 
 
+def _maybe_find_pre_dispatch_tf_mode_for_export():
+    if not torch._C._is_torch_function_mode_enabled():
+        return None
+
+    torch_function_mode_stack = torch.overrides._get_current_function_mode_stack()
+
+    pre_dispatch_tf_modes = [
+        mode
+        for mode in torch_function_mode_stack
+        if isinstance(mode, PreDispatchTorchFunctionMode)
+    ]
+
+    assert len(pre_dispatch_tf_modes) <= 1, (
+        f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
+    )
+
+    if len(pre_dispatch_tf_modes) == 0:
+        return None
+
+    mode = pre_dispatch_tf_modes[0]
+    return mode
+
+
 def _populate_param_buffer_metadata_to_new_gm(
     params_buffers_to_node_meta: dict[str, Any],
     gm: torch.fx.GraphModule,
@@ -307,7 +331,7 @@ def get_keystr(key_path: KeyPath) -> str:
         return f"*args{keystr(key_path[1:])}"
     else:
         kwarg_key = key_path[1]
-        assert isinstance(kwarg_key, MappingKey)
+        assert isinstance(kwarg_key, (GetAttrKey, MappingKey))
         name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
         return f"{name}{keystr(key_path[2:])}"
 
@@ -395,7 +419,7 @@ def _check_symint(
         # this means we deferred a guard from export analysis to runtime, let this pass
         # we'll add a runtime assert checking equality to this replacement expression
         pass
-    elif arg != symint:
+    elif arg != int(symint):
         path = get_keystr(keypath)
         if i is not None:
             path += f".shape[{i}]"
@@ -440,13 +464,18 @@ def _check_input_constraints_for_graph(
                 )
 
         elif isinstance(node_val, (int, float, str)):
-            if type(arg) != type(node_val) or arg != node_val:
+            if type(arg) is not type(node_val) or arg != node_val:
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
                 )
         elif isinstance(node_val, torch.SymInt):
             _check_symint(
-                node_val, arg, range_constraints, unification_map, key_path, None
+                node_val,
+                arg,
+                range_constraints,
+                unification_map,
+                key_path,
+                None,
             )
 
 
@@ -464,6 +493,7 @@ def register_dataclass_as_pytree_node(
         f"Only dataclasses can be registered with this function: {cls}"
     )
 
+    @torch._dynamo.dont_skip_tracing
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
         flat_names = []
@@ -477,10 +507,12 @@ def register_dataclass_as_pytree_node(
                 none_names.append(name)
         return flattened, [flat_names, none_names]
 
+    @torch._dynamo.dont_skip_tracing
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
+    @torch._dynamo.dont_skip_tracing
     def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
@@ -662,7 +694,10 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                         gm,
                         functools.partial(
                             _node_metadata_hook,
-                            stack_trace=node.meta.get("stack_trace"),
+                            metadata={
+                                "stack_trace": node.meta.get("stack_trace"),
+                                "nn_module_stack": node.meta.get("nn_module_stack"),
+                            },
                         ),
                     ),
                 ):
@@ -690,7 +725,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
             "in insert_deferred_runtime_asserts"
         )
         with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            gm,
+            functools.partial(
+                _node_metadata_hook, metadata={"stack_trace": stack_trace}
+            ),
         ):
             shape_env = _get_shape_env_from_gm(gm)
             if shape_env:
@@ -1082,12 +1120,14 @@ def placeholder_naming_pass(
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
         ):
+            # pyrefly: ignore  # index-error
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
+            # pyrefly: ignore  # index-error
             spec.target = name_map[spec.target]
 
     # rename keys in constants dict for custom objects

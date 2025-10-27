@@ -43,7 +43,7 @@ class ArgInfo:
 class CUDATemplate(KernelTemplate):
     index_counter = itertools.count()
     # dict of cache key to (code, size_args)
-    code_cache: dict[str, tuple[str, tuple[int, ...]]] = {}
+    code_cache: dict[str, tuple[str, tuple[int, ...], tuple[int, ...]]] = {}
     cache_clear = staticmethod(code_cache.clear)
 
     def __init__(
@@ -72,6 +72,7 @@ class CUDATemplate(KernelTemplate):
 
     @classmethod
     @functools.lru_cache(None)
+    # pyrefly: ignore [bad-override]
     def _template_from_string(cls, source: str) -> Any:
         return KernelTemplate._template_from_string(source)
 
@@ -113,8 +114,12 @@ class CUDATemplate(KernelTemplate):
             key = self.make_key(name=name, input_key=input_key, layout_repr=layout_repr)
 
         if key is not None and key in self.code_cache:
-            code, size_args = self.code_cache[key]
-            extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
+            code, size_args, offset_args = self.code_cache[key]
+            extra_args = tuple(
+                list(size_args)
+                + list(offset_args)
+                + list(self.get_runtime_arg_values(**kwargs))
+            )
             return code, extra_args
 
         kernel_name = str(Placeholder.KERNEL_NAME)
@@ -148,12 +153,15 @@ class CUDATemplate(KernelTemplate):
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
         size_args = V.graph.sizevars.size_hints(kernel.get_dynamic_shape_args())
+        offset_args = V.graph.sizevars.size_hints(kernel.get_offset_args())
 
         if key is not None:
-            self.code_cache[key] = code, size_args
+            self.code_cache[key] = code, size_args, offset_args
 
         # extra args has runtime params, which shouldn't be cached
-        extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
+        extra_args = tuple(
+            list(size_args) + list(offset_args) + self.get_runtime_arg_values(**kwargs)
+        )
 
         return code, extra_args
 

@@ -48,7 +48,10 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+
+#ifdef USE_NVSHMEM
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#endif
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -440,7 +443,8 @@ PyTypeObject* GetReduceOpMetaclass() {
     spec.basicsize = base_metaclass->tp_basicsize;
     spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
     spec.slots = slots;
-    PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
+    PyTypeObject* metaclass =
+        reinterpret_cast<PyTypeObject*>(PyType_FromSpec(&spec));
     if (!metaclass)
       throw py::error_already_set();
     return metaclass;
@@ -809,7 +813,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(
-      module, "ReduceOp", py::metaclass((PyObject*)GetReduceOpMetaclass()), R"(
+      module,
+      "ReduceOp",
+      py::metaclass(reinterpret_cast<PyObject*>(GetReduceOpMetaclass())),
+      R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
@@ -1128,6 +1135,9 @@ This class does not support ``__members__`` property.)");
           &::c10d::symmetric_memory::has_multicast_support)
       .def_static("set_backend", &::c10d::symmetric_memory::set_backend)
       .def_static("get_backend", &::c10d::symmetric_memory::get_backend)
+      .def_static(
+          "get_mempool_allocator",
+          &::c10d::symmetric_memory::get_mempool_allocator)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(
@@ -1167,6 +1177,7 @@ This class does not support ``__members__`` property.)");
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly(
           "signal_pad_size", &SymmetricMemory::get_signal_pad_size)
+      .def_property_readonly("offset", &SymmetricMemory::get_offset)
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,
@@ -1198,6 +1209,12 @@ This class does not support ``__members__`` property.)");
           py::arg("src_rank"),
           py::arg("channel") = 0,
           py::arg("timeout_ms") = 0)
+      .def(
+          "get_remote_tensor",
+          &SymmetricMemory::get_remote_tensor,
+          py::arg("peer"),
+          py::arg("sizes"),
+          py::arg("dtype"))
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
@@ -2063,22 +2080,24 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
+          .def("get_group_store", &::c10d::ProcessGroup::getStore, R"(Get the store of this process group.)")
           .def(
               "split_group",
               &::c10d::ProcessGroup::splitGroup,
               py::arg("ranks"),
               py::arg("timeout") = std::nullopt,
               py::arg("opts") = std::nullopt,
-              py::arg("groupDesc") = std::nullopt,
+              py::arg("group_name") = std::nullopt,
+              py::arg("group_desc") = std::nullopt,
               py::call_guard<py::gil_scoped_release>())
            .def(
               "merge_remote_group",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::intrusive_ptr<::c10d::Store>& store,
-                 int size,
-                 std::chrono::milliseconds timeout,
-                 std::optional<std::string> groupName,
-                 std::optional<std::string> groupDesc) {
+                 const int& size,
+                 const std::chrono::milliseconds& timeout,
+                 const std::optional<std::string>& groupName,
+                 const std::optional<std::string>& groupDesc) {
                 ::c10d::ProcessGroup::MergeOptions opts;
                 opts.timeout = timeout;
                 opts.group_name = groupName;
@@ -3084,11 +3103,13 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("backend"),
               py::arg("timeout") = kProcessGroupDefaultTimeout)
           .def_readonly("backend", &::c10d::Backend::Options::backend)
-          .def_readwrite("_timeout", &::c10d::Backend::Options::timeout);
+          .def_readwrite("_timeout", &::c10d::Backend::Options::timeout)
+          .def_readwrite(
+              "global_ranks_in_group",
+              &::c10d::Backend::Options::global_ranks_in_group)
+          .def_readwrite("group_name", &::c10d::Backend::Options::group_name);
 
 #ifdef USE_C10D_GLOO
-  static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
-
   auto processGroupGloo =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
           module, "ProcessGroupGloo", backend);
@@ -3100,12 +3121,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupGloo::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupGloo::Options::group_name);
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo
       .def_static(
@@ -3170,31 +3186,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
 
-            auto options = ::c10d::ProcessGroupGloo::Options::create();
-            bool lazyInit = ::c10d::getDefaultGlooLazyInit();
-
-            // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            auto ifnameEnv =
-                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && ifnameEnv->size() > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
-                options->devices.push_back(
-                    ::c10d::ProcessGroupGloo::createDeviceForInterface(
-                        iface, lazyInit));
-              }
-            } else {
-              // If no hostname is specified, this function looks up
-              // the machine's hostname and returns a device instance
-              // associated with the address that the hostname resolves to.
-              options->devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
-            }
-
-            options->timeout = timeout;
-            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-            options->threads = options->devices.size() * 2;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
-                store, rank, size, options);
+                store,
+                rank,
+                size,
+                ::c10d::ProcessGroupGloo::Options::create_default(timeout));
           }),
           py::arg("store"),
           py::arg("rank"),
@@ -3333,7 +3329,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "perform_nocolor_split",
               &::c10d::ProcessGroupNCCL::performNocolorSplit)
-          .def("register_mem_pool", &::c10d::ProcessGroupNCCL::registerMemPool)
+          .def(
+              "register_mem_pool",
+              &::c10d::ProcessGroupNCCL::registerMemPool,
+              py::arg("pool"),
+              py::arg("symm") = false)
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool)
@@ -3361,6 +3361,20 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_static("get_runtime_nccl_version", [] {
             return ::c10d::getNcclVersionTuple();
           });
+
+#ifdef NCCL_HAS_CTA_POLICY
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_DEFAULT",
+      [](const py::object&) { return NCCL_CTA_POLICY_DEFAULT; });
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_EFFICIENCY",
+      [](const py::object&) { return NCCL_CTA_POLICY_EFFICIENCY; });
+#ifdef NCCL_CTA_POLICY_ZERO // requires NCCL version >= 2.28
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_ZERO",
+      [](const py::object&) { return NCCL_CTA_POLICY_ZERO; });
+#endif // NCCL_CTA_POLICY_ZERO
+#endif // NCCL_HAS_CTA_POLICY
 
   module.def(
       "_get_intra_node_comm_usage_counter",
@@ -3398,6 +3412,11 @@ for details.
 #ifdef NCCL_HAS_NVLS_CTAS
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
+      .def(
+          "unsafe_get_ptr",
+          [](const ncclConfig_t& self) {
+            return reinterpret_cast<uintptr_t>(&self);
+          })
       .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
@@ -3462,11 +3481,6 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name)
       .def(
           "__copy__",
           [](const ::c10d::ProcessGroupNCCL::Options& self) {
@@ -3505,17 +3519,73 @@ Example::
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
+                          int size,
+                          c10::intrusive_ptr<::c10d::ProcessGroupXCCL::Options>
+                              options) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
+                    store, rank, size, std::move(options));
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("options"),
+              R"(Create a new ProcessGroupXCCL instance.)")
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
                           int size) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
 
+                auto options = ::c10d::ProcessGroupXCCL::Options::create();
+                options->is_high_priority_stream = false;
                 return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
-                    store, rank, size);
+                    store, rank, size, options);
               }),
               py::arg("store"),
               py::arg("rank"),
-              py::arg("size"));
+              py::arg("size"),
+              R"(Create a new ProcessGroupXCCL instance.)")
+          .def_property_readonly(
+              "options",
+              &::c10d::ProcessGroupXCCL::getOptions,
+              R"(Return the options used to create this ProcessGroupXCCL instance.)");
+
+  intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
+      processGroupXCCL, "Options", backendOptions)
+      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+      .def_readwrite(
+          "is_high_priority_stream",
+          &::c10d::ProcessGroupXCCL::Options::is_high_priority_stream);
+  module
+      .def(
+          "_dump_xccl_trace",
+          [](std::optional<bool> includeCollectives,
+             std::optional<bool> includeStackTraces,
+             std::optional<bool> onlyActive) {
+            return py::bytes(::c10d::dump_xccl_trace(
+                includeCollectives.value_or(true),
+                includeStackTraces.value_or(true),
+                onlyActive.value_or(false)));
+          },
+          py::arg("includeCollectives") = std::optional<bool>(),
+          py::arg("includeStackTraces") = std::optional<bool>(),
+          py::arg("onlyActive") = std::optional<bool>(),
+          R"(
+Arguments:
+    includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+    includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+    onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+Returns:
+    Stringified pickle work traces.
+    Default settings return everything - i.e. contains XCCL comm dumps and collective traces.
+      )")
+      .def("get_xccl_version", [] { return ::c10d::getXcclVersion(); });
+
 #endif
 
 #ifdef USE_C10D_UCC
@@ -3774,14 +3844,30 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
   auto fakeProcessGroup =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
-          module, "FakeProcessGroup", backend)
-          .def(
-              py::init([](int rank, int size) {
-                return c10::make_intrusive<::c10d::FakeProcessGroup>(
-                    rank, size);
-              }),
-              py::arg("rank"),
-              py::arg("world_size"));
+          module, "FakeProcessGroup", backend);
+  intrusive_ptr_class_<::c10d::FakeProcessGroup::Options>(
+      fakeProcessGroup, "Options", backendOptions)
+      .def(py::init())
+      .def_readwrite(
+          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
+      .def_readwrite(
+          "error_on_collective",
+          &::c10d::FakeProcessGroup::Options::error_on_collective);
+  fakeProcessGroup
+      .def_static(
+          "_create_internal",
+          [](int rank,
+             int size,
+             c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
+            return ::c10d::FakeProcessGroup::_create_internal(
+                rank, size, std::move(options));
+          },
+          py::arg("rank"),
+          py::arg("world_size"),
+          py::arg("options") =
+              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+      .def_property_readonly(
+          "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)
@@ -4022,6 +4108,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
+  module.def(
+      "_reset_fr_recording_nccl",
+      []() { ::c10d::reset_nccl_trace(); },
+      "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
 
   module.def(

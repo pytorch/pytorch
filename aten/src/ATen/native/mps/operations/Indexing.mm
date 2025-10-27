@@ -17,7 +17,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <fmt/format.h>
@@ -108,26 +107,12 @@ static std::string getBitSizeString(const TensorBase& t) {
 static void validateInputData(const TensorIteratorBase& iter,
                               IntArrayRef index_size,
                               IntArrayRef index_stride,
-                              const std::string& op,
-                              bool accumulate) {
-  using namespace mps;
-
+                              const std::string& op) {
   const auto num_indices = index_size.size();
   TORCH_CHECK(num_indices <= 16, "Current limit allows up to 16 indices to be used in MPS indexing kernels");
 
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(static_cast<int>(num_indices) == iter.ntensors() - 2);
-  const Tensor& inputTensor = iter.tensor(1);
-  const auto scalar_type = inputTensor.scalar_type();
-
-  if (accumulate) {
-    // No atomic support for the complex dtypes
-    TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type));
-  } else {
-    TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type) ||
-                    scalar_type == ScalarType::ComplexFloat || scalar_type == ScalarType::ComplexHalf,
-                getMPSTypeString(inputTensor) + std::string(" not supported for index.Tensor_out"));
-  }
 }
 
 static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, const Tensor& mask) {
@@ -158,7 +143,7 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                                   IntArrayRef index_stride,
                                   const std::string& kernel_name,
                                   const bool serial = false) {
-  validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
+  validateInputData(iter, index_size, index_stride, "index.Tensor_out");
   if (iter.numel() == 0)
     return;
   if (!iter.can_use_32bit_indexing()) {
@@ -200,7 +185,7 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
 }
 
 static void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
+  validateInputData(iter, index_size, index_stride, "index.Tensor_out");
   dispatch_index_kernel(
       iter, index_size, index_stride, fmt::format("index_select_{}", getBitSizeString(iter.tensor_base(0))));
 }
@@ -210,7 +195,7 @@ static void index_put_kernel_mps(TensorIterator& iter,
                                  IntArrayRef index_stride,
                                  bool accumulate) {
   @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
+    validateInputData(iter, index_size, index_stride, "index_put_impl");
     if (accumulate) {
       dispatch_index_kernel(iter,
                             index_size,
@@ -244,7 +229,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
                 index.numel());
     int64_t idx = index.item<int64_t>();
     TORCH_CHECK(idx == 0, "index_copy_(): the only valid index for a 0-dim tensor is 0, but got ", idx);
-    result.copy_(source);
+    result.copy_(source.squeeze());
     return;
   }
 
@@ -268,11 +253,12 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
     }
   }
 
-  TORCH_CHECK(source.size(dim) == index.numel(),
+  const auto source_size_dim = source.dim() > 0 ? source.size(dim) : 1;
+  TORCH_CHECK(index.numel() == source_size_dim,
               "index_copy_(): Number of indices (",
               index.numel(),
               ") should be equal to source.size(dim) (",
-              source.size(dim),
+              source_size_dim,
               ")");
 
   auto stream = getCurrentMPSStream();
@@ -295,7 +281,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
       [computeEncoder setComputePipelineState:indexCopyPSO];
       mtl_setArgs(computeEncoder, result, self, source, index, dim_arg, self.sizes(), ndim, indices_numel);
       if (!is_dense) {
-        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides());
+        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides(), index.strides());
       }
       mtl_dispatch1DJob(computeEncoder, indexCopyPSO, result.numel());
     }
@@ -353,14 +339,7 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
 }
 
 Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
-    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 14.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    Tensor out_fallback = nonzero_fallback(self);
-    at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback);
-    return out_;
-  } else if (self.is_complex()) {
+  if (self.is_complex()) {
     TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes. ",
                     "Falling back on CPU. This may have performance implications.");
     Tensor out_fallback = nonzero_fallback(self);
@@ -445,11 +424,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 }
 
 Tensor nonzero_mps(const Tensor& self) {
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
-    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 14.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return nonzero_fallback(self);
-  } else if (self.is_complex()) {
+  if (self.is_complex()) {
     TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes ",
                     "Falling back on CPU. This may have performance implications.");
     return nonzero_fallback(self);
@@ -537,7 +512,28 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     return;
   }
 
-  TORCH_CHECK(source.scalar_type() != ScalarType::Long, "index_add(): Expected non int64 dtype for source.");
+  bool use_deterministic_algorithm = globalContext().deterministicAlgorithms();
+
+  // TODO: Do not use deterministic algorithm for long/complex but rather implement it as Metal shader
+  use_deterministic_algorithm |= source.scalar_type() == ScalarType::Long;
+  use_deterministic_algorithm |= c10::isComplexType(source.scalar_type());
+
+  if (use_deterministic_algorithm) {
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
+    torch::List<std::optional<Tensor>> indices;
+    indices.reserve(dim + 1);
+    for (const auto i : c10::irange(dim)) {
+      indices.emplace_back();
+    }
+    indices.emplace_back(index.to(at::kLong));
+    const Tensor result_ = (result.dim() == 0) ? result.view(1) : result;
+    const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+    result_.index_put_(indices, source_.mul(alpha), true);
+    return;
+  }
+
   auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int;
 
   struct CachedGraph : public MPSCachedGraph {
@@ -599,28 +595,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)
 }
 
 Tensor index_select_mps(const Tensor& self, int64_t dim, const Tensor& index) {
-  IntArrayRef input_shape = self.sizes();
-  auto num_input_dims = input_shape.size();
-
-  auto num_indices = index.numel();
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
-
-  dim = maybe_wrap_dim(dim, self.dim());
-  std::vector<int64_t> shape_data(num_input_dims);
-
-  // Calculate new shape
-  for (const auto i : c10::irange(num_input_dims)) {
-    if (i == static_cast<decltype(i)>(dim)) {
-      shape_data[i] = num_indices;
-    } else {
-      shape_data[i] = input_shape[i];
-    }
-  }
-
-  IntArrayRef output_shape = IntArrayRef(shape_data.data(), num_input_dims);
-
-  Tensor result = at::empty(output_shape, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
+  Tensor result = at::empty({0}, self.options());
   index_select_out_mps(self, dim, index, result);
   return result;
 }
@@ -642,25 +617,11 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "index_select(): self and output must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(output.dim() == 0 || index.size(-1) == output.size(dim),
-              "index_select(): index and output must have the same size at `dim`th dimension, but got ",
-              index.size(-1),
-              " and ",
-              output.size(dim),
-              ".");
-
-  for (const auto i : irange(self.dim())) {
-    if (i == dim)
-      continue;
-    TORCH_CHECK(self.size(i) == output.size(i),
-                "index_select(): self and output must have the same dimensions except for `dim`th dimension, but got ",
-                self.size(i),
-                " and ",
-                output.size(i),
-                " at dimension ",
-                i,
-                ".");
+  auto output_size = self.sizes().vec();
+  if (self.dim() > 0) {
+    output_size[dim] = num_indices;
   }
+  at::native::resize_output(output, output_size);
 
   // Empty index
   if (num_indices == 0 || self.numel() == 0) {
@@ -946,6 +907,10 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "index_fill_(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_fill_(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(self.is_complex() || !source.is_complex(),
+              "index_fill_(): Converting complex Scalar to non-complex type is not supported");
+  // MPS.scatter crashes if used with complex dtypes
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "index_fill_(): Complex types are yet not supported");
 
   // Empty index
   if (num_indices == 0) {

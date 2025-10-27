@@ -245,16 +245,16 @@ class CKTileGemmTemplate(CKTileTemplate):
         const auto BiasTerms = std::array<const void*, 0> ();
         const auto BiasStrides = std::array<int32_t, 0> ();
 
-        auto kargs = ck_tile::GemmKernelArgs<0> {
-           X,
-           W,
+        auto kargs = ck_tile::UniversalGemmKernelArgs<> {
+           {X},
+           {W},
            BiasTerms,
            Y,
            M,
            N,
            K,
-           LDA,
-           LDB,
+           {LDA},
+           {LDB},
            BiasStrides,
            LDC,
            kBatch
@@ -750,9 +750,9 @@ class CKTileGemmTemplate(CKTileTemplate):
         """
         The primary entry point for the code rendering process used in this template.
         """
-        epilogue_nodes = kwargs.get("epilogue_nodes", None)
+        epilogue_nodes = kwargs.get("epilogue_nodes")
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
-        template_buffer_node = kwargs.get("template_buffer_node", None)
+        template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         assert 2 == len(self.input_nodes)

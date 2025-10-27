@@ -7,7 +7,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import IS_FBCODE
-from torch.testing._internal.inductor_utils import requires_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
@@ -420,7 +420,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             )
             return tensor + 1, tma
 
-        x = torch.randn(128, 128, device="cuda")
+        x = torch.randn(128, 128, device=GPU_TYPE)
 
         ref = create_tma(x)
         res = torch.compile(create_tma, backend="eager")(x)
@@ -441,7 +441,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             )
             return tensor + 1, tma
 
-        x = torch.randn(128, 128, device="cuda")
+        x = torch.randn(128, 128, device=GPU_TYPE)
 
         ref = create_tma(x)
         res = torch.compile(create_tma, backend="eager")(x)

@@ -56,7 +56,7 @@ jobs:
           cache: pip
           architecture: x64
 
-      - run: pip install pyyaml==6.0
+      - run: pip install pyyaml==6.0.2
         shell: bash
 
       - name: Verify mergeability

@@ -76,8 +76,8 @@ static std::optional<at::Tensor> runTorchSlice_opset9(
   if (!(node->hasAttributeS("starts") && node->hasAttributeS("ends"))) {
     return std::nullopt;
   }
-  auto startsAttr = node->is(attr::starts);
-  auto endsAttr = node->is(attr::ends);
+  auto const& startsAttr = node->is(attr::starts);
+  auto const& endsAttr = node->is(attr::ends);
   if (startsAttr.size() != endsAttr.size()) {
     return std::nullopt;
   }

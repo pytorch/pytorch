@@ -27,7 +27,8 @@ from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
-from torch._inductor.utils import get_ld_library_path
+from torch._inductor.utils import get_ld_library_path, python_subprocess_env
+from torch._utils_internal import find_compile_subproc_binary
 
 
 log = logging.getLogger(__name__)
@@ -90,8 +91,14 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: str) -> None:
-        super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
+    def __init__(self, details: str, name: str = "<unknown>") -> None:
+        self.details = details
+        super().__init__(
+            f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
+        )
+
+    def with_name(self, name: str) -> "SubprocException":
+        return SubprocException(self.details, name)
 
 
 class SubprocPickler:
@@ -137,6 +144,11 @@ class SubprocPool:
         cmd = [
             sys.executable,
             entry,
+        ]
+        if (binary := find_compile_subproc_binary()) is not None:
+            cmd = [binary]
+
+        args = [
             f"--pickler={self.pickler.__class__.__module__}.{self.pickler.__class__.__name__}",
             f"--kind={self.kind.value}",
             f"--workers={nprocs}",
@@ -145,30 +157,39 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
-        local = False
+        cmd.extend(args)
+        log_path = None
+        self.log_file = None
+
         if config.worker_suppress_logging:
+            log_path = os.devnull
             log.info("Suppressing compile worker output due to config")
-            local = True
+        else:
+            log_path = config.torchinductor_worker_logpath
+            if not log_path:
+                log_path = config.get_worker_log_path()
+
+        if log_path:
+            # pyrefly: ignore [bad-assignment]
+            self.log_file = open(log_path, "w")
 
         self.process = subprocess.Popen(
             cmd,
             env={
-                **os.environ,
-                # We need to set the PYTHONPATH so the subprocess can find torch.
-                "PYTHONPATH": os.environ.get(
-                    "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
-                ),
+                **python_subprocess_env(),
                 # Safeguard against creating a SubprocPool in the subprocess.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": get_ld_library_path(),
             },
             pass_fds=(subproc_read_fd, subproc_write_fd),
-            stdout=subprocess.DEVNULL if local else None,
-            stderr=subprocess.DEVNULL if local else None,
+            stdout=self.log_file,
+            stderr=self.log_file,
         )
         self.write_lock = threading.Lock()
-        self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
+        self.read_thread = threading.Thread(
+            target=self._read_thread, name="InductorSubproc", daemon=True
+        )
 
         self.futures_lock = threading.Lock()
         self.pending_futures: dict[int, Future[Any]] = {}
@@ -184,6 +205,7 @@ class SubprocPool:
         self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
     ) -> Future[_T]:
         if args or kwargs:
+            # pyrefly: ignore [bad-assignment]
             job_fn = functools.partial(job_fn, *args, **kwargs)
         job_data = self.pickler.dumps(job_fn)
         future: Future[_T]
@@ -260,8 +282,10 @@ class SubprocPool:
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             self.process.wait(300)
-        except OSError as e:
-            log.warning("Ignored OSError in pool shutdown:  %s", e)
+            if self.log_file:
+                self.log_file.close()
+        except OSError:
+            log.warning("Ignored OSError in pool shutdown", exc_info=True)
         finally:
             with self.futures_lock:
                 for future in self.pending_futures.values():

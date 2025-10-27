@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import random
 import sys
 import types
 import unittest
@@ -57,14 +58,14 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import parametrize, skipIfWindows
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 
 
 def get_inputs(optim):
@@ -288,7 +289,7 @@ def build_opt_kwarg_db():
 
                 has_tensor_lr = False
                 for key, val in kwargs.items():
-                    if (not key == "lr" and not key == "betas") and (
+                    if (key != "lr" and key != "betas") and (
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
                     ):
                         name += "_" + key
@@ -449,7 +450,7 @@ def make_test(
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
             kwargs_compiled = deepcopy(kwargs)
-            if isinstance(kwargs.get("lr", None), torch.Tensor):
+            if isinstance(kwargs.get("lr"), torch.Tensor):
                 kwargs["lr"] = kwargs["lr"].to(device)
                 kwargs_compiled["lr"] = kwargs_compiled["lr"].to(device)
 
@@ -583,6 +584,9 @@ class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
+        torch.cuda.manual_seed_all(0)
+        torch.manual_seed(0)
+        random.seed(0)
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
@@ -604,7 +608,10 @@ class CompiledOptimizerParityTests(TestCase):
                 torch._inductor.metrics.reset()
                 input = torch.ones([10, 10], device=device)
                 model_eager = torch.nn.Sequential(
-                    *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+                    *[
+                        torch.nn.Linear(10, 10, device=device, bias=False)
+                        for _ in range(2)
+                    ]
                 )
                 model_eager(input).sum().backward()
                 model_compiled = deepcopy(model_eager)
@@ -724,6 +731,7 @@ class CompiledOptimizerTests(TestCase):
         SGD, kernel_count=1, lr=0.01, foreach=True
     )
 
+    @skipIfWindows
     @requires_gpu
     def test_static_address_finalizer(self):
         import gc
@@ -891,7 +899,7 @@ class CompiledOptimizerTests(TestCase):
         compiled = torch.compile(_get_value)
 
         x = torch.ones(2, 2)
-        mark_static_address(x)
+        mark_static_address(x, guard=True)
 
         ret_val = compiled(x)
 
@@ -916,7 +924,7 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -935,7 +943,7 @@ class CompiledOptimizerTests(TestCase):
             kwargs = aot_graph_input_parser(forward)
             torch.compile(forward)(**kwargs)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_foreach_map_adam(self):
         params = [
             torch.rand(

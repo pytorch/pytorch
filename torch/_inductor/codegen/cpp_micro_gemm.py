@@ -195,7 +195,7 @@ inline void {{kernel_name}}(
     ALLOCATE_WEIGHT_BUFFER = r"""
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
-    std::unique_ptr<{{buffer_dtype}}[]> heap_deq_b_buf_ptr(new {{buffer_dtype}}[{{buffer_size}}]);
+    auto heap_deq_b_buf_ptr = std::make_unique<{{buffer_dtype}}[]>({{buffer_size}});
     {{buffer_dtype}}* {{buffer_name}} = heap_deq_b_buf_ptr.get();
     {%- else %}
     // It's safe to use a stack-allocated array since the blocking strategy would
@@ -963,6 +963,24 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     return k % vnni_size == 0 and alpha == 1
 
 
+def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
+    # We need avx512_bf16 to dequant int8 to bf16
+    vec_isa = kwargs.get("vec_isa")
+    assert vec_isa is not None
+    return vec_isa.is_avx512_bf16_supported() and check_amx_extra(
+        config, m, n, k, alpha, num_threads, **kwargs
+    )
+
+
+# amx_fp16 need to be checked separately since it is not always supported when amx is supported
+def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
+    assert config.input_dtype == torch.float16 and config.output_dtype == torch.float
+    vec_isa = kwargs.get("vec_isa")
+    assert vec_isa is not None
+    vnni_size = 2
+    return vec_isa.is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
+
+
 @register_micro_gemm(
     *generate_gemm_config(
         VecAMX,
@@ -975,19 +993,26 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     ),
     *generate_gemm_config(
         VecAMX,
-        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        [(32, 32, 32), (48, 16, 32)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=check_int8_bf16_amx_extra,
+    ),
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 16, 32), (32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.bfloat16,
+        output_dtype=torch.float,
         extra_check=check_amx_extra,
     ),
     *generate_gemm_config(
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
-        input_dtype=torch.bfloat16,
+        input_dtype=torch.float16,
         output_dtype=torch.float,
-        extra_check=check_amx_extra,
+        extra_check=check_amx_fp16_extra,
     ),
     *generate_gemm_config(
         VecAMX,
@@ -1024,13 +1049,35 @@ class CppMicroGemmAMX(CppMicroGemm):
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
         for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
         {%- for vec_idx in range(0, block_n, 32) %}
+            _mm_prefetch(base_addr + idx_q + 64 * ldb, _MM_HINT_T0);
             {%- if (block_n - vec_idx) >= 32 %}
-            auto b_int8_idx_{{vec_idx}} = at::vec::Vectorized<int8_t>::loadu(
-                base_addr + idx_q + {{vec_idx}} ,
-                static_cast<int64_t>(32)
-            );
-            auto b_bf16_idx_{{vec_idx}} = at::vec::convert<{{input_t}}>(b_int8_idx_{{vec_idx}});
-            b_bf16_idx_{{vec_idx}}.store(dequantized_B_buf + idx_dq + {{vec_idx}});
+            // 1) Load 32 x int8
+            __m256i v8  = _mm256_loadu_si256((const __m256i*)(base_addr + idx_q + {{vec_idx}}));
+            // 2) Extract two halves
+            __m128i v8_lo = _mm256_extracti128_si256(v8, 0);
+            __m128i v8_hi = _mm256_extracti128_si256(v8, 1);
+            // 3) Widen each half to i32
+            __m512i v32_lo = _mm512_cvtepi8_epi32(v8_lo);
+            __m512i v32_hi = _mm512_cvtepi8_epi32(v8_hi);
+            // 4) Convert to f32
+            __m512 f_lo = _mm512_cvtepi32_ps(v32_lo);
+            __m512 f_hi = _mm512_cvtepi32_ps(v32_hi);
+            // 5) f32 -> bf16 (round-to-nearest-even) and pack 32 lanes to 512b
+            // Packs the second operand (f_lo) into the lower 16 bf16 lanes and the first (f_hi) into the upper 16.
+            __m512i bf = (__m512i)_mm512_cvtne2ps_pbh(f_hi, f_lo);
+            // 6) Store 32 x bf16 (512 bits)
+            _mm512_storeu_si512((__m512i*)(dequantized_B_buf + idx_dq + {{vec_idx}}), bf);
+            {%- elif (block_n - vec_idx) >= 16 %}
+            // 1) Load 16 x int8 (128 bits)
+            __m128i v8 = _mm_loadu_si128((const __m128i*)(base_addr + idx_q + {{vec_idx}}));
+            // 2) Widen: 16 x i8 -> 16 x i32
+            __m512i v32 = _mm512_cvtepi8_epi32(v8);
+            // 3) Convert to f32
+            __m512 f32 = _mm512_cvtepi32_ps(v32);
+            // 4) Convert f32 -> bf16 (round-to-nearest-even)
+            __m256i bf16 = (__m256i)_mm512_cvtneps_pbh(f32);
+            // 5) Store 16 x bf16 (256 bits)
+            _mm256_storeu_si256((__m256i*)(dequantized_B_buf + idx_dq + {{vec_idx}}), bf16);
             {%- else %}
             auto b_int8_tail = at::vec::Vectorized<int8_t>::loadu(
                 base_addr + idx_q + {{block_n - (block_n % 32)}},
@@ -1187,7 +1234,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
             {%- endif %}
         {%- else %}
+            {%- if input_dtype == torch.float16 %}
+        _tile_dpfp16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- endif %}
         {%- endif %}
     {%- endfor %}
 {%- endfor %}
@@ -1359,10 +1410,10 @@ class CppMicroBrgemm(CppMicroGemm):
 def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     if alpha != 1:
         return False
-    q_group_size = kwargs.get("q_group_size", None)
+    q_group_size = kwargs.get("q_group_size")
     assert q_group_size is not None
     if (
-        q_group_size < 32
+        q_group_size not in [32, 64, 128]
         or k % q_group_size != 0
         or config.register_blocking.block_k > q_group_size
     ):
@@ -1508,9 +1559,7 @@ inline void {{kernel_name}}_kernel(
   auto load_scale_and_zeros = [&](int i, int _kb) {
     // load 2x bfloat16 vector
     __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * lds + 32 * i));
-    if (_kb + PREFETCH_SIZE_KB < KB) {
-      _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
-    }
+    _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
 
     // convert to 2x f32 vector
     __m512 a, b;
@@ -1544,9 +1593,7 @@ inline void {{kernel_name}}_kernel(
 
     if constexpr (col == 0) {
       float aa = static_cast<float>(A[row * lda + k]);
-      if (k + PREFETCH_SIZE_K < K) {
-        _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
-      }
+      _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
       va = _mm512_set1_ps(aa);
     }
 
@@ -1556,9 +1603,7 @@ inline void {{kernel_name}}_kernel(
         // to reduce de-quantize overhead.
         if constexpr (col == 0) {
           __m256i b4 = _mm256_loadu_si256((__m256i*)(B + k * ldb));
-          if (k + PREFETCH_SIZE_K < K) {
-            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
-          }
+          _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
 
           __m512i b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
           vb[0] = _mm512_permutexvar_ps(b32, lut);
@@ -1650,7 +1695,8 @@ class CppMicroGemmWoQInt4Amx(CppMicroGemmAMX):
 
     TEMPLATE_ENTRY = r"""
 inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_size) {
-  return (k_start + index) % group_size == 0;
+  // check if (k_start + index) % group_size == 0, assuming group_size = 32/64/128
+  return ((k_start + index) & (group_size - 1)) == 0;
 }
 
 {{declare_kernel}} {
@@ -1734,9 +1780,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
     auto load_scale_and_zeros = [&](int i, int _kb) {
         // load 2x bfloat16 vector
         __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * lds + 32 * i));
-        if (_kb + PREFETCH_SIZE_KB < KB) {
-            _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
-        }
+        _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
 
         // convert to 2x f32 vector
         __m512 a, b;
@@ -1765,11 +1809,9 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
                 c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
             }
 
-            // load 256 bits = 64 elements in int4
-            if (k + PREFETCH_SIZE_K < K) {
-                _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb_int4, _MM_HINT_T0);
-            }
+            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb_int4, _MM_HINT_T0);
 
+            // load 256 bits = 64 elements in int4
             __m128i b4 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + k * ldb_int4));
             b32[0] = _mm512_cvtepu8_epi32(b4);
             b32[1] = _mm512_srli_epi32(b32[0], 4);
@@ -1778,8 +1820,8 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             vb[1] = _mm512_permutexvar_ps(b32[1], lut);
             vb[1] = _mm512_fmadd_ps(vb[1], scale[1], zero[1]);
 
-            b4 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + (k + 1) * ldb_int4));
-            b32[0 + COLS] = _mm512_cvtepu8_epi32(b4);
+            __m128i b4_2 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + (k + 1) * ldb_int4));
+            b32[0 + COLS] = _mm512_cvtepu8_epi32(b4_2);
             b32[1 + COLS] = _mm512_srli_epi32(b32[0 + COLS], 4);
             vb[0 + COLS] = _mm512_permutexvar_ps(b32[0 + COLS] , lut);
             vb[0 + COLS] = _mm512_fmadd_ps(vb[0 + COLS], scale[0], zero[0]);
@@ -1904,7 +1946,7 @@ def create_micro_gemm(
             alpha,
         )
 
-    def skip_amx_kernel_for_woq(config, dynamic_M, micro_gemm_cls):
+    def skip_amx_kernel_for_woq(dynamic_M):
         # For WoQ GEMM, AMX micro-kernel may not perform well if m is small.
         # Exception: for dynamic shapes, we consider using the AMX micro-kernel.
         if (
@@ -1913,11 +1955,7 @@ def create_micro_gemm(
             or input2_dtype not in [torch.int8, torch.uint8]
         ):
             return False
-        # For WOQ INT8, use AMX for m >= block_m
-        # For WOQ INT4, use AMX for m >= 5
-        block_m, *_ = config.register_blocking
-        is_woq_int4 = micro_gemm_cls == CppMicroGemmWoQInt4Amx
-        m_threshold = 5 if is_woq_int4 else block_m
+        m_threshold = 5
         return m < m_threshold
 
     assert isinstance(n, int) or n.is_number, n
@@ -1959,12 +1997,11 @@ def create_micro_gemm(
                     num_threads,
                     dynamic_M=dynamic_M,
                     q_group_size=q_group_size,
+                    vec_isa=vec_isa,
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
-                if config.vec_isa_cls == VecAMX and skip_amx_kernel_for_woq(
-                    config, dynamic_M, cls
-                ):
+                if config.vec_isa_cls == VecAMX and skip_amx_kernel_for_woq(dynamic_M):
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC
@@ -1993,9 +2030,14 @@ def create_micro_gemm(
                     + (block_m * block_k + block_k * block_n)
                     * config.input_dtype.itemsize
                 )
+                size_score = register_bytes
+                # if number of mxn blocks can not occupy all the threads,
+                # we favor smaller register blocks.
+                if occupancy_score == 0:
+                    size_score = 0 - register_bytes
                 matched_configs.append(
                     (
-                        (isa_score, dividable_score, occupancy_score, register_bytes),
+                        (isa_score, dividable_score, occupancy_score, size_score),
                         cls,
                         config,
                     )

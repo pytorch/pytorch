@@ -7,9 +7,9 @@
 #   .ci/docker/requirements-ci.txt
 boto3==1.35.42
 jinja2==3.1.6
-lintrunner==0.10.7
+lintrunner==0.12.7
 ninja==1.10.0.post1
 nvidia-ml-py==11.525.84
-pyyaml==6.0
+pyyaml==6.0.2
 requests==2.32.4
-rich==10.9.0
+rich==14.1.0

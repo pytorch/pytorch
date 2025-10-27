@@ -6,17 +6,8 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Sequence
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -45,6 +36,7 @@ __all__ = [
     "register_torch_dispatch",
     "register_vmap",
     "get_ctx",
+    "get_kernel",
     "custom_op",
     "triton_op",
     "wrap_triton",
@@ -102,11 +94,8 @@ class Library:
                 ns,
                 " is a reserved namespace. Please try creating a library with another name.",
             )
-        if torch._running_with_deploy():
-            _library.utils.warn_deploy()
-            return
 
-        frame = traceback.extract_stack(limit=3)[0]
+        frame = traceback.extract_stack(limit=2)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m: Optional[Any] = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno
@@ -156,9 +145,6 @@ class Library:
             >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         """
-        if torch._running_with_deploy():
-            _library.utils.warn_deploy()
-            return
 
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
@@ -191,9 +177,6 @@ class Library:
 
     def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=False):
         r"""Registers the fake impl for an operator defined in the library."""
-        if torch._running_with_deploy():
-            _library.utils.warn_deploy()
-            return
 
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
@@ -237,9 +220,6 @@ class Library:
         If it is a TorchDispatchMode, we expect fn to have the following signature:
         (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
         """
-        if torch._running_with_deploy():
-            _library.utils.warn_deploy()
-            return
 
         qualname = f"{self.ns}::{op_name}"
         entry = torch._library.simple_registry.singleton.find(qualname)
@@ -259,12 +239,10 @@ class Library:
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
-        if torch._running_with_deploy():
-            _library.utils.warn_deploy()
-            return
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
+        # pyrefly: ignore  # bad-argument-type
         assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
 
         if isinstance(op_name, str):
@@ -324,9 +302,6 @@ class Library:
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         """
-        if torch._running_with_deploy():
-            _library.utils.warn_deploy()
-            return
 
         if not callable(fn):
             raise TypeError(
@@ -409,9 +384,6 @@ class Library:
             >>>     # ...
             >>> my_lib.fallback(fallback_kernel, "Autocast")
         """
-        if torch._running_with_deploy():
-            _library.utils.warn_deploy()
-            return
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
@@ -582,7 +554,7 @@ def _(lib: Library, schema, alias_analysis=""):
 def impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
 ) -> Callable[[Callable[..., object]], None]: ...
@@ -672,6 +644,7 @@ def impl(
         >>> y2 = torch.sin(x) + 1
         >>> assert torch.allclose(y1, y2)
     """
+
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
@@ -694,7 +667,7 @@ if not TYPE_CHECKING:
 def _impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
     disable_dynamo: bool = False,
@@ -1494,6 +1467,80 @@ def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
     (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.fake_impl.global_ctx_getter()
+
+
+def get_kernel(
+    op: _op_identifier, dispatch_key: Union[str, torch.DispatchKey]
+) -> torch._C._SafeKernelFunction:
+    """Returns the computed kernel for a given operator and dispatch key.
+
+    This function retrieves the kernel that would be executed for a given
+    operator and dispatch key combination. The returned SafeKernelFunction
+    can be used to call the kernel in a boxed fashion. The intended use
+    case for this function is to retrieve the original kernel for a given
+    dispatch key and then register another kernel to the same dispatch key
+    that calls into the original kernel for certain cases.
+
+    Args:
+        op: Operator name (along with the overload) or OpOverload object
+            Can be a string (e.g., "aten::add.Tensor"), an OpOverload, or a CustomOpDef.
+        dispatch_key (str | torch.DispatchKey): The dispatch key to get the kernel for.
+            Can be a string (e.g., "CPU", "CUDA") or a DispatchKey enum value.
+
+    Returns:
+        torch._C._SafeKernelFunction: A safe kernel function that can be used to
+            call the kernel.
+
+    Raises:
+        RuntimeError: If the operator does not exist.
+
+    Example:
+        >>> # Get the CPU kernel for torch.add
+        >>> kernel = torch.library.get_kernel("aten::add.Tensor", "CPU")
+        >>>
+        >>> # You can also use DispatchKey enum
+        >>> kernel = torch.library.get_kernel("aten::add.Tensor", torch.DispatchKey.CPU)
+        >>>
+        >>> # Or use an OpOverload directly
+        >>> kernel = torch.library.get_kernel(torch.ops.aten.add.Tensor, "CPU")
+        >>>
+        >>> # Example: Using get_kernel in a custom op with conditional dispatch
+        >>> # Get the original kernel for torch.sin
+        >>> original_sin_kernel = torch.library.get_kernel("aten::sin", "CPU")
+        >>>
+        >>> # If input has negative values, use original sin, otherwise return zeros
+        >>> def conditional_sin_impl(dispatch_keys, x):
+        >>>     if (x < 0).any():
+        >>>         return original_sin_kernel.call_boxed(dispatch_keys, x)
+        >>>     else:
+        >>>         return torch.zeros_like(x)
+        >>>
+        >>> lib = torch.library.Library("aten", "IMPL")
+        >>> # with_keyset=True so the first argument to the impl is the current DispatchKeySet
+        >>> which needs to be the first argument to ``kernel.call_boxed``
+        >>> lib.impl("sin", conditional_sin_impl, "CPU", with_keyset=True)
+        >>>
+        >>> # Test the conditional behavior
+        >>> x_positive = torch.tensor([1.0, 2.0])
+        >>> x_mixed = torch.tensor([-1.0, 2.0])
+        >>> torch.sin(x_positive)
+        tensor([0., 0.])
+        >>> torch.sin(x_mixed)
+        tensor([-0.8415, 0.9093])
+    """
+    if not isinstance(op, (str, torch._ops.OpOverload)):
+        raise ValueError(f"get_kernel({op}): got unexpected type for op: {type(op)}")
+
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+
+    if isinstance(dispatch_key, str):
+        try:
+            dispatch_key = torch._C.DispatchKey.__members__[dispatch_key]
+        except KeyError:
+            raise ValueError(f"Invalid dispatch key: {dispatch_key}") from None
+
+    return torch._C._dispatch_get_computed_kernel_for_dispatch_key(op, dispatch_key)
 
 
 _OPCHECK_DEFAULT_UTILS = (

@@ -25,7 +25,7 @@ import torch.distributed as dist
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_nccl,
     requires_nccl_version,
     sm_is_or_higher_than,
@@ -33,7 +33,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -45,7 +44,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class ProcessGroupNCCLOpTest(MultiProcContinousTest):
+class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl"
@@ -319,7 +318,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @skipIfRocm()
     def test_nccl_watchdog_cudagraph(self):
         # test that the watchdog does not crash graphs with disallowed event query
         pg = self.pg

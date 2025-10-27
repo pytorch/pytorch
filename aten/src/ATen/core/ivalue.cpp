@@ -7,6 +7,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/type_factory.h>
+#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -96,6 +97,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       case Tag::ComplexDouble:
         return ComplexType::get();
       case Tag::Int:
+        return IntType::get();
+      case Tag::UInt:
         return IntType::get();
       case Tag::SymInt:
         return c10::SymIntType::get();
@@ -320,6 +323,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
+    case Tag::UInt:
+      return rhs.isUnsigned() && lhs.toUInt() == rhs.toUInt();
     case Tag::SymInt:
       return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::SymFloat:
@@ -353,7 +358,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
-      // Unitialized ivalues show up in no-ops when the compiler can prove a
+      // Uninitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
   }
@@ -379,6 +384,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Int:
       return c10::get_hash(v.payload.u.as_int);
     // NB: these are technically strict aliasing violations
+    case Tag::UInt:
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::SymInt:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::SymFloat:
@@ -406,7 +413,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
@@ -806,6 +813,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
+    case IValue::Tag::UInt:
+      return out << v.toUInt();
     case IValue::Tag::SymInt:
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:

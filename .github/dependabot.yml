@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Update to the latest transformers version with dependabot
+  - package-ecosystem: "pip"
+    directory: "/.ci/docker/ci_commit_pins"
+    schedule:
+      interval: "daily"
+    target-branch: "main"
+    allow:
+      - dependency-name: "transformers"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]
+    commit-message:
+      prefix: "[Dependabot] Update"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "open source"
+      - "python"
+      - "topic: not user facing"
+      - "module: ci"
+      - "module: inductor"
+      - "ciflow/inductor"

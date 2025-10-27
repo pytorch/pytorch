@@ -661,9 +661,55 @@ void Graph::replaceAllUsesAfterNode(
 }
 
 void Graph::applyDevicePlacement(const Placement& placement) {
-  // TODO: consolidate device info in weight loading here as well.
+  TORCH_CHECK(
+      !placementApplied_,
+      "placement has been applied to the graph! placement must be applied once and once only.");
+
+  placementApplied_ = true;
+
+  // inplace override node's device-typed attributes according to placement
   for (auto& node : nodes_) {
     node.applyDevicePlacement(placement);
+  }
+
+  // inplace override weightMeta_'s device according to placement
+  for (auto& [_, weightMeta] : weightsMeta_) {
+    weightMeta.applyDevicePlacement(placement);
+  }
+
+  // inplace override tensorValuesMeta_'s device according to placement
+  for (auto& [_, tensorMeta] : tensorValuesMeta_) {
+    tensorMeta.applyDevicePlacement(placement);
+  }
+}
+
+void Graph::overrideWeightsDevice(
+    const std::unordered_map<std::string, std::optional<c10::Device>>&
+        submodNameToDevice) {
+  for (auto& [weightName, weightMeta] : weightsMeta_) {
+    for (auto& [name, device] : submodNameToDevice) {
+      if (device.has_value() && weightMeta.device() != device &&
+          c10::starts_with(weightName, name) &&
+          (weightName == name || weightName[name.length()] == '.')) {
+        LOG(INFO) << "Overriding " << weightName << " from "
+                  << weightMeta.device() << " to device " << device.value();
+        weightMeta.setDevice(device.value());
+        break;
+      }
+    }
+  }
+
+  for (auto& [tensorName, tensorMeta] : tensorValuesMeta_) {
+    for (auto& [name, device] : submodNameToDevice) {
+      if (device.has_value() && tensorMeta.device() != device &&
+          c10::starts_with(tensorName, name) &&
+          (tensorName == name || tensorName[name.length()] == '.')) {
+        LOG(INFO) << "Overriding " << tensorName << " from "
+                  << tensorMeta.device() << " to device " << device.value();
+        tensorMeta.setDevice(device.value());
+        break;
+      }
+    }
   }
 }
 

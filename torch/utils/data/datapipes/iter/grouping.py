@@ -1,10 +1,8 @@
 # mypy: allow-untyped-defs
-import warnings
 from collections import defaultdict
-from collections.abc import Iterator, Sized
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable, Iterator, Sized
+from typing import Any, Optional, TypeVar
 
-import torch.utils.data.datapipes.iter.sharding
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
@@ -21,16 +19,6 @@ _T_co = TypeVar("_T_co", covariant=True)
 
 
 def __getattr__(name: str):
-    if name in ["SHARDING_PRIORITIES", "ShardingFilterIterDataPipe"]:
-        warnings.warn(
-            f"`{name}` from `torch.utils.data.datapipes.iter.grouping` is going to be removed in PyTorch 2.1"
-            f"Please use `{name}` from the `torch.utils.data.datapipes.iter.sharding`",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-
-        return getattr(torch.utils.data.datapipes.iter.sharding, name)
-
     raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
@@ -69,7 +57,8 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         drop_last: bool = False,
         wrapper_class: type[DataChunk] = DataChunk,
     ) -> None:
-        assert batch_size > 0, "Batch size is required to be larger than 0!"
+        if batch_size <= 0:
+            raise AssertionError("Batch size is required to be larger than 0!")
         super().__init__()
         self.datapipe = datapipe
         self.batch_size = batch_size
@@ -182,7 +171,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def group_fn(file):
         ...     return os.path.basename(file).split(".")[0]
-        >>> source_dp = IterableWrapper(["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"])
+        >>> source_dp = IterableWrapper(
+        ...     ["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"]
+        ... )
         >>> dp0 = source_dp.groupby(group_key_fn=group_fn)
         >>> list(dp0)
         [['a.png', 'a.json', 'a.jpg'], ['b.png', 'b.json'], ['c.json']]
@@ -191,7 +182,12 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> list(dp1)
         [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
         >>> # Scenario where `buffer` is full, and group 'a' needs to be yielded since its size > `guaranteed_group_size`
-        >>> dp2 = source_dp.groupby(group_key_fn=group_fn, buffer_size=3, group_size=3, guaranteed_group_size=2)
+        >>> dp2 = source_dp.groupby(
+        ...     group_key_fn=group_fn,
+        ...     buffer_size=3,
+        ...     group_size=3,
+        ...     guaranteed_group_size=2,
+        ... )
         >>> list(dp2)
         [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
     """
@@ -208,7 +204,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         drop_remaining: bool = False,
     ):
         _check_unpickable_fn(group_key_fn)
+        # pyrefly: ignore [invalid-type-var]
         self.datapipe = datapipe
+        # pyrefly: ignore [invalid-type-var]
         self.group_key_fn = group_key_fn
 
         self.keep_key = keep_key
@@ -218,10 +216,16 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.group_size = group_size
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
-            assert 0 < group_size <= buffer_size
+            if not (0 < group_size <= buffer_size):
+                raise AssertionError("group_size must be > 0 and <= buffer_size")
+            # pyrefly: ignore [bad-assignment]
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
-            assert group_size is not None and 0 < guaranteed_group_size <= group_size
+            if group_size is None or not (0 < guaranteed_group_size <= group_size):
+                raise AssertionError(
+                    "guaranteed_group_size must be > 0 and <= group_size and group_size must be set"
+                )
+            # pyrefly: ignore [bad-assignment]
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk

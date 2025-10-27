@@ -12,7 +12,8 @@ import collections
 import contextlib
 import copy
 import re
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 
@@ -44,7 +45,7 @@ def default_convert(data):
         >>> default_convert(np.array([0, 1]))
         tensor([0, 1])
         >>> # Example with NamedTuple
-        >>> Point = namedtuple('Point', ['x', 'y'])
+        >>> Point = namedtuple("Point", ["x", "y"])
         >>> default_convert(Point(0, 0))
         Point(x=0, y=0)
         >>> default_convert(Point(np.array(0), np.array(0)))
@@ -203,6 +204,7 @@ def collate(
         # check to make sure that the elements in batch have consistent size
         it = iter(batch)
         elem_size = len(next(it))
+        # pyrefly: ignore [not-iterable]
         if not all(len(elem) == elem_size for elem in it):
             raise RuntimeError("each element in list of batch should be of equal size")
         transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
@@ -366,13 +368,13 @@ def default_collate(batch):
         >>> default_collate([0, 1, 2, 3])
         tensor([0, 1, 2, 3])
         >>> # Example with a batch of `str`s:
-        >>> default_collate(['a', 'b', 'c'])
+        >>> default_collate(["a", "b", "c"])
         ['a', 'b', 'c']
         >>> # Example with `Map` inside the batch:
-        >>> default_collate([{'A': 0, 'B': 1}, {'A': 100, 'B': 100}])
+        >>> default_collate([{"A": 0, "B": 1}, {"A": 100, "B": 100}])
         {'A': tensor([  0, 100]), 'B': tensor([  1, 100])}
         >>> # Example with `NamedTuple` inside the batch:
-        >>> Point = namedtuple('Point', ['x', 'y'])
+        >>> Point = namedtuple("Point", ["x", "y"])
         >>> default_collate([Point(0, 0), Point(1, 1)])
         Point(x=tensor([0, 1]), y=tensor([0, 1]))
         >>> # Example with `Tuple` inside the batch:

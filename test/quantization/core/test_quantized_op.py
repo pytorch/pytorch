@@ -4,56 +4,67 @@
 
 import copy
 import itertools
-import numpy as np
 import operator
 import random
-import sys
 import unittest
-from typing import NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
+
+import numpy as np
 
 import torch
-from torch import _VF
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair
-
-from hypothesis import settings, HealthCheck
-from hypothesis import assume, given, note
-from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
+
+from hypothesis import assume, given, HealthCheck, note, settings, strategies as st
+from packaging.version import Version
+from torch import _VF
+if TYPE_CHECKING:
+    from torch._ops import OpOverloadPacket
+from torch.nn.modules.utils import _pair, _single
+
 hu.assert_deadline_disabled()
-
-from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
-    TestCase,
-    IS_PPC,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_FBCODE,
-    IS_ARM64
-)
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
-from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    override_quantized_engine, supported_qengines, override_qengines, _snr
-from torch.testing._internal.common_quantized import (
-    qengine_is_qnnpack,
-    qengine_is_onednn,
-)
-from torch.ao.quantization import PerChannelMinMaxObserver
-from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDNN_VERSION, TEST_CUDA
-from torch.testing._internal.optests import opcheck
-import torch.backends.xnnpack
-
-from torch.utils.cpp_extension import ROCM_HOME
 
 from typing import Optional
 
-np_dtype = {
-    torch.quint8 : np.uint8,
-    torch.qint8 : np.int8,
-    torch.qint32 : np.int32
-}
+import torch.backends.xnnpack
+from torch.ao.quantization import PerChannelMinMaxObserver
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    TEST_CUDA,
+    TEST_CUDNN,
+    TEST_CUDNN_VERSION,
+)
+from torch.testing._internal.common_quantization import (
+    skipIfNoFBGEMM,
+    skipIfNoONEDNN,
+    skipIfNoQNNPACK,
+)
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_qparams,
+    _dequantize,
+    _quantize,
+    _snr,
+    override_qengines,
+    override_quantized_engine,
+    qengine_is_onednn,
+    qengine_is_qnnpack,
+    supported_qengines,
+)
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_PPC,
+    IS_SANDCASTLE,
+    raise_on_run_directly,
+    TestCase,
+)
+from torch.testing._internal.optests import opcheck
+
+from torch.utils.cpp_extension import ROCM_HOME
+
+np_dtype = {torch.quint8: np.uint8, torch.qint8: np.int8, torch.qint32: np.int32}
 
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
@@ -73,7 +84,7 @@ class PointwisePostOp(NamedTuple):
 def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
-    if sys.version_info >= (3, 13):
+    if Version(np.__version__) >= Version("2.1"):
         raise unittest.SkipTest("numpy 2.1 overflow error")
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):
@@ -166,7 +177,8 @@ def _quantize_fp8e4m3(t: torch.Tensor, channelwise: bool, scale: Optional[torch.
         scale = scale or t.abs().max().reshape([1]) / quant_max
         scale = torch.max(scale, eps) if isinstance(scale, torch.Tensor) else max(scale, eps.item())
         qt = t / scale
-    qt = qt.to(torch.float8_e4m3fn)
+    # Clamp to avoid NaN. Convert in two steps to align with fp32 -> fp16 -> fp8
+    qt = qt.clamp(-448, 448).half().to(torch.float8_e4m3fn)
     return qt, scale
 
 def _dequantize_fp8e4m3(qt: torch.Tensor, scale: torch.Tensor):
@@ -3041,7 +3053,7 @@ class TestQuantizedOps(TestCase):
                 lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_config_dict
                 )
-                assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
+                assert type(lstm_quantized[0]) is torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -4732,7 +4744,7 @@ class TestQuantizedLinear(TestCase):
         use_bias_list = [True, False]
         weight_quant_per_channel_list = [True, False]
         output_dtype_list = [None, torch.float32, torch.bfloat16]
-        y_scale, y_zp = 0.07, 0
+        y_scale, y_zp = 0.3, 0
         input_dim_list = [2, 3]
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
@@ -4754,13 +4766,18 @@ class TestQuantizedLinear(TestCase):
                 qw, w_scales = _quantize_fp8e4m3(w, channelwise=weight_quant_per_channel)
                 if use_bias:
                     b = torch.rand(oc) * 10
+                    if bfloat16_out:
+                        b = b.to(torch.bfloat16)
                 else:
                     b = None
 
                 # compute reference result
                 x_ref = _dequantize_fp8e4m3(qx, x_scale)
                 w_ref = _dequantize_fp8e4m3(qw, w_scales)
-                y_ref = linear_op(x_ref, w_ref, b)
+                if b is not None:
+                    y_ref = linear_op(x_ref, w_ref, b.to(torch.float))
+                else:
+                    y_ref = linear_op(x_ref, w_ref)
 
                 # compute fp8 linear
                 qw_packed = qlinear_prepack(qw, x.shape)
@@ -4825,6 +4842,7 @@ class TestQuantizedLinear(TestCase):
 
                 self.assertEqual(x.dim(), qy.dim())
                 self.assertEqual(y_ref.float(), qy.float())
+                assert not torch.isnan(qy).any()
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -7027,8 +7045,8 @@ class TestQuantizedConv(TestCase):
         # ONEDNN only supports symmetric quantization of weight
         if W_zero_point is not None:
             W_zero_point = len(W_zero_point) * [0]
-        fp32_output = True if qconv_output_dtype is torch.float32 else False
-        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
+        fp32_output = qconv_output_dtype is torch.float32
+        bfloat16_output = qconv_output_dtype is torch.bfloat16
         if fp32_output or bfloat16_output:
             Y_scale = 1.0
             Y_zero_point = 0
@@ -7878,7 +7896,7 @@ class TestQuantizedConv(TestCase):
         strides=(),
         pads=(),
         dilations=(),
-        Y_scale=0.02,
+        Y_scale=0.002,
         use_bias=True,
         post_op=PointwisePostOp(),
         use_channelwise=True,
@@ -7887,8 +7905,8 @@ class TestQuantizedConv(TestCase):
         weight_in_channel_last_format=False,
     ):
         # We assume FP8 quantization is always symmetric
-        fp32_output = True if qconv_output_dtype is torch.float32 else False
-        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
+        fp32_output = qconv_output_dtype is torch.float32
+        bfloat16_output = qconv_output_dtype is torch.bfloat16
         if fp32_output or bfloat16_output:
             Y_scale = 1.0
             X2_scale = 1.0
@@ -7955,9 +7973,7 @@ class TestQuantizedConv(TestCase):
 
         # Quantize reference results for comparison
         if qconv_output_dtype is None:
-            Y_scale_t = torch.Tensor([Y_scale]).to(device)
-            # Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
-            result_ref = result_ref.div(Y_scale_t).half().to(torch.float8_e4m3fn)
+            result_ref = _quantize_fp8e4m3(result_ref, False, Y_scale)[0]
         else:
             result_ref = result_ref.to(qconv_output_dtype)
 
@@ -8034,7 +8050,8 @@ class TestQuantizedConv(TestCase):
         if fp32_output or bfloat16_output:
             self.assertTrue(result.dtype == qconv_output_dtype)
 
-        assert torch.allclose(result.float(), result_ref.float(), atol=1e-6)
+        self.assertEqual(result.float(), result_ref.float(), atol=1e-6, rtol=1e-5)
+        assert not torch.isnan(result).any()
 
     def _test_qconv_fp8_helper(self, nd, pointwise_post_op):
         # nd = 1,2,3 -> conv1d/2d/3d
@@ -8149,6 +8166,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoONEDNN
     def test_qconv3d_fp8(self):
         pointwise_post_op = PointwisePostOp()
+        torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
 
@@ -8787,6 +8805,67 @@ class TestComparatorOps(TestCase):
             note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
                              msg=f"'tensor.{op}(scalar)'' failed")
+
+"""Tests the correctness of the quantized::embedding_bag_(byte|4bit|2bit)_prepack_with_rowwise_min_max ops."""
+class TestQuantizedWithMinMax(TestCase):
+    """Validates that the *rowwsie_min_max* quantization functions are equivalent to the ones without it."""
+    def test_quantize_tensor_with_min_max(self):
+        num_rows_list = [1, 2, 10, 100]
+        num_cols_list = [4, 8, 16, 32, 64, 128]
+        # Map of quantization bit rate to tuple of quantize function (with rowwise_min_max) and
+        # quantize function (without rowwise_min_max)
+        bit_rate_to_quant_fn: dict[
+            int,
+            tuple[
+                OpOverloadPacket,
+                OpOverloadPacket,
+            ],
+        ] = {
+            8: (
+                torch.ops.quantized.embedding_bag_byte_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_byte_prepack,
+            ),
+            4: (
+                torch.ops.quantized.embedding_bag_4bit_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_4bit_prepack,
+            ),
+            2: (
+                torch.ops.quantized.embedding_bag_2bit_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_2bit_prepack,
+            ),
+        }
+
+        for quant_fn_with_rowwise_min_max, quant_fn in bit_rate_to_quant_fn.values():
+            for torch_dtype in [torch.float16, torch.float32]:
+                for num_rows, num_cols in itertools.product(num_rows_list, num_cols_list):
+                    weight = torch.rand(num_rows, num_cols, dtype=torch_dtype)
+                    rowwise_min_max = torch.stack(
+                        [weight.min(dim=1).values, weight.max(dim=1).values], dim=1
+                    )
+
+                    # Perform the quantization with rowwise_min_max
+                    weight_quantized = quant_fn_with_rowwise_min_max(
+                        weight, rowwise_min_max
+                    )
+                    assert weight_quantized.dtype == torch.uint8
+
+                    # Confirm that the quantization is matching the one without rowwise_min_max
+                    weight_quantized_no_rowwise_min_max = quant_fn(weight)
+                    assert torch.equal(
+                        weight_quantized, weight_quantized_no_rowwise_min_max
+                    )
+
+                    # Confirtm that incorrect rowwise_min_max will result in different quantization output
+                    incorrect_rowwise_min_max = torch.stack(
+                        [weight.max(dim=1).values, weight.max(dim=1).values], dim=1
+                    )
+                    weight_incorrectly_quantized = quant_fn_with_rowwise_min_max(
+                        weight, incorrect_rowwise_min_max
+                    )
+                    assert weight_incorrectly_quantized.dtype == torch.uint8
+                    assert not torch.equal(
+                        weight_incorrectly_quantized, weight_quantized_no_rowwise_min_max
+                    )
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")

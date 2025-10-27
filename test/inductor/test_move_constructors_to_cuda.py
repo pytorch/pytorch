@@ -9,7 +9,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 requires_multigpu = functools.partial(
@@ -112,5 +112,5 @@ class TestMoveConstructorsToCuda(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_CUDA_AND_TRITON:
         run_tests()
