@@ -87,7 +87,18 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"assert len\(self\.stride\) == len\(order\)"
     ),  # https://github.com/pytorch/pytorch/issues/166270
+    re.compile(
+        r"assert len\(input_size\) == len\(new_size\)"
+    ),  # https://github.com/pytorch/pytorch/issues/166279
+    re.compile(
+        r"torch\._inductor\.exc\.InductorError: IndexError: list index out of range"
+    ),  # https://github.com/pytorch/pytorch/issues/166290
+    re.compile(
+        r"assert bool\(static_expr\)"
+    ),  # https://github.com/pytorch/pytorch/issues/166319
     # Add more patterns here as needed, e.g.:
+
+
     # re.compile(r"Some other error message"),
 ]
 
