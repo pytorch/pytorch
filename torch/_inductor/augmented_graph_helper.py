@@ -136,18 +136,6 @@ class AugmentedGraphHelper:
         """
         Transfer all extra dependencies from erased nodes to their replacements, handling
         cross-dependencies between erased nodes correctly.
-
-        This is used when replacing erased nodes with new nodes during bucketing.
-        The function:
-        1. For each erased node, gathers its merge set
-        2. Transfers dependencies FROM erased nodes to new nodes (redirecting to new nodes when needed)
-        3. Transfers dependencies TO erased nodes to new nodes
-        4. Cleans up all dependencies from erased nodes
-
-        Args:
-            erased_to_new: Mapping from erased nodes to their replacement nodes
-
-        Filters out internal dependencies (within merge sets).
         """
         erased_merge_sets: dict[fx.Node, fx.Node] = {}
 

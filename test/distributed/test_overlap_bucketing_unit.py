@@ -190,27 +190,14 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             # Trace with make_fx
             traced = make_fx(func)(a, b)
 
-        # Find nodes by iterating through graph
-        ag1, ag2, mm1, mm2 = None, None, None, None
-        ag1_wait, ag2_wait = None, None
-
-        for node in traced.graph.nodes:
-            if node.op == "call_function":
-                if "all_gather_into_tensor" in str(node.target):
-                    if ag1 is None:
-                        ag1 = node
-                    else:
-                        ag2 = node
-                elif "mm" in str(node.target):
-                    if mm1 is None:
-                        mm1 = node
-                    else:
-                        mm2 = node
-                elif "wait_tensor" in str(node.target):
-                    if ag1_wait is None:
-                        ag1_wait = node
-                    else:
-                        ag2_wait = node
+        # Find nodes using find_nodes
+        ag1, ag2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        mm1, mm2 = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
 
         # Manually annotate hiding relationships
         hiding_annotations = {
@@ -223,8 +210,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
-        # Run bucketing logic to find buckets (without applying them)
-        from torch._inductor.fx_passes.bucketing import bucket_key
+        # Run bucketing
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
         )
@@ -235,50 +221,13 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             node_ancestors,
             scheduled,
         )
+        bucketer.bucket_collectives()
 
-        # Find buckets manually (same logic as bucket_collectives but without applying)
-        from collections import defaultdict
-
-        from torch._inductor.fx_passes.overlap_scheduling import get_group_name
-        from torch.utils._ordered_set import OrderedSet as OS
-
-        # Group by PG first
-        pg_collectives = defaultdict(OS)
-        for start in collective_info:
-            pg = get_group_name(start)
-            pg_collectives[pg].add(start)
-
-        all_buckets = []
-        for pg, collectives in pg_collectives.items():
-            # Populate node_to_event for this PG
-            bucketer._populate_node_to_event(pg)
-
-            # Group by bucket key within this PG
-            grouped_collectives = defaultdict(OS)
-            for start in collectives:
-                key = bucket_key(start)
-                if key is not None:
-                    grouped_collectives[key].add(start)
-
-            # Find buckets for this PG
-            for collective_group in grouped_collectives.values():
-                buckets = bucketer._find_buckets(collective_group)
-                all_buckets.extend(buckets)
-
-        # Verify: should have 1 bucket with 2 collectives
-        self.assertEqual(
-            len(all_buckets), 1, f"Expected 1 bucket, got {len(all_buckets)}"
-        )
-        self.assertEqual(
-            len(all_buckets[0].collectives),
-            2,
-            f"Expected 2 collectives in bucket, got {len(all_buckets[0].collectives)}",
-        )
-
-        # Verify both collectives are in the bucket
-        bucketed_colls = set(all_buckets[0].collectives)
-        self.assertIn(ag1, bucketed_colls)
-        self.assertIn(ag2, bucketed_colls)
+        # Verify: should have 1 bucketed collective (all_gather_into_tensor_out)
+        graph_str = str(traced.graph)
+        FileCheck().check_count(
+            "all_gather_into_tensor_out", 1, exactly=False
+        ).run(graph_str)
 
     def test_cant_bucket_nested_hiding_intervals(self):
         """
@@ -326,21 +275,17 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             # Trace with make_fx
             traced = make_fx(func)(a, b)
 
-        # Find nodes
-        ag1, ag2, mm1, mm2 = None, None, None, None
-
-        for node in traced.graph.nodes:
-            if node.op == "call_function":
-                if "all_gather_into_tensor" in str(node.target):
-                    if ag1 is None:
-                        ag1 = node
-                    else:
-                        ag2 = node
-                elif "mm" in str(node.target):
-                    if mm2 is None:
-                        mm2 = node
-                    else:
-                        mm1 = node
+        # Find nodes using find_nodes
+        ag1, ag2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        mm_nodes = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+        # mm2 is the first mm, mm1 is the second (based on graph order)
+        mm2 = mm_nodes[0]
+        mm1 = mm_nodes[1]
 
         # Manually annotate hiding relationships
         hiding_annotations = {
@@ -353,8 +298,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
-        # Run bucketing logic to find buckets (without applying them)
-        from torch._inductor.fx_passes.bucketing import bucket_key
+        # Run bucketing
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
         )
@@ -365,45 +309,14 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             node_ancestors,
             scheduled,
         )
-
-        # Find buckets manually
-        from collections import defaultdict
-
-        from torch._inductor.fx_passes.overlap_scheduling import get_group_name
-        from torch.utils._ordered_set import OrderedSet as OS
-
-        # Group by PG first
-        pg_collectives = defaultdict(OS)
-        for start in collective_info:
-            pg = get_group_name(start)
-            pg_collectives[pg].add(start)
-
-        all_buckets = []
-        for pg, collectives in pg_collectives.items():
-            # Populate node_to_event for this PG
-            bucketer._populate_node_to_event(pg)
-
-            # Group by bucket key within this PG
-            grouped_collectives = defaultdict(OS)
-            for start in collectives:
-                key = bucket_key(start)
-                if key is not None:
-                    grouped_collectives[key].add(start)
-
-            # Find buckets for this PG
-            for collective_group in grouped_collectives.values():
-                buckets = bucketer._find_buckets(collective_group)
-                all_buckets.extend(buckets)
+        bucketer.bucket_collectives()
 
         # Verify: nested hiding intervals should prevent bucketing
-        # So we should have either 0 buckets (both stay separate) or 2 buckets with 1 collective each
-        # Either way, no bucket should have 2 collectives
-        for bucket in all_buckets:
-            self.assertLess(
-                len(bucket.collectives),
-                2,
-                "Nested hiding intervals should prevent bucketing of both collectives",
-            )
+        # Should have 2 separate all_gathers, not 1 bucketed one
+        graph_str = str(traced.graph)
+        FileCheck().check_count(
+            "all_gather_into_tensor", 2, exactly=False
+        ).run(graph_str)
 
     @parametrize("final_mm_hidden", (True, False))
     def test_cant_bucket_ag_with_rs_hiding_interval_between(self, final_mm_hidden):
