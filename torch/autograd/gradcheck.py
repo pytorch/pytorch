@@ -1762,8 +1762,9 @@ def _adjusted_atol(atol, u, v):
     # Jacobians. Then the transformed tolerance checks being done in the torch.allclose ops
     # are of form abs(Re{q_r u_r - q_i u_i}) < atol * (abs(u_r) + abs(u_i)), and equivalently
     # for imaginary components abs(Im{q_r u_r - q_i ui}) < atol * (abs(u_r) + abs(u_i)).
-    # Since u is drawn randomly non-negative,
-    # the end effect is a factor (sum(u_r) + sum(u_i)) * sum(v) increase in atol for complex inputs.
+    # Since u is drawn randomly non-negative, the end effect is a factor
+    # (sum(u_r) + sum(u_i)) * sum(v) increase in atol for complex inputs, eg.
+    # a statistical factor of 2 as compared to the real case.
 
     modified_atol = atol
     sum_v = 1.0 if v is None else v.sum()
