@@ -1201,9 +1201,6 @@ class TestDataLoader(TestCase):
         if persistent_workers and kwargs.get("num_workers", 0) == 0:
             persistent_workers = False
         kwargs["persistent_workers"] = persistent_workers
-        # Default stateful to the test class attribute if not explicitly provided
-        if "stateful" not in kwargs:
-            kwargs["stateful"] = getattr(self, "stateful", False)
         return DataLoader(dataset, **kwargs)
 
     def _test_sequential(self, loader):
@@ -3831,30 +3828,26 @@ class TestStatefulDataLoaderBasic(TestCase):
 
 
 class StatefulMapDataset(Dataset):
-    """Map dataset with stateful behavior for testing."""
+    """Map dataset with stateful behavior for testing. Keeps track of access count."""
 
-    def __init__(self, size, shuffle=False):
+    def __init__(self, size):
         self.size = size
         self.data = [{"id": i, "value": i * 2} for i in range(size)]
-        self.shuffle = shuffle
+        self.access_count = 0
 
     def __len__(self):
         return self.size
 
     def __getitem__(self, i):
-        if self.shuffle:
-            i = torch.randint(self.size, (1,)).item()
+        self.access_count += 1
         return self.data[i]
 
     def state_dict(self):
-        if self.shuffle:
-            return {"rng_state": torch.get_rng_state()}
-        else:
-            return {}
+        return {"access_count": self.access_count}
 
     def load_state_dict(self, state_dict):
-        if self.shuffle and "rng_state" in state_dict:
-            torch.set_rng_state(state_dict["rng_state"])
+        if "access_count" in state_dict:
+            self.access_count = state_dict["access_count"]
 
 
 @unittest.skipIf(
@@ -3869,7 +3862,7 @@ class TestStatefulDataLoaderMapDataset(TestCase):
     def test_map_dataset_statefulness(self, num_workers):
         """Test state_dict/load_state_dict functionality with map datasets"""
 
-        dataset = StatefulMapDataset(50, shuffle=False)
+        dataset = StatefulMapDataset(50)
         dl = DataLoader(
             dataset=dataset,
             num_workers=num_workers,
@@ -3878,24 +3871,19 @@ class TestStatefulDataLoaderMapDataset(TestCase):
             batch_size=5,
         )
 
-        # Consume some batches and track expected results
-        batches_before_checkpoint = []
         it = iter(dl)
         for i in range(3):  # consume first 3 batches
-            batch = next(it)
-            batches_before_checkpoint.append(batch)
+            _ = next(it)
 
         # Save state after consuming 3 batches
         state_dict = dl.state_dict()
         self.assertIsInstance(state_dict, dict)
 
-        # Continue with original iterator and collect remaining batches
-        remaining_batches_original = []
-        for batch in it:
-            remaining_batches_original.append(batch)
+        # Collect remaining batches
+        remaining_batches_original = list(it)
 
         # Create new loader and resume from checkpoint
-        dataset2 = StatefulMapDataset(50, shuffle=False)  # same dataset
+        dataset2 = StatefulMapDataset(50)  
         dl2 = DataLoader(
             dataset=dataset2,
             num_workers=num_workers,
@@ -3911,13 +3899,8 @@ class TestStatefulDataLoaderMapDataset(TestCase):
             remaining_batches_resumed.append(batch)
 
         # Verify that resumed loader continues exactly where original left off
-        self.assertEqual(
-            len(remaining_batches_original), len(remaining_batches_resumed)
-        )
-        for orig, resumed in zip(remaining_batches_original, remaining_batches_resumed):
-            self.assertEqual(len(orig), len(resumed))
-            for o, r in zip(orig, resumed):
-                self.assertEqual(o, r)
+        self.assertEqual(remaining_batches_original, remaining_batches_resumed)
+
 
 
 class StatefulSampler(torch.utils.data.Sampler):
@@ -3975,7 +3958,7 @@ class TestStatefulDataLoaderSampler(TestCase):
     @parametrize("num_workers", [0])
     def test_stateful_sampler(self, num_workers):
         """Test state_dict/load_state_dict functionality with stateful samplers"""
-        dataset = StatefulMapDataset(20, shuffle=False)
+        dataset = StatefulMapDataset(20)
         sampler = StatefulSampler(len(dataset))
 
         dl = DataLoader(
@@ -4004,7 +3987,7 @@ class TestStatefulDataLoaderSampler(TestCase):
             remaining_batches_original.append(batch)
 
         # Create new loader with fresh sampler and resume from checkpoint
-        dataset2 = StatefulMapDataset(20, shuffle=False)
+        dataset2 = StatefulMapDataset(20)
         sampler2 = StatefulSampler(len(dataset2))
         dl2 = DataLoader(
             dataset=dataset2,
@@ -4033,7 +4016,7 @@ class TestStatefulDataLoaderSampler(TestCase):
     @parametrize("num_workers", [0])
     def test_sampler_state_preservation(self, num_workers):
         """Test that sampler internal state is properly preserved"""
-        dataset = StatefulMapDataset(10, shuffle=False)
+        dataset = StatefulMapDataset(10)
         sampler = StatefulSampler(len(dataset))
 
         dl = DataLoader(
@@ -4062,7 +4045,7 @@ class TestStatefulDataLoaderSampler(TestCase):
         batch3_original = next(it)  # Should get indices [4, 5]
 
         # Resume from checkpoint
-        dataset2 = StatefulMapDataset(10, shuffle=False)
+        dataset2 = StatefulMapDataset(10)
         sampler2 = StatefulSampler(len(dataset2))
         dl2 = DataLoader(
             dataset=dataset2,
@@ -4092,7 +4075,7 @@ class TestStatefulDataLoaderRandomState(TestCase):
 
     def test_shuffle_state_preservation(self):
         """Test that shuffle random state is properly preserved and restored"""
-        dataset = StatefulMapDataset(20, shuffle=False)
+        dataset = StatefulMapDataset(20)
 
         # Test with shuffle=True and specific generator seed
         generator = torch.Generator()
@@ -4125,7 +4108,7 @@ class TestStatefulDataLoaderRandomState(TestCase):
         generator2 = torch.Generator()
         generator2.manual_seed(42)  # Same seed as original
 
-        dataset2 = StatefulMapDataset(20, shuffle=False)
+        dataset2 = StatefulMapDataset(20)
         dl2 = DataLoader(
             dataset=dataset2,
             num_workers=0,
@@ -4146,7 +4129,7 @@ class TestStatefulDataLoaderRandomState(TestCase):
 
     def test_reproducible_shuffle_sequences(self):
         """Test that shuffle produces reproducible sequences when resumed"""
-        dataset = StatefulMapDataset(16, shuffle=False)
+        dataset = StatefulMapDataset(16)
 
         # Run full sequence with shuffling
         generator1 = torch.Generator()
@@ -4195,7 +4178,7 @@ class TestStatefulDataLoaderRandomState(TestCase):
         generator3 = torch.Generator()
         generator3.manual_seed(123)  # Same seed
 
-        dataset3 = StatefulMapDataset(16, shuffle=False)
+        dataset3 = StatefulMapDataset(16)
         dl3 = DataLoader(
             dataset=dataset3,
             num_workers=0,
@@ -4231,7 +4214,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
     @parametrize("num_workers", [0])
     def test_multi_epoch_continuation(self, num_workers):
         """Test that DataLoader state is preserved across multiple epochs"""
-        dataset = StatefulMapDataset(12, shuffle=False)
+        dataset = StatefulMapDataset(12)
 
         # For reproducibility
         torch.manual_seed(789)
@@ -4263,7 +4246,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         # Now test resumption: Create new loader and resume from checkpoint
         torch.manual_seed(789)  # Same seed
 
-        dataset2 = StatefulMapDataset(12, shuffle=False)
+        dataset2 = StatefulMapDataset(12)
         dl2 = DataLoader(
             dataset=dataset2,
             num_workers=num_workers,
@@ -4284,7 +4267,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
     @parametrize("num_workers", [0])
     def test_epoch_boundary_state_behavior(self, num_workers):
         """Test state behavior at exact epoch boundaries"""
-        dataset = StatefulMapDataset(8, shuffle=False)
+        dataset = StatefulMapDataset(8)
 
         dl = DataLoader(
             dataset=dataset,
@@ -4313,7 +4296,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         state_dict_after_epoch = dl.state_dict()
 
         # Test resuming from state saved during epoch (after 3rd batch)
-        dataset2 = StatefulMapDataset(8, shuffle=False)
+        dataset2 = StatefulMapDataset(8)
         dl2 = DataLoader(
             dataset=dataset2,
             num_workers=num_workers,
@@ -4336,7 +4319,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         self.assertEqual(remaining_items, expected_remaining_this_epoch)
 
         # Test resuming from state saved after epoch completion
-        dataset3 = StatefulMapDataset(8, shuffle=False)
+        dataset3 = StatefulMapDataset(8)
         dl3 = DataLoader(
             dataset=dataset3,
             num_workers=num_workers,
@@ -4356,7 +4339,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
     @parametrize("num_workers", [0])
     def test_checkpoint_at_different_epoch_positions(self, num_workers):
         """Test checkpointing at batch boundaries within epochs"""
-        dataset = StatefulMapDataset(12, shuffle=False)
+        dataset = StatefulMapDataset(12)
         dl = DataLoader(
             dataset=dataset,
             num_workers=num_workers,
@@ -4370,7 +4353,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         for checkpoint_batch_pos in checkpoint_batch_positions:
             with self.subTest(checkpoint_batch_position=checkpoint_batch_pos):
                 # Reset and consume up to checkpoint batch position
-                dataset_test = StatefulMapDataset(12, shuffle=False)
+                dataset_test = StatefulMapDataset(12)
                 dl_test = DataLoader(
                     dataset=dataset_test,
                     num_workers=num_workers,
@@ -4402,7 +4385,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
                         remaining_original.extend(batch)
 
                 # Resume from checkpoint
-                dataset_resume = StatefulMapDataset(12, shuffle=False)
+                dataset_resume = StatefulMapDataset(12)
                 dl_resume = DataLoader(
                     dataset=dataset_resume,
                     num_workers=num_workers,
@@ -4486,7 +4469,7 @@ class TestStatefulDataLoaderSerialization(TestCase):
 
     def test_pickle_serialization(self):
         """Test that state dict can be pickle serialized and deserialized"""
-        dataset = StatefulMapDataset(30, shuffle=False)
+        dataset = StatefulMapDataset(30)
         dl = DataLoader(
             dataset=dataset,
             num_workers=0,
@@ -4512,7 +4495,7 @@ class TestStatefulDataLoaderSerialization(TestCase):
             unpickled_state = pickle.loads(pickled_state)
 
             # Should be able to load the unpickled state
-            dataset2 = StatefulMapDataset(30, shuffle=False)
+            dataset2 = StatefulMapDataset(30)
             dl2 = DataLoader(
                 dataset=dataset2,
                 num_workers=0,
@@ -4827,7 +4810,7 @@ class TestStateInitializationResumeCompleteness(TestCase):
 class TestConcurrentLoaderParity(TestCase):
     @parametrize("num_workers", [0])
     def test_parity_with_standard_loader(self, num_workers):
-        dataset = StatefulMapDataset(40, shuffle=False)
+        dataset = StatefulMapDataset(40)
         stateful = DataLoader(
             dataset=dataset,
             num_workers=num_workers,
@@ -4852,7 +4835,7 @@ class TestStatefulDataLoaderEmptyStateDict(TestCase):
 
     def test_load_empty_state_dict_resets_state(self):
         """Test that passing empty dict to load_state_dict resets the dataloader state."""
-        dataset = StatefulMapDataset(20, shuffle=False)
+        dataset = StatefulMapDataset(20)
         
         # Create initial dataloader
         dl = DataLoader(
@@ -4882,7 +4865,7 @@ class TestStatefulDataLoaderEmptyStateDict(TestCase):
     
     def test_load_empty_state_dict_then_load_real_state(self):
         """Test that after loading empty dict, we can still load a real state dict."""
-        dataset = StatefulMapDataset(20, shuffle=False)
+        dataset = StatefulMapDataset(20)
         
         dl = DataLoader(
             dataset=dataset,
@@ -4920,7 +4903,7 @@ class TestStatefulDataLoaderEmptyStateDict(TestCase):
     
     def test_load_empty_state_dict_iteration_behavior(self):
         """Test iteration behavior after loading empty state dict."""
-        dataset = StatefulMapDataset(20, shuffle=False)
+        dataset = StatefulMapDataset(20)
         
         # Create dataloader and consume some data
         dl = DataLoader(
@@ -4948,7 +4931,7 @@ class TestStatefulDataLoaderEmptyStateDict(TestCase):
     
     def test_empty_state_dict_multiple_times(self):
         """Test loading empty state dict multiple times."""
-        dataset = StatefulMapDataset(20, shuffle=False)
+        dataset = StatefulMapDataset(20)
         
         dl = DataLoader(
             dataset=dataset,

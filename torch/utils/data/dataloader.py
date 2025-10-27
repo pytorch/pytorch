@@ -541,6 +541,8 @@ class DataLoader(Generic[_T_co]):
             and self.next_iter_state
             and self.next_iter_state.get(_StateKeys.ITERATOR_FINISHED, False)
         ):
+            # If the previously saved state was in the finished state, we want to load the start of the next epoch
+            # instead of the end of the previous. See https://github.com/meta-pytorch/data/issues/1437
             self.next_iter_state = None
             self._iterator = self._get_stateful_iterator()
         else:
@@ -938,7 +940,9 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
 
     _NUM_YIELDED = "_num_yielded"
 
-    def __init__(self, loader, next_iter_state=None):
+    def __init__(
+        self, loader: DataLoader, next_iter_state: Optional[dict[str, Any]] = None
+    ):
         super().__init__(loader)
         assert self._timeout == 0
         assert self._num_workers == 0
@@ -1035,12 +1039,11 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
                 _try_load_state_dict(
                     self._sampler_iter, state_dict[_StateKeys.SAMPLER_ITER_STATE]
                 )
-        else:
-            if not isinstance(self._index_sampler, _InfiniteConstantSampler):
-                # Fallback to fastforward
-                self._sampler_iter = itertools.islice(
-                    self._index_sampler, self._sampler_iter_yielded, None
-                )
+        elif not isinstance(self._index_sampler, _InfiniteConstantSampler):
+            # Fallback to fastforward
+            self._sampler_iter = itertools.islice(
+                self._index_sampler, self._sampler_iter_yielded, None
+            )
 
     def _load_common_state(self, state_dict):
         """Load state common to all dataset kinds."""
@@ -1052,12 +1055,7 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
 
     def _load_dataset_state(self, state_dict):
         """Load dataset state if it's stateful."""
-        if (
-            _StateKeys.DATASET_STATE in state_dict
-            and state_dict[_StateKeys.DATASET_STATE] is not None
-            and isinstance(self._dataset, Stateful)
-        ):
-            _try_load_state_dict(self._dataset, state_dict[_StateKeys.DATASET_STATE])
+        _try_load_state_dict(self._dataset, state_dict[_StateKeys.DATASET_STATE])
 
     def _create_fetcher(self):
         """Create the dataset fetcher."""

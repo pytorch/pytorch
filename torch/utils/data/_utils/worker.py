@@ -29,11 +29,10 @@ def _try_get_state_dict(obj: Any) -> Optional[dict[str, Any]]:
     return None
 
 
-def _try_load_state_dict(obj: T, state_dict: dict[str, Any]) -> None:
+def _try_load_state_dict(obj: Any, state_dict: Optional[dict[str, Any]]) -> None:
     """Try to load state_dict into an object if it implements Stateful protocol."""
     if isinstance(obj, Stateful) and state_dict is not None:
         obj.load_state_dict(state_dict)
-    return None
 
 
 if TYPE_CHECKING:
