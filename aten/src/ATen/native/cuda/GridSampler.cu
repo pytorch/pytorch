@@ -308,6 +308,212 @@ namespace {
 // lies relative to the entire tensor, so we pass the base grad_input.data and full offset information,
 // including batch * channel offset (NC_offset).
 
+  template <typename scalar_t, typename index_t>
+  C10_LAUNCH_BOUNDS_1(256)
+  __global__ void grid_sampler_2d_backward_kernel(
+      const index_t nthreads,
+      TensorInfo<const scalar_t, index_t> grad_output,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
+      TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros (or unused if input_requires_grad is false)
+      TensorInfo<scalar_t, index_t> grad_grid,   // initialized to empty
+      const GridSamplerInterpolation interpolation_mode,
+      const GridSamplerPadding padding_mode,
+      bool align_corners,
+      const index_t grad_input_memory_span,
+      const bool input_requires_grad) {
+
+    index_t C = input.sizes[1];
+    index_t inp_H = input.sizes[2];
+    index_t inp_W = input.sizes[3];
+    index_t out_H = grid.sizes[1];
+    index_t out_W = grid.sizes[2];
+    index_t inp_sN = input.strides[0];
+    index_t inp_sC = input.strides[1];
+    index_t inp_sH = input.strides[2];
+    index_t inp_sW = input.strides[3];
+    index_t grid_sN = grid.strides[0];
+    index_t grid_sH = grid.strides[1];
+    index_t grid_sW = grid.strides[2];
+    index_t grid_sCoor = grid.strides[3];
+    index_t gOut_sN = grad_output.strides[0];
+    index_t gOut_sC = grad_output.strides[1];
+    index_t gOut_sH = grad_output.strides[2];
+    index_t gOut_sW = grad_output.strides[3];
+    // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
+    index_t gInp_sN;
+    index_t gInp_sC;
+    index_t gInp_sH;
+    index_t gInp_sW;
+    if (input_requires_grad) {
+      gInp_sN = grad_input.strides[0];
+      gInp_sC = grad_input.strides[1];
+      gInp_sH = grad_input.strides[2];
+      gInp_sW = grad_input.strides[3];
+    }
+    index_t gGrid_sW = grad_grid.strides[2];
+
+    CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
+      const index_t w = index % out_W;
+      const index_t h = (index / out_W) % out_H;
+      const index_t n = index / (out_H * out_W);
+      const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
+
+      // get the corresponding input x, y co-ordinates from grid
+      scalar_t x = grid.data[grid_offset];
+      scalar_t y = grid.data[grid_offset + grid_sCoor];
+
+      // multipliers for gradients on ix and iy
+      scalar_t gix_mult, giy_mult;
+      scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+      scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+
+      if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+        // get NE, NW, SE, SW pixel values from (x, y)
+        index_t ix_nw = static_cast<index_t>(std::floor(ix));
+        index_t iy_nw = static_cast<index_t>(std::floor(iy));
+        index_t ix_ne = ix_nw + 1;
+        index_t iy_ne = iy_nw;
+        index_t ix_sw = ix_nw;
+        index_t iy_sw = iy_nw + 1;
+        index_t ix_se = ix_nw + 1;
+        index_t iy_se = iy_nw + 1;
+
+        // get surfaces to each neighbor:
+        scalar_t nw = (ix_se - ix)    * (iy_se - iy);
+        scalar_t ne = (ix    - ix_sw) * (iy_sw - iy);
+        scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
+        scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
+
+        scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
+        const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+        index_t NC_offset = n * gInp_sN;
+        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+          const scalar_t gOut = *gOut_ptr_NCHW;
+
+          if (input_requires_grad) {
+            // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
+            safe_add_2d(grad_input.data, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut, NC_offset, grad_input_memory_span);
+            safe_add_2d(grad_input.data, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut, NC_offset, grad_input_memory_span);
+            safe_add_2d(grad_input.data, iy_sw, ix_sw, gInp_sH, gInp_sW, inp_H, inp_W, sw * gOut, NC_offset, grad_input_memory_span);
+            safe_add_2d(grad_input.data, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, se * gOut, NC_offset, grad_input_memory_span);
+          }
+
+          // calculate grad_grid
+          if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+            scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
+            gix -= nw_val * (iy_se - iy) * gOut;
+            giy -= nw_val * (ix_se - ix) * gOut;
+          }
+          if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
+            scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
+            gix += ne_val * (iy_sw - iy) * gOut;
+            giy -= ne_val * (ix - ix_sw) * gOut;
+          }
+          if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
+            scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
+            gix -= sw_val * (iy - iy_ne) * gOut;
+            giy += sw_val * (ix_ne - ix) * gOut;
+          }
+          if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
+            scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
+            gix += se_val * (iy - iy_nw) * gOut;
+            giy += se_val * (ix - ix_nw) * gOut;
+          }
+        }
+
+        // assuming grad_grid is contiguous
+        // thus we can
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
+        //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
+        scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
+        gGrid_ptr_NHW[0] = gix_mult * gix;
+        gGrid_ptr_NHW[1] = giy_mult * giy;
+      } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+        if (input_requires_grad) {
+          index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
+          index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
+
+          // assign nearest neighbour pixel value to output pixel
+          const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+          index_t NC_offset = n * gInp_sN;
+          for (index_t c = 0; c < C; ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+            // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
+            safe_add_2d(grad_input.data, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, *gOut_ptr_NCHW, NC_offset, grad_input_memory_span);
+          }
+        }
+
+        // assuming grad_grid is contiguous
+        // thus we can
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
+        //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
+        scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
+        gGrid_ptr_NHW[0] = static_cast<scalar_t>(0);
+        gGrid_ptr_NHW[1] = static_cast<scalar_t>(0);
+      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+
+        ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
+        iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
+
+        scalar_t ix_nw = std::floor(ix);
+        scalar_t iy_nw = std::floor(iy);
+
+        const scalar_t tx = ix - ix_nw;
+        const scalar_t ty = iy - iy_nw;
+
+        scalar_t x_coeffs[4];
+        scalar_t y_coeffs[4];
+        scalar_t x_coeffs_grad[4];
+        scalar_t y_coeffs_grad[4];
+
+        get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, tx);
+        get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, ty);
+        get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
+        get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+
+        scalar_t gix = static_cast<scalar_t>(0);
+        scalar_t giy = static_cast<scalar_t>(0);
+
+        const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+        index_t NC_offset = n * gInp_sN;
+        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
+
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC+= inp_sC) {
+          const scalar_t gOut = *gOut_ptr_NCHW;
+
+          #pragma unroll 4
+          for (index_t i = 0; i < 4; ++i) {
+            #pragma unroll 4
+            for (index_t j = 0; j < 4; ++j) {
+
+              if (input_requires_grad) {
+                // set input gradient. See Note [Passing pointer and offset to fastAtomicAdd].
+                add_value_bounded<scalar_t>(grad_input.data, ix_nw - 1 + i, iy_nw - 1 + j, inp_W, inp_H, gInp_sW, gInp_sH,
+                  gOut * x_coeffs[i] * y_coeffs[j],
+                  padding_mode,
+                  align_corners,
+                  NC_offset,
+                  grad_input_memory_span);
+              }
+
+              // set grid gradient
+              scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
+                inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
+
+              gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
+              giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
+            }
+          }
+        }
+
+        scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
+        gGrid_ptr_NHW[0] = gix_mult * gix;
+        gGrid_ptr_NHW[1] = giy_mult * giy;
+      }
+    }
+  }
+
 #ifdef USE_ROCM
 // Note [ROCm-specific GridSampler backward optimization]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -537,13 +743,13 @@ namespace {
       //index_t C = input.sizes(1);
       // constexpr int CCHUNK = C < 64 ? 8 : 4;
       constexpr int CCHUNK = 4;
-      constexpr int HALO = INTERP_MODE == GridSamplerInterpolation::Bicubic ? 2 : 1;
+      constexpr int HALO = interpolation_mode == GridSamplerInterpolation::Bicubic ? 2 : 1;
       constexpr int SMEM_H = TILE_H + 2 * HALO;
       constexpr int SMEM_W = TILE_W + 2 * HALO;
       constexpr int SMEM_W_PAD = SMEM_W + 1;
       const size_t smem_bytes = CCHUNK * SMEM_H * SMEM_W_PAD * sizeof(at::opmath_type<scalar_t>);
 
-      auto launch = [&](auto pad_mode, auto align_flag, auto req_grad_flag) {
+      auto launch = [&](GridSamplerPadding pad_mode, auto align_flag, auto req_grad_flag) {
         grid_sampler_2d_backward_kernel_optimized<scalar_t, index_t, GridSamplerInterpolation::Bilinear, pad_mode, align_flag, req_grad_flag>
           <<<blocks, threads, smem_bytes, stream>>>(
             getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input), getTensorInfo<const scalar_t, index_t>(grid),
@@ -579,212 +785,6 @@ namespace {
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 #endif  // USE_ROCM
-
-  template <typename scalar_t, typename index_t>
-  C10_LAUNCH_BOUNDS_1(256)
-  __global__ void grid_sampler_2d_backward_kernel(
-      const index_t nthreads,
-      TensorInfo<const scalar_t, index_t> grad_output,
-      TensorInfo<const scalar_t, index_t> input,
-      TensorInfo<const scalar_t, index_t> grid,
-      TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros (or unused if input_requires_grad is false)
-      TensorInfo<scalar_t, index_t> grad_grid,   // initialized to empty
-      const GridSamplerInterpolation interpolation_mode,
-      const GridSamplerPadding padding_mode,
-      bool align_corners,
-      const index_t grad_input_memory_span,
-      const bool input_requires_grad) {
-
-    index_t C = input.sizes[1];
-    index_t inp_H = input.sizes[2];
-    index_t inp_W = input.sizes[3];
-    index_t out_H = grid.sizes[1];
-    index_t out_W = grid.sizes[2];
-    index_t inp_sN = input.strides[0];
-    index_t inp_sC = input.strides[1];
-    index_t inp_sH = input.strides[2];
-    index_t inp_sW = input.strides[3];
-    index_t grid_sN = grid.strides[0];
-    index_t grid_sH = grid.strides[1];
-    index_t grid_sW = grid.strides[2];
-    index_t grid_sCoor = grid.strides[3];
-    index_t gOut_sN = grad_output.strides[0];
-    index_t gOut_sC = grad_output.strides[1];
-    index_t gOut_sH = grad_output.strides[2];
-    index_t gOut_sW = grad_output.strides[3];
-    // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
-    index_t gInp_sN;
-    index_t gInp_sC;
-    index_t gInp_sH;
-    index_t gInp_sW;
-    if (input_requires_grad) {
-      gInp_sN = grad_input.strides[0];
-      gInp_sC = grad_input.strides[1];
-      gInp_sH = grad_input.strides[2];
-      gInp_sW = grad_input.strides[3];
-    }
-    index_t gGrid_sW = grad_grid.strides[2];
-
-    CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
-      const index_t w = index % out_W;
-      const index_t h = (index / out_W) % out_H;
-      const index_t n = index / (out_H * out_W);
-      const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
-
-      // get the corresponding input x, y co-ordinates from grid
-      scalar_t x = grid.data[grid_offset];
-      scalar_t y = grid.data[grid_offset + grid_sCoor];
-
-      // multipliers for gradients on ix and iy
-      scalar_t gix_mult, giy_mult;
-      scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-      scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
-
-      if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-        // get NE, NW, SE, SW pixel values from (x, y)
-        index_t ix_nw = static_cast<index_t>(std::floor(ix));
-        index_t iy_nw = static_cast<index_t>(std::floor(iy));
-        index_t ix_ne = ix_nw + 1;
-        index_t iy_ne = iy_nw;
-        index_t ix_sw = ix_nw;
-        index_t iy_sw = iy_nw + 1;
-        index_t ix_se = ix_nw + 1;
-        index_t iy_se = iy_nw + 1;
-
-        // get surfaces to each neighbor:
-        scalar_t nw = (ix_se - ix)    * (iy_se - iy);
-        scalar_t ne = (ix    - ix_sw) * (iy_sw - iy);
-        scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
-        scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
-
-        scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
-        const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-        index_t NC_offset = n * gInp_sN;
-        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
-        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
-          const scalar_t gOut = *gOut_ptr_NCHW;
-
-          if (input_requires_grad) {
-            // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
-            safe_add_2d(grad_input.data, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut, NC_offset, grad_input_memory_span);
-            safe_add_2d(grad_input.data, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut, NC_offset, grad_input_memory_span);
-            safe_add_2d(grad_input.data, iy_sw, ix_sw, gInp_sH, gInp_sW, inp_H, inp_W, sw * gOut, NC_offset, grad_input_memory_span);
-            safe_add_2d(grad_input.data, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, se * gOut, NC_offset, grad_input_memory_span);
-          }
-
-          // calculate grad_grid
-          if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
-            scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
-            gix -= nw_val * (iy_se - iy) * gOut;
-            giy -= nw_val * (ix_se - ix) * gOut;
-          }
-          if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
-            scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
-            gix += ne_val * (iy_sw - iy) * gOut;
-            giy -= ne_val * (ix - ix_sw) * gOut;
-          }
-          if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
-            scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
-            gix -= sw_val * (iy - iy_ne) * gOut;
-            giy += sw_val * (ix_ne - ix) * gOut;
-          }
-          if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
-            scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
-            gix += se_val * (iy - iy_nw) * gOut;
-            giy += se_val * (ix - ix_nw) * gOut;
-          }
-        }
-
-        // assuming grad_grid is contiguous
-        // thus we can
-        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
-        //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
-        scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = gix_mult * gix;
-        gGrid_ptr_NHW[1] = giy_mult * giy;
-      } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        if (input_requires_grad) {
-          index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
-          index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
-
-          // assign nearest neighbour pixel value to output pixel
-          const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-          index_t NC_offset = n * gInp_sN;
-          for (index_t c = 0; c < C; ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
-            // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
-            safe_add_2d(grad_input.data, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, *gOut_ptr_NCHW, NC_offset, grad_input_memory_span);
-          }
-        }
-
-        // assuming grad_grid is contiguous
-        // thus we can
-        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
-        //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
-        scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = static_cast<scalar_t>(0);
-        gGrid_ptr_NHW[1] = static_cast<scalar_t>(0);
-      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-
-        ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
-        iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
-
-        scalar_t ix_nw = std::floor(ix);
-        scalar_t iy_nw = std::floor(iy);
-
-        const scalar_t tx = ix - ix_nw;
-        const scalar_t ty = iy - iy_nw;
-
-        scalar_t x_coeffs[4];
-        scalar_t y_coeffs[4];
-        scalar_t x_coeffs_grad[4];
-        scalar_t y_coeffs_grad[4];
-
-        get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, tx);
-        get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, ty);
-        get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
-        get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
-
-        scalar_t gix = static_cast<scalar_t>(0);
-        scalar_t giy = static_cast<scalar_t>(0);
-
-        const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-        index_t NC_offset = n * gInp_sN;
-        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
-
-        for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC+= inp_sC) {
-          const scalar_t gOut = *gOut_ptr_NCHW;
-
-          #pragma unroll 4
-          for (index_t i = 0; i < 4; ++i) {
-            #pragma unroll 4
-            for (index_t j = 0; j < 4; ++j) {
-
-              if (input_requires_grad) {
-                // set input gradient. See Note [Passing pointer and offset to fastAtomicAdd].
-                add_value_bounded<scalar_t>(grad_input.data, ix_nw - 1 + i, iy_nw - 1 + j, inp_W, inp_H, gInp_sW, gInp_sH,
-                  gOut * x_coeffs[i] * y_coeffs[j],
-                  padding_mode,
-                  align_corners,
-                  NC_offset,
-                  grad_input_memory_span);
-              }
-
-              // set grid gradient
-              scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
-                inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
-
-              gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
-              giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
-            }
-          }
-        }
-
-        scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = gix_mult * gix;
-        gGrid_ptr_NHW[1] = giy_mult * giy;
-      }
-    }
-  }
 
   template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(256)
