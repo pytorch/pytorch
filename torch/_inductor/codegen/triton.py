@@ -3720,7 +3720,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         exit_stack.close()
 
     def _lift_helper(
-        self, fn, values: tuple[CSEVariable, ...], dtypes: tuple[torch.dtype, ...]
+        self, fn, values: tuple[CSEVariable, ...], dtypes: tuple[torch.dtype, ...], 
+        additional_inputs: tuple[CSEVariable, ...], additional_inputs_dtypes: tuple[torch.dtype, ...]
     ) -> str:
         # Lift IR function for scan operations into a triton function
         # in the global namespace
@@ -3728,6 +3729,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         helper.writeline("@triton.jit")
         cse = CSE()
 
+        # args = [
+        #     (tuple(
+        #         cse.namedvar(f"arg{i}_{n}", dtype=dtype, shape=value.shape)
+        #         for n, (value, dtype) in enumerate(zip(values, dtypes))
+        #     ),
+        #     tuple(
+        #         cse.namedvar(f"arg{i}_{n + len(values)}", dtype=dtype, shape=value.shape)
+        #         for n, (value, dtype) in enumerate(zip(additional_inputs, additional_inputs_dtypes))
+        #     ))
+        #     for i in range(2)
+        # ]
         args = [
             tuple(
                 cse.namedvar(f"arg{i}_{n}", dtype=dtype, shape=value.shape)
@@ -3735,6 +3747,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             for i in range(2)
         ]
+        additional_args = [
+            tuple(
+                cse.namedvar(f"arg{i}_{n + len(values)}", dtype=dtype, shape=value.shape)
+                for n, (value, dtype) in enumerate(zip(additional_inputs, additional_inputs_dtypes))
+            )
+            for i in range(2)
+        ]
+        args = list(itertools.chain(*zip(args, additional_args)))
+        
         signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
@@ -3790,6 +3811,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
         values: tuple[CSEVariable, ...],
+        additional_inputs_dtypes: tuple[torch.dtype, ...],
+        additional_inputs: tuple[CSEVariable, ...],
     ) -> tuple[CSEVariable, ...]:
         """
         Perform an associative scan on 'values'.
@@ -3805,8 +3828,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         accumulators = []
 
         dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
+        additional_inputs_dtypes = tuple(upcast_compute_type(dtype) for dtype in additional_inputs_dtypes)
         cse_compute = functools.partial(self.cse.generate, self.compute)
-        combine_helper_fn = self._lift_helper(combine_fn, values, dtypes)
+        combine_helper_fn = self._lift_helper(combine_fn, values, dtypes, additional_inputs, additional_inputs_dtypes)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
         for value, dtype in zip(values, dtypes):
@@ -3838,6 +3862,38 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
                 accumulators.append(accumulator)
+                
+        for value, dtype in zip(additional_inputs, additional_inputs_dtypes):
+            value_dtype = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_compute_type(dtype)})",
+                dtype=dtype,
+                shape=value.shape,
+            )
+            # broadcasted_values.append(value_dtype)
+            
+            value = self.cse.generate(
+                self.compute,
+                f"tl.broadcast_to({value_dtype}, {self.dense_size_str()})",
+                dtype=dtype,
+                shape=tuple(self.dense_size_list()),
+            )
+            broadcasted_values.append(value)
+
+            # acc_type = triton_acc_type(dtype)
+
+            # if not self.persistent_reduction:
+            #     reduced_size = self.dense_size_list()
+            #     reduced_size[-1] = "1"
+            #     accumulator = self.cse.newvar(dtype=dtype, shape=reduced_size)
+            #     reduced_size_str = f"[{', '.join(reduced_size)}]"
+
+            #     default = "float('nan')" if dtype.is_floating_point else "-1"
+            #     self.body.writeline(
+            #         f"{accumulator} = tl.full({reduced_size_str}, {default}, {acc_type})"
+            #     )
+
+            #     accumulators.append(accumulator)
 
         def csv(values):
             return " ".join(f"{value}," for value in values)

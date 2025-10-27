@@ -271,6 +271,7 @@ class DtypePropagationOpsHandler:
         dtypes: tuple[torch.dtype, ...],
         combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
         values: tuple[T, ...],
+        additional_inputs: tuple[T, ...],
     ) -> tuple[torch.dtype, ...]:
         return dtypes
 

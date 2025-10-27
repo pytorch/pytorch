@@ -2303,6 +2303,8 @@ class Scan(Loops):
     # output_index indexes the following tuples
     dtypes: tuple[torch.dtype, ...]
     inner_fns: tuple[Callable[..., Any], ...]
+    additional_inputs_dtypes: tuple[torch.dtype, ...] = None
+    additional_inputs_fns: tuple[Callable[..., Any], ...] = None
 
     # HACK we mimic reduction
 
@@ -2333,7 +2335,8 @@ class Scan(Loops):
     ) -> Any:
         idx = self.reindex(vars, scan_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        result = ops.scan(self.dtypes, self.combine_fn, values)
+        additional_inputs = tuple(add_ips_fn(vars) for add_ips_fn in self.additional_inputs_fns)
+        result = ops.scan(self.dtypes, self.combine_fn, values, self.additional_inputs_dtypes, additional_inputs)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
         )
@@ -2376,6 +2379,8 @@ class Scan(Loops):
         axis: int,
         combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        additional_inputs_dtypes: tuple[torch.dtype, ...] = None,
+        additional_inputs_fns: tuple[Callable[[Sequence[Expr]], Any], ...] = None,
         *,
         # Whether we have the option to fallback to aten
         can_fallback_to_aten: bool = True,
@@ -2446,6 +2451,8 @@ class Scan(Loops):
                     dtypes=dtypes,
                     inner_fn=inner_fns[output_index],
                     inner_fns=inner_fns,
+                    additional_inputs_dtypes=additional_inputs_dtypes,
+                    additional_inputs_fns=additional_inputs_fns,
                     size=size,
                     ranges=pointwise_ranges,
                     scan_ranges=scan_ranges,

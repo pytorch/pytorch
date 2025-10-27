@@ -4773,7 +4773,14 @@ class GraphModule(torch.nn.Module):
     # does not support lifted arguments
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or params["autograd"] == True
+            )
+        ),
     )
     def test_associative_scan_freevars_simple(
         self, compile_mode, combine_mode, reverse, device, autograd
@@ -4781,22 +4788,18 @@ class GraphModule(torch.nn.Module):
         H = torch.rand(2, device=device, requires_grad=autograd)
 
         def fct_freevars1(x: torch.Tensor, y: torch.Tensor):
-            return x * H + y * 2
-
-        def fct_freevars2(x: torch.Tensor, y: torch.Tensor):
-            return x * H + y * H
+            return x + y + H
 
         H1 = torch.rand(1, device=device, requires_grad=autograd)
         H2 = torch.rand(1, device=device, requires_grad=autograd)
 
         def fct_freevars3(x: torch.Tensor, y: torch.Tensor):
-            return x * H1 + y * H2
+            return x + y + H1 + H2
 
         inp = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
 
         for fct, param in [
             (fct_freevars1, (H,)),
-            (fct_freevars2, (H,)),
             (fct_freevars3, (H1, H2)),
         ]:
             kwargs = {

@@ -94,7 +94,12 @@ class AssociativeScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
-        return super().__call__(combine_fn, xs, additional_inputs)
+        
+        # Broadcast additional arguments
+        xsb_additional_inputsb = torch.broadcast_tensors(*xs, *additional_inputs)
+        xsb, additional_inputsb = xsb_additional_inputsb[:len(xs)], xsb_additional_inputsb[len(xs):]
+        additional_inputsb = [add_inpsb[0, :] for add_inpsb in additional_inputsb]
+        return super().__call__(combine_fn, xs, additional_inputsb)
 
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
