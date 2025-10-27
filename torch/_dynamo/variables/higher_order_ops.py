@@ -1402,8 +1402,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
             true_spec.treespec, false_spec.treespec
-        )
-        if not same_spec.as_python_constant():
+        ).as_python_constant()
+        # 3.14: NotImplemented cannot be converted to bool
+        if same_spec is not NotImplemented and not same_spec:
             unimplemented("Expected branches to return the same pytree structure.")
 
         (
@@ -1696,9 +1697,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with tx.fake_mode:
             sub_args_fake = [
-                leaf.node.meta["example_value"].clone()
-                if hasattr(leaf.node.meta["example_value"], "clone")
-                else leaf.node.meta["example_value"]
+                (
+                    leaf.node.meta["example_value"].clone()
+                    if hasattr(leaf.node.meta["example_value"], "clone")
+                    else leaf.node.meta["example_value"]
+                )
                 for leaf in pytree.tree_leaves(proxy_vars_inputcheck)
             ]
             pre_dispatch = False

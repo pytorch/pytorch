@@ -1431,7 +1431,12 @@ class InstructionTranslatorBase(
                 # an exception table entry, so we also assume that we
                 # are still in the same block. It is probably safe to do
                 # this in 3.11, even though we haven't encountered this case before.
-                if self.block_stack and inst.opname not in ("NOP", "JUMP_BACKWARD"):
+                # In 3.14+, NOT_TAKEN might also not be covered by an exn table entry.
+                if self.block_stack and inst.opname not in (
+                    "NOP",
+                    "JUMP_BACKWARD",
+                    "NOT_TAKEN",
+                ):
                     # If we really escape from a block and the current
                     # instruction is not in another block, then there
                     # should be no other nested blocks that we are in.
