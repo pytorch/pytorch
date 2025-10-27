@@ -4,6 +4,8 @@ import math as pymath
 import warnings
 from typing import Any, Callable, TypeVar
 
+from triton import JITFunction
+
 from .triton_compat import (  # noqa: F401
     _log2,
     builtins_use_semantic_kwarg,
@@ -57,6 +59,10 @@ def get_backend_options():
     backend = triton.compiler.compiler.make_backend(target)
     options = backend.parse_options(dict())
     return options.__dict__
+
+
+def get_constexprs(kernel: JITFunction) -> list[int]:
+    return [p.num for p in kernel.params if p.is_constexpr]
 
 
 @triton.jit

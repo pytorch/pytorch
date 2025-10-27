@@ -6830,10 +6830,9 @@ class UserDefinedTritonKernel(ExternKernel):
         named_args = {
             k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         }
-        assert hasattr(kernel, "arg_names") and hasattr(kernel, "constexprs"), type(
-            kernel
-        )
-        constexpr_names = OrderedSet(kernel.arg_names[i] for i in kernel.constexprs)
+        arg_names = [p.name for p in kernel.params]  # type: ignore[attr-defined]
+        constexprs = [p.num for p in kernel.params if p.is_constexpr]  # type: ignore[attr-defined]
+        constexpr_names = OrderedSet(arg_names[i] for i in constexprs)
 
         args: list[Any] = []
         arg_types: list[Any] = []
