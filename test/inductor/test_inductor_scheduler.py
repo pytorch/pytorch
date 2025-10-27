@@ -147,10 +147,10 @@ class TestScheduler(TestCase):
         scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
 
         node1 = self._create_mock_node(
-            name="node1",reads=["A", "B", "C"],writes=["D"]
+            name="node1", reads=["A", "B", "C"], writes=["D"]
         )
         node2 = self._create_mock_node(
-            name="node2",reads=["D", "E", "F"],writes=["G"]
+            name="node2", reads=["D", "E", "F"], writes=["G"]
         )
 
         # Execute: Check with threshold of 5 (should prevent fusion since 6 > 5)
