@@ -1537,11 +1537,8 @@ def should_prefer_unfused_addmm(match):
     if any(has_pointwise_use(use) for use in output.users):
         return True
     else:
-        mat1, mat2 = match.args
-        inp_val = inp.meta["val"]
-        mat1_val = mat1.meta["val"]
-        mat2_val = mat2.meta["val"]
-        return not _cublaslt_can_fuse_bias_epilogue(inp_val, mat1_val, mat2_val)
+        args_val = (arg.meta["val"] for arg in (inp, *match.args))
+        return not _cublaslt_can_fuse_bias_epilogue(*args_val)
 
 
 @register_graph_pattern(
