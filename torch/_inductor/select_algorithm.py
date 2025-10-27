@@ -3596,6 +3596,52 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @staticmethod
+    def log_flex_attention_results(
+        name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
+    ) -> None:
+        flex_attention_filename = get_flex_attention_log_filename()
+        if not flex_attention_filename or "flex_attention" not in name:
+            return
+
+        if len(input_nodes) < 3:
+            return
+
+        query_size = input_nodes[0].get_size()
+        key_size = input_nodes[1].get_size()
+        value_size = input_nodes[2].get_size()
+
+        B = query_size[0]
+        Hq = query_size[1]
+        seq_len_q = query_size[2]
+        qk_head_dim = query_size[3]
+        Hkv = key_size[1]
+        seq_len_kv = key_size[2]
+        v_head_dim = value_size[3]
+
+        kernel_type = "backward" if "backward" in name else "forward"
+        dims_key = str(
+            (
+                kernel_type,
+                B,
+                Hq,
+                Hkv,
+                seq_len_q,
+                seq_len_kv,
+                qk_head_dim,
+                v_head_dim,
+            )
+        )
+
+        sorted_choices = sorted(timings, key=timings.__getitem__)
+        out_dict = {
+            dims_key: [
+                AlgorithmSelectorCache.get_flex_attention_choice_info(choice, timings)
+                for choice in sorted_choices
+            ]
+        }
+        append_to_log(flex_attention_filename, out_dict)
+
+    @staticmethod
     def log_results(
         name: str,
         input_nodes: list[ir.IRNode],
@@ -3674,45 +3720,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             append_to_log(mm_filename, out_dict)
 
-        flex_attention_filename = get_flex_attention_log_filename()
-        if flex_attention_filename and "flex_attention" in name:
-            if len(input_nodes) >= 3:
-                query_size = input_nodes[0].get_size()
-                key_size = input_nodes[1].get_size()
-                value_size = input_nodes[2].get_size()
-
-                B = query_size[0]
-                Hq = query_size[1]
-                seq_len_q = query_size[2]
-                qk_head_dim = query_size[3]
-                Hkv = key_size[1]
-                seq_len_kv = key_size[2]
-                v_head_dim = value_size[3]
-
-                kernel_type = "backward" if "backward" in name else "forward"
-                dims_key = str(
-                    (
-                        kernel_type,
-                        B,
-                        Hq,
-                        Hkv,
-                        seq_len_q,
-                        seq_len_kv,
-                        qk_head_dim,
-                        v_head_dim,
-                    )
-                )
-
-                sorted_choices = sorted(timings, key=timings.__getitem__)
-                out_dict = {
-                    dims_key: [
-                        AlgorithmSelectorCache.get_flex_attention_choice_info(
-                            choice, timings
-                        )
-                        for choice in sorted_choices
-                    ]
-                }
-                append_to_log(flex_attention_filename, out_dict)
+        AlgorithmSelectorCache.log_flex_attention_results(name, input_nodes, timings)
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
