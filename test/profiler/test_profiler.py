@@ -985,6 +985,12 @@ class TestProfiler(TestCase):
         )
         self.assertRegex(profiler_output, "Total M?FLOPs")
 
+        event_list_tree = kineto_profiler.events()._print_tree(
+            ["input_shapes", "flops"]
+        )
+        patt = "aten::conv2d  # {input_shapes: [[40, 16, 18, 260], [33, 16, 18, 18], [33], [], [], [], []], flops: "
+        self.assertTrue(event_list_tree.startswith(patt))
+
     def test_override_time_units(self):
         US_IN_SECOND = 1000.0 * 1000.0
         US_IN_MS = 1000.0
