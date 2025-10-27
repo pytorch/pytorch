@@ -1830,28 +1830,39 @@ class DataPtrVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__eq__" and len(args) == 1:
-            if not isinstance(args[0], DataPtrVariable):
+            other = args[0]
+            if not isinstance(self, type(other)):
                 return variables.ConstantVariable.create(NotImplemented)
 
-            other = args[0]
             self_example = self.from_tensor.proxy.node.meta.get("example_value")
             other_example = other.from_tensor.proxy.node.meta.get("example_value")
 
-            if self_example is not None and other_example is not None:
-                same_storage = torch._C._is_alias_of(self_example, other_example)
-                same_first_element = self_example.storage_offset() == other_example.storage_offset()
-                return variables.ConstantVariable.create(same_storage and same_first_element)
+            if self_example is None or other_example is None:
+                unimplemented_v2(
+                    gb_type="data_ptr comparison",
+                    context="Comparing data_ptr() when aliasing cannot be determined at compile time.",
+                )
 
-            unimplemented_v2(
-                gb_type="data_ptr comparison",
-                context="Comparing data_ptr() when aliasing cannot be determined at compile time.",
+            self_has_storage = self_example.untyped_storage().size() > 0
+            other_has_storage = other_example.untyped_storage().size() > 0
+
+            if not self_has_storage and not other_has_storage:
+                return variables.ConstantVariable.create(True)
+            if not self_has_storage or not other_has_storage:
+                return variables.ConstantVariable.create(False)
+
+            same_storage = torch._C._is_alias_of(self_example, other_example)
+            same_first_element = (
+                self_example.storage_offset() == other_example.storage_offset()
+            )
+            return variables.ConstantVariable.create(
+                same_storage and same_first_element
             )
 
-        elif name == "__ne__" and len(args) == 1:
+        if name == "__ne__" and len(args) == 1:
             eq_result = self.call_method(tx, "__eq__", args, kwargs)
-            if isinstance(eq_result, variables.ConstantVariable):
-                if eq_result.value is NotImplemented:
-                    return eq_result
-                return variables.ConstantVariable.create(not eq_result.value)
+            if eq_result.value is NotImplemented:
+                return eq_result
+            return variables.ConstantVariable.create(not eq_result.value)
 
         return super().call_method(tx, name, args, kwargs)
