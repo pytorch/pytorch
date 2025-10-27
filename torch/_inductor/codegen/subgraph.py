@@ -186,9 +186,11 @@ class SubgraphTemplate(KernelTemplate):
         Generate a SubgraphChoiceCaller instance for autotuning.
 
         Args:
+            name: The name for this subgraph choice
             input_nodes: List of input nodes to the subgraph
             layout: Memory layout information for the output
-            example_inputs: Example tensor inputs used to trace and benchmark the subgraph
+            make_fx_graph: Callable that creates the FX graph for this subgraph
+            description: Optional description of this choice
             **kwargs: Additional keyword arguments
 
         Returns:

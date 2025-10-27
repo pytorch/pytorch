@@ -21,10 +21,10 @@ log = logging.getLogger(__name__)
 
 
 class CustomOpConfig:
-    """Config for custom op autotuning - similar to triton.Config.
+    """Config for custom op autotuning.
 
-    Specifies decomposition function with parameter values.
-    Each config creates exactly one variant (no Cartesian product).
+    Specifies optional decomposition function with parameter values.
+    Each config creates exactly one variant.
 
     Args:
         decomposition: Optional functions to autotune. If not provided, default will be used.
@@ -63,14 +63,13 @@ class CustomOpConfig:
             from torch._library.custom_ops import _maybe_get_opdef
 
             op_def = _maybe_get_opdef(default_impl)
-            if op_def is not None:
+            if op_def is not None and hasattr(op_def, "_init_fn"):
                 return op_def._init_fn
 
-        # Fallback to default_impl if we couldn't extract Python implementation
-        if default_impl is None:
-            raise TypeError("decomposition is None and no default_impl provided")
-
-        return default_impl
+        raise TypeError(
+            f"Could not extract Python implementation from {default_impl}. "
+            f"Please register customop or provide a decomposition function."
+        )
 
     def get_name(self) -> str:
         """Get the name for this config variant."""
@@ -141,6 +140,7 @@ def _merge_config_and_runtime_kwargs(
     runtime_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
     """Merge config parameters with runtime kwargs. Runtime kwargs take precedence.
+       If there are conflicts, log a warning and use runtime value.
 
     Args:
         config_params: Parameters from CustomOpConfig
@@ -188,7 +188,12 @@ def _create_user_input_gen_fns(
         if name in name_to_index:
             index_based_fns[name_to_index[name]] = gen_fn
         else:
-            print(f"Warning: Unknown argument name '{name}' in input_gen_fns")
+            log.warning(
+                "Unknown argument name '%s' in input_gen_fns. "
+                "Available argument names: %s",
+                name,
+                list(name_to_index.keys()),
+            )
 
     def create_internal_input_gen_fn(
         user_function: Callable[[torch.Tensor], torch.Tensor], arg_name: str
@@ -235,51 +240,6 @@ def _create_fallback_choice(
         op_overload=default_impl,
         use_fallback_kernel=True,
     )
-
-
-def _create_parameter_variants(
-    decompositions: list[Callable[..., Any]],
-    tuning_knob: dict[str, list[Any]],
-) -> list[Any]:  # Returns partial objects which are callable
-    """Create parameter variants for decompositions using tuning knob.
-
-    Args:
-        decompositions: Base implementation functions
-        tuning_knob: Parameter tuning dict with parameter names and value lists
-
-    Returns:
-        List of variant functions with all parameter combinations
-    """
-    # Validate parameter values
-    for param_name, param_values in tuning_knob.items():
-        if not param_values or not isinstance(param_values, (list, tuple)):
-            raise TypeError(
-                f"Parameter values for '{param_name}' must be a list or tuple, got {type(param_values)}"
-            )
-
-    # Generate all combinations of parameter values using Cartesian product
-    import itertools
-
-    param_names = list(tuning_knob.keys())
-    param_values_lists = list(tuning_knob.values())
-    param_combinations = list(itertools.product(*param_values_lists))
-
-    # Create variants for each decomposition with each parameter combination
-    variants = []
-    for decomp_fn in decompositions:
-        for param_combo in param_combinations:
-            # Create kwargs dict for this combination
-            param_kwargs = dict(zip(param_names, param_combo))
-
-            # Create partial function with all parameters
-            variant = functools.partial(decomp_fn, **param_kwargs)
-            param_suffix = "_".join(
-                f"{name}_{value}" for name, value in param_kwargs.items()
-            )
-            variant.__name__ = f"{decomp_fn.__name__}_{param_suffix}"  # type: ignore[attr-defined]
-            variants.append(variant)
-
-    return variants
 
 
 def autotune_custom_op(
@@ -397,10 +357,8 @@ def register_custom_op_autotuning(
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
 ) -> None:
-    """Register custom op for autotuning with explicit configs.
-
-    Uses config-based API where each config specifies a decomposition function
-    with its parameter values.
+    """Register custom op for autotuning with custom_op configs where each config
+    specifies a decomposition implementation function with its parameter values.
 
     Args:
         custom_op: Custom operation to register
@@ -426,9 +384,6 @@ def register_custom_op_autotuning(
     if not isinstance(configs, (list, tuple)):
         raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
-    if not configs:
-        raise ValueError("At least one config must be provided")
-
     processed_configs = []
     for config in configs:
         if isinstance(config, CustomOpConfig):
@@ -437,6 +392,9 @@ def register_custom_op_autotuning(
             raise TypeError(
                 f"Each config must be a CustomOpConfig object, got {type(config)}"
             )
+
+    if not processed_configs:
+        raise ValueError("At least one config must be provided")
 
     if name is None:
         name = f"{custom_op._name}_autotuned"
@@ -447,7 +405,7 @@ def register_custom_op_autotuning(
         # Extract tensor inputs and non-tensor parameters (runtime kwargs)
         tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
 
-        # Prepare decompositions and kwargs by merging config params with runtime kwargs
+        # Prepare decompositions and kwargs by merging customop config params with runtime kwargs
         decompositions = []
         non_tensor_args = []
 
