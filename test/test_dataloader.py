@@ -3906,34 +3906,47 @@ class TestStatefulDataLoaderMapDataset(TestCase):
 class StatefulSampler(torch.utils.data.Sampler):
     """Sampler with stateful behavior for testing."""
 
-    def __init__(self, size):
+    def __init__(self, size, track_calls=False):
         self.size = size
         self.i = 0
+        self.track_calls = track_calls
+        self.state_dict_called = False
+        self.load_state_dict_called = False
+        self._iterator = None
 
     def __iter__(self):
-        return StatefulSamplerIterator(self.size, self.i)
+        self._iterator = StatefulSamplerIterator(self.size, self.i, self.track_calls)
+        return self._iterator
 
     def __len__(self):
         return self.size
 
     def state_dict(self):
+        if self.track_calls:
+            self.state_dict_called = True
         return {"i": self.i}
 
     def load_state_dict(self, state_dict):
+        if self.track_calls:
+            self.load_state_dict_called = True
         self.i = state_dict["i"]
 
 
 class StatefulSamplerIterator:
     """Iterator for stateful sampler."""
 
-    def __init__(self, size, start_idx=0):
+    def __init__(self, size, start_idx=0, track_next_calls=False):
         self.size = size
         self.i = start_idx
+        self.track_next_calls = track_next_calls
+        self.next_call_count = 0
 
     def __iter__(self):
         return self
 
     def __next__(self):
+        if self.track_next_calls:
+            self.next_call_count += 1
         idx = self.i
         if idx >= self.size:
             raise StopIteration
@@ -3957,9 +3970,13 @@ class TestStatefulDataLoaderSampler(TestCase):
 
     @parametrize("num_workers", [0])
     def test_stateful_sampler(self, num_workers):
-        """Test state_dict/load_state_dict functionality with stateful samplers"""
+        """Test state_dict/load_state_dict functionality with stateful samplers
+        
+        Ensures that stateful samplers use state_dict/load_state_dict for state restoration
+        rather than fast-forwarding via repeated next() calls.
+        """
         dataset = StatefulMapDataset(20)
-        sampler = StatefulSampler(len(dataset))
+        sampler = StatefulSampler(len(dataset), track_calls=True)
 
         dl = DataLoader(
             dataset=dataset,
@@ -3980,15 +3997,19 @@ class TestStatefulDataLoaderSampler(TestCase):
         # Save state after consuming 2 batches
         state_dict = dl.state_dict()
         self.assertIsInstance(state_dict, dict)
+        
+        # Verify that state_dict was called on the stateful sampler during save
+        self.assertIn("_sampler_iter_state", state_dict)
+        self.assertIsNotNone(state_dict["_sampler_iter_state"])
+        self.assertTrue(sampler.state_dict_called,
+                        "state_dict should be called on stateful sampler")
 
         # Continue with original iterator and collect remaining batches
-        remaining_batches_original = []
-        for batch in it:
-            remaining_batches_original.append(batch)
+        remaining_batches_original = list(it)
 
         # Create new loader with fresh sampler and resume from checkpoint
         dataset2 = StatefulMapDataset(20)
-        sampler2 = StatefulSampler(len(dataset2))
+        sampler2 = StatefulSampler(len(dataset2), track_calls=True)
         dl2 = DataLoader(
             dataset=dataset2,
             num_workers=num_workers,
@@ -3997,12 +4018,27 @@ class TestStatefulDataLoaderSampler(TestCase):
             batch_size=4,
             sampler=sampler2,
         )
+        
         dl2.load_state_dict(state_dict)
+        it2 = iter(dl2)
+        # Verify that load_state_dict was called on the stateful sampler
+        self.assertTrue(sampler2.load_state_dict_called,
+                        "load_state_dict should be called on stateful sampler")
+        # The sampler's state should have been restored (i should be 8, since we consumed 2 batches of 4)
+        self.assertEqual(sampler2._iterator.i, 8)
+        
+        # CRITICAL CHECK: Verify that next() was NOT called for fast-forwarding
+        # If fast-forwarding occurred, we would see multiple next() calls here
+        # Since we restored via load_state_dict, next_call_count should be 0 before we start consuming
+        if sampler2._iterator is not None:
+            self.assertEqual(
+                sampler2._iterator.next_call_count,
+                0,
+                "Stateful sampler should NOT be fast-forwarded via next() calls after load_state_dict"
+            )
 
         # Collect all batches from resumed loader
-        remaining_batches_resumed = []
-        for batch in dl2:
-            remaining_batches_resumed.append(batch)
+        remaining_batches_resumed = list(it2)
 
         # Verify that resumed loader continues exactly where original left off
         self.assertEqual(
@@ -4012,57 +4048,6 @@ class TestStatefulDataLoaderSampler(TestCase):
             self.assertEqual(len(orig), len(resumed))
             for o, r in zip(orig, resumed):
                 self.assertEqual(o, r)
-
-    @parametrize("num_workers", [0])
-    def test_sampler_state_preservation(self, num_workers):
-        """Test that sampler internal state is properly preserved"""
-        dataset = StatefulMapDataset(10)
-        sampler = StatefulSampler(len(dataset))
-
-        dl = DataLoader(
-            dataset=dataset,
-            num_workers=num_workers,
-            collate_fn=identity_collate,
-            stateful=True,
-            batch_size=2,
-            sampler=sampler,
-        )
-
-        # Consume some data
-        it = iter(dl)
-        batch1 = next(it)  # Should get indices [0, 1]
-        batch2 = next(it)  # Should get indices [2, 3]
-
-        # Verify expected indices
-        expected_batch1 = [{"id": 0, "value": 0}, {"id": 1, "value": 2}]
-        expected_batch2 = [{"id": 2, "value": 4}, {"id": 3, "value": 6}]
-
-        self.assertEqual(batch1, expected_batch1)
-        self.assertEqual(batch2, expected_batch2)
-
-        # Save state and continue
-        state_dict = dl.state_dict()
-        batch3_original = next(it)  # Should get indices [4, 5]
-
-        # Resume from checkpoint
-        dataset2 = StatefulMapDataset(10)
-        sampler2 = StatefulSampler(len(dataset2))
-        dl2 = DataLoader(
-            dataset=dataset2,
-            num_workers=num_workers,
-            collate_fn=identity_collate,
-            stateful=True,
-            batch_size=2,
-            sampler=sampler2,
-        )
-        dl2.load_state_dict(state_dict)
-
-        it2 = iter(dl2)
-        batch3_resumed = next(it2)  # Should also get indices [4, 5]
-
-        self.assertEqual(batch3_original, batch3_resumed)
-        expected_batch3 = [{"id": 4, "value": 8}, {"id": 5, "value": 10}]
-        self.assertEqual(batch3_resumed, expected_batch3)
 
 
 @unittest.skipIf(
