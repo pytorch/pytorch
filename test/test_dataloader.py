@@ -3782,11 +3782,6 @@ def identity_collate(x):
     return x
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
 class TestStatefulDataLoaderBasic(TestCase):
     """Test basic stateful DataLoader functionality with iterable datasets."""
 
@@ -3850,11 +3845,7 @@ class StatefulMapDataset(Dataset):
             self.access_count = state_dict["access_count"]
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestStatefulDataLoaderMapDataset(TestCase):
     """Test stateful DataLoader with map-style datasets."""
 
@@ -3960,11 +3951,7 @@ class StatefulSamplerIterator:
         self.i = state_dict["i"]
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestStatefulDataLoaderSampler(TestCase):
     """Test stateful DataLoader with stateful samplers."""
 
@@ -4050,11 +4037,7 @@ class TestStatefulDataLoaderSampler(TestCase):
                 self.assertEqual(o, r)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestStatefulDataLoaderRandomState(TestCase):
     """Test stateful DataLoader with random state and shuffle functionality."""
 
@@ -4188,11 +4171,7 @@ class TestStatefulDataLoaderRandomState(TestCase):
         self.assertEqual(remaining_original, remaining_resumed)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestStatefulDataLoaderMultiEpoch(TestCase):
     """Test stateful DataLoader across multiple epochs and at epoch boundaries."""
 
@@ -4201,8 +4180,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         """Test that DataLoader state is preserved across multiple epochs"""
         dataset = StatefulMapDataset(12)
 
-        # For reproducibility
-        torch.manual_seed(789)
+
 
         dl = DataLoader(
             dataset=dataset,
@@ -4210,6 +4188,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
             stateful=True,
             batch_size=4,
             shuffle=True,
+            generator=torch.Generator().manual_seed(42)
         )
 
         # Run through 2 full epochs and collect all items
@@ -4229,7 +4208,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
             epoch3_items_original.extend(batch)
 
         # Now test resumption: Create new loader and resume from checkpoint
-        torch.manual_seed(789)  # Same seed
+
 
         dataset2 = StatefulMapDataset(12)
         dl2 = DataLoader(
@@ -4238,6 +4217,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
             stateful=True,
             batch_size=4,
             shuffle=True,
+            generator=torch.Generator().manual_seed(42)
         )
         dl2.load_state_dict(state_dict)
 
@@ -4389,11 +4369,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
                     self.assertEqual(orig, resumed)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestStatefulDataLoaderSerialization(TestCase):
     """Test stateful DataLoader state dict serialization compatibility."""
 
@@ -4547,11 +4523,6 @@ class ErrorDataset_SDL(Dataset):
 ERROR_MSG = "Error in worker_init_fn"
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
 class TestStatefulDataLoaderErrors(TestCase):
     @parametrize("num_workers", [0])
     def test_iteration_error(self, num_workers):
@@ -4712,11 +4683,7 @@ class DynamicStateIterable(IterableDataset):
         self.i = sd["i"]
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestDynamicStateGrowth(TestCase):
     @parametrize("num_workers", [0])
     def test_state_is_immutable_post_fetch(self, num_workers):
@@ -4744,11 +4711,7 @@ class TestDynamicStateGrowth(TestCase):
         self.assertTrue(len(exp) > 0)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestStateInitializationResumeCompleteness(TestCase):
     def _run(self, num_workers):
         length = 100
@@ -4787,11 +4750,7 @@ class TestStateInitializationResumeCompleteness(TestCase):
     #     self._run(2)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestConcurrentLoaderParity(TestCase):
     @parametrize("num_workers", [0])
     def test_parity_with_standard_loader(self, num_workers):
@@ -4810,11 +4769,7 @@ class TestConcurrentLoaderParity(TestCase):
         self.assertEqual(got, exp)
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
+
 class TestStatefulDataLoaderEmptyStateDict(TestCase):
     """Test behavior when passing an empty dict to load_state_dict."""
 
