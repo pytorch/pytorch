@@ -2091,7 +2091,6 @@ _scaled_mm_cuda_v2_out(
         mat_a.size(mat_a_dim) == mat_b.size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
         mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ") ",
         "with contraction dims mat_a: ", mat_a_dim, ", mat_b: ", mat_b_dim);
->>>>>>> upstream/main
   } else {
     TORCH_CHECK_VALUE(
         mat_a.size(1) == mat_b.size(0), "mat_a and mat_b shapes cannot be multiplied (",
