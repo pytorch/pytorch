@@ -866,7 +866,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
         elif isinstance(value, logging.Logger):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
@@ -923,6 +923,8 @@ class VariableBuilder:
                         GuardBuilder.CLOSURE_MATCH
                     )
                 )
+            elif inspect.isclass(value):
+                self.install_guards(GuardBuilder.CLASS_MATCH)
             elif callable(value):
                 self.install_guards(GuardBuilder.FUNCTION_MATCH)
             else:
@@ -948,7 +950,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLASS_MATCH)
             return AutogradFunctionVariable(
                 value,
                 source=self.source,
@@ -1010,7 +1012,7 @@ class VariableBuilder:
             value
             is torch._dynamo.external_utils.FakeCompiledAutogradEngine._exec_final_callbacks_stub
         ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return LambdaVariable(
                 lambda: UserFunctionVariable(
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
@@ -1124,7 +1126,7 @@ class VariableBuilder:
             id(value) in ITERTOOLS_TYPE_IDS
             and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
         ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLASS_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, _DynamicScalar):
             is_int = isinstance(value, DynamicInt)
@@ -1258,7 +1260,10 @@ class VariableBuilder:
                 source=self.source,
             )
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            if inspect.isclass(value):
+                self.install_guards(GuardBuilder.CLASS_MATCH)
+            elif inspect.isfunction(value):
+                self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
         elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1321,7 +1326,7 @@ class VariableBuilder:
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.MODULE_MATCH)
             result = PythonModuleVariable(
                 value,
                 source=self.source,
@@ -1382,7 +1387,7 @@ class VariableBuilder:
                     value, source=self.source
                 )
             if value is torch.autograd._unsafe_preserve_version_counter:
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+                self.install_guards(GuardBuilder.CLASS_MATCH)
                 return PreserveVersionContextVariable.constructor(self.tx)
             if (
                 # `value` must be a strict subclass of `torch.Tensor`
@@ -1406,7 +1411,7 @@ class VariableBuilder:
                 # self.__class__ manually.
                 # For other cases, this is a userdefined class, so install an
                 # ID_MATCH even if its a global variable.
-                self.install_guards(GuardBuilder.ID_MATCH)
+                self.install_guards(GuardBuilder.CLASS_MATCH)
 
             return UserDefinedClassVariable(
                 value,

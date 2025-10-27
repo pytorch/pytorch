@@ -328,7 +328,7 @@ class StreamContext:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1  # pyrefly: ignore  # bad-assignment
+            self.idx = -1  # pyrefly: ignore [bad-assignment]
 
     def __enter__(self):
         cur_stream = self.stream

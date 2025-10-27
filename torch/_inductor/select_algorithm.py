@@ -2103,7 +2103,11 @@ class TritonTemplate(KernelTemplate):
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
-                **{k: kwargs[k] for k in _FLEX_ATTENTION_TUNABLE_KEYS if k in kwargs},
+                **{
+                    k: kwargs[k]
+                    for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
+                    if k in kwargs
+                },
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
@@ -2397,24 +2401,6 @@ def get_mm_log_filename() -> Optional[str]:
     return mm_file_name
 
 
-_FLEX_ATTENTION_TUNABLE_KEYS = frozenset(
-    [
-        "num_warps",
-        "num_stages",
-        "BLOCK_M",
-        "BLOCK_N",
-        "BLOCK_M1",
-        "BLOCK_N1",
-        "BLOCK_M2",
-        "BLOCK_N2",
-        "USE_TMA",
-        "kpack",
-        "matrix_instr_nonkdim",
-        "waves_per_eu",
-    ]
-)
-
-
 @functools.cache
 def get_flex_attention_log_filename() -> Optional[str]:
     flex_attention_file_name = os.environ.get(
@@ -2635,6 +2621,25 @@ class AlgorithmSelectorCache(PersistentCache):
     The cache is keyed by input characteristics (sizes, strides, dtypes, etc.) but
     doesn't depend on the output layout.
     """
+
+    FLEX_ATTENTION_TUNABLE_KEYS = tuple(
+        dict.fromkeys(
+            [
+                "num_warps",
+                "num_stages",
+                "BLOCK_M",
+                "BLOCK_N",
+                "BLOCK_M1",
+                "BLOCK_N1",
+                "BLOCK_M2",
+                "BLOCK_N2",
+                "USE_TMA",
+                "kpack",
+                "matrix_instr_nonkdim",
+                "waves_per_eu",
+            ]
+        )
+    )
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -3570,6 +3575,27 @@ class AlgorithmSelectorCache(PersistentCache):
         return pruned_choices
 
     @staticmethod
+    def get_flex_attention_choice_info(
+        choice: ChoiceCaller, timings: dict[ChoiceCaller, float]
+    ) -> dict[str, Any]:
+        if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+            return {"type": "extern", "time": timings[choice]}
+
+        assert isinstance(choice, torch._inductor.select_algorithm.TritonTemplateCaller)
+
+        info = choice.info_dict()
+        result = {
+            "type": "triton",
+            "time": timings[choice],
+        }
+
+        for key in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS:
+            if key in info:
+                result[key] = info[key]
+
+        return result
+
+    @staticmethod
     def log_results(
         name: str,
         input_nodes: list[ir.IRNode],
@@ -3637,26 +3663,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 "num_warps": info["num_warps"],
             }
 
-        def get_flex_attention_choice_info(choice):
-            if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
-                return {"type": "extern", "time": timings[choice]}
-
-            assert isinstance(
-                choice, torch._inductor.select_algorithm.TritonTemplateCaller
-            )
-
-            info = choice.info_dict()
-            result = {
-                "type": "triton",
-                "time": timings[choice],
-            }
-
-            for key in _FLEX_ATTENTION_TUNABLE_KEYS:
-                if key in info:
-                    result[key] = info[key]
-
-            return result
-
         mm_filename = get_mm_log_filename()
         if mm_filename and "mm" in name:
             M, K = input_nodes[-2].get_size()[:2]
@@ -3700,7 +3706,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 sorted_choices = sorted(timings, key=timings.__getitem__)
                 out_dict = {
                     dims_key: [
-                        get_flex_attention_choice_info(choice)
+                        AlgorithmSelectorCache.get_flex_attention_choice_info(
+                            choice, timings
+                        )
                         for choice in sorted_choices
                     ]
                 }

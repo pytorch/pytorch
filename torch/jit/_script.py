@@ -775,6 +775,7 @@ if _enabled:
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
                 DeprecationWarning,
+                stacklevel=2,
             )
             return self._c._save_for_mobile(*args, **kwargs)
 
@@ -787,6 +788,7 @@ if _enabled:
                 "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
                 https://docs.pytorch.org/executorch/stable/getting-started.html",
                 DeprecationWarning,
+                stacklevel=2,
             )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
@@ -1165,7 +1167,8 @@ def _script_impl(
             warnings.warn(
                 "Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
                 "to enable Profile-Directed Typing in TorchScript. Refer to "
-                "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. "
+                "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ",
+                stacklevel=2,
             )
 
     if isinstance(obj, torch.nn.Module):
