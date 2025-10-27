@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
-import unittest
 
 import torch
 import torch._inductor.test_case
@@ -155,10 +154,6 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
     def test_invoke_subgraph_inner(self, serialize):
         # Checks that the inductor regions are searched recursively.
 
-        # TODO: GraphPickler does not recompile nested subgraphs?
-        if serialize:
-            raise unittest.SkipTest("GraphPickler doesn't recompile nested subgraphs")
-
         @torch.compiler.nested_compile_region
         def gn(x):
             with fx_traceback.annotate({"compile_with_inductor": 0}):
@@ -184,12 +179,6 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("serialize", [False, True])
     def test_flex_attention(self, serialize):
-        if serialize:
-            # TODO: Fixed in next PR
-            raise unittest.SkipTest(
-                "FlexAttentionBackward isn't marked cacheable even though it is"
-            )
-
         def _squared(score, b, h, m, n):
             return score * score
 
@@ -229,11 +218,6 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
-        if serialize:
-            raise unittest.SkipTest(
-                "FlexAttentionBackward isn't marked cacheable even though it is"
-            )
-
         class FlexAttentionModule(torch.nn.Module):
             def __init__(self, hidden_size, num_heads):
                 super().__init__()
