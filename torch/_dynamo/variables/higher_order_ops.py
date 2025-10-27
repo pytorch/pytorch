@@ -1378,7 +1378,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     supports_aliasing=self.supports_aliasing,
                 )
 
-
             if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
                     "Expected branches to return a possibly nested pytree of tensors "

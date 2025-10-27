@@ -7964,7 +7964,7 @@ class ShapeEnv:
         """
         prev = self.ra_prelude
 
-        if prev:
+        if prev is not None:
             prelude = OrderedAnd(prev, prelude)
 
         self.ra_prelude = prelude
