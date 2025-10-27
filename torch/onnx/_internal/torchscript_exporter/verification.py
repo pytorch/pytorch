@@ -248,7 +248,7 @@ def _compare_onnx_pytorch_outputs_in_np(
                         stacklevel=2,
                     )
                     continue
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             if ort_out.dtype == np.uint8 or ort_out.dtype == np.int8:
                 warnings.warn("ONNX output is quantized", stacklevel=2)
             # pyrefly: ignore  # missing-attribute

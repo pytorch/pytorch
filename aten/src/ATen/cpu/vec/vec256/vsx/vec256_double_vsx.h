@@ -143,7 +143,7 @@ class Vectorized<double> {
       const Vectorized<double>& a,
       const Vectorized<double>& b,
       const Vectorized<double>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparison of vec256
 
     return {
         vec_sel(a._vec0, b._vec0, mask._vecb0),
