@@ -944,7 +944,8 @@ def _check_inputs(tupled_inputs) -> bool:
                     f"Input #{idx} requires gradient and "
                     "is not a double precision floating point or complex. "
                     "This check will likely fail if all the inputs are "
-                    "not of double precision floating point or complex. "
+                    "not of double precision floating point or complex. ",
+                    stacklevel=2,
                 )
             if inp.is_sparse:
                 content = inp._values()
@@ -1325,7 +1326,8 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
             "Backwards compatibility: New undefined gradient support checking "
             "feature is enabled by default, but it may break existing callers "
             "of this function. If this is true for you, you can call this "
-            'function with "check_undefined_grad=False" to disable the feature'
+            'function with "check_undefined_grad=False" to disable the feature',
+            stacklevel=2,
         )
 
     def check_undefined_grad_support(output_to_check):

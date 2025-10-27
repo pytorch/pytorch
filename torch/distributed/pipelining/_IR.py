@@ -282,7 +282,7 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)

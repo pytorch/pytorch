@@ -396,15 +396,15 @@ def transpose_w(W: _T, trans_w: bool) -> _T:
     if isinstance(W, ir.IRNode):
         if trans_w:
             if not isinstance(W, ir.TensorBox):
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 W = ir.TensorBox(W)
             W = L.permute(W, [1, 0])
     else:
         if trans_w:
             assert isinstance(W, torch.Tensor)
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             W = W.transpose(0, 1)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return W
 
 
@@ -415,15 +415,15 @@ def expand_bias(B: Optional[_T], X: _T) -> Optional[_T]:
     if B is not None:
         if isinstance(B, ir.IRNode):
             if not isinstance(B, ir.TensorBox):
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 B = ir.TensorBox(B)
             assert hasattr(X, "get_size")
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
         else:
             assert isinstance(B, torch.Tensor)
             assert isinstance(X, torch.Tensor)
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             B = B.expand(X.shape[0], B.shape[-1])
     return B
 
@@ -1049,7 +1049,7 @@ class CppGemmTemplate(CppTemplate):
             return cls.prep_weight(
                 new_inputs,
                 new_layout,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 micro_gemm,
                 pre_block_weights,
                 use_int8_fast_compensation_path,
@@ -1073,7 +1073,7 @@ class CppGemmTemplate(CppTemplate):
                 new_input_nodes, _ = cls.prep_weight(
                     new_input_nodes,
                     new_layout,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     micro_gemm,
                     pre_block_weights,
                     use_int8_fast_compensation_path,
@@ -1479,7 +1479,7 @@ class CppGemmTemplate(CppTemplate):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
             gemm_output_buffer = ir.Buffer(
                 name=gemm_output_name,
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 layout=template_buffer.layout,
             )
             current_input_buffer = gemm_output_buffer
@@ -1491,7 +1491,7 @@ class CppGemmTemplate(CppTemplate):
                 epilogues.append(
                     ir.ComputedBuffer(
                         name=buffer_name,
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         layout=template_buffer.layout,
                         data=creator(current_input_buffer),
                     )
@@ -1502,7 +1502,7 @@ class CppGemmTemplate(CppTemplate):
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
                         name=buffer_name,
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         layout=template_buffer.layout,
                     )
 
@@ -1534,7 +1534,7 @@ class CppGemmTemplate(CppTemplate):
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             input2_dtype=W.get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
