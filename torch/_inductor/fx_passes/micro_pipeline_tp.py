@@ -27,6 +27,10 @@ aten = torch.ops.aten
 patterns = PatternMatcherPass()
 
 
+def _is_last_dim(t: torch.Tensor, dim: int) -> bool:
+    return dim == t.ndim - 1 or dim == -1
+
+
 def _is_backward(graph: torch.fx.Graph) -> bool:
     placeholders = []
     for node in graph.nodes:
@@ -645,9 +649,17 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
-        return
+    filter_matmul = None
+    if _is_last_dim(_get_tensor(shard_node), gather_dim):
+        # Decomposed mms should not be too small
+        if _get_tensor(shard_node).shape[-1] < 1024:
+            return
+
+        # scaled_mm is not supported yet for last dim
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
 
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
@@ -663,18 +675,29 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
         return
 
+    if _is_last_dim(_get_tensor(shard_node), gather_dim) and len(
+        all_gather.res_node.users
+    ) > len(matmuls):
+        # The result of ag-split-cat is used not only in matmuls.
+        # Then it has to be materialized, which can have overhead.
+        return
+
+    if filter_matmul and not filter_matmul(matmuls[0]):
+        return
+
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
-        if "val" in shard_node.meta:
-            restrided = restride_A_shard_for_fused_all_gather_matmul(
-                _get_tensor(shard_node),
-                gather_dim,
-            )
-            shard_node = graph.call_function(
-                inductor_prims.force_stride_order,
-                args=(shard_node, restrided.stride()),
-            )
+        if not _is_last_dim(_get_tensor(shard_node), gather_dim):
+            if "val" in shard_node.meta:
+                restrided = restride_A_shard_for_fused_all_gather_matmul(
+                    _get_tensor(shard_node),
+                    gather_dim,
+                )
+                shard_node = graph.call_function(
+                    inductor_prims.force_stride_order,
+                    args=(shard_node, restrided.stride()),
+                )
 
         fused_node = _insert_fused_all_gather_matmul(
             graph, matmuls, shard_node, gather_dim, group_name
@@ -881,7 +904,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     filter_matmul = None
-    if orig_scatter_dim == _get_tensor(input_node).ndim - 1:
+    if _is_last_dim(_get_tensor(input_node), orig_scatter_dim):
         # scaled_mm is not supported yet for last dim mm+rs
         def _filter_out_scaled_matmul(matmul: _Matmul):
             return not isinstance(matmul, _ScaledMatmul)
