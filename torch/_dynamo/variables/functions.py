@@ -1498,6 +1498,8 @@ class SkipFunctionVariable(VariableTracker):
                 )
 
             guard_on_source.make_guard(GuardBuilder.CLOSURE_MATCH)
+        elif inspect.isbuiltin(value):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
