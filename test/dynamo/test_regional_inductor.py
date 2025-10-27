@@ -259,8 +259,8 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             captured_options.append(options)
 
             # Verify config is set as expected from explicit options
-            assert inductor_config.max_autotune == True, "max_autotune should be True"
-            assert inductor_config.triton.cudagraphs == False, (
+            assert inductor_config.max_autotune, "max_autotune should be True"
+            assert not inductor_config.triton.cudagraphs, (
                 "triton.cudagraphs should be False"
             )
 

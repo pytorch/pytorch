@@ -74,7 +74,9 @@ def _compile_submod(gm, prefix):
 
             # Log the options being used
             logger.info(
-                f"Compiling submodule {node.target} with inductor options: {inductor_options}"
+                "Compiling submodule %s with inductor options: %s",
+                node.target,
+                inductor_options,
             )
 
             # Apply config patches before compilation
