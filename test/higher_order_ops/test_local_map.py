@@ -338,6 +338,7 @@ class GraphModule(torch.nn.Module):
             out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = q_1, key = k_1, value = v_1, is_causal = False);  q_1 = k_1 = v_1 = None
             return (out,)
 """,
+                ignore_empty_lines=True,
             )
 
     @unittest.skipIf(*get_skip_reasons())
