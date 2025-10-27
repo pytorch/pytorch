@@ -402,6 +402,43 @@ def forward(self, x):
 
         self.assertEqual(res_export, res_eager)
 
+    def test_dynamo_graph_capture(self):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        class Foo(torch.nn.Module):
+            def forward(self, dct, lst, bleh):
+                x = dct["a"] * lst[1][0]
+                y = dct["b"] * lst[0]
+                out_dict = {}
+
+                # Mutate and get a new entry in there
+                lst_copy = lst.copy()
+                lst_copy.append(lst[0])
+                out_dict["a"] = x
+                out_dict["b"] = y
+                return (
+                    dct["a"],
+                    out_dict["b"],
+                    bleh,
+                    lst_copy[-1],
+                    out_dict["a"],
+                    [5, 6],
+                )
+
+        foo = Foo()
+
+        def make_inputs():
+            return (
+                {"a": torch.randn(2, 3), "b": torch.randn(2, 3)},
+                [torch.randn(2, 3), (torch.randn(2, 3),)],
+                torch.randn(2, 3),
+            )
+
+        trace_inputs = make_inputs()
+        gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+        test_inputs = make_inputs()
+        self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+
 
 if __name__ == "__main__":
     run_tests()

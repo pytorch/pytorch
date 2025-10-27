@@ -82,7 +82,7 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace cuda { namespace detail {
 // This is only used for an old-style dispatches
-// Please do not add any new entires to it
+// Please do not add any new entries to it
 struct LinalgDispatch {
    Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);
 };
