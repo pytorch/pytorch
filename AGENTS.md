@@ -4,7 +4,7 @@
   test if your changes work.  Once the change is passing, find an appropriate
   test file to add the test to and make sure to follow local conventions on
   the test file.
-- If you are running the real test suite, DO NOT run the entire test suite.
+- If you are running the real test suite, Do NOT run the entire test suite.
   Instead run only a single test case, e.g., 'python test/test_torch.py TestTorch.test_dir'
 - Do NOT run setup.py, you do not have a working build environment
 - Do NOT run pre-commit, it is not setup
