@@ -637,8 +637,8 @@ class DeviceCachingAllocator {
         do {
           it++;
         } while (it != pool.blocks.end() && (*it)->expandable_segment_ &&
-                 (*it)->stream == p.stream());
-        if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
+                 (*it)->queue == p.queue());
+        if (it == pool.blocks.end() || (*it)->queue != p.queue()) {
           return false;
         }
       }
@@ -750,7 +750,7 @@ class DeviceCachingAllocator {
       // block -> after_free -> next?
       Block* after_free = new Block(
           block->device,
-          block->stream,
+          block->queue,
           after_size,
           block->pool,
           unmapped.ptr + unmapped.size);
