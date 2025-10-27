@@ -292,9 +292,10 @@ class WeakIdKeyDictionary(MutableMapping):
             if o is not None:
                 return o, value
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def pop(self, key, *args):
         self._dirty_len = True
+        # pyrefly: ignore [not-iterable]
         return self.data.pop(self.ref_type(key), *args)  # CHANGED
 
     def setdefault(self, key, default=None):
@@ -351,16 +352,14 @@ class TensorWeakRef:
     ref: WeakRef[Tensor]
 
     def __init__(self, tensor: Tensor):
-        if not isinstance(tensor, Tensor):
-            raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
+        assert isinstance(tensor, Tensor)
         self.ref = weakref.ref(tensor)
 
     def __call__(self):
         out = self.ref()
         if out is None:
             return out
-        if not isinstance(out, Tensor):
-            raise AssertionError(f"expected torch.Tensor, got {type(out)}.")
+        assert isinstance(out, Tensor)
         # TODO, add _fix_weakref type binding
         out._fix_weakref()  # type: ignore[attr-defined]
         return out
