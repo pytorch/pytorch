@@ -1507,6 +1507,7 @@ class SIMDScheduling(BaseScheduling):
                 with end_current_reduction_loop():
                     node_schedule.append(node)
             else:
+                breakpoint()
                 raise NotImplementedError(
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )

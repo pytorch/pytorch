@@ -3870,6 +3870,8 @@ class Scheduler:
         def fuse_two_nodes(
             node1: BaseSchedulerNode, node2: BaseSchedulerNode
         ) -> BaseSchedulerNode:
+            if isinstance(node1, FusedMixOrderReductions) or isinstance(node2, FusedMixOrderReductions):
+                breakpoint()
             fusion_log.debug("fusing %s with %s", node1.get_name(), node2.get_name())
 
             device = node1.get_device()
