@@ -2083,6 +2083,25 @@ class lookup_table:
     # hash checking is performed.
     check_src_hash: bool = True
 
+    # Recorder configuration for capturing autotuning results
+    # Master switch for recording functionality - must be True to enable any recording
+    recording_active: bool = False
+    # Enable emitting entries to registered emit backends (e.g., logging)
+    recorder_emit: bool = True
+    # Directory to record lookup tables to. If set, enables DirectoryRecordBackend
+    recorder_record_dir: Optional[str] = None
+    # Number of top choices to record. If None or negative, record all choices.
+    # If 0, record nothing. If positive, record only the top k choices.
+    recorder_topk: Optional[int] = None
+    # Whether to record template hashes for templates that provide them.
+    # Template hashes make the lookup table more robust but potentially less portable
+    record_template_hash: bool = True
+    # Whether to include device key when recording lookup table entries.
+    # When True, entries are recorded with device-specific keys (more precise but less portable).
+    # When False, entries are recorded without device keys (more portable across devices).
+    # During lookup, both key formats are always tried regardless of this setting.
+    record_with_device_key: bool = True
+
 
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
