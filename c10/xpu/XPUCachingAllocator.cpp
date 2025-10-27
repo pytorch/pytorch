@@ -378,7 +378,7 @@ class DeviceCachingAllocator {
 
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
-        !src->stream_uses.empty()) {
+        !src->stream_uses.empty() || dst->mapped != src->mapped) {
       return 0;
     }
 
@@ -397,7 +397,8 @@ class DeviceCachingAllocator {
     }
     const size_t subsumed_size = src->size;
     dst->size += subsumed_size;
-    auto erased = pool.blocks.erase(src);
+    auto erased =
+        src->mapped ? pool.blocks.erase(src) : pool.unmapped.erase(src);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == 1);
     delete src;
 
