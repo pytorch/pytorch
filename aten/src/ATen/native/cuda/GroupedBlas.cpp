@@ -208,6 +208,35 @@ _f8_f8_bf16_rowwise_grouped_mm(
 #endif
 }
 
+Tensor&
+_f4_f4_bf16_grouped_mm_fbgemm(
+      const Tensor& mat_a,
+      const Tensor& mat_b,
+      const Tensor& scale_a,
+      const Tensor& global_scale_a,
+      const Tensor& scale_b,
+      const Tensor& global_scale_b,
+      const std::optional<Tensor>& offs,
+      const std::optional<Tensor>& bias,
+      Tensor& out) {
+#if !defined(USE_ROCM) && defined(USE_FBGEMM_GENAI)
+  // Checks
+  auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      offs.value(),
+      out,
+      global_scale_a.mul(global_scale_b)
+  );
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_FBGEMM_GENAI, and only for CUDA")
+#endif
+
+  return out;
+}
+
 void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
   // Checks scales for 2d or 3d target tensors (`mat`).
   if (mat.dim() == 2) {
@@ -411,9 +440,10 @@ namespace {
 
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2> scale_grouped_kernel_dispatch = {{
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 3> scale_grouped_kernel_dispatch = {{
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
-  { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}}};
+  { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
+  { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4}}};
 
 } // anonymous namespace
 
@@ -536,6 +566,18 @@ _scaled_grouped_mm_cuda_v2(
           swizzle_b_enum[0],
           offs.value(),
           out);
+    }
+    case ScaledGemmImplementation::NVFP4_NVFP4: {
+        return _f4_f4_bf16_grouped_mm_fbgemm(
+            mat_a,
+            mat_b,
+            scale_a[0], /* block-scale A */
+            scale_a[1], /* global-scale A */
+            scale_b[0], /* block-scale B */
+            scale_b[1], /* global-scale A */
+            offs.value(),
+            std::nullopt, /* bias */
+            out);
     }
     default:
       TORCH_CHECK_NOT_IMPLEMENTED(false,
