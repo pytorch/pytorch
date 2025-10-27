@@ -251,8 +251,7 @@ class BaseTorchVariable(VariableTracker):
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         elif inspect.isbuiltin(value):
-            # We can skip guards here, because we dont expect torch.* builtins to change id
-            pass
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
