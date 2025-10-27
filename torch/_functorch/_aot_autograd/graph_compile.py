@@ -1761,9 +1761,9 @@ def _aot_stage2b_bw_compile(
                 # import fbvscode
                 # fbvscode.set_trace()
                 with suppress_ctx:
-                    for i in range(len(ph_arg.stride())):
+                    for k in range(len(ph_arg.stride())):
                         # can real_stride be symbolic? CI will tell us lol.
-                        if guard_or_true(ph_arg.stride()[i] != int(real_stride[i])):
+                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
                             stride_different = True
                             break
           
