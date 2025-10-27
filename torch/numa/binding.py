@@ -134,7 +134,7 @@ def _raise_if_logical_cpu_indices_invalid(*, logical_cpu_indices: set[int]) -> N
 
 def _bind_current_thread_to_logical_cpus(*, logical_cpu_indices: set[int]) -> None:
     # 0 represents the current thread
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     os.sched_setaffinity(0, logical_cpu_indices)  # type: ignore[attr-defined]
 
 
@@ -545,5 +545,5 @@ def _get_numa_node_indices_for_socket_index(*, socket_index: int) -> set[int]:
 
 def _get_allowed_cpu_indices_for_current_thread() -> set[int]:
     # 0 denotes current thread
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return os.sched_getaffinity(0)  # type:ignore[attr-defined]

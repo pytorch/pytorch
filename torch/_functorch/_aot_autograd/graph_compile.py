@@ -538,7 +538,7 @@ def collect_bw_donated_buffer_idxs(
         fw_ins,
         user_fw_outs,
         bw_outs,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         saved_tensors,
     )
 
@@ -1523,7 +1523,7 @@ def _aot_stage2a_partition(
 
             # apply joint_gm callback here
             if callable(torch._functorch.config.joint_custom_pass):
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
@@ -1793,7 +1793,7 @@ def _aot_stage2b_bw_compile(
                     # tensor which is wrong.
 
                     ph_size = ph_arg.size()
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     if len(ph_size) == 0 and len(real_stride) > 0:
                         # Fix for 0-dimensional tensors: When a tensor becomes 0-d
                         # (e.g., via squeeze), its stride should be () not (1,).
@@ -1802,7 +1802,7 @@ def _aot_stage2b_bw_compile(
                         # may get preserved causing a dimension mismatch (#164814)
                         real_stride = ()
 
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
             compiled_bw_func = None
             if (
