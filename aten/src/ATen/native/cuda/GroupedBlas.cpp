@@ -287,10 +287,11 @@ void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int
 }
 
 void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
-  // if nvfp4, will need to modify K later
-  bool is_nvfp4 = (mat.scalar_type() == kFloat4_e2m1fn_x2);
+  // if {mx,nv}fp4, will need to modify K later
+  bool is_fp4 = (mat.scalar_type() == kFloat4_e2m1fn_x2);
   int blocksize = 32;
-  if (is_nvfp4) {
+  // check for nvfp4 vs. mxfp4 to fix blocksize
+  if (is_fp4 && scale.scalar_type() == kFloat8_e4m3fn) {
     blocksize = 16;
   }
 
@@ -326,7 +327,7 @@ void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim
     // We'll need to support 3d-3d and 3d-2d cases once mxfp8 grouped gemm supports them.
     int64_t G = mat.size(0);
     int64_t K = mat.size(1);
-    if (is_nvfp4) {
+    if (is_fp4) {
       K *= 2;
     }
     int64_t N = mat.size(2);
