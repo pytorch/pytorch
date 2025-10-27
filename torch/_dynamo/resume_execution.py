@@ -258,8 +258,8 @@ class ResumeFunctionMetadata:
         default_factory=list
     )
     # per-offset map from new block target offsets to original block target offsets
-    block_target_offset_remap: dict[int, dict[int, int]] = dataclasses.field(
-        default_factory=dict
+    block_target_offset_remap: dict[tuple[int, int], dict[int, int]] = (
+        dataclasses.field(default_factory=dict)
     )
 
 
@@ -643,9 +643,15 @@ class ContinueExecutionCache:
             # each setup_fn, based on `code`. When we codegen the resume function
             # based on the original code object, `meta.code`, the offsets in
             # setup_fn_target_offsets must be based on `meta.code` instead.
-            if orig_init_offset not in meta.block_target_offset_remap:
+            offset_key = (orig_init_offset, orig_resume_offset)
+            # NOTE: we key by offset_key since the same resume function may graph
+            # break in multiple places and we need different block_target_offset_remap's
+            # for each graph break location. Keying by orig_resume_offset may not be enough
+            # if 2 graph breaks on different initial offsets resume on the same instruction
+            # (although this is rare and not tested anywhere).
+            if offset_key not in meta.block_target_offset_remap:
                 block_target_offset_remap = meta.block_target_offset_remap[
-                    orig_init_offset
+                    offset_key
                 ] = {}
 
                 def remap_block_offsets(
@@ -653,11 +659,15 @@ class ContinueExecutionCache:
                 ) -> None:
                     # NOTE: each prefix block generates exactly one PUSH_EXC_INFO,
                     # so we can tell which block a prefix PUSH_EXC_INFO belongs to,
-                    # by counting. Then we can use meta.prefix_block-target_offset_remap
+                    # by counting. Then we can use meta.prefix_block_target_offset_remap
                     # to determine where in the original code the PUSH_EXC_INFO offset
                     # replaced.
                     prefix_blocks: list[Instruction] = []
                     for inst in instructions:
+                        # NOTE meta.prefix_block_target_offset_remap is based off of how we codegen'd
+                        # context managers at the prefix/prologue of the resume function. It is the same for
+                        # every graph break in the same resume function, so we do not need to recompute
+                        # for each graph break (unlike for meta.block_target_offset_remap)
                         if len(prefix_blocks) == len(
                             meta.prefix_block_target_offset_remap
                         ):
@@ -665,36 +675,42 @@ class ContinueExecutionCache:
                         if inst.opname == "PUSH_EXC_INFO":
                             prefix_blocks.append(inst)
 
-                    # offsets into prefix
+                    # remap block target offsets for blocks generated in the resume prefix
                     for inst, o in zip(
                         prefix_blocks, meta.prefix_block_target_offset_remap
                     ):
                         block_target_offset_remap[cast(int, inst.offset)] = o
 
-                    # old bytecode targets are after the prefix PUSH_EXC_INFO's
-                    old_start_offset = (
+                    # current bytecode targets are after the prefix PUSH_EXC_INFO's
+                    cur_start_offset = (
                         cast(int, prefix_blocks[-1].offset) if prefix_blocks else -1
                     )
-                    # offsets into old bytecode
-                    old_inst_offsets = sorted(
-                        n for n in setup_fn_target_offsets if n > old_start_offset
+                    # get the remaining block target offsets of the current bytecode
+                    cur_inst_offsets = sorted(
+                        n for n in setup_fn_target_offsets if n > cur_start_offset
                     )
                     targets = _filter_iter(
-                        instructions, old_inst_offsets, lambda inst, o: inst.offset == o
+                        instructions, cur_inst_offsets, lambda inst, o: inst.offset == o
                     )
-                    new_targets = _filter_iter(
-                        zip(reversed(instructions), reversed(meta.instructions)),
-                        targets,
-                        lambda v1, v2: v1[0] is v2,
+                    # The original code and resume code should have matching suffixes.
+                    # Match the post-prefix block target offsets of the current resume code
+                    # and the original code.
+                    orig_targets = reversed(
+                        _filter_iter(
+                            zip(reversed(instructions), reversed(meta.instructions)),
+                            reversed(targets),
+                            lambda v1, v2: v1[0] is v2,
+                        )
                     )
-                    for new, old in zip(new_targets, targets):
-                        block_target_offset_remap[old.offset] = new[1].offset
+                    for orig, cur in zip(orig_targets, targets):
+                        block_target_offset_remap[cur.offset] = orig[1].offset
 
                 transform_code_object(code, remap_block_offsets)
 
-            # if offset is not in setup_fn_target_offsets, it is an error
+            # if offset_key or offset is not in setup_fn_target_offsets, it is an error
+            # that needs to be fixed
             setup_fn_target_offsets = tuple(
-                meta.block_target_offset_remap[orig_init_offset][n]
+                meta.block_target_offset_remap[offset_key][n]
                 for n in setup_fn_target_offsets
             )
         return ContinueExecutionCache.lookup(
