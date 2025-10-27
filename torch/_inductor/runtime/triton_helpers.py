@@ -4,11 +4,10 @@ import math as pymath
 import warnings
 from typing import Any, Callable, TypeVar
 
-from triton import JITFunction
-
 from .triton_compat import (  # noqa: F401
     _log2,
     builtins_use_semantic_kwarg,
+    JITFunction,
     libdevice,
     math,
     tl,
