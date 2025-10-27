@@ -195,9 +195,9 @@ kernel void fused_gather_mul_kernel(
     const ulong offR = (ulong)iR * (ulong)view_cols + (ulong)col;
     const ulong offO = (ulong)k  * (ulong)view_cols + (ulong)col;
 
-    const float a = (float)lhs_vals[offL];
-    const float b = (float)rhs_vals[offR];
-    out_vals[offO] = (T)(a * b);
+    const auto a = static_cast<accum_t<T>>(lhs_vals[offL]);
+    const auto b = static_cast<accum_t<T>>(rhs_vals[offR]);
+    out_vals[offO] = static_cast<T>(mul(a, b));
   }
 
   // One thread per match copies the indices column

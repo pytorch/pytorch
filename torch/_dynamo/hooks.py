@@ -10,7 +10,8 @@ These hooks enable customization of guard export and failure handling behaviors.
 """
 
 import dataclasses
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from torch._guards import GuardsSet
 
