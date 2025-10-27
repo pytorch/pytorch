@@ -121,7 +121,7 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x*UNRL) {
 #pragma unroll
       for (int u = 0; u < UNRL; u++)
-        tmp[u] = op(batch, plane, min((int)tensor.size(2)-1, (int)(x+u*blockDim.x)));
+        tmp[u] = op(batch, plane, std::min((int)tensor.size(2)-1, (int)(x+u*blockDim.x)));
 #pragma unroll
       for (int u = 0; u < UNRL; u++)
         if (x+u*blockDim.x < tensor.size(2))
