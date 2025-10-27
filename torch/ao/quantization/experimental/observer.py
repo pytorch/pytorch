@@ -58,8 +58,12 @@ class APoTObserver(ObserverBase):
         alpha = torch.max(-self.min_val, self.max_val)
 
         # check for valid inputs of b, k
-        assert self.k and self.k != 0
-        assert self.b % self.k == 0
+        if not self.k or self.k == 0:
+            raise AssertionError(f"k must be a non-zero integer, got k={self.k}")
+        if self.b % self.k != 0:
+            raise AssertionError(
+                f"b must be divisible by k, got b={self.b}, k={self.k}"
+            )
 
         # compute n and store as member variable
         self.n = self.b // self.k
