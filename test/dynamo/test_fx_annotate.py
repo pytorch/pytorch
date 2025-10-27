@@ -288,6 +288,18 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",  # noqa: B950
         )
 
+    def test_graph_break(self):
+        def fn(x):
+            with torch.fx.traceback.annotate({"pp_stage": 0}):
+                x = torch.sin(x)
+                torch._dynamo.graph_break()
+                x = torch.cos(x)
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(10, requires_grad=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 if __name__ == "__main__":
     run_tests()
