@@ -235,7 +235,7 @@ class TunableOp {
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
 
-      // calcaulte a reference answer for numerical check
+      // calculate a reference answer for numerical check
       if (do_numerics_check) {
         reference_params = params->DeepCopy(false);
         TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
