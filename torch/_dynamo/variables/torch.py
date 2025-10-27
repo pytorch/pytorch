@@ -250,7 +250,9 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        elif inspect.isbuiltin(value):
+        elif inspect.isbuiltin(value) or isinstance(
+            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         else:
             assert False
