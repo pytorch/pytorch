@@ -5939,7 +5939,7 @@ class TestLinalg(TestCase):
 
             # Seed the existing untuned file with 1 entry
             seed_lines = [
-                "GemmTunableOp_float_NT,nt_768_1024_512"
+                "GemmTunableOp_float_NT,nt_768_1024_512_ld_lda_ldb_ldc"
             ]
 
             with open(untuned_filename, "w") as f:
