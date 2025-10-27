@@ -562,7 +562,7 @@ class DeviceCachingAllocator {
     try_merge_blocks(to_map, to_map->prev, pool);
     try_merge_blocks(to_map, to_map->next, pool);
 
-    pool.insert_into_blocks(to_map);
+    pool.insert(to_map);
 
     // update statistics
     total_allocated_memory += mapped_range.size;
@@ -672,6 +672,7 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(size);
     });
+    TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
     return true;
   }
 
