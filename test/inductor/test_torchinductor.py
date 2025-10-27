@@ -6256,13 +6256,55 @@ class CommonTemplate:
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(torch.randn(8), torch.tensor(8))
 
+    def test_cat_prevent_fusion_with_too_many_input_buffers(self):
+        """
+        Test that cat fusion is prevented when the fused kernel would have too
+        many input buffers, based on the config.max_fused_cat_input_buffers setting.
+        """
+
+        def fn(a, b, c, d, e):
+            # Create pointwise operations that would be fused into cat
+            # Each adds 1 input buffer for fusion
+            tmp1 = a * 2  # 1 buffer (a)
+            tmp2 = b + 1  # 1 buffer (b)
+            tmp3 = c - 1  # 1 buffer (c)
+            tmp4 = d * 3  # 1 buffer (d)
+            tmp5 = e + 2  # 1 buffer (e)
+            # Total: 5 input buffers after fusion
+            return torch.cat([tmp1, tmp2, tmp3, tmp4, tmp5], dim=1)
+
+        # Test with default config (no limit)
+        with torch._inductor.config.patch(max_fused_cat_input_buffers=None):
+            opt_fn = torch.compile(fn)
+            inputs = [torch.randn(8, 10, device=self.device) for _ in range(5)]
+            eager_result = fn(*inputs)
+            compiled_result = opt_fn(*inputs)
+            self.assertEqual(eager_result, compiled_result)
+
+        # Test with limit that should prevent fusion (set limit to 3, we have 5 buffers)
+        with torch._inductor.config.patch(max_fused_cat_input_buffers=3):
+            opt_fn = torch.compile(fn)
+            inputs = [torch.randn(8, 10, device=self.device) for _ in range(5)]
+            eager_result = fn(*inputs)
+            compiled_result = opt_fn(*inputs)
+            self.assertEqual(eager_result, compiled_result)
+
+        # Test with limit that should allow fusion (set limit to 10, we have 5 buffers)
+        with torch._inductor.config.patch(max_fused_cat_input_buffers=10):
+            opt_fn = torch.compile(fn)
+            inputs = [torch.randn(8, 10, device=self.device) for _ in range(5)]
+            eager_result = fn(*inputs)
+            compiled_result = opt_fn(*inputs)
+            self.assertEqual(eager_result, compiled_result)
+
     def test_cat(self):
         tgt_dtype = torch.double if self.device != "mps" else torch.half
 
         def fn(a):
             tmp = a * 2
             return (
-                torch.cat((a, a[:, :4] + 1, a + 2), -1),
+                torch.cat((a, a[:, :2] + tmp, a + 1), dim=1),
+                torch.cat((a, a[:, :2] + tmp, a + 1), dim=1).sum(dim=1),
                 torch.cat((tmp, tmp), 0),
                 torch.cat((tmp, tmp.to(dtype=tgt_dtype)), 0),
             )

@@ -1748,6 +1748,19 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
+    """
+    Concatenate tensors along a specified dimension.
+
+    Implements adaptive fusion strategy based on operation complexity,
+    device type, and number of input buffers to optimize performance.
+
+    Args:
+        inputs: List of tensor inputs to concatenate
+        dim: Dimension along which to concatenate (default: 0)
+
+    Returns:
+        TensorBox containing the concatenated result
+    """
     cpu_device = inputs[0].get_device().type == "cpu"
     if cpu_device and all(
         input.get_dtype() in [torch.int8, torch.uint8] for input in inputs
