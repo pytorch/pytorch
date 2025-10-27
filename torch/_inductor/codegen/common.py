@@ -1573,7 +1573,6 @@ class KernelArgs:
         - A new argument "ws_ptr" will be present in the generated code.
 
         Args:
-            nbytes (sympy.Expr): The number of bytes to allocate.
             nelem (sympy.Expr): The number of elements to allocate.
             zero_fill (bool): Whether to initialize the buffer to zero.
             dtype (torch.dtype): the dtype of the workspace tensor
