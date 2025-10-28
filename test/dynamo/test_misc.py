@@ -6993,7 +6993,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
         self.assertIn(
-            """len(x) == 10""",
+            """size mismatch at index 0. expected 10, actual 9""",
             guard_failure[0],
         )
 
