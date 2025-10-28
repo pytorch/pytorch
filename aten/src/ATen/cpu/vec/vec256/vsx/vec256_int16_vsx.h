@@ -202,7 +202,7 @@ class Vectorized<int16_t> {
       const Vectorized<int16_t>& a,
       const Vectorized<int16_t>& b,
       const Vectorized<int16_t>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparison of vec256
     // assuming this we can use the same mask directly with vec_sel
     // warning intel style mask will not work properly
     return {
