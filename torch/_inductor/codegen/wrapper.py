@@ -2332,8 +2332,10 @@ class PythonWrapperCodegen(CodeGen):
                 else:
                     add_to_signature(idx, arg)
 
-        for idx, key in enumerate(kernel.arg_names):
-            if idx in kernel.constexprs:
+        arg_names = [p.name for p in kernel.params]
+        constexprs = [p.num for p in kernel.params if p.is_constexpr]
+        for idx, key in enumerate(arg_names):
+            if idx in constexprs:
                 add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
                 continue
 

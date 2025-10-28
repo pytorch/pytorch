@@ -634,10 +634,11 @@ class MatmulTest(TestCaseMPS):
     def test_batched_matrix_x_broadcasted_matrix(self):
         self._helper((10, 3, 4), (4, 5))
 
+    @serialTest()
     def test_large_matmul(self):
         # Issue: #141909
-        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half)
-        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half)
+        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half, device="mps")
+        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half, device="mps")
         matmul_mps = torch.matmul(tensor1_mps, tensor2_mps)
 
         tensor1_cpu = tensor1_mps.to("cpu")
