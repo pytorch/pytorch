@@ -312,11 +312,8 @@ inline torch::stable::Tensor op(
   }
 }
 
-#endif
 
-#if TORCH_FEATURE_VERSION >= (((0ULL + 2) << 56) | ((0ULL + 10) << 48))
-
-// New ops should be added here if they do not use aoti_torch_call_dispatcher
+// New ops should be added here if they use a brand new shim API
 
 #endif
 
