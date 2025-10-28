@@ -483,6 +483,9 @@ graph_partition: bool = (
     == "1"
 )
 
+# register ops upon which inductor should partition the graph
+custom_should_partition_ops: list[str] = []
+
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
