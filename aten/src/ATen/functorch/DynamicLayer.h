@@ -37,7 +37,7 @@ namespace at::functorch  {
 // how to perform the transform.
 //
 // TODO: we can excise DynamicLayer in favor of Interpreter,
-// But I am going to leave it for now as a compatiblity shim to avoid
+// But I am going to leave it for now as a compatibility shim to avoid
 // needing to refactor a lot of callsites...
 struct TORCH_API DynamicLayer {
   explicit DynamicLayer(

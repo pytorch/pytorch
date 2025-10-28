@@ -2580,7 +2580,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
 
-    def test_truediv_numerics_with_eager(self):
+    @config.patch({"emulate_divison_rounding": True})
+    def test_truediv_emulate_divison_rounding(self):
         from decimal import Decimal
 
         y, x = 7.0, 11.0
@@ -2600,10 +2601,30 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
 
                 torch._dynamo.reset()
-                compiled_div = Decimal(compiled_divide(x, y_ten).item())
-                eager_div = Decimal((x / y_ten).item())
+                compiled_div = Decimal(compiled_divide(x_ten, y_ten).item())
+                eager_div = Decimal((x_ten / y_ten).item())
 
                 self.assertEqual(eager_div, compiled_div)
+
+    @config.patch({"emulate_divison_rounding": False})
+    def test_truediv_base_not_bitwise_equivalent(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        y_ten = torch.tensor([y], dtype=torch.float32, device="cuda")
+        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
+
+        compile_out, code = run_and_get_code(
+            torch.compile(lambda x, y: x / y),
+            x_ten,
+            y_ten,
+        )
+        compiled_div = Decimal(compile_out.item())
+        eager_div = Decimal((x_ten / y_ten).item())
+
+        self.assertNotEqual(eager_div, compiled_div)
+        self.assertTrue("div_rn" not in code)
 
 
 if __name__ == "__main__":
