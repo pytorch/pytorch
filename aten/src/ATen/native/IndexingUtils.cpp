@@ -4,31 +4,22 @@
 namespace at::native {
 
 bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
-  auto elements = t.sym_numel();
-  if (elements >= max_elem) {
-    return false;
-  }
-  if (elements == 0) {
-    return max_elem > 0;
-  }
-
+  const auto strides = t.sym_strides();
+  const auto sizes = t.sym_sizes();
   c10::SymInt offset = 0;
-  auto linearId = elements - 1;
 
   // NOTE: Assumes all strides are positive, which is true for now
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  for (int i = t.dim() - 1; i >= 0; --i) {
-    auto curDimIndex = linearId % t.sym_size(i);
-    auto curDimOffset = curDimIndex * t.sym_stride(i);
-    offset += curDimOffset;
-    linearId /= t.sym_size(i);
+  for (const auto d : c10::irange(t.dim())) {
+    if (sizes[d] == 0) {
+      // return numel < max_elem
+      return 0 < max_elem;
+    }
+    // here sizes[d] >= 1
+    offset += (sizes[d] - 1) * strides[d];
   }
 
-  if (offset >= max_elem) {
-    return false;
-  }
-
-  return true;
+  return offset < max_elem;
 }
 
 } // namespace at::native
