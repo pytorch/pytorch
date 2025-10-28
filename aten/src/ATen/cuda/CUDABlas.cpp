@@ -16,6 +16,8 @@
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
 
+#include <ATen/cuda/detail/BLASConstants.h>
+
 #ifdef USE_ROCM
 #include <c10/cuda/CUDAStream.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -1954,13 +1956,15 @@ void scaled_gemm(
     const void *result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    bool use_fast_accum) {
+    bool use_fast_accum,
+    const std::optional<Tensor>& alpha) {
   // Note: see `cublasCommonArgs` for various non-intuitive manupulations
   // of input arguments to this function.
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
-  const float alpha_val = 1.0;
-  const float beta_val = 0.0;
+  // Note: alpha_val may change later depending on user-passed argument
+  float alpha_val = 1.0;
+  float beta_val = 0.0;
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
@@ -2031,6 +2035,33 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
+
+  // Handle user-passed alpha
+  float *alpha_ptr = &alpha_val;
+  float *beta_ptr = &beta_val;
+
+  if (alpha.has_value()) {
+    auto& a = alpha.value();
+
+    // if device-tensor
+    if (a.is_cuda()) {
+      // NOTE: there are lifetime requirements on device-side pointers for alpha/beta -- the value must be
+      //       valid & correct until the cublas call finishes (not is scheduled like host-side values). Thus
+      //       we need to use allocations for alpha/beta that have some guarantees on lifetime - a statically
+      //       managed 4B buffer for alpha that we'll copy the passed alpha value into, and constant memory
+      //       for beta respectively.
+      float *user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
+      at::Tensor user_alpha = at::from_blob(user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
+      user_alpha.copy_(a);
+      // Tell cublasLt we're using device-side pointers for alpha/beta
+      auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
+      computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
+      alpha_ptr = user_alpha.data_ptr<float>();
+      beta_ptr = at::cuda::detail::get_cublas_device_zero();
+    } else {
+      alpha_val = a.item<float>();
+    }
+  }
     // For other data types, use the get_scale_mode function based on scaling type
     // The SCALE_MODE attrs only exist in cuBLAS 12.8+/ROCm 7.0 or in recent hipblaslt,
     // but we must invoke get_scale_mode anyways to trigger the version checks.
@@ -2048,6 +2079,7 @@ void scaled_gemm(
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
@@ -2088,10 +2120,10 @@ void scaled_gemm(
         auto is_valid_status = hipblaslt_ext::matmulIsAlgoSupported(
                 ltHandle,
                 computeDesc.descriptor(),
-                &alpha_val,
+                alpha_ptr,
                 Adesc.descriptor(),
                 Bdesc.descriptor(),
-                &beta_val,
+                beta_ptr,
                 Cdesc.descriptor(),
                 Ddesc.descriptor(),
                 all_algos[i].algo,
@@ -2110,17 +2142,14 @@ void scaled_gemm(
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
-      &alpha_val,
+      alpha_ptr,
       mat1_ptr,
       Adesc.descriptor(),
       mat2_ptr,
       Bdesc.descriptor(),
-      &beta_val,
-#ifdef USE_ROCM
+      beta_ptr,
+      // NOTE: always use result_ptr here, because cuBLASLt w/device beta=0 can't handle nullptr either
       result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
-#else
-      nullptr,
-#endif // ifdef USE_ROCM
       Cdesc.descriptor(),
       result_ptr,
       Ddesc.descriptor(),

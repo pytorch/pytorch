@@ -921,7 +921,6 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 1|aten._native_batch_norm_legit_functional.default|batch_norm|
 2|aten.relu.default|relu|
 2|aten.detach.default|relu|
-2|aten.detach.default|relu|
 3|aten.add.Tensor|add|
 4|aten.view.default|flatten|
 5|aten.view.default|linear|
@@ -947,7 +946,6 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 6|aten.t.default||linear
 5|aten.view.default||linear
 4|aten.view.default||flatten
-2|aten.detach.default||relu
 2|aten.detach.default||relu
 2|aten.threshold_backward.default||relu
 1|aten.native_batch_norm_backward.default||batch_norm

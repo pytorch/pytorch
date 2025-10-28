@@ -1198,7 +1198,7 @@ class TransferEvents {
 class TransferEvents {
  public:
   template <class... Args>
-  TransferEvents(Args&&...) {}
+  TransferEvents(Args&&... /*unused*/) {}
 };
 #endif
 
