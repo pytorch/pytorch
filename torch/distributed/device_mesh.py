@@ -11,7 +11,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
-from torch.distributed._pycute import is_int, suffix_product
+from torch.distributed._pycute import IntTuple, is_int, suffix_product
 from torch.utils._typing_utils import not_none
 
 
@@ -269,7 +269,7 @@ else:
                 )
 
             # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
 
@@ -497,12 +497,11 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        self._flatten_mesh_list,
+                        self._flatten_rank_map,
                         self._layout,
                         self._device_type,
                         self._mesh_dim_names,
                         self._thread_id,
-                        self._root_mesh,
                     )
                 )
             return self._hash
@@ -513,12 +512,11 @@ else:
             if not isinstance(other, DeviceMesh):
                 return False
             return (
-                self._flatten_mesh_list == other._flatten_mesh_list
+                self._flatten_rank_map == other._flatten_rank_map
                 and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
-                and self._root_mesh == other._root_mesh
             )
 
         def __getitem__(
@@ -1182,6 +1180,41 @@ else:
                 mesh_dim_names,
                 backend_override_tuple,
             )
+
+        @staticmethod
+        def _concatenate(device_mesh_list: list["DeviceMesh"]) -> "DeviceMesh":
+            concat_dim_names: list[str] = []
+            concat_sizes: list[IntTuple] = []
+            concat_strides: list[IntTuple] = []
+            concat_dim_group_name: list[str] = []
+            flatten_rank_map = device_mesh_list[0]._flatten_rank_map
+            for dm in device_mesh_list:
+                for i in range(len(dm._layout)):
+                    concat_sizes.append(dm._layout[i].sizes)
+                    concat_strides.append(dm._layout[i].strides)
+                concat_dim_names.extend(not_none(dm.mesh_dim_names))
+                concat_dim_group_name.extend(not_none(dm._dim_group_names))
+                # Concatenate device mesh having different root mesh tensors are meaningless
+                # because the concatenated indices should be indexed by the same root mesh tensor.
+                if dm._flatten_rank_map != flatten_rank_map:
+                    raise RuntimeError(
+                        "Cannot concatenate DeviceMeshes derived from different device meshs"
+                    )
+            concat_mesh_layout = _MeshLayout(tuple(concat_sizes), tuple(concat_strides))
+            if not concat_mesh_layout.check_non_overlap():
+                raise RuntimeError(
+                    f"Cannot concatenate overlapping meshes: {device_mesh_list}"
+                )
+            res_mesh = DeviceMesh(
+                device_mesh_list[0].device_type,
+                _layout=concat_mesh_layout,
+                _rank_map=device_mesh_list[0]._rank_map,
+                mesh_dim_names=tuple(concat_dim_names),
+                _root_mesh=device_mesh_list[0]._get_root_mesh(),
+                _init_backend=False,
+            )
+            res_mesh._dim_group_names = concat_dim_group_name
+            return res_mesh
 
     def _normalize_backend_override(
         backend_override: dict[

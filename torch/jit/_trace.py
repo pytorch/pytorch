@@ -169,7 +169,7 @@ def _clone_inputs(args):
         else:
             return a.clone(memory_format=torch.preserve_format)
 
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return function._nested_map(
         lambda x: isinstance(x, torch.Tensor), clone_input, condition_msg="tensors"
     )(args)
@@ -336,7 +336,7 @@ def _check_trace(
 
         if is_trace_module:
             copied_dict = {}
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
@@ -742,7 +742,7 @@ def _trace_impl(
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
     elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         example_inputs = tuple(example_inputs)
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
@@ -769,7 +769,7 @@ def _trace_impl(
         traced = torch._C._create_function_from_trace(
             name,
             func,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             example_inputs,
             var_lookup_fn,
             strict,
