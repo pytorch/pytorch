@@ -14,13 +14,12 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import (
     OffloadPolicy,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
+    DDPMeshInfo,
     detect_compiled_autograd,
-    HSDPMeshInfo,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_device_from_mesh,
     _get_managed_states,
-    _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
     _move_states_to_device,
 )
@@ -184,23 +183,19 @@ def replicate_impl(
         )
 
     mesh = mesh or _init_default_fully_shard_mesh()
-    if mesh.ndim != 2:
-        raise ValueError(f"replicate expects a 2D DeviceMesh but got {mesh}")
+    if mesh.ndim != 1:
+        raise ValueError(f"replicate expects a 1D DeviceMesh but got {mesh}")
 
     else:
         if mesh.mesh_dim_names is None:
             raise AssertionError(
                 "Please init the 2D mesh for HSDP with mesh_dim_names specified"
             )
-        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+        mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
-    # If the user does not provide ``reshard_after_forward``, we set it to True.
-    # During lazy_init, we identify which module is the root and override its value to False
-    post_forward_mesh_info = _get_post_forward_mesh_info(
-        reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
-        mesh_info,
-    )
+
+    post_forward_mesh_info = None
 
     arg_module = module
     modules = (
@@ -217,7 +212,7 @@ def replicate_impl(
         state._fsdp_param_group = FSDPParamGroup(
             params,
             modules,
-            mesh_info,
+            mesh_info,  # type: ignore[arg-type]
             post_forward_mesh_info,
             device,
             shard_placement_fn,
@@ -341,8 +336,8 @@ def replicate_mesh():
     device = torch._C._get_accelerator()
     mesh = init_device_mesh(
         device.type,
-        mesh_shape=(default_pg.size(), 1),
-        mesh_dim_names=("replicate", "shard"),
+        mesh_shape=(default_pg.size(),),
+        mesh_dim_names=("replicate",),
     )
     return mesh
 
