@@ -547,7 +547,7 @@ def has_uses(
     Uses in view ops will follow the views uses.
     """
 
-    def get_use_aggregate_fn(use_aggregate_type: LogicalConnective):
+    def get_use_aggregate_fn(use_aggregate_type: LogicalConnective) -> Callable[Iterator, bool]:
         match use_aggregate_type:
             case LogicalConnective.AND:
                 return all
