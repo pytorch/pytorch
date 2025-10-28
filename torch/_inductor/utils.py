@@ -560,12 +560,13 @@ class LogicalConnective(enum.Enum):
 
 def has_uses(
     target: Node,
-    use_filter_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
+    use_selector_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
     use_aggregate_type: LogicalConnective = LogicalConnective.OR,
 ) -> bool:
     """
-    Is there an immediate pointwise use, i.e. a descendant in a graph
-    (tagged with torch.Tag.pointwise or True for optional `is_pointwise_fn`) of an op.
+    Given a target, explore the uses of `target` by applying `use_selector_fn`
+    on them, and then aggregate these booleans with the `use_aggregate_type`
+    logical connective.
 
     Uses in view ops will follow the views uses.
     """
@@ -594,7 +595,7 @@ def has_uses(
         if target is operator.getitem or is_view(target):
             return use_aggregate_fn(user_has_use(user) for user in use.users)
 
-        return use_filter_fn(target)
+        return use_selector_fn(target)
 
     return use_aggregate_fn(user_has_use(user) for user in target.users)
 
@@ -602,10 +603,13 @@ def has_uses(
 def has_uses_tagged_as(
     target: Node,
     use_tags: Collection[torch.Tag],
-    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
 ) -> bool:
+    """
+    Is there a use with tages from the `use_tags` collection?
+    """
+
     use_tag_selector = lambda use: any(use_tag in use_tags for use_tag in use.tags)
-    return has_uses(target, use_tag_selector, use_aggregate_type)
+    return has_uses(target, use_tag_selector)
 
 
 def gen_gm_and_inputs(
