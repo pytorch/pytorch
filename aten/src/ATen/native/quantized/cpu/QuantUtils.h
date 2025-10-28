@@ -146,12 +146,12 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   // The arithmetic error on the zero point computed from either pair
   // will be roughly machine_epsilon * (sum of absolute values of terms)
   // so we want to use the variant that adds the smaller terms.
-  double zero_point_from_min = qmin - min / static_cast<double>(scale);
-  double zero_point_from_max = qmax - max / static_cast<double>(scale);
+  double zero_point_from_min = qmin - min / scale;
+  double zero_point_from_max = qmax - max / scale;
   double zero_point_from_min_error =
-      std::abs(qmin) - std::abs(min / static_cast<double>(scale));
+      std::abs(qmin) - std::abs(min / scale);
   double zero_point_from_max_error =
-      std::abs(qmax) - std::abs(max / static_cast<double>(scale));
+      std::abs(qmax) - std::abs(max / scale);
   double initial_zero_point =
       zero_point_from_min_error < zero_point_from_max_error
       ? zero_point_from_min

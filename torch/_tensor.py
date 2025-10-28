@@ -2,12 +2,14 @@
 import copyreg
 import enum
 import functools
+import itertools
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Any, cast, Concatenate, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._C as _C
@@ -348,7 +350,8 @@ class Tensor(torch._C.TensorBase):
             # hypothesis is that no one cares for meta tensors.
             if skip_data:
                 warnings.warn(
-                    "Serializing tensors on the meta device under skip_data context manager is a no-op"
+                    "Serializing tensors on the meta device under skip_data context manager is a no-op",
+                    stacklevel=2,
                 )
             arg_meta = (
                 self.dtype,
@@ -549,6 +552,7 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError("__setstate__ can be only called on leaf Tensors")
         if len(state) == 4:
             # legacy serialization of Tensor
+            # pyrefly: ignore [not-iterable]
             self.set_(*state)
             return
         elif len(state) == 5:
@@ -755,7 +759,10 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict()
+            self._post_accumulate_grad_hooks: dict[Any, Any] = (
+                # pyrefly: ignore [bad-assignment]
+                OrderedDict()
+            )
 
         from torch.utils.hooks import RemovableHandle
 
@@ -1027,7 +1034,7 @@ class Tensor(torch._C.TensorBase):
     def resize(self, *sizes):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.resize, (self,), self, *sizes)
-        warnings.warn("non-inplace resize is deprecated")
+        warnings.warn("non-inplace resize is deprecated", stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, sizes)
@@ -1035,7 +1042,7 @@ class Tensor(torch._C.TensorBase):
     def resize_as(self, tensor):
         if has_torch_function_variadic(self, tensor):
             return handle_torch_function(Tensor.resize_as, (self, tensor), self, tensor)
-        warnings.warn("non-inplace resize_as is deprecated")
+        warnings.warn("non-inplace resize_as is deprecated", stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, tensor.size())
@@ -1055,7 +1062,12 @@ class Tensor(torch._C.TensorBase):
         if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
-            return torch._VF.split_with_sizes(self, split_size, dim)
+            return torch._VF.split_with_sizes(
+                self,
+                # pyrefly: ignore [bad-argument-type]
+                split_size,
+                dim,
+            )
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
@@ -1109,6 +1121,7 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
+    # pyrefly: ignore [bad-override]
     __pow__ = cast(
         Callable[
             ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
@@ -1334,7 +1347,7 @@ class Tensor(torch._C.TensorBase):
 
         return self._typed_storage()._get_legacy_storage_class()
 
-    def refine_names(self, *names):
+    def refine_names(self, *names):  # pyrefly: ignore  # bad-override
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
 
         Refining is a special case of renaming that "lifts" unnamed dimensions.
@@ -1378,7 +1391,7 @@ class Tensor(torch._C.TensorBase):
         names = resolve_ellipsis(names, self.names, "refine_names")
         return super().refine_names(names)
 
-    def align_to(self, *names):
+    def align_to(self, *names):  # pyrefly: ignore  # bad-override
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
         specified in :attr:`names`, adding size-one dims for any new names.
 
@@ -1621,7 +1634,7 @@ class Tensor(torch._C.TensorBase):
             # Check if there are any duplicate strides
             has_duplicate_strides = any(
                 guard_or_false(earlier == later)
-                for earlier, later in zip(strides, strides[1:])
+                for earlier, later in itertools.pairwise(strides)
             )
 
             # Check if there are any singleton dimensions

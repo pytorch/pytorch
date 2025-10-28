@@ -393,7 +393,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when no name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
             }
             with (
                 tempfile.TemporaryDirectory() as tmp_dir,
@@ -407,7 +407,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear",
             }
             with (
@@ -422,7 +422,7 @@ class TestAOTInductorPackage(TestCase):
 
             # test invalid model name
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear/linear",
             }
             with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
@@ -448,7 +448,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "cos",
             }
             with (
@@ -950,7 +950,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         class Bar(torch.nn.Module):
@@ -1034,7 +1034,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         # linear.weight's node name is linear_weight.

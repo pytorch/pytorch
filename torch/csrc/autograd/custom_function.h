@@ -24,7 +24,8 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_self_fn_t& view_as_self_fn);
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -523,7 +524,8 @@ auto Function<T>::apply(Args&&... args)
       is_executable ? node : nullptr,
       jvp_fn,
       {},
-      view_as_self_fn);
+      view_as_self_fn,
+      false);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {

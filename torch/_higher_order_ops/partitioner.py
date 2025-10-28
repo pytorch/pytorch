@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
@@ -82,7 +83,7 @@ class HopPartitionedGraph:
             val1: Union[torch.SymInt, torch.Tensor],
             val2: Union[torch.SymInt, torch.Tensor],
         ) -> bool:
-            if type(val1) != type(val2):
+            if type(val1) is not type(val2):
                 return False
 
             if isinstance(val1, torch.SymInt) and isinstance(val2, torch.SymInt):

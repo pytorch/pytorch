@@ -658,6 +658,7 @@ static void check_shape_forward(const at::Tensor& input,
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
   TORCH_CHECK(!params.is_dilation_neg(), "dilation should be greater than zero");
+  TORCH_CHECK(groups > 0, "expected groups to be greater than 0, but got groups=", groups);
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -702,7 +703,7 @@ static void check_shape_forward(const at::Tensor& input,
       // If kernel size is incorrect
       std::ostringstream input_ss;
       std::ostringstream kernel_ss;
-      std::string separator = "";
+      std::string separator;
 
       for (int i = 0, len = input_shape.size(); i < len; ++i) {
         input_ss << separator << input_shape[i];
@@ -1019,7 +1020,7 @@ static Tensor convolution_same(
 
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
-    SymDimVector output_padding(static_cast<size_t>(dim));
+    SymDimVector output_padding(dim);
     return at::convolution_symint(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
@@ -1039,7 +1040,7 @@ static Tensor convolution_same(
     }
   }
   auto padded_input = at::constant_pad_nd_symint(input, pad_nd, 0);
-  SymDimVector output_padding(static_cast<size_t>(dim));
+  SymDimVector output_padding(dim);
   return at::convolution_symint(padded_input, weight, bias, stride, padding_l,
                                 dilation, false, output_padding, groups);
 }
@@ -1174,7 +1175,7 @@ at::Tensor convolution(
   bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN("conv"));
+                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN(at::Float32Op::CONV));
 }
 
 at::Tensor convolution_overrideable(
@@ -1319,7 +1320,7 @@ ConvBackend select_conv_backend(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
+  params.allow_tf32 = ctx.allowTF32CuDNN(at::Float32Op::CONV);
 
   auto input = input_r;
   auto weight = weight_r;
@@ -1699,7 +1700,7 @@ at::Tensor _convolution(
   c10::MaybeOwned<Tensor> bias_r_maybe_owned = at::borrow_from_optional_tensor(bias_r_opt);
   const Tensor& bias_r = *bias_r_maybe_owned;
 
-  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN("conv"));
+  return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN(at::Float32Op::CONV));
 }
 
 std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
@@ -1997,7 +1998,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.benchmark = ctx.benchmarkCuDNN();
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
-  params.allow_tf32 = ctx.allowTF32CuDNN("conv");
+  params.allow_tf32 = ctx.allowTF32CuDNN(at::Float32Op::CONV);
 
   // Validate inputs.
   check_shape_backward(input, weight.sizes(), params);

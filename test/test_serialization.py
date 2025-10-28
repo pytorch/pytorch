@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     TemporaryDirectoryName,
     TemporaryFileName,
     TEST_DILL,
+    TEST_WITH_MTIA,
     TestCase,
 )
 from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
@@ -68,6 +69,9 @@ if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
     MAP_SHARED, MAP_PRIVATE = None, None
+
+if TEST_WITH_MTIA:
+    import mtia.host_runtime.torch_mtia.dynamic_library  # noqa: F401
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -291,7 +295,7 @@ class SerializationMixin:
             5,
             6
         ]
-        for i in range(0, 100):
+        for i in range(100):
             data.append(0)
         t = torch.tensor(data, dtype=torch.uint8)
 
@@ -648,6 +652,10 @@ class SerializationMixin:
         xpu_last_map_locations = [
             f'xpu:{torch.xpu.device_count() - 1}',
         ]
+        mtia_0_map_locations = generate_map_locations('mtia')
+        mtia_last_map_locations = [
+            f'mtia:{torch.mtia.device_count() - 1}',
+        ]
 
         def check_map_locations(map_locations, dtype, intended_device):
             for fileobject_lambda in fileobject_lambdas:
@@ -672,6 +680,13 @@ class SerializationMixin:
                 xpu_last_map_locations,
                 torch.float,
                 torch.device('xpu', torch.xpu.device_count() - 1)
+            )
+        if torch.mtia.is_available():
+            check_map_locations(mtia_0_map_locations, torch.float, torch.device('mtia', 0))
+            check_map_locations(
+                mtia_last_map_locations,
+                torch.float,
+                torch.device('mtia', torch.mtia.device_count() - 1)
             )
 
     @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
@@ -4538,7 +4553,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with TemporaryFileName() as f:
             torch.save(m, f)
             try:
-                old_value = os.environ[env_var] if env_var in os.environ else None
+                old_value = os.environ.get(env_var, None)
                 os.environ[env_var] = "1"
                 # if weights_only is explicitly set, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD cannot override it
                 with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
@@ -4786,6 +4801,18 @@ class TestSerialization(TestCase, SerializationMixin):
                 y = torch.load(checkpoint)
 
             assert x.dtype == y.dtype
+
+    @skipIfTorchDynamo("getrefcount does not work in dynamo")
+    def test_serializaion_no_storage_leak(self):
+        # Test https://github.com/pytorch/pytorch/issues/149846
+        t = torch.rand(10, 10)
+        state_dict = {'a': 1, 'b': 2, 'c': t}
+        storage = t.untyped_storage()
+        ref1 = sys.getrefcount(storage)
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            torch.save(state_dict, checkpoint)
+        ref2 = sys.getrefcount(storage)
+        self.assertEqual(ref1, ref2)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

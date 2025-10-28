@@ -14,7 +14,7 @@ __all__ = [
     "ONNXProgram",
 ]
 
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._C import _onnx as _C_onnx
@@ -37,7 +37,7 @@ from ._internal.torchscript_exporter._type_utils import (
 )
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
     register_custom_op_symbolic,
-    select_model_mode_for_export,
+    select_model_mode_for_export,  # pyrefly: ignore  # deprecated
     unregister_custom_op_symbolic,
 )
 from .errors import OnnxExporterError
@@ -45,7 +45,7 @@ from .errors import OnnxExporterError
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Collection, Mapping, Sequence
+    from collections.abc import Callable, Collection, Mapping, Sequence
 
 # Set namespace for exposed private names
 ONNXProgram.__module__ = "torch.onnx"
