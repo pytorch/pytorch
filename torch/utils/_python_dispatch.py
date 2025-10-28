@@ -44,6 +44,23 @@ def is_in_any_mode_without_ignore_compile_internals() -> bool:
     return _is_in_any_mode_without_ignore_compile_internals
 
 
+def any_torch_dispatch_mode_on_stack() -> bool:
+    stack_len = torch._C._len_torch_dispatch_stack()
+
+    for idx in range(stack_len):
+        mode = _get_dispatch_stack_at(idx)
+
+        # Apply filters first
+        if mode.is_infra_mode():
+            continue
+
+        if mode.ignore_compile_internals():
+            continue
+
+        return True
+    return False
+
+
 class TorchDispatchMode:
     """
     A ``TorchDispatchMode`` allows you to override the meaning of all
@@ -106,6 +123,26 @@ class TorchDispatchMode:
                 bool
             ] = deque()
 
+    def __init_subclass__(cls, **kwargs):
+        """
+        Automatically wrap __torch_dispatch__ with recursive dynamo disable for all subclasses.
+        This ensures that compilation is disabled within dispatch modes and any functions
+        they call.
+        """
+        super().__init_subclass__(**kwargs)
+
+        # Check if the subclass defines its own __torch_dispatch__
+        if "__torch_dispatch__" in cls.__dict__:
+            original_dispatch = cls.__torch_dispatch__
+            # Apply the recursive dynamo disable decorator
+            # Use recursive=True to disable dynamo for all nested calls
+            cls.__torch_dispatch__ = torch._disable_dynamo(
+                original_dispatch, recursive=True
+            )
+
+    # Apply recursive dynamo disable to ensure compilation is disabled
+    # within dispatch modes and any functions they call
+    @torch._disable_dynamo(recursive=True)
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
