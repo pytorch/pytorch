@@ -66,7 +66,7 @@ Tensor& random_mps_impl(Tensor& self,
   }
 
   // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
-  const auto need_reshape = self_.ndimension() > 4;
+  const auto need_reshape = self.ndimension() > 4;
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
   auto stream = getCurrentMPSStream();
 
@@ -87,7 +87,7 @@ Tensor& random_mps_impl(Tensor& self,
         if constexpr (std::is_same_v<scalar_t, bool>) {
           return MPSDataTypeFloat32;
         }
-        switch (self_.scalar_type()) {
+        switch (self.scalar_type()) {
           case kHalf:
             return MPSDataTypeFloat16;
           case kFloat:
@@ -96,7 +96,7 @@ Tensor& random_mps_impl(Tensor& self,
             return MPSDataTypeBFloat16;
           }
           default:
-            TORCH_CHECK_TYPE(false, "Unsupported type ", self_.scalar_type(), " for operation ", op_name);
+            TORCH_CHECK_TYPE(false, "Unsupported type ", self.scalar_type(), " for operation ", op_name);
         }
       }();
       const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
@@ -118,9 +118,9 @@ Tensor& random_mps_impl(Tensor& self,
       // we don't use the output state tensor from the MPSGraph API as it requires reading back from GPU to CPU.
       // Instead, we keep the Philox state in the MPSGenerator and use the PyTorch's philox_engine to maintain
       // the counters, and feed them to the graph manually
-      auto self_shape = getMPSShape(self_);
+      auto self_shape = getMPSShape(self);
       NSArray<MPSGraphTensor*>* resultTensors =
-          [mpsGraph randomTensorWithShape:need_reshape ? @[ @(self_.numel()) ] : self_shape
+          [mpsGraph randomTensorWithShape:need_reshape ? @[ @(self.numel()) ] : self_shape
                                descriptor:desc
                               stateTensor:newCachedGraph->stateTensor
                                      name:nil];
@@ -130,8 +130,8 @@ Tensor& random_mps_impl(Tensor& self,
         newCachedGraph->resultTensor = randomBlock(newCachedGraph, newCachedGraph->resultTensor);
       }
       // results will be cast if self's scalar type isn't directly supported by MPS backend.
-      if (getMPSDataType(self_) != outputDataType)
-        newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, self_.scalar_type());
+      if (getMPSDataType(self) != outputDataType)
+        newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, self.scalar_type());
     });
     // feed the updated state values to the graph
     MPSNDArrayDescriptor* stateDesc =
