@@ -35,7 +35,6 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_CUDA,
-    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
@@ -532,7 +531,9 @@ def run_test(
 
     xml_report_dir = get_report_dir(test_file, None, options.pytest)
     if is_cpp_test:
-        unittest_args.append(f"--junit-xml-reruns={get_report_path(xml_report_dir, test_file)}")
+        unittest_args.append(
+            f"--junit-xml-reruns={get_report_path(xml_report_dir, test_file)}"
+        )
     else:
         unittest_args.append(f"--save-xml={xml_report_dir}")
 
