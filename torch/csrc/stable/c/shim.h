@@ -23,11 +23,12 @@ using StableIValue = uint64_t;
 // needed for backward compatibility when calling native functions via
 // the dispatcher. The caller should pass in the libtorch version the
 // extension is building with (NOT target version).
-AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(const char* opName,
-                                                       const char* overloadName,
-                                                       StableIValue* stack,
-                                                       uint64_t extension_build_version);
-                                                      
+AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack,
+    uint64_t extension_build_version);
+
 // Version-aware variant of aoti_torch_library_impl that takes an
 // extension_build_version parameter for backward compatibility
 AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
