@@ -1641,15 +1641,15 @@ static PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_was_wrapped_number(
+static PyObject* THPVariable_is_wrapped_number(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "was_wrapped_number");
+    return handle_torch_function_getter(self, "is_wrapped_number");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.was_wrapped_number());
+  return torch::autograd::utils::wrap(self_.is_wrapped_number());
   END_HANDLE_TH_ERRORS
 }
 
@@ -2043,8 +2043,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr},
     {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
     {"is_nested", (getter)THPVariable_is_nested, nullptr, nullptr, nullptr},
-    {"was_wrapped_number",
-     (getter)THPVariable_was_wrapped_number,
+    {"is_wrapped_number",
+     (getter)THPVariable_is_wrapped_number,
      nullptr,
      nullptr,
      nullptr},

@@ -326,10 +326,8 @@ class TestTensorBuiltins(JitTestCase):
             # This has a longer implementation, maybe not worth copying to
             # TorchScript if named tensors don't work there anyways
             "names",
-            "was_wrapped_number",
             # We don't plan to support grad_dtype in TorchScript
             "grad_dtype",
-            "was_wrapped_number",
         }
 
         for p in properties:

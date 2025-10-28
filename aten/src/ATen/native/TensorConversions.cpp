@@ -361,8 +361,8 @@ Tensor _to_copy(
               self.sizes(), self.strides(), options.pinned_memory(pin_out));
           r.copy_(self, non_blocking);
         }
-        if (self.unsafeGetTensorImpl()->was_wrapped_number()) {
-          r.unsafeGetTensorImpl()->set_was_wrapped_number(true);
+        if (self.unsafeGetTensorImpl()->is_wrapped_number()) {
+          r.unsafeGetTensorImpl()->set_wrapped_number(true);
         }
         return r;
       } else if (!self.is_quantized() && self.layout() == kStrided) {
@@ -371,8 +371,8 @@ Tensor _to_copy(
         r = at::empty_strided(
             self.sizes(), strides, options.pinned_memory(pin_out));
         r.copy_(self, non_blocking);
-        if (self.unsafeGetTensorImpl()->was_wrapped_number()) {
-          r.unsafeGetTensorImpl()->set_was_wrapped_number(true);
+        if (self.unsafeGetTensorImpl()->is_wrapped_number()) {
+          r.unsafeGetTensorImpl()->set_wrapped_number(true);
         }
         return r;
       } else {

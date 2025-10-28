@@ -90,7 +90,7 @@ torch_function_passthrough = {
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.was_wrapped_number.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.is_wrapped_number.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_contiguous,
     # For TorchRefsMode only
     torch.Tensor.__format__,
@@ -1659,7 +1659,7 @@ def elementwise_dtypes(
                 if float_as_complex and is_float_dtype(_dtype):
                     _dtype = corresponding_complex_dtype(_dtype)
                 if x.ndim == 0:
-                    if x.was_wrapped_number:
+                    if x.is_wrapped_number:
                         wrapped_num_dtype = get_higher_dtype(wrapped_num_dtype, _dtype)
                     else:
                         zero_dim_tensor_dtype = get_higher_dtype(

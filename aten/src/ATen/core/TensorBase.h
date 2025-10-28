@@ -455,8 +455,8 @@ class TORCH_API TensorBase {
   }
 
   /// Returns if a `Tensor` was derived from a wrapped number.
-  bool was_wrapped_number() const {
-    return impl_->was_wrapped_number();
+  bool is_wrapped_number() const {
+    return impl_->is_wrapped_number();
   }
 
   /// Returns if a `Tensor` has CPU backend.

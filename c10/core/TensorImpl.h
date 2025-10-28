@@ -1369,15 +1369,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_wrapped_number_ = value;
   }
 
-  bool was_wrapped_number() const {
-    return was_wrapped_number_;
-  }
-
-  void set_was_wrapped_number(bool value) {
-    TORCH_INTERNAL_ASSERT(dim() == 0);
-    was_wrapped_number_ = value;
-  }
-
   /**
    * Returns true if Tensor supports as_strided and as_strided_backward.
    * This is used in autograd to perform inplace update on view Tensors.
@@ -2958,7 +2949,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_channels_last_3d_contiguous_ = false;
     is_non_overlapping_and_dense_ = true;
     is_wrapped_number_ = false;
-    was_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
     sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
@@ -3007,8 +2997,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_non_overlapping_and_dense_ : 1;
 
   bool is_wrapped_number_ : 1;
-
-  bool was_wrapped_number_ : 1;
 
   // NOTE [ Metadata Change for a Detached Tensor ]
   //
