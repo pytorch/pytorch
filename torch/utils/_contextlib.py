@@ -163,6 +163,7 @@ class _NoParamDecoratorContextManager(_DecoratorContextManager):
     def __new__(cls, orig_func: F) -> F: ...  # type: ignore[misc]
     @overload
     def __new__(cls, orig_func: None = None) -> Self: ...
+
     def __new__(cls, orig_func: F | None = None) -> Self | F:  # type: ignore[misc]
         if orig_func is None:
             return super().__new__(cls)
