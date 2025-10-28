@@ -76,7 +76,7 @@ class CudaTimer : public Timer {
     if (milliseconds < 0) {
       return std::nullopt;
     }
-    return int64_t(milliseconds * kMilliSecondToNanosSecond);
+    return static_cast<int64_t>(milliseconds * kMilliSecondToNanosSecond);
   }
 };
 
