@@ -5,7 +5,7 @@ import warnings
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, overload, Protocol, Union
+from typing import cast, Optional, overload, Protocol, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -605,7 +605,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
 
-def _get_write_alias(x) -> str:
+def _get_write_alias(x) -> Optional[str]:
     alias_set = x.alias_set
     if not alias_set or not x.is_write:
         return None
@@ -641,7 +641,7 @@ class SchemaInfo:
 
     # List of (arg_idx, return_idx) where args[arg_idx].alias_set &
     # outs[out_idx].alias_set is not empty, and not args[arg_idx].is_write.
-    read_only_alias_match_indexes: list[tuple[int]]
+    read_only_alias_match_indexes: list[tuple[int, int]]
 
 
 # Given an OpOverload, returns schema information on it.
@@ -721,12 +721,15 @@ def get_alias_info(func) -> SchemaInfo:
             if is_read_only_alias_match:
                 read_only_alias_match_indexes.append((arg_idx, return_idx))
 
-    outs_write_aliases = [_get_write_alias(r) for r in out_schemas]
-    if not any(x is not None for x in outs_write_aliases):
-        outs_write_aliases = None
-    elif not all(x is not None for x in outs_write_aliases):
+    outs_write_aliases_list: list[Optional[str]] = [_get_write_alias(r) for r in out_schemas]
+    non_nones = sum(x is not None for x in outs_write_aliases_list)
+    if non_nones == 0:
+        outs_write_aliases : Optional[list[str]] = None
+    elif non_nones != len(outs_write_aliases_list):
         # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
         raise RuntimeError("Unsupported schema: " + str(func._schema))
+    else:
+        outs_write_aliases = cast(list[str], outs_write_aliases_list)
 
     schema_info = SchemaInfo(
         args=arg_schemas,
