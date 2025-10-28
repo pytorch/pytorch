@@ -51,7 +51,7 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
-    has_pointwise_use,
+    has_uses_tagged_as,
     is_gpu,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
@@ -1534,7 +1534,7 @@ def should_prefer_unfused_addmm(match):
         return False
 
     output = match.output_node()
-    if any(has_pointwise_use(use) for use in output.users):
+    if has_uses_tagged_as(output, (torch.Tag.pointwise,)):
         return True
     else:
         args_val = (arg.meta["val"] for arg in (inp, *match.args))

@@ -427,7 +427,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
-        # for form subgroup to avoid unnecesssary overhead.
+        # for form subgroup to avoid unnecessary overhead.
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
