@@ -34,7 +34,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import GetAttrKey, register_pytree_node, tree_map_only
+from torch.utils._pytree import GetAttrKey, tree_map_only
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -1648,12 +1648,3 @@ def flex_attention(
     return _finalize_outputs(
         out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
     )
-
-
-register_pytree_node(
-    BlockMask,
-    BlockMask._flatten,
-    BlockMask._unflatten,
-    flatten_with_keys_fn=BlockMask._flatten_with_keys,
-    serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-)
