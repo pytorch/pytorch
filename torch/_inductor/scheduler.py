@@ -2723,6 +2723,8 @@ class Scheduler:
             }
         )
 
+        self.removed_ops = set()
+
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
         for name in V.graph.graph_inputs_original:

@@ -22,6 +22,7 @@ class TestBase(TestCase):
         ref = f(*args)
         act = torch.compile(f)(*args)
         self.assertTrue(same(ref, act, tol=tol))
+        # breakpoint()
 
 
 class SkipPatternTest(TestBase):
@@ -116,6 +117,34 @@ class MixOrderReductionTest(TestBase):
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
         )
+
+    def test_independent_split_size(self):
+        """
+        Make sure mix order reduction can pick the split size it want
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        def check_one_split_size(split_size):
+            torch._dynamo.reset()
+
+            with inductor_config.patch("triton.mix_order_reduction_split_size", split_size):
+                self.check_numeric(f, (x,))
+                self.assertEqual(
+                    inductor_config.triton.mix_order_reduction,
+                    metrics.codegen_mix_order_reduction,
+                )
+
+                _, (code,) = utils.run_and_get_code(torch.compile(f), x)
+                self.assertTrue(f"'RSPLIT_SIZE': {split_size}" in code)
+
+        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+
+        check_one_split_size(8)
+        check_one_split_size(16)
 
     @inductor_config.patch(split_reductions=False)
     def test_non_contiguous_input(self):
