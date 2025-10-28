@@ -61,12 +61,16 @@ These backends include:
 .. attribute::  allow_fp16_reduced_precision_reduction
 
     A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
+    Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets you also toggle whether
+    split-K heuristics may be used when dispatching to cuBLASLt. ``allow_splitk`` defaults to ``True``.
 ```
 
 ```{eval-rst}
 .. attribute::  allow_bf16_reduced_precision_reduction
 
     A :class:`bool` that controls whether reduced precision reductions are allowed with bf16 GEMMs.
+    Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets you also toggle whether
+    split-K heuristics may be used when dispatching to cuBLASLt. ``allow_splitk`` defaults to ``True``.
 ```
 
 ```{eval-rst}

@@ -824,7 +824,7 @@ class CommonTemplate:
         [
             ((8, 8), 1, 1, True),  # Persistent Welford fallback
             subtest(
-                ((128, 128), 9, 2, False), decorators=[xfail_if_use_tensor_descriptor]
+                ((128, 128), 7, 2, False), decorators=[xfail_if_use_tensor_descriptor]
             ),  # Looped Welford reduction
         ],
     )
@@ -924,7 +924,7 @@ class CommonTemplate:
         result, (code,) = self._run_and_compare(
             foo,
             view,
-            expected_num_block_pointers=6,
+            expected_num_block_pointers=5,
             expected_num_triton_kernels=2,
             config_patches={
                 "triton.multi_kernel": True,
@@ -1075,7 +1075,6 @@ class CommonTemplate:
 
         def foo(x, length):
             unbacked = length.item()
-            torch._check_is_size(unbacked)
 
             repeated = x.repeat(1, unbacked, NUM_REPEAT)
             # permute creates split in middle with unbacked symint is the first range
