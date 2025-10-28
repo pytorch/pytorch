@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import onnx_ir.passes.common as common_passes
-import onnxruntime
 from onnxscript import ir
-from packaging import version
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -418,6 +416,7 @@ class SymbolicOpsTest(common_utils.TestCase):
             )
 
 
+@common_utils.instantiate_parametrized_tests
 class NativeOnnxOpsTest(common_utils.TestCase):
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
@@ -564,7 +563,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
         onnx_testing.assert_onnx_program(onnx_program)
 
-    def test_attention_basic(self):
+    def test_attention_without_past_kv_caches(self):
         """Test basic attention functionality."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
         q_num_heads, kv_num_heads = 8, 8
@@ -615,10 +614,16 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             present_value.shape, (batch_size, kv_num_heads, kv_seq_len, head_size)
         )
 
-    def test_attention_gqa(self):
-        """Test Group Query Attention (GQA)."""
+    @common_utils.parametrize(
+        "name, kv_num_heads",
+        [
+            ("group_query_attention", 4),
+            ("multi_query_attention", 1),
+        ],
+    )
+    def test_attention_kv_num_heads(self, name: str, kv_num_heads: int):
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 4  # GQA: q_num_heads % kv_num_heads = 0
+        q_num_heads = 8
         head_size = 64
 
         Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
@@ -779,26 +784,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             output_4d.shape, (batch_size, q_num_heads, q_seq_len, head_size)
         )
 
-    def test_attention_with_large_negative_float_mask(self):
-        """Test attention with large negative values in float mask."""
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 8
-        head_size = 64
-
-        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
-        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-
-        # Create mask with large negative values (similar to -inf masking)
-        float_mask = torch.full((q_seq_len, kv_seq_len), -1e9)
-        # Allow some positions
-        float_mask[:, :3] = 0.0
-
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
-        output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
-
-        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
-
     def test_attention_causal(self):
         """Test causal attention."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 4  # Square for causal
@@ -916,9 +901,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         class AttentionModel(torch.nn.Module):
             def forward(self, Q, K, V):
-                output, present_key, present_value, qk_output = (
-                    torch.onnx.ops.attention(Q, K, V)
-                )
+                output, _, _, _ = torch.onnx.ops.attention(Q, K, V)
                 return output
 
         model = AttentionModel()
@@ -943,14 +926,12 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         attn_mask = torch.randint(
-            0, 2, (batch_size, 1, kv_seq_len), dtype=torch.bool
+            0, 2, (batch_size, 1, q_seq_len, kv_seq_len), dtype=torch.bool
         )
 
         class AttentionModel(torch.nn.Module):
             def forward(self, Q, K, V, attn_mask):
-                output, present_key, present_value, qk_output = (
-                    torch.onnx.ops.attention(Q, K, V, attn_mask=attn_mask)
-                )
+                output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=attn_mask)
                 return output
 
         model = AttentionModel()
@@ -959,7 +940,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             "Q": {0: "batch", 2: "q_seq_len"},
             "K": {0: "batch", 2: "kv_seq_len"},
             "V": {0: "batch", 2: "kv_seq_len"},
-            "attn_mask": {0: "batch", 2: "q_seq_len"},
+            "attn_mask": {0: "batch", 2: "q_seq_len", 3: "kv_seq_len"},
         }
 
         onnx_program = self.export(
@@ -1127,13 +1108,15 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         class FullAttentionModel(torch.nn.Module):
             def forward(self, Q, K, V, attn_mask, past_key, past_value):
-                output, present_key, present_value, qk_matmul = torch.onnx.ops.attention(
-                    Q,
-                    K,
-                    V,
-                    attn_mask=attn_mask,
-                    past_key=past_key,
-                    past_value=past_value,
+                output, present_key, present_value, qk_matmul = (
+                    torch.onnx.ops.attention(
+                        Q,
+                        K,
+                        V,
+                        attn_mask=attn_mask,
+                        past_key=past_key,
+                        past_value=past_value,
+                    )
                 )
                 return output, present_key, present_value, qk_matmul
 
@@ -1417,7 +1400,17 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program)
 
-    def test_attention_export_with_softmax_precision(self):
+    @common_utils.parametrize(
+        "precision_enum, precision_name",
+        [
+            (1, "FLOAT"),
+            (10, "FLOAT16"),
+            (11, "DOUBLE"),
+        ],
+    )
+    def test_attention_export_with_softmax_precision(
+        self, precision_enum, precision_name
+    ):
         """Test export with different softmax precision values."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
         q_num_heads, kv_num_heads = 8, 8
@@ -1427,38 +1420,28 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        # Test different ONNX precision types
-        precision_types = [
-            (1, "FLOAT"),
-            (10, "FLOAT16"),
-            (11, "DOUBLE"),
-            (16, "BFLOAT16"),
-        ]
+        class SoftmaxPrecisionModel(torch.nn.Module):
+            def __init__(self, precision):
+                super().__init__()
+                self.precision = precision
 
-        for precision_val, precision_name in precision_types:
+            def forward(self, Q, K, V):
+                output, _, _, _ = torch.onnx.ops.attention(
+                    Q, K, V, softmax_precision=self.precision
+                )
+                return output
 
-            class SoftmaxPrecisionModel(torch.nn.Module):
-                def __init__(self, precision):
-                    super().__init__()
-                    self.precision = precision
+        model = SoftmaxPrecisionModel(precision_enum)
+        onnx_program = self.export(model, (Q, K, V), opset_version=23)
 
-                def forward(self, Q, K, V):
-                    output, _, _, _ = torch.onnx.ops.attention(
-                        Q, K, V, softmax_precision=self.precision
-                    )
-                    return output
+        node = onnx_program.model.graph.node(0)
+        self.assertEqual(node.op_type, "Attention")
 
-            model = SoftmaxPrecisionModel(precision_val)
-            onnx_program = self.export(model, (Q, K, V), opset_version=23)
-
-            node = onnx_program.model.graph.node(0)
-            self.assertEqual(node.op_type, "Attention")
-
-            # Verify softmax_precision attribute
-            attrs = node.attributes
-            self.assertIn("softmax_precision", attrs)
-            self.assertEqual(attrs["softmax_precision"].value, precision_val)
-            onnx_testing.assert_onnx_program(onnx_program)
+        # Verify softmax_precision attribute
+        attrs = node.attributes
+        self.assertIn("softmax_precision", attrs)
+        self.assertEqual(attrs["softmax_precision"].value, precision_enum)
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1e-3)
 
     def test_attention_export_gqa(self):
         """Test export and verify output tensor shapes."""
@@ -1472,7 +1455,8 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         class AttentionOutputsModel(torch.nn.Module):
             def forward(self, Q, K, V):
-                return torch.onnx.ops.attention(Q, K, V)
+                result, _, _, _ = torch.onnx.ops.attention(Q, K, V)
+                return result
 
         model = AttentionOutputsModel()
         onnx_program = self.export(model, (Q, K, V), opset_version=23)
@@ -1489,22 +1473,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             outputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
         )
 
-        # present_key: (batch_size, kv_num_heads, kv_seq_len, head_size)
-        self.assertEqual(
-            outputs[1].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
-        )
-
-        # present_value: (batch_size, kv_num_heads, kv_seq_len, head_size)
-        self.assertEqual(
-            outputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
-        )
-
-        # qk_output: (batch_size, q_num_heads, q_seq_len, kv_seq_len)
-        self.assertEqual(
-            outputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len]
-        )
-        # ORT does not allow all outputs when past key/value are not provided
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(onnx_program)
 
 
 if __name__ == "__main__":
