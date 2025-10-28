@@ -4,7 +4,8 @@ circular dependencies.
 """
 
 import functools
-from typing import Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable
+from typing import Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 
 

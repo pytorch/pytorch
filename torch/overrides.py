@@ -27,9 +27,9 @@ import contextlib
 import functools
 import types
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -249,6 +249,8 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
+        torch.nn.functional.scaled_grouped_mm,
+        torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
@@ -1351,6 +1353,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor._grad.__get__: lambda self: -1,
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
+        Tensor.grad_dtype.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
         Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
         Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
@@ -1744,6 +1747,7 @@ def handle_torch_function(
                 "Defining your `__torch_function__ as a plain method is deprecated and "
                 "will be an error in future, please define it as a classmethod.",
                 DeprecationWarning,
+                stacklevel=2,
             )
 
         # Use `public_api` instead of `implementation` so __torch_function__
@@ -2054,7 +2058,8 @@ class TorchFunctionMode:
     @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn(
-            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`"
+            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`",
+            stacklevel=2,
         )
         instance = cls(*args, **kwargs)
         return instance

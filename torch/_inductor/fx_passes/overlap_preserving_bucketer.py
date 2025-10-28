@@ -1,27 +1,15 @@
 from collections import defaultdict
-from typing import Optional
 
-import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
-    _ag_group_key,
-    _rs_group_key,
+    bucket_key,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
     is_wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import CollBucket, CollectiveInfo
 from torch.utils._ordered_set import OrderedSet
-
-
-def bucket_key(node: torch.fx.Node) -> Optional[object]:
-    if is_all_gather(node):
-        return _ag_group_key(node)
-    elif is_reduce_scatter(node):
-        return _rs_group_key(node)
-    else:
-        return None
 
 
 class OverlapPreservingBucketer:
@@ -37,6 +25,8 @@ class OverlapPreservingBucketer:
         node_ancestors: dict[fx.Node, OrderedSet[fx.Node]],
         scheduled: OrderedSet[fx.Node],
         max_bucket_memory_gb: float = 1.0,
+        max_coll_distance: int = 1000,
+        insert_overlap_deps: bool = False,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -44,20 +34,21 @@ class OverlapPreservingBucketer:
         self.scheduled = scheduled
         self.max_bucket_memory_gb = max_bucket_memory_gb
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
+        self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
+        self.max_coll_distance = max_coll_distance
+        self.insert_overlap_deps = insert_overlap_deps
 
     def bucket_collectives(self) -> None:
         """Main entry point for bucketing collectives."""
-
-        aug_graph = AugmentedGraphHelper(self.graph)
 
         # Add extra dependencies for hidden collectives
         # For each hidden collective, add: compute -> start and wait -> compute
         for start_node, info in self.collective_info.items():
             if info.hiding_node and not info.is_exposed:
                 # Add edge: hiding_compute depends on start (start must come before compute)
-                aug_graph.add_extra_dep(n=info.hiding_node, dep=start_node)
+                self.aug_graph.add_extra_dep(n=info.hiding_node, dep=start_node)
                 # Add edge: wait depends on hiding_compute (compute must come before wait)
-                aug_graph.add_extra_dep(n=info.wait_node, dep=info.hiding_node)
+                self.aug_graph.add_extra_dep(n=info.wait_node, dep=info.hiding_node)
 
         # Group collectives by bucket key (type, group, etc.)
         grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -68,7 +59,7 @@ class OverlapPreservingBucketer:
 
         all_buckets: list[CollBucket] = []
         for collective_group in grouped_collectives.values():
-            buckets = self._find_buckets(collective_group, aug_graph)
+            buckets = self._find_buckets(collective_group)
             all_buckets.extend(buckets)
 
         # Collect all extra dependencies to preserve after bucketing
@@ -86,12 +77,16 @@ class OverlapPreservingBucketer:
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
         _stable_topological_sort(self.graph, additional_deps)
+
+        # After topological sort, preserve dependencies using effect tokens
+        if self.insert_overlap_deps:
+            self._preserve_dependencies_with_tokens(additional_deps)
+
         self.graph.lint()
 
     def _find_buckets(
         self,
         collective_group: OrderedSet[fx.Node],
-        aug_graph: AugmentedGraphHelper,
     ) -> list[CollBucket]:
         """Find valid buckets within a group of similar collectives."""
 
@@ -109,17 +104,23 @@ class OverlapPreservingBucketer:
                 total_bytes=self.collective_info[start_node].size_bytes,
             )
             processed.add(start_node)
+            start_node_idx = self.node_idx[start_node]
 
             # TODO - limit within range
             for candidate in collective_group:
                 if candidate in processed:
                     continue
 
+                candidate_idx = self.node_idx[candidate]
+                # Check if candidate is within max distance from the bucket start
+                if abs(candidate_idx - start_node_idx) > self.max_coll_distance:
+                    continue
+
                 candidate_bytes = self.collective_info[candidate].size_bytes
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
                     continue
 
-                if self._can_add_to_bucket(bucket_info, candidate, aug_graph):
+                if self._can_add_to_bucket(bucket_info, candidate):
                     bucket_info.collectives.append(candidate)
                     bucket_info.total_bytes += candidate_bytes
                     processed.add(candidate)
@@ -137,7 +138,6 @@ class OverlapPreservingBucketer:
         self,
         bucket_info: CollBucket,
         candidate: fx.Node,
-        aug_graph: AugmentedGraphHelper,
     ) -> bool:
         """
         Check if candidate can be added to bucket without interfering
@@ -173,26 +173,26 @@ class OverlapPreservingBucketer:
         # TODO: we have a range of possible idxs of the merged node, and idx of new node.
         # we should not do path search beyond that range
         existing_coll = bucket_info.collectives[0]
-        if aug_graph.has_path(existing_coll, candidate):
+        if self.aug_graph.has_path(existing_coll, candidate):
             return False
-        if aug_graph.has_path(candidate, existing_coll):
+        if self.aug_graph.has_path(candidate, existing_coll):
             return False
 
         # Safe to merge starts - do the merge
-        aug_graph.merge_to_set(existing_coll, candidate)
+        self.aug_graph.merge_to_set(existing_coll, candidate)
 
         # Step 3: Check and merge waits
         existing_wait = self.collective_info[existing_coll].wait_node
         candidate_wait = candidate_info.wait_node
         # TODO - as above, limit search by idx
-        if aug_graph.has_path(existing_wait, candidate_wait) or aug_graph.has_path(
-            candidate_wait, existing_wait
-        ):
+        if self.aug_graph.has_path(
+            existing_wait, candidate_wait
+        ) or self.aug_graph.has_path(candidate_wait, existing_wait):
             # Unmerge the start we just merged
-            aug_graph.unmerge_node(candidate)
+            self.aug_graph.unmerge_node(candidate)
             return False
 
-        aug_graph.merge_to_set(existing_wait, candidate_wait)
+        self.aug_graph.merge_to_set(existing_wait, candidate_wait)
         return True
 
     def _apply_bucket(
@@ -254,3 +254,18 @@ class OverlapPreservingBucketer:
                 overlap_deps[new_wait].add(info.hiding_node)
 
         return overlap_deps
+
+    def _preserve_dependencies_with_tokens(
+        self, additional_deps: dict[fx.Node, OrderedSet[fx.Node]]
+    ) -> None:
+        """
+        Preserve dependencies using effect tokens and with_effects higher-order op.
+
+        Uses the standalone token_dependencies utility for consistent behavior
+        across different overlap scheduling approaches.
+        """
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+
+        preserve_node_ordering(self.graph, additional_deps)

@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from typing import Any, Optional, overload, TypeVar, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -96,19 +96,8 @@ def _maybe_run_with_interpreter(fn):
 
 def _maybe_compile_and_run_fn(fn, *args):
     if not torch.compiler.is_dynamo_compiling():
-        from torch._dynamo.backends.debugging import (
-            make_eager_backend_with_torch_function_mode,
-        )
-
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                if metadata_mode:
-                    backend: Union[str, Callable[..., Any]] = (
-                        make_eager_backend_with_torch_function_mode(metadata_mode)
-                    )
-                else:
-                    backend = "eager"
-                return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+            return torch.compile(fn, backend=backend, fullgraph=True)(*args)
     else:
         return fn(*args)
 
@@ -237,6 +226,34 @@ def check_meta_consistency(
 
 
 @contextmanager
+def setup_compilation_env():
+    """
+    Context manager that sets up proper environment and backend when invoking torch.compile
+    inside torch.export region or inside HOP.
+    """
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_modes,
+    )
+    from torch.fx.experimental.proxy_tensor import (
+        _temp_remove_pre_dispatch_torch_function_mode,
+    )
+
+    with (
+        _set_compilation_env(),
+        torch._dynamo.utils.disable_cache_limit(),
+        _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
+        _temp_remove_metadata_torch_function_mode() as metadata_mode,
+    ):
+        modes = [
+            mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
+        ]
+        if modes:
+            yield make_eager_backend_with_torch_function_modes(modes)
+        else:
+            yield "eager"
+
+
+@contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
@@ -253,6 +270,7 @@ def _set_compilation_env():
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        # pyrefly: ignore  # bad-assignment
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
@@ -423,6 +441,7 @@ def unique_graph_name_with_root(
 ) -> tuple[int, str]:
     next_name = None
     i = 0
+    # pyrefly: ignore  # bad-assignment
     while not next_name:
         candidate = f"{prefix}_{i}"
         if hasattr(root, candidate):
@@ -483,8 +502,7 @@ def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
-            for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
         ]
 
     return fw_with_masks
@@ -779,6 +797,8 @@ def create_bw_fn(
     """
 
     from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+    # pyrefly: ignore  # missing-module-attribute
     from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
 
     dummy_aot_config = AOTConfig(
@@ -840,7 +860,7 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
 
 # Returns a mask whether a list element is a tensor or not
 def get_tensor_mask(tensor_list: Iterable[Any]) -> list[bool]:
-    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
+    return [bool(isinstance(v, torch.Tensor)) for v in tensor_list]
 
 
 def mask_list(
@@ -923,6 +943,7 @@ def check_input_alias_and_mutation(
         out_out_alias_map,
         mutated_inputs,
     ) = check_input_alias_and_mutation_return_outputs(gm)[:-1]
+    # pyrefly: ignore  # bad-return
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 

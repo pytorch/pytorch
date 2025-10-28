@@ -31,6 +31,34 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
+  stream << val.val_;
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
+  stream << static_cast<int>(val.val_);
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
+  stream << static_cast<unsigned int>(val.val_);
+  return stream;
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
+  T buf[Vectorized<T>::size()];
+  vec.store(buf);
+  stream << "vec[";
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    if (i != 0) {
+      stream << ", ";
+    }
+    stream << buf[i];
+  }
+  stream << "]";
+  return stream;
+}
+
 #if defined(CPU_CAPABILITY_AVX512)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX512)
@@ -369,7 +397,7 @@ inline Vectorized<bool> operator&&(
   const __m512i* other_ = reinterpret_cast<const __m512i*>(other.as_bytes());
   __m512i out = _mm512_and_si512(*self_, *other_);
   Vectorized<bool> ret;
-  // We do not have a constructer that takes __m512i, so we need to memcpy
+  // We do not have a constructor that takes __m512i, so we need to memcpy
   std::memcpy(ret, &out, ret.size() * sizeof(bool));
   return ret;
 }
