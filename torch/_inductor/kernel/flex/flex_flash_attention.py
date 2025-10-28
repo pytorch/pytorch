@@ -12,7 +12,7 @@ from torch.fx import GraphModule
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
-from .common import infer_dense_strides, load_template, SubgraphResults
+from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
 
 aten = torch.ops.aten
@@ -36,7 +36,7 @@ from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 
 
 flash_attention_cutedsl_template = CuteDSLTemplate(
-    name="flash_attention_cutedsl", source=load_template("flash_attention")
+    name="flash_attention_cutedsl", source=load_flex_template("flash_attention")
 )
 
 

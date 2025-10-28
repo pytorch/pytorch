@@ -63,7 +63,6 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
-    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -917,7 +916,6 @@ def fetch_object_proxy(
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectType, PySymType]
 ) -> object:
-    # pyrefly: ignore  # no-matching-overload
     return get_proxy_slot(t, tracer, t)
 
 
@@ -966,7 +964,6 @@ def _fetch_proxies_and_all_constant_flag(
     """
     f_flat_args_kwargs = [
         (
-            # pyrefly: ignore  # no-matching-overload
             fetch_object_proxy(tracer, x)
             if isinstance(x, (Tensor, _AnyScriptObject))
             else x
@@ -1033,16 +1030,11 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if (
-        not pre_dispatch
-        and func
-        not in [
-            torch.ops.aten.size.default,
-            torch.ops.aten.stride.default,
-            torch.ops.aten.storage_offset.default,
-        ]
-        and autograd_would_have_decomposed(func, flat_args_kwargs)
-    ):
+    if not pre_dispatch and func not in [
+        torch.ops.aten.size.default,
+        torch.ops.aten.stride.default,
+        torch.ops.aten.storage_offset.default,
+    ]:
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1497,11 +1489,19 @@ def wrap_key(
 
     @functools.wraps(f)
     def wrapped(*proxies: _P.args, **_unused: _P.kwargs) -> R:
+        nonlocal tensors
+
         flat_proxies, _proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
         with disable_proxy_modes_tracing() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+
+        if getattr(tracer, "proxy_module_inputs", False):
+            tensors = [  # type: ignore[assignment, var-annotated]
+                p if isinstance(t, torch.nn.Module) else t
+                for t, p in zip(tensors, proxies)  # type: ignore[arg-type]
+            ]
 
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
             return get_proxy_slot(t, tracer, t, lambda x: x.proxy)  # type: ignore[attr-defined]
@@ -2216,6 +2216,7 @@ class _MakefxTracer:
         _error_on_data_dependent_ops: bool,
         record_stack_traces: bool = False,
         parent_tracer: Optional[_MakefxTracer] = None,
+        proxy_module_inputs: bool = False,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2248,6 +2249,7 @@ class _MakefxTracer:
         )
         self.record_stack_traces = record_stack_traces
         self.parent_tracer: Optional[_MakefxTracer] = parent_tracer
+        self.proxy_module_inputs = proxy_module_inputs
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2357,6 +2359,7 @@ class _MakefxTracer:
             self.python_dispatcher_mode = enable_python_dispatcher()
 
         self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
+        fx_tracer.proxy_module_inputs = self.proxy_module_inputs  # type: ignore[union-attr]
 
     @contextmanager
     def _init_modes_from_parent(
@@ -2503,7 +2506,6 @@ class _MakefxTracer:
         ):
             from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
-            # pyrefly: ignore  # unbound-name
             insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
             t.recompile()
         # TODO: kind of a bad way to do it, should maybe figure out a better way
@@ -2560,6 +2562,7 @@ def make_fx(
     _allow_fake_constant: bool = False,
     _error_on_data_dependent_ops: bool = True,
     record_stack_traces: bool = False,
+    proxy_module_inputs: bool = False,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -2583,6 +2586,7 @@ def make_fx(
         _error_on_data_dependent_ops,
         record_stack_traces=record_stack_traces
         or config.trace.provenance_tracking_level == 1,
+        proxy_module_inputs=proxy_module_inputs,
     )
 
     @functools.wraps(f)

@@ -270,7 +270,7 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
           "This probably happened because you took out a weak reference to "
           "Tensor and didn't call _fix_weakref() after dereferencing it.  "
           "Subsequent accesses to this tensor via the PyObject will now fail.");
-      ((THPVariable*)pyobj)->cdata =
+      (reinterpret_cast<THPVariable*>(pyobj))->cdata =
           c10::MaybeOwned<torch::autograd::Variable>();
     } else if (THPStorage_Check(pyobj)) {
       TORCH_WARN(
@@ -278,7 +278,8 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
           "This probably happened because you took out a weak reference to "
           "UntypedStorage and didn't call _fix_weakref() after dereferencing it.  "
           "Subsequent accesses to this storage via the PyObject will now fail.");
-      ((THPStorage*)pyobj)->cdata = c10::MaybeOwned<c10::Storage>();
+      (reinterpret_cast<THPStorage*>(pyobj))->cdata =
+          c10::MaybeOwned<c10::Storage>();
     }
   }
   Py_DECREF(pyobj);
