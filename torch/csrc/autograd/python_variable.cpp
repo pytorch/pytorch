@@ -771,7 +771,10 @@ static Tensor make_tensor_for_subclass_helper(
   Storage storage{
       Storage::use_byte_size_t{},
       size_bytes,
-      at::DataPtr{nullptr, options.device()},
+      // REVIEW: without the device change here,
+      // test_dtensor_save_load breaks. I'm not at all sure why it was
+      // OK before.
+      at::DataPtr{nullptr, c10::kMeta},
       /*allocator=*/c10::GetAllocator(c10::kMeta),
       /*resizable=*/true};
 
@@ -1112,18 +1115,6 @@ static PyObject* THPVariable_dtensor_new(
       Py_TYPE(cls)->tp_name,
       ")");
 
-#ifndef NDEBUG
-  // This is specifically for making a DTensor, which we know defines
-  // __torch_dispatch__. Check anyway in debug builds in case somebody
-  // removes it.
-  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
-  TORCH_CHECK_TYPE(
-      attr.ptr() != nullptr &&
-          attr.ptr() != torch::disabled_torch_dispatch_impl(),
-      ((PyTypeObject*)cls)->tp_name,
-      " must define __torch_dispatch__");
-#endif
-
   const auto& local_tensor = r.tensor(1);
   const bool requires_grad = r.toBool(3);
   if (local_tensor.requires_grad() && !requires_grad) {
@@ -1169,8 +1160,8 @@ static PyObject* THPVariable_dtensor_new(
           tensor,
           // false is the default
           /*allow_preexisting_pyobj=*/false,
-          // we know DTensor has __torch_dispatch__; avoid checking again.
-          /*has_torch_dispatch_if_known=*/true));
+          // we know DTensor does not have __torch_dispatch__; avoid checking.
+          /*has_torch_dispatch_if_known=*/false));
   py_tensor.attr(dtensor_interned_strings._spec) = spec;
   py_tensor.attr(dtensor_interned_strings._local_tensor) = local_tensor;
   return py_tensor.release().ptr();
@@ -1345,6 +1336,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       }
       const auto mesh_dim_size = py::cast<int64_t>(mesh_size(idx));
       tensor_shape[shard_dim] *= mesh_dim_size;
+      // recover tensor stride by modifying the strides that are
+      // larger than the current stride on the shard_dim.
       for (const auto i : c10::irange(tensor_strides.size())) {
         if (static_cast<int64_t>(i) != shard_dim &&
             tensor_strides[i] >= tensor_strides[shard_dim]) {
