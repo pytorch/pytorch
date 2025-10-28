@@ -763,11 +763,9 @@ auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined
 """
 )
 
-FW_DERIVATIVE_ADD_WRAPPED_NUM_TEMPLATE = CodeTemplate(
+FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE = CodeTemplate(
     """\
-if (${inp}.unsafeGetTensorImpl()->is_wrapped_number() && !${inp}_t.unsafeGetTensorImpl()->was_wrapped_number()) {
-  ${inp}_t.unsafeGetTensorImpl()->set_was_wrapped_number(true);
-}
+update_wrapped_number(${inp_name}_tensor, ${inp_name}_t);
 """
 )
 
@@ -1916,12 +1914,12 @@ def emit_body(
                             zeros_fn=zeros_fn,
                         )
                     )
-                if f.root_name in ["mul", "add", "div"]:
-                    unpacked_arguments += (
-                        FW_DERIVATIVE_ADD_WRAPPED_NUM_TEMPLATE.substitute(
-                            inp_name=inp.name, inp=inp_name + input_suffix
+                    if zeros_fn == "_efficientzerotensor_symint":
+                        unpacked_arguments += (
+                            FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE.substitute(
+                                inp_name=inp.name
+                            )
                         )
-                    )
 
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += (

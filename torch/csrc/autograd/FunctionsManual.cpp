@@ -79,6 +79,12 @@ Tensor toNonOptPrimal(const std::optional<Tensor>& t) {
   return Tensor();
 }
 
+void update_wrapped_number(Tensor& input, Tensor& output) {
+  if (input.unsafeGetTensorImpl()->is_wrapped_number()) {
+    output.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+}
+
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
   TORCH_CHECK(range.second <= out.size());
   TORCH_CHECK(
