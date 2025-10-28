@@ -1000,6 +1000,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.exit_stack.close()
         super().tearDown()
 
+    def test_compiled_module_truthiness(self):
+        # Test with empty ModuleList
+        original_empty = nn.ModuleList()
+        compiled_empty = torch.compile(original_empty)
+        self.assertEqual(bool(original_empty), bool(compiled_empty))
+        self.assertFalse(bool(compiled_empty))
+        # Test with non-empty ModuleList
+        original_filled = nn.ModuleList([nn.Linear(10, 5)])
+        compiled_filled = torch.compile(original_filled)
+        self.assertEqual(bool(original_filled), bool(compiled_filled))
+        self.assertTrue(bool(compiled_filled))
+
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
         cloned_root = root.clone_manager(lambda x: True)
