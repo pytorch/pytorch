@@ -2676,7 +2676,9 @@ class InstructionTranslatorBase(
             reason=GraphCompileReason("store_attr", [self.frame_summary()]),
             stack_pops=2,
         )
-        self.output.add_output_instructions([copy.copy(inst)])
+        inst_copy = copy.copy(inst)
+        inst_copy.exn_tab_entry = None
+        self.output.add_output_instructions([inst_copy])
         self.popn(2)
         self.output.add_output_instructions(
             self.create_call_resume_at(
@@ -2868,9 +2870,12 @@ class InstructionTranslatorBase(
         # so we should not count NullVariables
         stack_len = len(self.stack) - len(meta.stack_null_idxes)
 
+        assert self.current_instruction.offset is not None
+
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
+            self.current_instruction.offset,
             resume_inst.offset,
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
