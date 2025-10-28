@@ -587,7 +587,11 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu() || (tensor.is_meta() && tensor.dim() == 0));
+      if (tensor.is_meta() && tensor.dim() == 0) {
+        // deal with zero tensor sym with wrapped number logic
+        return py::cast(std::move(tensor));
+      }
       auto py_tensor = py::cast(tensor);
       if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
         return py_tensor.attr("_wrapped_number");
