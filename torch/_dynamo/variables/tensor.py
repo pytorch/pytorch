@@ -466,11 +466,6 @@ class TensorVariable(VariableTracker):
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
-        elif name == "__iter__":
-            it = ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
-            return variables.GetAttrVariable(it, "__iter__")
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -1084,6 +1079,14 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
         return self.call_method(tx, "size", [ConstantVariable.create(0)], {})
 
+    def method___iter__(self):
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        return ListIteratorVariable(
+            self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+        )
+
     def method_addcmul_(self, tensor1, tensor2, *, value=None):
         from ..symbolic_convert import InstructionTranslator
 
@@ -1569,11 +1572,6 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        elif name == "__iter__":
-            it = ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
-            return variables.GetAttrVariable(it, "__iter__")
         if result is None:
             raise NotImplementedError
         return result
@@ -1622,7 +1620,7 @@ class NumpyNdarrayVariable(TensorVariable):
                     ),
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
-        if name in ["__len__", "size", "tolist"]:
+        if name in ["__len__", "size", "tolist", "__iter__"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
         if name in ("tostring", "tobytes", "__delattr__"):
