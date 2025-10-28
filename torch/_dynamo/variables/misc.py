@@ -1032,10 +1032,10 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                 assert tx.one_graph or tx.error_on_graph_break, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
+                # queue_callback is a method-wrapper, no need to insert a guard.
                 fn_vt = VariableTracker.build(
                     tx,
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
-                    source=self.source,
                 )
                 return fn_vt.call_function(
                     tx,
