@@ -132,6 +132,20 @@ class MixOrderReductionTest(TestBase):
         )
 
     @inductor_config.patch(split_reductions=False)
+    def test_non_contiguous_input(self):
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=[0, 1])
+
+        x = torch.randn(1024, 32, 768, dtype=torch.float, device=GPU_TYPE).permute(
+            1, 0, 2
+        )
+        self.check_numeric(f, (x,))
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
+    @inductor_config.patch(split_reductions=False)
     def test_multi_workspace_allocation(self):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)

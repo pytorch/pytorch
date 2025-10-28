@@ -243,6 +243,7 @@ class MixOrderReduction:
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         if not config.triton.mix_order_reduction:
             return False
+
         if not node1.is_gpu() or not node2.is_gpu():
             return False
         if node1.get_device().type != "cuda" or config.cuda_backend != "triton":  # type: ignore[union-attr]
@@ -4514,6 +4515,15 @@ class Scheduler:
         single fused node.
         """
         if node1 is node2:
+            return False
+
+        # We don't further fuse with FusedMixOrderReductions for now.
+        # It's not a big deal since the score for fusion with
+        # mix order reduction is low. When we do this kind of fusion,
+        # the participants should have already been well fused.
+        if isinstance(node1, FusedMixOrderReductions) or isinstance(
+            node2, FusedMixOrderReductions
+        ):
             return False
 
         why = WhyNoFuse(node1, node2)
