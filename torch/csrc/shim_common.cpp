@@ -8,7 +8,6 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
-
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
     const c10::IValue& ivalue) {
