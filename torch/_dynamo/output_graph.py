@@ -2065,10 +2065,16 @@ class OutputGraph(OutputGraphCommon):
             assert len(device_types) == 1, (
                 "Expect only one device type but got {}".format("+".join(device_types))
             )
+            # Get device count, with fallback for platforms where it might return 0 (e.g., ROCm)
+            num_devices = torch.accelerator.device_count()
+            if num_devices == 0:
+                # If device_count returns 0, use the world size as approximation
+                # This can happen on some platforms (e.g., ROCm) in certain contexts
+                num_devices = compile_pg.size()
+            device_type = device_types.pop()
+            device_interface = get_interface_for_device(device_type)
             with (
-                get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
-                    compile_pg.rank() % torch.accelerator.device_count()
-                ),
+                device_interface.device(compile_pg.rank() % num_devices),  # type: ignore[attr-defined]
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
