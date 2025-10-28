@@ -3729,17 +3729,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         helper.writeline("@triton.jit")
         cse = CSE()
 
-        # args = [
-        #     (tuple(
-        #         cse.namedvar(f"arg{i}_{n}", dtype=dtype, shape=value.shape)
-        #         for n, (value, dtype) in enumerate(zip(values, dtypes))
-        #     ),
-        #     tuple(
-        #         cse.namedvar(f"arg{i}_{n + len(values)}", dtype=dtype, shape=value.shape)
-        #         for n, (value, dtype) in enumerate(zip(additional_inputs, additional_inputs_dtypes))
-        #     ))
-        #     for i in range(2)
-        # ]
         args = [
             tuple(
                 cse.namedvar(f"arg{i}_{n}", dtype=dtype, shape=value.shape)
@@ -3747,14 +3736,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             for i in range(2)
         ]
-        additional_args = [
-            tuple(
-                cse.namedvar(f"arg{i}_{n + len(values)}", dtype=dtype, shape=value.shape)
-                for n, (value, dtype) in enumerate(zip(additional_inputs, additional_inputs_dtypes))
-            )
-            for i in range(2)
-        ]
-        args = list(itertools.chain(*zip(args, additional_args)))
+        if len(additional_inputs) > 0:
+            additional_args = [
+                tuple(
+                    cse.namedvar(f"arg{i}_{n + len(values)}", dtype=dtype, shape=value.shape)
+                    for n, (value, dtype) in enumerate(zip(additional_inputs, additional_inputs_dtypes))
+                )
+                for i in range(2)
+            ]
+            args = list(itertools.chain(*zip(args, additional_args)))
         
         signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
@@ -3870,7 +3860,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype=dtype,
                 shape=value.shape,
             )
-            # broadcasted_values.append(value_dtype)
             
             value = self.cse.generate(
                 self.compute,
@@ -3879,21 +3868,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 shape=tuple(self.dense_size_list()),
             )
             broadcasted_values.append(value)
-
-            # acc_type = triton_acc_type(dtype)
-
-            # if not self.persistent_reduction:
-            #     reduced_size = self.dense_size_list()
-            #     reduced_size[-1] = "1"
-            #     accumulator = self.cse.newvar(dtype=dtype, shape=reduced_size)
-            #     reduced_size_str = f"[{', '.join(reduced_size)}]"
-
-            #     default = "float('nan')" if dtype.is_floating_point else "-1"
-            #     self.body.writeline(
-            #         f"{accumulator} = tl.full({reduced_size_str}, {default}, {acc_type})"
-            #     )
-
-            #     accumulators.append(accumulator)
 
         def csv(values):
             return " ".join(f"{value}," for value in values)

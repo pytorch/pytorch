@@ -7261,22 +7261,40 @@ def associative_scan(
 ):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
-    subgraph_inputs = [
-        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
-        for x in itertools.chain(xs, xs)
-    ]
-    subgraph_inputs += [
-        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
-        for x in additional_inputs
-    ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
+    # Check that additional_inputs only contains tensors
+    if any(not isinstance(x, torch.Tensor) and not isinstance(x, TensorBox) for x in additional_inputs):
+        raise RuntimeError("associative_scan in combine_mode='pointwise' only supports torch.Tensor lifted arguments!")
 
-    def wrapped_combine_fn(lhs, add_inputs, rhs, add_inputs2):
-        return lowered_combine_fn(
-            *pytree.tree_leaves(lhs),
-            *pytree.tree_leaves(rhs),
-            *pytree.tree_leaves(add_inputs)
-        ) + tuple(pytree.tree_leaves(add_inputs))
+    if len(additional_inputs) > 0:
+        subgraph_inputs = [
+            InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+            for x in itertools.chain(xs, xs)
+        ]
+        subgraph_inputs += [
+            InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+            for x in additional_inputs
+        ]
+        lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
+
+
+        def wrapped_combine_fn(lhs, add_inputs, rhs, add_inputs2):
+            return lowered_combine_fn(
+                *pytree.tree_leaves(lhs),
+                *pytree.tree_leaves(rhs),
+                *pytree.tree_leaves(add_inputs)
+            ) + tuple(pytree.tree_leaves(add_inputs))
+    else:
+        subgraph_inputs = [
+            InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+            for x in itertools.chain(xs, xs)
+        ]
+        lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
+
+        def wrapped_combine_fn(lhs, rhs):
+            return lowered_combine_fn(
+                *pytree.tree_leaves(lhs),
+                *pytree.tree_leaves(rhs),
+            )
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)

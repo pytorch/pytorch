@@ -4829,7 +4829,14 @@ class GraphModule(torch.nn.Module):
     # does not support lifted arguments
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or params["autograd"] == True
+            )
+        ),
     )
     def test_associative_scan_freevars_nested(
         self, compile_mode, combine_mode, reverse, device, autograd
@@ -4839,17 +4846,17 @@ class GraphModule(torch.nn.Module):
 
         def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
             def inner(xi):
-                return xi * H2
+                return xi + H2
 
             ret = inner(y)
-            return x + ret * H1
+            return x + ret + H1
 
         def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
             def inner(xi):
-                return xi * H2
+                return xi + H2
 
             ret = inner(y)
-            return x + ret * H1
+            return x + ret + H1
 
         # TODO: Using random tensors in the `combine_fn` triggers the vmap randomness error:
         # RuntimeError: vmap: called random operation while in randomness error mode.
@@ -4858,25 +4865,25 @@ class GraphModule(torch.nn.Module):
             H2_i = torch.ones(4, 1, device=device) * 42
 
             def inner(xi):
-                return xi * H2_i
+                return xi + H2_i
 
             ret = inner(y)
-            return x + ret * H1
+            return x + ret + H1
 
         def fct_nested_inside_fake(x: torch.Tensor, y: torch.Tensor):
             H2_i = torch.ones(4, 1, device=device) * 42
 
             def inner(xi):
-                return xi * H2_i
+                return xi + H2_i
 
             ret = inner(y)
-            return x + ret * H1
+            return x + ret + H1
 
         inp = torch.randn(3, 4, 5, device=device, requires_grad=autograd)
 
         for fct, fct_fake, param in [
             (fct_nested_outside, fct_nested_outside_fake, (H1, H2)),
-            (fct_nested_inside, fct_nested_inside_fake, ()),
+            (fct_nested_inside, fct_nested_inside_fake, (H1)),
         ]:
             kwargs = {
                 "dim": 0,
@@ -4906,17 +4913,24 @@ class GraphModule(torch.nn.Module):
     # does not support lifted arguments
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or params["autograd"] == True
+            )
+        ),
     )
     def test_associative_scan_freevars_fct(
         self, compile_mode, combine_mode, reverse, device, autograd
     ):
         def additional_fct_no_add_inp(x, y):
-            return x * y
+            return x + y
 
         def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
-            ret = additional_fct_no_add_inp(y, y)
-            return x + ret
+            ret = additional_fct_no_add_inp(x, y)
+            return ret + 2.
 
         inp = torch.randn(3, 4, 5, device=device, requires_grad=autograd)
 
@@ -4983,8 +4997,7 @@ class GraphModule(torch.nn.Module):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
-    # as the current implementation of associative_scan lowering
-    # does not support lifted arguments
+    # as the combine_fn in this test is non-pointwise
     @decorateIf(
         unittest.skip,
         lambda params: (params["combine_mode"] == "pointwise"),
@@ -5026,7 +5039,14 @@ class GraphModule(torch.nn.Module):
     # does not support lifted arguments
     @decorateIf(
         unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise"),
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or params["autograd"] == True
+            )
+        ),
     )
     def test_associative_scan_freevars_pytree(
         self, compile_mode, combine_mode, reverse, device, autograd
@@ -5038,9 +5058,9 @@ class GraphModule(torch.nn.Module):
 
         def fct_pointwise(x, y):
             return {
-                "i": (x["i"] * y["i"]) + inpf["i"],
+                "i": (x["i"] * y["i"]) * inpf["i"],
                 "j": (
-                    [(x["j"][0][0] * y["j"][0][0]) + inpf["j"][0][0]],
+                    [(x["j"][0][0] * y["j"][0][0]) * inpf["j"][0][0]],
                     [
                         {
                             "o": (x["j"][1][0]["o"] + y["j"][1][0]["o"])
