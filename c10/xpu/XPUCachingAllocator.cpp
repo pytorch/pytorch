@@ -696,15 +696,20 @@ class DeviceCachingAllocator {
   }
 
   void release_expandable_segment(Block* block) {
+    // See Note [Safe to Free Blocks on BlockPool], additional synchronization
+    // is unnecessary here because this function is only called by
+    // release_cached_blocks().
     TORCH_INTERNAL_ASSERT(
         block->size == block->expandable_segment->size(),
         "block disagrees with segment");
     TORCH_INTERNAL_ASSERT(!block->mapped);
+
     auto it = std::find(
         expandable_segments.begin(),
         expandable_segments.end(),
         block->expandable_segment);
     TORCH_INTERNAL_ASSERT(it != expandable_segments.end());
+
     expandable_segments.erase(it);
     block->pool->unmapped.erase(block);
     delete block->expandable_segment;
