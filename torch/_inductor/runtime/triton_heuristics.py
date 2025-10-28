@@ -311,6 +311,12 @@ class CachingAutotuner(KernelInterface):
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
         self.autotune_cache_info = autotune_cache_info
+
+        # if "triton_red" in self.fn.__name__:
+        #     for config in self.configs:
+        #         if "XBLOCK" in config.kwargs and config.kwargs["XBLOCK"] != 1:
+        #             config.kwargs["XBLOCK"] = 1
+                    # config.num_warps = 1
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "CachingAutotuner gets %d configs for %s",
@@ -2950,6 +2956,10 @@ def _reduction_configs(
             ]
         )
 
+    if inductor_meta.get("batch_invariant", False):
+        result_configs = [result_configs[0]]
+        result_configs[0].kwargs["XBLOCK"] = 1
+
     return result_configs
 
 
@@ -3343,6 +3353,9 @@ def _persistent_reduction_configs(
             if prefix_is_reduction(prefix):
                 c.kwargs.pop(f"{prefix.upper()}BLOCK")
 
+    if inductor_meta.get("batch_invariant", False):
+        configs = [configs[0]]
+        configs[0].kwargs["XBLOCK"] = 1
     return configs
 
 
