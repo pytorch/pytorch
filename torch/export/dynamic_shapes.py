@@ -717,7 +717,18 @@ def _combine_args(f, args, kwargs) -> dict[str, Any]:
         else inspect.signature(f)
     )
     kwargs = kwargs if kwargs is not None else {}
-    return signature.bind(*args, **kwargs).arguments
+    combined_args = signature.bind(*args, **kwargs).arguments
+    # if `args` is in the key, flatten it into args_0, args_1, ...
+    if 'args' in combined_args:
+        flattened_args = {f'args_{i}': v for i, v in enumerate(combined_args['args'])}
+        combined_args = {**combined_args, **flattened_args}
+        del combined_args['args']
+    # flatten kwargs into combined_args
+    if 'kwargs' in combined_args:
+        for k, v in combined_args['kwargs'].items():
+            combined_args[k] = v
+        del combined_args['kwargs']
+    return combined_args
 
 
 class ShapesCollection:
