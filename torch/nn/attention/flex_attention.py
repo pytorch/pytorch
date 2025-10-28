@@ -944,6 +944,7 @@ class BlockMask:
             **dict(zip(cls._CONTEXT_ATTRS, context)),
             **dict(zip(cls._TENSOR_ATTRS, tensors)),
         }
+        # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
     def _flatten_with_keys(self):
