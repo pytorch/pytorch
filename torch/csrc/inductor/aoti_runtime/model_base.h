@@ -1,6 +1,6 @@
 #pragma once
 #ifdef _WIN32
-#include <Windows.h>
+#include <windows.h>
 #include <functional> // std::function
 #ifdef USE_MMAP_SELF
 #include <errno.h>
@@ -325,10 +325,23 @@ using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  // Use caching allocator for allocating GPU memory
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_cuda_caching_allocator_raw_alloc(num_bytes, &data_ptr));
+  auto deleter = [](void* ptr) {
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_cuda_caching_allocator_raw_delete(ptr));
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+#else
+  // Use cudaMalloc directly for allocating GPU memory
   void* data_ptr = nullptr;
   AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
   return RAIIDataPtr(data_ptr, deleter);
+#endif
 }
 
 #elif defined(USE_XPU)
@@ -568,7 +581,14 @@ class AOTInductorModelBase {
     return folded_constants;
   }
 
-  void load_constants() {
+  void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
+#if defined(USE_MMAP_EXTERNAL)
+    user_managed_mmap = const_cast<uint8_t*>(weight_blob_ptr);
+    load_constants(true);
+#endif
+  }
+
+  void load_constants(bool force = false) {
     size_t num_constants = this->num_constants();
     size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
@@ -577,7 +597,7 @@ class AOTInductorModelBase {
         num_constants - num_folded_constants);
     size_t blob_size = 0;
     compute_constant_blob(blob_size, constants_internal_offset);
-    if (!include_weights) {
+    if (!force && !include_weights) {
       return;
     }
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
@@ -806,6 +826,17 @@ aoti_torch_dtype_element_size(dtype));
     return out_spec_.c_str();
   }
 
+  uint64_t constant_blob_size() const {
+#if defined(USE_MMAP_SELF) || defined(USE_MMAP_EXTERNAL)
+    const uint64_t weights_size =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+    return weights_size;
+#else
+    throw std::runtime_error{
+        "constant blob size is only available for mmap'd weights"};
+#endif
+  }
+
   void update_constants_array_from_map() {
     if (!constants_map_) {
       throw std::runtime_error{
@@ -892,6 +923,15 @@ aoti_torch_dtype_element_size(dtype));
 
  protected:
   uint8_t* _get_constants_start() {
+#if defined(USE_MMAP_EXTERNAL)
+    if (!user_managed_mmap) {
+      throw std::runtime_error{
+          "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first."};
+    }
+    // Mapped memory for weights
+    return user_managed_mmap;
+#endif
+
 #ifndef USE_MMAP_SELF
     // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
@@ -931,6 +971,7 @@ aoti_torch_dtype_element_size(dtype));
     return self_mmap;
 #endif
   }
+
   struct ParamInfo {
     const char* name = nullptr;
   };
@@ -962,8 +1003,14 @@ aoti_torch_dtype_element_size(dtype));
   // Holds the blob storage for constants' at::Tensor.
   RAIIDataPtr constant_blob_;
 
-#ifdef USE_MMAP_SELF
+#if defined(USE_MMAP_SELF)
+  // Mapped memory for weights
   uint8_t* self_mmap = NULL;
+#endif
+
+#if defined(USE_MMAP_EXTERNAL)
+  // Mapped memory for weights
+  uint8_t* user_managed_mmap = NULL;
 #endif
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.

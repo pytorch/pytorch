@@ -43,12 +43,6 @@ case ${image} in
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13 --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
         ;;
-    manylinuxcxx11-abi-builder:cpu-cxx11-abi)
-        TARGET=final
-        GPU_IMAGE=""
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=9"
-        MANY_LINUX_VERSION="cxx11-abi"
-        ;;
     manylinuxs390x-builder:cpu-s390x)
         TARGET=final
         GPU_IMAGE=s390x/almalinux:8
@@ -81,15 +75,23 @@ case ${image} in
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
     manylinux2_28-builder:rocm*)
-        # we want the patch version of 6.4 instead
-        if [[ $(ver $GPU_ARCH_VERSION) -eq $(ver 6.4) ]]; then
+        # we want the patch version of 7.0 instead
+        if [[ "$GPU_ARCH_VERSION" == *"7.0"* ]]; then
             GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.2"
+        fi
+        # we want the patch version of 6.4 instead
+        if [[ "$GPU_ARCH_VERSION" == *"6.4"* ]]; then
+            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.4"
         fi
         TARGET=rocm_final
         MANY_LINUX_VERSION="2_28"
         DEVTOOLSET_VERSION="11"
         GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
         PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+        # add gfx950, gfx115x conditionally starting in ROCm 7.0
+        if [[ "$GPU_ARCH_VERSION" == *"7.0"* ]]; then
+            PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx950;gfx1150;gfx1151"
+        fi
         DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
         ;;
     manylinux2_28-builder:xpu)

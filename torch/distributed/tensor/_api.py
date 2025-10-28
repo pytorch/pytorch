@@ -3,8 +3,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from collections.abc import Sequence
-from typing import Any, Callable, cast, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, cast, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -25,6 +25,7 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -106,9 +107,12 @@ class _ToTorchTensor(torch.autograd.Function):
         )
 
         return (
+            # pyrefly: ignore [bad-argument-type]
             DTensor(
+                # pyrefly: ignore [bad-argument-count]
                 grad_output,
                 grad_spec,
+                # pyrefly: ignore [unexpected-keyword]
                 requires_grad=grad_output.requires_grad,
             ),
             None,
@@ -174,11 +178,14 @@ class _FromTorchTensor(torch.autograd.Function):
         )
 
         # We want a fresh Tensor object that shares memory with the input tensor
+        # pyrefly: ignore [bad-argument-type]
         dist_tensor = DTensor(
+            # pyrefly: ignore [bad-argument-count]
             input.view_as(input),
             dist_spec,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=input.requires_grad,
         )
         return dist_tensor
@@ -240,8 +247,8 @@ class DTensor(torch.Tensor):
     # _op_dispatcher instance as a class attribute to handle runtime dispatching logic
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
-    @staticmethod
-    @torch._disable_dynamo
+    # This implementation is just to convince mypy _spec and _local_tensor are
+    # initialized; it is immediately overridden below.
     def __new__(
         cls,
         local_tensor: torch.Tensor,
@@ -249,10 +256,21 @@ class DTensor(torch.Tensor):
         *,
         requires_grad: bool,
     ) -> "DTensor":
+        r = torch.Tensor._dtensor__new__(
+            cls, local_tensor, spec, requires_grad=requires_grad
+        )
+        r._spec = spec
+        r._local_tensor = local_tensor
+        return r
+
+    __new__ = torch.Tensor._dtensor__new__  # type: ignore[assignment] # noqa: F811
+
+    @torch._disable_dynamo
+    @mark_subclass_constructor_exportable_experimental
+    def __init__(self, *args, **kwargs):
         """
         Construct a DTensor from a local tensor, device mesh, and placement and
         other tensor properties (i.e. shape, requires_grad, strides, etc).
-
         .. note:: This is not a public API and it's only supposed to be used by the
             operator implementations and internals. If you want to construct a
             DTensor from a local tensor, consider using ``DTensor.from_local``, if
@@ -260,31 +278,6 @@ class DTensor(torch.Tensor):
             already have tensor initialized and want to shard this tensor),
             consider using ``distribute_tensor``.
         """
-        if local_tensor.requires_grad and not requires_grad:
-            warnings.warn(
-                "To construct DTensor from torch.Tensor, it's recommended to "
-                "use local_tensor.detach() and make requires_grad consistent."
-            )
-
-        # new method instruct wrapper tensor from local_tensor and add
-        # placement spec, it does not do actual distribution
-        assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-
-        r = torch.Tensor._make_dtensor(
-            cls,
-            spec.tensor_meta.shape,
-            spec.tensor_meta.stride,
-            local_tensor,
-            requires_grad,
-        )
-
-        r._spec = spec
-        r._local_tensor = local_tensor
-        return r
-
-    @torch._disable_dynamo
-    @mark_subclass_constructor_exportable_experimental
-    def __init__(self, *args, **kwargs):
         super().__init__()
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
@@ -317,9 +310,12 @@ class DTensor(torch.Tensor):
             spec.placements,
             tensor_meta=unflatten_tensor_meta,
         )
+        # pyrefly: ignore [bad-argument-type]
         return DTensor(
+            # pyrefly: ignore [bad-argument-count]
             local_tensor,
             unflatten_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=requires_grad,
         )
 
@@ -346,12 +342,6 @@ class DTensor(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        # These are all ops that can show up in AccumulateGrad,
-        # which is susceptible to DTensor overheads
-        if func is torch.ops.aten.detach.default:
-            return DTensor(
-                args[0]._local_tensor.detach(), args[0]._spec, requires_grad=False
-            )
         return DTensor._op_dispatcher.dispatch(
             func,
             args,
@@ -407,6 +397,12 @@ class DTensor(torch.Tensor):
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
         """
+        # `local_tensor` argument cannot be DTensor
+        if isinstance(local_tensor, DTensor):
+            raise RuntimeError(
+                f"the local_tensor argument only accepts torch.Tensor but got {type(local_tensor)} value."
+            )
+
         # if same shape/dtype, no need to run_check, if not, must allgather
         # the metadatas to check the size/dtype across ranks
         # There should be no data communication unless there's replication
@@ -548,9 +544,10 @@ class DTensor(torch.Tensor):
 
         placements = list(placements)
         for i, placement in enumerate(placements):
-            if placement.is_partial():
+            if placement.is_partial() and self.placements[i] != placement:
                 raise RuntimeError(
-                    "Can not redistribute to Partial, redistributing to Partial is for internal use only!"
+                    f"Can not redistribute from {self.placements[i]} to {placement}, "
+                    "redistributing to Partial is for internal use only!"
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
@@ -612,7 +609,21 @@ class DTensor(torch.Tensor):
         """
         return self._spec.placements
 
+    def _raise_if_contains_partial_placements(self) -> None:
+        """
+        Raise an error if the DTensor contains partial placements.
+        """
+        for placement in self._spec.placements:
+            if not isinstance(placement, Partial):
+                continue
+
+            raise ValueError(
+                "Any checkpointing related operations are not supported for "
+                "DTensor with partial placements!"
+            )
+
     def __create_write_items__(self, fqn: str, object: Any):
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_write_items_for_dtensor,
         )
@@ -635,6 +646,7 @@ class DTensor(torch.Tensor):
         Returns:
             A List[:class:`ChunkStorageMetadata`] object that represents the shard size/offset on the current rank.
         """
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
@@ -647,12 +659,26 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     def __get_tensor_shard__(self, index):
+        self._raise_if_contains_partial_placements()
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
             return self.to_local()
         else:
             raise RuntimeError("Unsupported tensor type!")
+
+    @classmethod
+    def __metadata_guard__(
+        cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
+    ) -> bool:
+        # TODO - delete this - This is now unused after the PR -
+        # https://github.com/pytorch/pytorch/pull/165824
+        orig_spec, orig_requires_grad = orig
+        other_spec, other_requires_grad = other
+        return (
+            orig_spec._check_equals(other_spec, skip_shapes=True)
+            and orig_requires_grad == other_requires_grad
+        )
 
 
 def distribute_tensor(
@@ -762,18 +788,29 @@ def distribute_tensor(
     # distribute the tensor according to the placements.
     placements = list(placements)
     for idx, placement in enumerate(placements):
-        if placement.is_shard():
-            placement = cast(Shard, placement)
-            if placement.dim < 0:
-                # normalize shard placement dim
-                placement = Shard(placement.dim + tensor.ndim)
-                placements[idx] = placement
-            local_tensor = placement._shard_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
+        if isinstance(placement, Shard):
+            placement_dim = (
+                placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
             )
-        elif placement.is_replicate():
-            placement = cast(Replicate, placement)
-            local_tensor = placement._replicate_tensor(
+            if isinstance(placement, _StridedShard):
+                local_tensor = _StridedShard._make_shard_tensor(
+                    placement_dim,
+                    local_tensor,
+                    device_mesh,
+                    idx,
+                    src_data_rank,
+                    split_factor=placement.split_factor,
+                )
+                placements[idx] = _StridedShard(
+                    placement_dim, split_factor=placement.split_factor
+                )
+            else:
+                local_tensor = Shard._make_shard_tensor(
+                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
+                )
+                placements[idx] = Shard(placement_dim)
+        elif isinstance(placement, Replicate):
+            local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
             )
         else:
@@ -794,9 +831,12 @@ def distribute_tensor(
             dtype=tensor.dtype,
         ),
     )
+    # pyrefly: ignore [bad-argument-type]
     return DTensor(
+        # pyrefly: ignore [bad-argument-count]
         local_tensor.requires_grad_(tensor.requires_grad),
         spec,
+        # pyrefly: ignore [unexpected-keyword]
         requires_grad=tensor.requires_grad,
     )
 
@@ -1051,9 +1091,12 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         ),
     )
 
+    # pyrefly: ignore [bad-argument-type]
     return DTensor(
+        # pyrefly: ignore [bad-argument-count]
         local_tensor,
         spec,
+        # pyrefly: ignore [unexpected-keyword]
         requires_grad=kwargs["requires_grad"],
     )
 

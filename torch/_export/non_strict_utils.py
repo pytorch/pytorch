@@ -6,9 +6,9 @@ import inspect
 import logging
 import math
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -101,6 +101,7 @@ class _KeyPathTrie:
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
             node = node[k]
+        # pyrefly: ignore  # bad-return
         return node, kp
 
 
@@ -139,6 +140,7 @@ def key_path_to_source(
         source: Source = LocalSource("args")
     else:
         source, kp = sourced_prefixes.get(kp)
+
     for k in kp:
         if isinstance(k, SequenceKey):
             source = GetItemSource(source, k.idx)
@@ -199,9 +201,31 @@ def fakify(
             "To register a constant input, use torch.utils._pytree.register_constant"
         )
 
+    # Create symbolic context (handles subclass recursion internally)
+    symbolic_context = _create_symbolic_context_for_tensor(
+        t, source, t_constraints, sources, mode
+    )
+
+    fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
+    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
+    return fake
+
+
+def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode):
+    """Helper function to create symbolic context for a tensor."""
+    from torch._dynamo.source import AttrSource
+    from torch.fx.experimental.symbolic_shapes import (
+        DimDynamic,
+        RelaxedUnspecConstraint,
+        SubclassSymbolicContext,
+    )
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    # Common dynamic dimension logic for both regular tensors and subclasses
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
+
     for i in range(n_dims):
         if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
@@ -213,12 +237,38 @@ def fakify(
             constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
-    symbolic_context: StatelessSymbolicContext = (  # make mypy happy
-        StatelessSymbolicContext(
+
+    # Handle nested subclasses
+    if is_traceable_wrapper_subclass(t):
+        # Get inner contexts recursively
+        inner_contexts = {}
+        attrs, _ = type(t).__tensor_flatten__(t)
+
+        # Propagate outer tensor constraints to inner tensors if not already present
+        for attr in attrs:
+            inner_tensor = getattr(t, attr)
+            inner_source = AttrSource(source, attr)
+            inner_contexts[attr] = _create_symbolic_context_for_tensor(
+                inner_tensor, inner_source, t_constraints, sources, mode
+            )
+
+        symbolic_context = SubclassSymbolicContext(
             dynamic_sizes=dynamic_sizes,
             constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+            view_base_context=None,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache={},
+            inner_contexts=inner_contexts,
         )
-    )
+    else:
+        symbolic_context: StatelessSymbolicContext = (  # type: ignore[no-redef]
+            StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+            )
+        )
+
+    # Apply constraints (common logic)
     t_id = id(t)
     assert mode.shape_env is not None
     if t_id in t_constraints:
@@ -229,9 +279,8 @@ def fakify(
                 continue
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
-    fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
-    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
-    return fake
+
+    return symbolic_context
 
 
 def _is_unbacked_symint(symbol):
@@ -307,10 +356,12 @@ def _override_builtin_ops():
     original_min = builtins.min
     original_pow = math.pow
 
+    # pyrefly: ignore  # bad-assignment
     builtins.max = functools.partial(
         _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
     )
 
+    # pyrefly: ignore  # bad-assignment
     builtins.min = functools.partial(
         _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
     )
@@ -1036,6 +1087,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 def run():
                     # Run sequence.
+                    # pyrefly: ignore  # index-error
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)

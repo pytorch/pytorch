@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from contextlib import contextmanager
 from typing import Optional, Union
@@ -15,6 +16,8 @@ from unittest import mock
 
 import torch
 from torch._dynamo import reset
+from torch._dynamo.package import DynamoCache
+from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
@@ -56,6 +59,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_SANDCASTLE,
     parametrize,
     TEST_WITH_ROCM,
 )
@@ -138,6 +142,101 @@ class TestPyCodeCache(TestCase):
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_editable_cached_wrapper(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+
+            step1 = textwrap.dedent(
+                """
+                import glob
+                import os
+                import torch
+                import warnings
+                from torch._inductor import config
+
+                warnings.filterwarnings("ignore")
+                config.fx_graph_cache = True
+                config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                @torch.compile(backend="inductor")
+                def f(x):
+                    return x * 2
+
+                f(torch.ones(2))
+                cache_dir = os.environ["TORCHINDUCTOR_CACHE_DIR"]
+                pyfiles = glob.glob(os.path.join(cache_dir, "**", "*.py"), recursive=True)
+                print(pyfiles[0])
+                """
+            )
+            wrapper_path = (
+                subprocess.check_output([sys.executable, "-c", step1], env=env)
+                .decode()
+                .strip()
+            )
+
+            step2 = textwrap.dedent(
+                """
+                import torch
+                import warnings
+                from torch._dynamo.utils import counters
+                from torch._inductor import config
+
+                warnings.filterwarnings("ignore")
+                config.fx_graph_cache = True
+                config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                @torch.compile(backend="inductor")
+                def f(x):
+                    return x * 2
+
+                f(torch.ones(2))
+                print(counters["inductor"]["fxgraph_cache_hit"])
+                """
+            )
+            hit = (
+                subprocess.check_output([sys.executable, "-c", step2], env=env)
+                .decode()
+                .strip()
+            )
+            self.assertEqual(hit, "1")
+
+            with open(wrapper_path) as f:
+                src = f.read()
+            with open(wrapper_path, "w") as f:
+                f.write(
+                    src.replace(
+                        "def call(self, args):",
+                        "def call(self, args):\n        print('debug')",
+                    )
+                )
+
+            step3 = textwrap.dedent(
+                """
+                import torch
+                import warnings
+                from torch._inductor import config
+
+                warnings.filterwarnings("ignore")
+                config.fx_graph_cache = True
+                config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                @torch.compile(backend="inductor")
+                def f(x):
+                    return x * 2
+
+                f(torch.ones(2))
+                """
+            )
+            out = subprocess.check_output(
+                [sys.executable, "-c", step3], env=env
+            ).decode()
+            self.assertIn("debug", out)
+
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
@@ -146,8 +245,12 @@ class TestFxGraphCache(TestCase):
     def setUp(self):
         super().setUp()
         counters.clear()
+        DynamoCache.clear()
+        PrecompileContext.clear()
+        AOTAutogradCache.clear()
         PatchCaches.setUp()
         CacheArtifactManager.clear()
+        torch._dynamo.reset()
 
     def tearDown(self):
         super().tearDown()
@@ -155,6 +258,8 @@ class TestFxGraphCache(TestCase):
 
     def reset(self):
         AOTAutogradCache.clear()
+        DynamoCache.clear()
+        PrecompileContext.clear()
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
@@ -497,6 +602,109 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_triton()
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "autotune_local_cache": True,
+        }
+    )
+    @torch._dynamo.config.patch(
+        {
+            "caching_precompile": True,
+        }
+    )
+    @parametrize("dynamic", (False, True))
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    def test_cache_hot_load_caching_precompile(self, device, dtype, dynamic):
+        """
+        Verify that we can populate and hot load functions from the cache.
+        """
+
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
+
+        def fn(x, y):
+            return x.sin() @ y
+
+        a = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
+        b = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
+
+        # Record artifacts
+        with fresh_cache():
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
+
+            # A first call should miss in the cache.
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            compiled_result.sum().backward()
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 1)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 0)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+
+        self.assertIsNotNone(artifacts)
+
+        artifact_bytes, cache_info = artifacts
+
+        autotune_expect = 2 if device == GPU_TYPE else 0
+        self.assertEqual(len(cache_info.inductor_artifacts), 2)
+        self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
+        self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
+        self.assertEqual(len(cache_info.pgo_artifacts), 0)
+        self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+        self.reset()
+
+        # Clean triton kernels
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        # We did not load anything so dont hit yet
+        with fresh_cache():
+            eager_result = fn(a, b)
+            # With caching precompile, we have to re torch.compile the function
+            # to trigger cache lookup
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
+            compiled_result = compiled_fn(a, b)
+            compiled_result.sum().backward()
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 0)
+        self.reset()
+        # Clean triton kernels
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        # Hot load and hit
+        with fresh_cache(), torch.compiler.set_stance("fail_on_recompile"):
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+            self.assertEqual(len(cache_info.inductor_artifacts), 2)
+            self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
+            self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
+            self.assertEqual(len(cache_info.pgo_artifacts), 0)
+            self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+            # With caching precompile, we have to re torch.compile the function
+            # to trigger cache lookup
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
+
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            compiled_result.sum().backward()
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
 
     @config.patch(
         {
@@ -938,7 +1146,7 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn1(x):
-            return x + torch.tensor(list(range(0, 12)), device=device)
+            return x + torch.tensor(list(range(12)), device=device)
 
         def fn2(x):
             return x + torch.tensor(list(range(1, 13)), device=device)
@@ -1631,11 +1839,21 @@ class TestStandaloneCompile(TestCase):
     @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
     @parametrize("graph_partition", (False, True))
+    @parametrize("is_aot", (False, True))
     def test_basic(
-        self, device: str, format: str, dynamic: bool, graph_partition: bool
+        self,
+        device: str,
+        format: str,
+        dynamic: bool,
+        graph_partition: bool,
+        is_aot: bool,
     ) -> None:
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        # AOT mode does not support unpacked format
+        if is_aot and format == "unpacked":
+            raise unittest.SkipTest("AOT mode does not support unpacked format")
 
         mod = torch.nn.Linear(1, 3, device=device)
         x = torch.randn(4, 1, device=device)
@@ -1661,7 +1879,9 @@ class TestStandaloneCompile(TestCase):
                 gm, args, kwargs = self.capture(f)(x)
                 assert not kwargs
 
-                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_artifact = torch._inductor.standalone_compile(
+                    gm, args, aot=is_aot
+                )
                 compiled_artifact.save(path=path, format=format)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -1677,13 +1897,15 @@ class TestStandaloneCompile(TestCase):
                 compiled_out = loaded(*concrete_args)
                 self.assertEqual(eager_out, compiled_out)
 
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            if not is_aot:
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("dynamic", (False, True))
-    def test_call_in_backend(self, dynamic: bool) -> None:
+    @parametrize("is_aot", (False, True))
+    def test_call_in_backend(self, dynamic: bool, is_aot: bool) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
         if dynamic:
@@ -1696,7 +1918,7 @@ class TestStandaloneCompile(TestCase):
         eager_out = f(x)
 
         def backend(gm, args, **kwargs):
-            return torch._inductor.standalone_compile(gm, args)
+            return torch._inductor.standalone_compile(gm, args, aot=is_aot)
 
         with fresh_cache():
             compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
@@ -1847,7 +2069,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_dynamic_shapes_from_graph(self):
+    @parametrize("is_aot", (False, True))
+    def test_dynamic_shapes_from_graph(self, is_aot: bool):
         def f(x):
             return x.shape[0] * x
 
@@ -1859,7 +2082,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             assert not kwargs
 
         compiled_artifact = torch._inductor.standalone_compile(
-            gm, args, dynamic_shapes="from_graph"
+            gm, args, dynamic_shapes="from_graph", aot=is_aot
         )
         x = torch.ones(4)
         (result,) = compiled_artifact(4, x)
@@ -1869,7 +2092,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"autograd_cache_normalize_inputs": True})
-    def test_split_module(self):
+    @parametrize("is_aot", (False, True))
+    def test_split_module(self, is_aot):
         class Mod(torch.nn.Module):
             def forward(self, x, a0, a1, b0, b1, c0, c1):
                 x = x + (a0**2) + (a1 / 2)
@@ -1908,16 +2132,24 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         split = torch.fx.passes.split_module.split_module(gm, gm, split)
 
         # Each of the split graphs only has one output.
-        ca0 = torch._inductor.standalone_compile(split.submod_0, (a0, x, a1))
-        ca1 = torch._inductor.standalone_compile(split.submod_1, (b0, x, b1))
-        ca2 = torch._inductor.standalone_compile(split.submod_2, (c0, x, c1))
+        ca0 = torch._inductor.standalone_compile(
+            split.submod_0, (a0, x, a1), aot=is_aot
+        )
+        ca1 = torch._inductor.standalone_compile(
+            split.submod_1, (b0, x, b1), aot=is_aot
+        )
+        ca2 = torch._inductor.standalone_compile(
+            split.submod_2, (c0, x, c1), aot=is_aot
+        )
 
         y = ca0(a0, x, a1)
         y = ca1(b0, y, b1)
         y = ca2(c0, y, c1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+        if not is_aot:
+            # fx graph cache doesn't run in AOT mode
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
         # TODO: split_module causes ca1 and ca2 to have different type annotations
         # for the parameter x, so we can only AOTAutogradCache cache hit once instead of twice
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
@@ -1930,8 +2162,9 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("is_aot", (False, True))
     @parametrize("config_patches", [True, False])
-    def test_dynamic_shapes_from_example_inputs(self, config_patches):
+    def test_dynamic_shapes_from_example_inputs(self, config_patches, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -1953,6 +2186,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             (5, torch.ones(4)),
             dynamic_shapes="from_example_inputs",
             options={"config_patches": config_patches},
+            aot=is_aot,
         )
         x = torch.ones(4)
         (result,) = compiled_artifact(3, x)
@@ -1967,8 +2201,9 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("is_aot", (True, False))
     @parametrize("dynamic_shapes", ["from_graph", "from_example_inputs"])
-    def test_static_shapes(self, dynamic_shapes):
+    def test_static_shapes(self, dynamic_shapes, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -1978,7 +2213,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             static_gm, args, kwargs = self.capture(f, dynamic=False)(static_x)
             assert not kwargs
         compiled_artifact = torch._inductor.standalone_compile(
-            static_gm, [static_x], dynamic_shapes=dynamic_shapes
+            static_gm, [static_x], dynamic_shapes=dynamic_shapes, aot=is_aot
         )
         x = torch.randn(3)
         (result,) = compiled_artifact(x)
@@ -1990,8 +2225,9 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("is_aot", (True, False))
     @parametrize("dynamic_shapes", ["from_tracing_context", "from_graph"])
-    def test_backend(self, dynamic_shapes):
+    def test_backend(self, dynamic_shapes, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -2000,7 +2236,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         def backend(gm, args, **kwargs):
             compiled_artifact = torch._inductor.standalone_compile(
-                gm, args, dynamic_shapes=dynamic_shapes
+                gm, args, dynamic_shapes=dynamic_shapes, aot=is_aot
             )
             y = torch.randn(4)
             (result,) = compiled_artifact(4, y)
@@ -2013,7 +2249,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_backend_dynamic_shapes_from_example_inputs(self):
+    @parametrize("is_aot", (True, False))
+    def test_backend_dynamic_shapes_from_example_inputs(self, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -2022,7 +2259,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         def backend(gm, args, **kwargs):
             compiled_artifact = torch._inductor.standalone_compile(
-                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs"
+                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs", aot=is_aot
             )
             y = torch.ones(4)
             (result,) = compiled_artifact(4, y)

@@ -23,7 +23,7 @@ import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
@@ -38,13 +38,26 @@ T = TypeVar("T")
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .symbolic_convert import InstructionTranslatorBase
 
 
 Node = torch.fx.Node
 Region = list[Node]
 IdenticalNodes = list[Node]
-GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
+GlobalStateKey = tuple[
+    bool,
+    bool,
+    int,
+    tuple[bool, bool],
+    tuple[bool, bool],
+    torch.dtype,
+    bool,
+    bool,
+    bool,
+    bool,
+]
 
 log = logging.getLogger(__name__)
 graph_expansion_log = torch._logging.getArtifactLogger(
@@ -258,7 +271,7 @@ class GraphRegionTracker:
                 duplicates.append(node)
                 self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
-            log.debug("Unable to hash node %s with exception %s", node, e)
+            log.debug("Unable to hash node %s with exception %s", node, e)  # noqa: G200
 
     def track_node_mutations(
         self,
@@ -320,6 +333,7 @@ class GraphRegionTracker:
             if len(group) > 1:
                 region_group = []
                 min_rank = math.inf
+                # pyrefly: ignore [bad-assignment]
                 for node in group:
                     # some nodes aren't in the topo ranking?
                     if node in topological_ranking:

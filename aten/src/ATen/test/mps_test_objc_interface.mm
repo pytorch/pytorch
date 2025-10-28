@@ -42,7 +42,7 @@ TEST(MPSObjCInterfaceTest, MPSCustomKernel) {
     id<MTLLibrary> customKernelLibrary = [device newLibraryWithSource: [NSString stringWithUTF8String:CUSTOM_KERNEL]
                                                               options: nil
                                                                 error: &error];
-    TORCH_CHECK(customKernelLibrary, "Failed to to create custom kernel library, error: ", error.localizedDescription.UTF8String);
+    TORCH_CHECK(customKernelLibrary, "Failed to create custom kernel library, error: ", error.localizedDescription.UTF8String);
 
     id<MTLFunction> customFunction = [customKernelLibrary newFunctionWithName: @"add_arrays"];
     TORCH_CHECK(customFunction, "Failed to create function state object for the kernel");

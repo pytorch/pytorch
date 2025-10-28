@@ -4,11 +4,13 @@ set(AOTI_ABI_CHECK_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_abi_check)
 set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
 )
@@ -27,7 +29,7 @@ add_executable(test_aoti_abi_check
 target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 
 # WARNING: DO NOT LINK torch!!!
-# The purpose is to check if the used aten/c10 headers are writtern in a header-only way
+# The purpose is to check if the used aten/c10 headers are written in a header-only way
 target_link_libraries(test_aoti_abi_check PRIVATE gtest_main)
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})
 

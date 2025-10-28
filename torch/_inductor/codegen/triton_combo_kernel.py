@@ -172,15 +172,13 @@ class PartitionState:
 
 
 class ComboKernel(Kernel):
-    MAX_NUM_ARGS = 250  # number where I would no longer get triton errors
-
     @staticmethod
     def _update_partition(
         partition_state: PartitionState,
         node_rw_count: int,
         node_info: BaseSchedulerNode,
     ) -> None:
-        if partition_state.cur_count + node_rw_count > ComboKernel.MAX_NUM_ARGS:
+        if partition_state.cur_count + node_rw_count > config.combo_kernel_max_num_args:
             partition_state.partitions.append(partition_state.cur_partition)
             partition_state.cur_partition = [node_info]
             partition_state.cur_count = node_rw_count
@@ -379,6 +377,7 @@ class ComboKernel(Kernel):
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
+        # pyrefly: ignore [bad-assignment]
         metrics.generated_kernel_count -= 1
         sub_kernel.args = self.args
         sub_kernel.iter_vars_count = self.iter_vars_count
@@ -434,10 +433,12 @@ class ComboKernel(Kernel):
                 assert f"{tree.prefix}numel_{num}" in self.dynamic_shape_args
                 uniquify_block_sizes.append(f"{tree.prefix}numel")
 
+            # pyrefly: ignore [missing-argument]
             if not tree.is_reduction:
                 if isinstance(simplified_tree_numel, (Integer, int)):
                     grid.append(int(simplified_tree_numel))
                 else:
+                    # pyrefly: ignore [bad-argument-type]
                     grid.append(f"{tree.prefix}numel_{num}")
 
             if tree.is_reduction and sub_kernel.persistent_reduction:
@@ -475,8 +476,10 @@ class ComboKernel(Kernel):
                 if sub_kernel.no_x_dim:
                     min_x_blocks = x_numels
                     x_numels = (
+                        # pyrefly: ignore [unsupported-operation]
                         -min_x_blocks
                         if isinstance(x_numels, int)
+                        # pyrefly: ignore [redundant-cast]
                         else "-" + cast(str, x_numels)
                     )
                 else:
@@ -606,6 +609,7 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
+        # pyrefly: ignore [unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
@@ -622,7 +626,7 @@ class ComboKernel(Kernel):
         if heuristics == "foreach":
             heuristics_line = f"""
                 @triton_heuristics.foreach(
-                    num_warps={self.num_warps},
+                    filename=__file__,
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},
                 )
@@ -684,6 +688,7 @@ class ComboKernel(Kernel):
         for sub_kernel in self.sub_kernels:
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
+                # pyrefly: ignore [missing-argument]
                 if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
                 ):
@@ -722,6 +727,7 @@ class ComboKernel(Kernel):
                     expr = V.graph.wrapper_code.generate_numel_expr(
                         name, tree, suffix=str(num)
                     )
+                # pyrefly: ignore [missing-argument]
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     call_args.append(expr)
                     arg_types.append(type(expr))
@@ -733,6 +739,7 @@ class ComboKernel(Kernel):
                 numel_name = f"{tree.prefix}numel_{num}"
                 if numel_name not in self.dynamic_shape_args:
                     continue
+                # pyrefly: ignore [missing-argument]
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(
                         str(
@@ -763,6 +770,14 @@ class ComboKernel(Kernel):
         code.splice(gen_common_triton_imports())
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
+
+        seen_helpers: OrderedSet[str] = OrderedSet()
+        for sub_kernel in self.sub_kernels:
+            for helper in sub_kernel.helper_functions:
+                if helper not in seen_helpers:
+                    code.writeline("")
+                    code.splice(helper)
+                    seen_helpers.add(helper)
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
@@ -1004,6 +1019,7 @@ class ComboKernel(Kernel):
         for num, sub_kernel in enumerate(self.sub_kernels):
             meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
             for i, tree in enumerate(sub_kernel.range_trees):
+                # pyrefly: ignore [missing-argument]
                 if not tree.is_reduction:
                     numel_name = f"{tree.prefix}numel_{num}"
                     if numel_name in self.dynamic_shape_args:

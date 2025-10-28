@@ -4,22 +4,23 @@ from __future__ import annotations
 import operator
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import reduce
 from typing import (
     Any,
-    Callable,
     cast,
     NamedTuple,
     Optional,
     overload,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias
+from typing_extensions import deprecated
 
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -305,7 +306,10 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         guard_size_oblivious,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
 
     if maybe_guard_or_false(a.numel() < 2):
         return True
@@ -388,7 +392,11 @@ def validate_memory_format(memory_format: torch.memory_format):
 
 
 def is_contiguous_for_memory_format(  # type: ignore[return]
-    a: Tensor, *, memory_format: torch.memory_format, false_if_dde=False
+    a: Tensor,
+    *,
+    memory_format: torch.memory_format,
+    false_if_dde=False,
+    # pyrefly: ignore  # bad-return
 ) -> bool:
     validate_memory_format(memory_format)
 
@@ -534,12 +542,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
 def compute_elementwise_output_logical_to_physical_perm(
-    *tensors, _skip_checks=False
-) -> list[int]:
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    *tensors, _skip_checks=False, ambiguity_check=False
+) -> tuple[list[int], bool]:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
@@ -558,15 +563,15 @@ def compute_elementwise_output_logical_to_physical_perm(
 
     # Short-circuits for CPU scalar case
     if len(tensors) == 0:
-        return []
+        return [], False
 
     # Short-circuits for shapes with zero or one dimensions
     # TODO: are these necessary?
     ndim = tensors[0].ndim
     if ndim == 0:
-        return []
+        return [], False
     if ndim == 1:
-        return [0]
+        return [0], False
 
     # Short-circuits if contiguous or channels last, following the fake fast path.
     # This reduces the number of guards we end up making
@@ -584,42 +589,40 @@ def compute_elementwise_output_logical_to_physical_perm(
         )
 
     if is_contiguous and not is_channels_last:
-        return list(range(ndim))
+        return list(range(ndim)), False
 
     if is_channels_last and not is_contiguous:
-        return [0, *list(range(2, ndim)), 1]
+        return [0, *list(range(2, ndim)), 1], False
 
     shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):
+        def ge(a, b):
+            """
+            Returns true if a is symbolically greater than or equal to b, assuming a >= 0, b >= 0.
+            """
+            if guard_or_false(b == 0):
+                return True
+            elif guard_or_false(a == 0):
+                return False
+            return guard_or_false(a >= b) or guard_or_false(a % b == 0)
+
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
-            if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
-                stride_b == 0
-            ):
+
+            if guard_or_false(stride_a == 0) or guard_or_false(stride_b == 0):
                 continue
 
             if guard_or_false(stride_a == stride_b):
-                if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
-                    return 1
-
-            # when stride_a = 1, we want stride_a < stride_b to be TRUE
-            # when stride_b = 1, we want stride_a < stride_b to be FALSE
-            elif guard_or_false(stride_a == 1):
-                return -1
-
-            elif guard_or_false(stride_b == 1):
+                if ge(shape[idx_b], shape[idx_a]):
+                    continue
                 return 1
 
-            if guard_size_oblivious(stride_a < stride_b):
+            if ge(stride_b, stride_a):
                 return -1
 
-            if guard_size_oblivious(stride_a > stride_b):
-                return 1
-
-            # stride_a == stride_b
-            if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
+            if ge(stride_a, stride_b):
                 return 1
 
         # Note: this case is hit if all strides are zero,
@@ -644,7 +647,16 @@ def compute_elementwise_output_logical_to_physical_perm(
             elif comparison < 0:
                 break
 
-    return list(reversed(perm))
+    # verify we've imposed ordering if ambiguity_check=True
+    raise_ambiguous = False
+    if ambiguity_check:
+        for i, j in zip(range(ndim - 1), range(1, ndim)):
+            order = should_swap(perm[i], perm[j])
+            if order != -1:
+                raise_ambiguous = True
+                break
+
+    return list(reversed(perm)), raise_ambiguous
 
 
 def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
@@ -674,7 +686,7 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     if ndim == 1:
         return (1,)
 
-    logical_to_physical_perm = compute_elementwise_output_logical_to_physical_perm(
+    logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
         *tensors, _skip_checks=True
     )
     permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
@@ -716,7 +728,7 @@ def validate_dim_length(length: int):
     """
 
     if isinstance(length, (int, torch.SymInt)):
-        torch._check_is_size(length)
+        torch._check(length >= 0)
     else:
         # sometimes called with sympy expression by inductor
         assert length >= 0
@@ -805,12 +817,16 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # mapping negative offsets to positive ones
 @overload
 def canonicalize_dims(
-    rank: int, indices: Sequence[int], wrap_scalar: bool = True
+    rank: int,
+    indices: Sequence[int],
+    wrap_scalar: bool = True,
+    # pyrefly: ignore  # bad-return
 ) -> tuple[int, ...]:
     pass
 
 
 @overload
+# pyrefly: ignore  # bad-return
 def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
@@ -839,7 +855,7 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
     return tuple(a) == tuple(b)
 
 
-def is_cpu_scalar_tensor(a: Any) -> bool:
+def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
     return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
 
 
@@ -857,6 +873,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
 
     # Note: cannot initialize device to the first arg's device (it may not have one)
     device = None
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -904,6 +921,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     shape = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -930,6 +948,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -986,6 +1005,7 @@ def extract_shape_from_varargs(
 
     # Handles tuple unwrapping
     if len(shape) == 1 and isinstance(shape[0], Sequence):
+        # pyrefly: ignore  # bad-assignment
         shape = shape[0]
 
     if validate:
@@ -1063,13 +1083,7 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
         shape[dim] = numel // newsize
-        # NB: This is pretty important when you have unbacked SymInts.
-        # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
-        # range for i0 is typically [2, inf], which means if you divide
-        # by two the new range should be [1, inf].  But this is bad news
-        # if you have an unbacked SymInt: we need to reapply the unsound
-        # assumption that the size is >= 2.
-        torch._check_is_size(shape[dim])
+        torch._check(shape[dim] >= 0)
     return tuple(shape)
 
 
@@ -1287,6 +1301,7 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
+    # pyrefly: ignore  # bad-argument-type
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1382,6 +1397,7 @@ def check_same_dtype(*args):
     full_dtype = None
     scalar_type = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             # Scalar type checking is disabled (and may be removed in the future)
@@ -1652,8 +1668,10 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
+            # pyrefly: ignore  # bad-return
             return one_plus_dim_tensor_dtype
 
+        # pyrefly: ignore  # bad-return
         return zero_dim_tensor_dtype
 
     if highest_type is float:
@@ -1971,10 +1989,15 @@ def check(
 
 # This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
 # c10/core/MemoryFormat.h into one function
-def are_strides_like_channels_last(
+# May return False when input sizes are data-dependent and the property is not
+# determined.
+def are_strides_like_channels_last_or_false(
     shape: Sequence[int], strides: Sequence[int]
 ) -> bool:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_true,
+        statically_known_true,
+    )
 
     ndim = len(shape)
 
@@ -1987,19 +2010,22 @@ def are_strides_like_channels_last(
     else:
         return False
 
-    if guard_size_oblivious(strides[1] == 0):
+    if guard_or_true(strides[1] == 0):
         return False
 
     min = 0
     for d in dim_order:
-        if guard_size_oblivious(shape[d] == 0):
+        if guard_or_true(shape[d] == 0):
             return False
-        if guard_size_oblivious(strides[d] < min):
+        if guard_or_true(strides[d] < min):
             return False
         if d == 0 and min == strides[1]:
             return False
         min = strides[d]
-        if guard_size_oblivious(strides[d] > 1):
+        # Assume stride is not 1, the consequence is min could be larger than needed,
+        # which would result in returning False for this function but not vice versa,
+        # so it's ok.
+        if guard_or_true(strides[d] > 1):
             min *= shape[d]
     return True
 
@@ -2008,7 +2034,7 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
     if x.layout != torch.strided:
         return torch.contiguous_format
 
-    if are_strides_like_channels_last(x.shape, x.stride()):
+    if are_strides_like_channels_last_or_false(x.shape, x.stride()):
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format
@@ -2111,7 +2137,8 @@ def alert_not_deterministic(caller: str):
                 f"{caller} does not have a deterministic implementation, but you set "
                 f"'torch.use_deterministic_algorithms(True, warn_only=True)'. "
                 f"You can file an issue at https://github.com/pytorch/pytorch/issues "
-                f"to help us prioritize adding deterministic support for this operation."
+                f"to help us prioritize adding deterministic support for this operation.",
+                stacklevel=2,
             )
         else:
             torch._check(

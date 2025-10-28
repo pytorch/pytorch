@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-import collections.abc
+import collections
 from itertools import repeat
 from typing import Any
 
@@ -10,18 +10,7 @@ __all__ = ["consume_prefix_in_state_dict_if_present"]
 def _ntuple(n, name="parse"):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
-            ret = tuple(x)
-
-            # If the iterable is length 1, automatically expand to fill.  This
-            # matches the behavior of expand_param_if_needed.
-            if len(ret) == 1:
-                return tuple(repeat(ret[0], n))
-
-            # Otherwise assert the correct length.
-            assert len(ret) == n, (
-                f"Expected an iterable of length {n}, but got length {len(ret)}"
-            )
-            return ret
+            return tuple(x)
         return tuple(repeat(x, n))
 
     parse.__name__ = name
@@ -47,6 +36,7 @@ def _list_with_default(out_size: list[int], defaults: list[int]) -> list[int]:
     import torch
 
     if isinstance(out_size, (int, torch.SymInt)):
+        # pyrefly: ignore [bad-return]
         return out_size
     if len(defaults) <= len(out_size):
         raise ValueError(f"Input dimension should be at least {len(out_size) + 1}")

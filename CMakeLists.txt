@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-# cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
 # sometimes makes XCode C compiler gets detected as "Clang", even when the C++
@@ -389,9 +388,9 @@ cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker 
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
-# on Windows.
+# on Windows and AArch64.
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
-if(WIN32)
+if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
@@ -443,7 +442,7 @@ if(WIN32)
       message(
         WARNING
           "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
-          "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
+          "Please run command 'conda install -c conda-forge libuv=1.51' to install libuv."
       )
     else()
       set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
@@ -886,26 +885,31 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
+
+
+IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Setting USE_FBGEMM_GENAI for gfx942 to ON by default, doing ROCM build")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
+  message(STATUS "Setting USE_FBGEMM_GENAI to ON by default , doing CUDA build for SM100a")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+else()
+  set(USE_FBGEMM_GENAI_DEFAULT OFF)
+endif()
 
 cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  ON
-  "USE_ROCM"
+  ${USE_FBGEMM_GENAI_DEFAULT}
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
-IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
-  set(USE_FBGEMM_GENAI off)
-endif()
 
 # Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
-if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
-  message(STATUS "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
-  set(USE_FBGEMM_GENAI ON)
+if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
 endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
@@ -921,7 +925,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     include(cmake/External/aotriton.cmake)
   endif()
 endif()
@@ -1390,10 +1394,6 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
-
-if(BUILD_FUNCTORCH)
-  add_subdirectory(functorch)
-endif()
 
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)

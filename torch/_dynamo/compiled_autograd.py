@@ -20,8 +20,8 @@ import itertools
 import operator
 import time
 from collections import Counter, defaultdict
-from collections.abc import Generator, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Generator, Sequence
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -166,7 +166,7 @@ class NaNChecker:
             if grad is not None:
                 assert not torch.isnan(grad).any(), (
                     f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                    "having NaN gradient. This is not supported. {TURN_OFF_MSG}"
+                    f"having NaN gradient. This is not supported. {TURN_OFF_MSG}"
                 )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]

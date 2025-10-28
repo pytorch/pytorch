@@ -579,7 +579,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -591,10 +591,12 @@ def convolution(
 
         conv_configs = V.choices.get_conv_configs(device_type)
 
+        dtype_size = x.get_dtype().itemsize
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
+            dtype_size=dtype_size,
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(

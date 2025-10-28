@@ -86,6 +86,7 @@ if torch.backends.mps.is_available():
             "item",
             "kron",
             "linalg.diagonal",
+            "linalg.householder_product",
             "linalg.svd",
             "log10",
             "log1p",
@@ -322,7 +323,6 @@ if torch.backends.mps.is_available():
             "linalg.cond": None,
             "linalg.eigh": None,
             "linalg.eigvalsh": None,
-            "linalg.householder_product": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
@@ -348,7 +348,6 @@ if torch.backends.mps.is_available():
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.ctc_loss": None,
-            "nn.functional.embedding_bag": None,
             "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": None,
             "nn.functional.pdist": None,
@@ -384,8 +383,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "to_sparse": None,
-            "unique": None,
             "vdot": None,
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -687,6 +684,7 @@ if torch.backends.mps.is_available():
             "_upsample_bilinear2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "sparse.mmreduce": [torch.float32],  # csr not supported
+            "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": [torch.float32],
@@ -758,6 +756,10 @@ if torch.backends.mps.is_available():
             "eye": [torch.float16, torch.float32],
             # topk fails with duplicate indices
             "topk": [torch.float16],
+            # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
+            "to_sparse": None,
+            # Exception: the derivative for '_unique2' is not implemented.
+            "unique": None,
         }
 
         SKIPLIST_GRAD = {
