@@ -610,7 +610,6 @@ def has_uses_tagged_as(
     Is there a use with given tags?
     """
 
-    use_tag_selector = lambda use: any(use_tag in use_tags for use_tag in use.tags)
     return has_uses(
         target,
         lambda use: any(tag in use_tags for tag in use.tags),
