@@ -86,10 +86,7 @@ namespace at {
 
       if (ivalue.isTensor()) {
         auto tensor = std::move(ivalue).toTensor();
-        bool is_wrapped_number = false;
-        if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-          is_wrapped_number = true;
-        }
+        bool is_wrapped_number = (tensor.unsafeGetTensorImpl()->is_wrapped_number()) ? true : false;
         if (tensor._is_zerotensor()) {
           TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",
                     "obtained using .clone() if you want a mutable tensor.");
@@ -103,10 +100,7 @@ namespace at {
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
           const Tensor& tensor = tensors[j];
-          bool is_wrapped_number = false;
-          if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-            is_wrapped_number = true;
-          }
+          bool is_wrapped_number = (tensor.unsafeGetTensorImpl()->is_wrapped_number()) ? true : false;
           if (tensor._is_zerotensor()) {
             // TODO: assert requires_grad=False
             //_like should not propagate zerotensor dispatch key
