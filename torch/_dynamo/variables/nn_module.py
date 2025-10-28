@@ -822,22 +822,18 @@ class NNModuleVariable(VariableTracker):
             )
 
             if type(module).__getitem__ not in builtin_supported:
-                if not isinstance(args[0], variables.ConstantVariable):
+                if not (
+                    isinstance(args[0], variables.ConstantVariable)
+                    and isinstance(args[0].as_python_constant(), (str, int))
+                ):
                     unimplemented_v2(
-                        gb_type="non-const argument in nn.Module __getitem__",
+                        gb_type="Invalid or non-const argument in nn.Module __getitem__",
                         context=f"call_method: {self} {name} {args} {kwargs}",
                         explanation="Dynamo does not support calling "
-                        f"method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
-                        hints=["Use constant arguments"],
-                    )
-                key = args[0].as_python_constant()
-                if not isinstance(key, (str, int)):
-                    unimplemented_v2(
-                        gb_type="Invalid args type in nn.Module __getitem__",
-                        context=f"call_method: {self} {name} {args} {kwargs}",
-                        explanation="Dynamo does not support calling "
-                        f"method `{name}` of ``nn.Module`` {module} with args[0] type other than str or int.",
-                        hints=["Please check args[0] type in __getitem__"],
+                        f"method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
+                        hints=[
+                            "Use constant arguments of type str or int for __getitem__"
+                        ],
                     )
                 fn = getattr(module, name).__func__
 

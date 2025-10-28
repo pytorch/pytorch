@@ -2825,59 +2825,30 @@
     {
       "Gb_type": "1-arg super not implemented",
       "Context": "",
-      "Explanation": "Dynamo failed to trace attribute `{name}` accessed via `super()` (for type `{self.typevar}` and object `{self.objvar}`) because only one argument of super() is not yet supported.",
-      "Hints": []
+      "Explanation": "Dynamo failed to trace attribute `{name}` accessed via `super()` (for type `{self.typevar}` and object `{self.objvar}`) because one-argument of super() is not supported.",
+      "Hints": [
+        "Use two-argument super(type, object_or_type)."
+      ]
     }
   ],
   "GB0281": [
     {
-      "Gb_type": "Unsupported queue_callback() in Compiled Autograd",
-      "Context": "call_method {self} {name}",
-      "Explanation": "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True.",
+      "Gb_type": "Invalid or non-const argument in nn.Module __getitem__",
+      "Context": "call_method: {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
       "Hints": [
-        "Use fullgraph=True"
+        "Use constant arguments of type str or int for __getitem__"
       ]
     }
   ],
   "GB0282": [
     {
-      "Gb_type": "non-const argument in nn.Module __getitem__",
-      "Context": "call_method: {self} {name} {args} {kwargs}",
-      "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
-      "Hints": [
-        "Use constant arguments"
-      ]
-    }
-  ],
-  "GB0283": [
-    {
-      "Gb_type": "Invalid args type in nn.Module __getitem__",
-      "Context": "call_method: {self} {name} {args} {kwargs}",
-      "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with args[0] type other than str or int.",
-      "Hints": [
-        "Please check args[0] type in __getitem__"
-      ]
-    }
-  ],
-  "GB0284": [
-    {
-      "Gb_type": "custom __getattr__ not supported",
+      "Gb_type": "Placement with custom __getattr__ not supported",
       "Context": "{value_type.__name__} with custom __getattr__",
       "Explanation": "Dynamo does not support Placement types with custom __getattr__ methods",
       "Hints": [
         "Use Placement types without custom __getattr__ methods",
-        "Or move the Placement usage outside the compiled region"
-      ]
-    }
-  ],
-  "GB0285": [
-    {
-      "Gb_type": "Unsupported autocast function",
-      "Context": "str(func)",
-      "Explanation": "Dynamo doesn't support compiling a region that returns a unsupported autocast function.",
-      "Hints": [
-        "Use supported autocast functions: torch.amp.autocast_mode.autocast, torch.cuda.amp.autocast, torch.cpu.amp.autocast",
-        "Or move the autocast usage outside the compiled region"
+        "Move the Placement usage outside the compiled region"
       ]
     }
   ]

@@ -877,20 +877,11 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(func, args, kwargs):
-        if func not in [
+        assert func in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ]:
-            unimplemented_v2(
-                gb_type="Unsupported autocast function",
-                context=str(func),
-                explanation="Dynamo doesn't support compiling a region that returns a unsupported autocast function.",
-                hints=[
-                    "Use supported autocast functions: torch.amp.autocast_mode.autocast, torch.cuda.amp.autocast, torch.cpu.amp.autocast",
-                    "Or move the autocast usage outside the compiled region",
-                ],
-            )
+        ]
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
