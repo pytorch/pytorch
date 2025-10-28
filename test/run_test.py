@@ -755,6 +755,8 @@ def run_test_retries(
                 REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
             ) as f:
                 current_failure = f.read()
+                if current_failure == "null":
+                    current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -776,10 +778,7 @@ def run_test_retries(
         elif num_failures[current_failure] >= 3:
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
-            if current_failure == "null":
-                print_to_file(f"FAILED CONSISTENTLY: {test_file}")
-            else:
-                print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
+            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -794,8 +793,6 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    if "null" in num_failures:
-        num_failures[f"'{test_file}'"] = num_failures.pop("null")
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
