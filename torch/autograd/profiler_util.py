@@ -30,7 +30,6 @@ class EventList(list):
         use_device = kwargs.pop("use_device", None)
         profile_memory = kwargs.pop("profile_memory", False)
         with_flops = kwargs.pop("with_flops", False)
-        # pyrefly: ignore [not-iterable]
         super().__init__(*args, **kwargs)
         self._use_device = use_device
         self._profile_memory = profile_memory
@@ -385,6 +384,46 @@ class EventList(list):
         total_stat.key = "Total"
         return total_stat
 
+    def _print_tree(self, attributes=None, max_depth=None, indent="  "):
+        """Pretty-prints profiled events in a hierarchical tree format.
+
+        attributes: annotates events with corresponding FunctionEvent attributes.
+        max_depth: tree depth to truncate logs; e.g. max_depth=0 only prints top-level events.
+        """
+        if not self._tree_built:
+            self._build_tree()
+
+        attributes = [] if attributes is None else attributes
+
+        def format_event(evt, depth=0):
+            if max_depth is not None and depth > max_depth:
+                return None
+
+            result = []
+            prefix = indent * depth
+            evt_str = f"{prefix}{evt.name}"
+
+            log = {}
+            for attr in attributes:
+                if hasattr(evt, attr):
+                    log[attr] = getattr(evt, attr)
+
+            if log:
+                log_str = ", ".join(f"{k}: {v}" for k, v in log.items())
+                evt_str = f"{evt_str}  # {{{log_str}}}"
+
+            result.append(evt_str)
+            for child in evt.cpu_children:
+                if (fmt_evt := format_event(child, depth + 1)) is not None:
+                    result.append(fmt_evt)
+
+            return "\n".join(result)
+
+        # Format all top-level events
+        top_level_events = [evt for evt in self if evt.cpu_parent is None]
+        tree_parts = [format_event(evt) for evt in top_level_events]
+        return "\n".join(tree_parts)
+
 
 def _format_time(time_us):
     """Define how to format time in FunctionEvent."""
@@ -506,9 +545,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.overload_name: str = overload_name
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
@@ -517,13 +556,13 @@ class FunctionEvent(FormattedTimesMixin):
         self.count: int = 1
         self.cpu_children: list[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.input_shapes: tuple[int, ...] = input_shapes
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.concrete_inputs: list[Any] = concrete_inputs
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.kwinputs: dict[str, Any] = kwinputs
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.stack: list = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device
@@ -767,7 +806,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_device_memory_usage += other.self_device_memory_usage
         self.count += other.count
         if self.flops is None:
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             self.flops = other.flops
         elif other.flops is not None:
             self.flops += other.flops
@@ -1004,7 +1043,7 @@ def _build_table(
         ]
         if flops <= 0:
             raise AssertionError(f"Expected flops to be positive, but got {flops}")
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore  # no-matching-overload
         log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
         if not (log_flops >= 0 and log_flops < len(flop_headers)):
             raise AssertionError(
