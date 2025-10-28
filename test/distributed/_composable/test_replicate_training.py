@@ -507,7 +507,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
         times in forward.
         """
 
-        (self._test_multi_forward_module,)
+        self._test_multi_forward_module()
 
     def _test_multi_forward_module(self):
         class MultiForwardModule(nn.Module):

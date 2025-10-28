@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, overload, TYPE_CHECKING, Union
+from typing import Optional, overload, Union
 
 import torch
 import torch.distributed as dist
@@ -36,12 +36,6 @@ from torch.distributed.tensor import DeviceMesh, init_device_mesh
 from torch.distributed.utils import _get_root_modules
 
 from .contract import _get_registry, contract
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from torch.distributed.tensor import Shard
 
 
 cls_to_replicate_cls: dict[type, type] = {}

@@ -3,7 +3,7 @@
 import copy
 import dataclasses
 import functools
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -14,7 +14,6 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
-from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -142,9 +141,8 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self):
-        (self._test_reduce_dtype_fp32_reduce,)
-
-        (self._test_reduce_dtype_bf16_reduce,)
+        self._test_reduce_dtype_fp32_reduce()
+        self._test_reduce_dtype_bf16_reduce()
 
     def _test_reduce_dtype_fp32_reduce(self):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
