@@ -273,7 +273,7 @@ fi
 # Add ARM-specific library dependencies
 if [[ "$ARCH" == "aarch64" ]]; then
     echo "Adding ARM-specific library dependencies"
-    
+
     # ARM Compute Library (if available)
     if [[ -d "/acl/build" ]]; then
         echo "Adding ARM Compute Library"
@@ -286,7 +286,7 @@ if [[ "$ARCH" == "aarch64" ]]; then
             "libarm_compute_graph.so"
         )
     fi
-    
+
     # ARM system libraries
     DEPS_LIST+=(
         "/lib64/libgomp.so.1"
@@ -296,7 +296,7 @@ if [[ "$ARCH" == "aarch64" ]]; then
         "libgomp.so.1"
         "libgfortran.so.5"
     )
-    
+
     # NVPL libraries (ARM optimized BLAS/LAPACK)
     if [[ -d "/usr/local/lib" && -f "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0" ]]; then
         echo "Adding NVPL libraries for ARM"
