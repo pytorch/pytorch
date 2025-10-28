@@ -1406,10 +1406,11 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             (1, "FLOAT"),
             (10, "FLOAT16"),
             (11, "DOUBLE"),
+            (16, "BFLOAT16"),
         ],
     )
     def test_attention_export_with_softmax_precision(
-        self, precision_enum, precision_name
+        self, precision_enum, precision_name: str
     ):
         """Test export with different softmax precision values."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
@@ -1441,7 +1442,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         attrs = node.attributes
         self.assertIn("softmax_precision", attrs)
         self.assertEqual(attrs["softmax_precision"].value, precision_enum)
-        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1e-3)
+        onnx_testing.assert_onnx_program(onnx_program, atol=2e-3, rtol=6e-3)
 
     def test_attention_export_gqa(self):
         """Test export and verify output tensor shapes."""
