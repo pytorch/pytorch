@@ -267,7 +267,7 @@ class MixOrderReduction:
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
         # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 10):
+        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 2):
             return False
 
         contiguous_node, other_node = (
@@ -292,7 +292,7 @@ class MixOrderReduction:
             return False
 
         # rnumel so large that we will not generated persistent reduction
-        if not V.graph.sizevars.statically_known_leq(ncol, 1024):
+        if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
         # Other reduction types like max/min is not supported yet.
