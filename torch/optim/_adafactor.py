@@ -11,6 +11,7 @@ from .optimizer import (
     _maximize_doc,
     _params_doc,
     _to_scalar,
+    Indices,
     Optimizer,
     ParamsT,
     TensorListList,
@@ -68,17 +69,20 @@ class Adafactor(Optimizer):
                     step_val = float(p_state["step"])
                     p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype())
 
-    def _get_factor_dims(self, grad: Tensor, fqn: Optional[str]=None) -> Tuple[int, int]:
+    def _get_factor_dims(
+        self, grad: Tensor, param_name: Optional[str] = None
+    ) -> tuple[int, int]:
         """Returns the dimensions to reduce over for the row and column factors.
-        
+
         Defaults to using the the second largest and largest dimension of the gradient
         Tensor for row and column respectively, but can be overridden for custom behavior.
 
         Args:
             grad (Tensor): Gradient tensor.
-            fqn (Optional[str]): Fully qualified name of the parameter corresponding to
-                the gradient. (default: None)
-        
+            param_name (Optional[str]): Name of the parameter corresponding to the gradient,
+                if provided through the constructor. This is commonly the fully qualified
+                name of the parameter if named_parameters() were passed in. (default: None)
+
         Returns:
             Tuple[int, int]: The dimensions to reduce over for the row and column factors,
                 respectively.
@@ -88,8 +92,11 @@ class Adafactor(Optimizer):
                 f"Adafactor _get_factor_dims should only be called on a tensor with at"
                 f" least 2 dimensions, but got a grad with {grad.dim()} dimensions."
             )
-        sorted_dims = torch.argsort(grad.shape)
-        return int(sorted_dims[-2]), int(sorted_dims[-1])
+
+        sorted_dims = sorted(
+            range(len(grad.shape)), key=lambda i: grad.shape[i], reverse=True
+        )
+        return int(sorted_dims[1]), int(sorted_dims[0])
 
     def _init_group(
         self,
@@ -100,9 +107,9 @@ class Adafactor(Optimizer):
         col_vars,
         variances,
         state_steps,
-        factored_dims,
+        factor_dims,
     ):
-        for p in group["params"]:
+        for i, p in enumerate(group["params"]):
             if p.grad is None:
                 continue
             if torch.is_complex(p):
@@ -122,27 +129,31 @@ class Adafactor(Optimizer):
                 state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
 
                 if p.grad.dim() > 1:
-                    row_dim, col_dim = self._get_factor_dims(p.grad, ???)
-                    state["factored_dims"] = (row_dim, col_dim)
+                    param_name = (
+                        None if "param_names" not in group else group["param_names"][i]
+                    )
+                    row_dim, col_dim = self._get_factor_dims(p.grad, param_name)
+                    state["factor_dims"] = (row_dim, col_dim)
                     row_shape = list(p.grad.shape)
                     row_shape[row_dim] = 1
-                    # Row factor of variance, NOT the same shape as grads (will be reduced along last dim)
+                    # Row factor of variance, NOT the same shape as grads (will be reduced along row dim)
                     state["row_var"] = p.grad.new_zeros(row_shape)
 
                     col_shape = list(p.grad.shape)
                     col_shape[col_dim] = 1
-                    # Col factor of variance, NOT the same shape as grads (will be reduced along penultimate dim)
+                    # Col factor of variance, NOT the same shape as grads (will be reduced along col dim)
                     state["col_var"] = p.grad.new_zeros(col_shape)
                 else:
                     state["variance"] = torch.zeros_like(
                         p.grad, memory_format=torch.preserve_format
                     )
 
-            factored_dims.append(state.get("factored_dims", None))
             row_vars.append(state.get("row_var", None))
             col_vars.append(state.get("col_var", None))
             variances.append(state.get("variance", None))
             state_steps.append(state["step"])
+            # Default factor dims are (-1, -2) or (last, penultimate) for (row, col)
+            factor_dims.append(state.get("factor_dims", (-1, -2)))
         return False  # has_complex
 
     @torch.no_grad()
@@ -167,7 +178,7 @@ class Adafactor(Optimizer):
             col_vars: list[Optional[Tensor]] = []
             variances: list[Optional[Tensor]] = []
             state_steps: list[Tensor] = []
-            factored_dims: list[Optional[Tuple[int, int]]] = []
+            factor_dims: list[tuple[int, int]] = []
             eps1, eps2 = group["eps"]
 
             has_complex = self._init_group(
@@ -178,7 +189,7 @@ class Adafactor(Optimizer):
                 col_vars,
                 variances,
                 state_steps,
-                factored_dims,
+                factor_dims,
             )
 
             adafactor(
@@ -199,6 +210,7 @@ class Adafactor(Optimizer):
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
                 has_complex=has_complex,
+                factor_dims=factor_dims,
             )
 
         return loss
@@ -378,6 +390,7 @@ def _single_tensor_adafactor(
     eps2: float,
     maximize: bool,
     has_complex: bool,
+    factor_dims: Optional[list[tuple[int, int]]] = None,
 ):
     assert grad_scale is None and found_inf is None, (
         "Grad scaling should occur outside of optimizer.step()"
@@ -399,6 +412,10 @@ def _single_tensor_adafactor(
         variance = variances[i]
         if eps1 is None:
             eps1 = torch.finfo(param.dtype).eps
+        if factor_dims is not None:
+            row_dim, col_dim = factor_dims[i]
+        else:
+            row_dim, col_dim = (-1, -2)
 
         # update step
         step_t += 1
@@ -416,18 +433,22 @@ def _single_tensor_adafactor(
             assert row_var is not None and col_var is not None, (
                 "row_var and col_var should be defined when grad is multidimensional"
             )
-            # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
+            # same as (g * g).mean(dim=row_dim) w/o materializing an intermediate size g
             row_mean = (
-                torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
+                torch.norm(grad, dim=row_dim, keepdim=True)
+                .square_()
+                .div_(grad.size(row_dim))
             )
             row_var.lerp_(row_mean, one_minus_beta2_t)
-            # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
+            # same as (g * g).mean(dim=col_dim) w/o materializing an intermediate size g
             col_mean = (
-                torch.norm(grad, dim=-2, keepdim=True).square_().div_(grad.size(-2))
+                torch.norm(grad, dim=col_dim, keepdim=True)
+                .square_()
+                .div_(grad.size(col_dim))
             )
             col_var.lerp_(col_mean, one_minus_beta2_t)
-            var_estimate = row_var @ col_var
-            var_estimate.div_(row_var.mean(dim=-2, keepdim=True).clamp_(min=eps1))
+            var_estimate = row_var.expand(grad.shape) * col_var.expand(grad.shape)
+            var_estimate.div_(row_var.mean(dim=col_dim, keepdim=True).clamp_(min=eps1))
         else:
             assert variance is not None, (
                 "variance should be defined when grad is a vector"
@@ -448,17 +469,19 @@ def _group_tensors_by_device_dtype_and_is_multidim(
     tensorlists: TensorListList,
 ) -> dict[
     tuple[Optional[torch.device], Optional[torch.dtype], bool],
-    list[list[Optional[Tensor]]],
+    tuple[TensorListList, Indices],
 ]:
     """Groups tensors by device, dtype, AND multidimensionality -- whether the tensor
     has multiple dims or just one dim (is a vector). This allows the foreach impl of
     Adafactor to assume that every group of params will either be factored or not."""
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(tensorlists)
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        tensorlists, with_indices=True
+    )
     ultra_grouped_tensors: dict[
         tuple[Optional[torch.device], Optional[torch.dtype], bool],
-        list[list[Optional[Tensor]]],
+        tuple[TensorListList, Indices],
     ] = {}
-    for (device, dtype), (tensorlists, _) in grouped_tensors.items():
+    for (device, dtype), (tensorlists, indices) in grouped_tensors.items():
         matrix_key = (device, dtype, True)
         vector_key = (device, dtype, False)
 
@@ -467,14 +490,16 @@ def _group_tensors_by_device_dtype_and_is_multidim(
             assert tensor is not None, "grad should not be None"
             if tensor.dim() > 1:
                 if matrix_key not in ultra_grouped_tensors:
-                    ultra_grouped_tensors[matrix_key] = [[] for _ in tensorlists]
+                    ultra_grouped_tensors[matrix_key] = ([[] for _ in tensorlists], [])
                 for i in range(len(tensorlists)):
-                    ultra_grouped_tensors[matrix_key][i].append(tensorlists[i][j])
+                    ultra_grouped_tensors[matrix_key][0][i].append(tensorlists[i][j])
+                ultra_grouped_tensors[matrix_key][1].append(indices[j])
             else:
                 if vector_key not in ultra_grouped_tensors:
-                    ultra_grouped_tensors[vector_key] = [[] for _ in tensorlists]
+                    ultra_grouped_tensors[vector_key] = ([[] for _ in tensorlists], [])
                 for i in range(len(tensorlists)):
-                    ultra_grouped_tensors[vector_key][i].append(tensorlists[i][j])
+                    ultra_grouped_tensors[vector_key][0][i].append(tensorlists[i][j])
+                ultra_grouped_tensors[vector_key][1].append(indices[j])
     return ultra_grouped_tensors
 
 
@@ -500,6 +525,7 @@ def _multi_tensor_adafactor(
     eps2: float,
     maximize: bool,
     has_complex: bool,
+    factor_dims: Optional[list[tuple[int, int]]] = None,
 ):
     if len(params) == 0:
         return
@@ -521,7 +547,8 @@ def _multi_tensor_adafactor(
             device_col_vars_,
             device_variances_,
             device_state_steps_,
-        )
+        ),
+        indices,
     ) in grouped_tensors.items():
         device_params = cast(list[Tensor], device_params_)
         device_grads = cast(list[Tensor], device_grads_)
@@ -572,30 +599,58 @@ def _multi_tensor_adafactor(
             assert device_row_vars[0] is not None and device_col_vars[0] is not None, (
                 "row_var and col_var should be defined when grad is multidimensional"
             )
-            # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
+            # same as (g * g).mean(dim=row_dim) w/o materializing an intermediate size g
             row_means = [
-                torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
+                torch.norm(
+                    grad,
+                    dim=(factor_dims[i][0] if factor_dims is not None else -1),
+                    keepdim=True,
+                )
+                for grad, i in zip(device_grads, indices)
             ]
             torch._foreach_mul_(row_means, row_means)
-            torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
+            torch._foreach_div_(
+                row_means,
+                [
+                    grad.size(factor_dims[i][0] if factor_dims is not None else -1)
+                    for grad, i in zip(device_grads, indices)
+                ],
+            )
             torch._foreach_lerp_(device_row_vars, row_means, one_minus_beta2_ts)
             del row_means
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_means = [
-                torch.norm(grad, dim=-2, keepdim=True) for grad in device_grads
+                torch.norm(
+                    grad,
+                    dim=(factor_dims[i][1] if factor_dims is not None else -2),
+                    keepdim=True,
+                )
+                for grad, i in zip(device_grads, indices)
             ]
             torch._foreach_mul_(col_means, col_means)
-            torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
+            torch._foreach_div_(
+                col_means,
+                [
+                    grad.size(factor_dims[i][1] if factor_dims is not None else -2)
+                    for grad, i in zip(device_grads, indices)
+                ],
+            )
             torch._foreach_lerp_(device_col_vars, col_means, one_minus_beta2_ts)
             del col_means
 
             var_estimates = [
-                row_var @ col_var
-                for row_var, col_var in zip(device_row_vars, device_col_vars)
+                row_var.expand(grad.shape) * col_var.expand(grad.shape)
+                for row_var, col_var, grad in zip(
+                    device_row_vars, device_col_vars, device_grads
+                )
             ]
             row_var_means = [
-                row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars
+                row_var.mean(
+                    dim=factor_dims[i][1] if factor_dims is not None else -2,
+                    keepdim=True,
+                )
+                for row_var, i in zip(device_row_vars, indices)
             ]
             torch._foreach_clamp_min_(row_var_means, eps1)
             torch._foreach_div_(var_estimates, row_var_means)
@@ -649,6 +704,7 @@ def adafactor(
     eps1: float,
     eps2: float,
     maximize: bool,
+    factor_dims: Optional[list[tuple[int, int]]] = None,
 ):
     r"""Functional API that performs Adafactor algorithm computation.
 
@@ -683,4 +739,5 @@ def adafactor(
         grad_scale=grad_scale,
         found_inf=found_inf,
         has_complex=has_complex,
+        factor_dims=factor_dims,
     )
