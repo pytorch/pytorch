@@ -1906,11 +1906,9 @@ Tensor& index_fill_(
         "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
-  if (!self.is_complex() && source.isComplex()) {
-    TORCH_CHECK(
-        false,
-        "index_fill_(): Converting complex Scalar to non-complex type is not supported");
-  }
+  TORCH_CHECK(
+      self.is_complex() || !source.isComplex(),
+      "index_fill_(): Converting complex Scalar to non-complex type is not supported");
 
   // Handle the case when `self` is 0-dim
   Tensor self_nonzero_dim = (self.dim() == 0) ? self.unsqueeze(-1) : self;
