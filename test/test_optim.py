@@ -772,8 +772,11 @@ class TestOptimRenewed(TestCase):
                     if torch.is_tensor(new_p_state.get("step", None)):
                         self.assertEqual(new_p_state["step"].dtype, assert_step_dtype)
                 for k in og_p_state:
-                    tracker.add(og_p_state[k])
-                    tracker.pop_check_set(new_p_state[k], self)
+                    if torch.is_tensor(og_p_state[k]):
+                        tracker.add(og_p_state[k])
+                        tracker.pop_check_set(new_p_state[k], self)
+                    else:
+                        self.assertEqual(og_p_state[k], new_p_state[k])
 
             self.assertTrue(tracker.all_popped())
 
