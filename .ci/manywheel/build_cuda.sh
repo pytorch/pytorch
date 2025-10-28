@@ -107,6 +107,12 @@ echo "TORCH_CUDA_ARCH_LIST set to: $TORCH_CUDA_ARCH_LIST"
 export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 echo "${TORCH_CUDA_ARCH_LIST}"
 
+# Disable MAGMA for aarch64 as pre-built libraries are x86-64 only
+if [[ "$ARCH" == "aarch64" ]]; then
+    echo "Disabling MAGMA for aarch64 architecture"
+    export USE_MAGMA=0
+fi
+
 # Package directories
 WHEELHOUSE_DIR="wheelhouse$cuda_version_nodot"
 LIBTORCH_HOUSE_DIR="libtorch_house$cuda_version_nodot"
@@ -322,9 +328,11 @@ export DESIRED_CUDA="$cuda_version_nodot"
 rm -rf /usr/local/cuda || true
 ln -s "/usr/local/cuda-${CUDA_VERSION}" /usr/local/cuda
 
-# Switch `/usr/local/magma` to the desired CUDA version
-rm -rf /usr/local/magma || true
-ln -s /usr/local/cuda-${CUDA_VERSION}/magma /usr/local/magma
+# Switch `/usr/local/magma` to the desired CUDA version (skip for aarch64)
+if [[ "$ARCH" != "aarch64" ]]; then
+    rm -rf /usr/local/magma || true
+    ln -s /usr/local/cuda-${CUDA_VERSION}/magma /usr/local/magma
+fi
 
 export CUDA_VERSION=$(ls /usr/local/cuda/lib64/libcudart.so.*|sort|tac | head -1 | rev | cut -d"." -f -3 | rev) # 10.0.130
 export CUDA_VERSION_SHORT=$(ls /usr/local/cuda/lib64/libcudart.so.*|sort|tac | head -1 | rev | cut -d"." -f -3 | rev | cut -f1,2 -d".") # 10.0
