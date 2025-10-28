@@ -110,7 +110,9 @@ class SuperVariable(VariableTracker):
                 explanation=f"Dynamo failed to trace attribute `{name}` accessed "
                 f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
                 "because one-argument of super() is not supported.",
-                hints=[],
+                hints=[
+                    "Use two-argument super(type, object_or_type).",
+                ],
             )
         search_type = self.typevar.as_python_constant()
 
