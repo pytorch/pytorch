@@ -87,6 +87,7 @@ core_sources_common = [
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/profiler/util.cpp",
+    "torch/csrc/shim_common.cpp",
 ]
 
 torch_unpickler_common = [
