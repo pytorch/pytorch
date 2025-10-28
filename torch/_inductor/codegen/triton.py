@@ -1989,7 +1989,7 @@ class CooperativeReductionWorkspaceCache:
         cached = self.ready_for_reuse.get(nbytes)
         if cached:
             return cached.popleft()
-        ws_name, ws_offset = self.args.workspace(nbytes, False)
+        ws_name, _, ws_offset = self.args.workspace(nbytes, False)
         self.current_loop.append((nbytes, ws_name, ws_offset))
         return (ws_name, ws_offset)
 
@@ -3553,6 +3553,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value,
         )
 
+        logical_index = None
+        if reduction_type in ("argmin", "argmax"):
+            if isinstance(value, tuple):
+                value, logical_index = value
+
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
         root_op: str
 
@@ -3688,15 +3693,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if reduction_type in ("argmax", "argmin"):
                 assert isinstance(masked_value, CSEVariable)
                 accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-
-                accumulator_index = str(
-                    self.cse.generate(
-                        self.compute,
-                        f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=accumulator_dtype,
-                        shape=masked_value.shape,
+                if logical_index:
+                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(accumulator_dtype)})"
+                else:
+                    accumulator_index = str(
+                        self.cse.generate(
+                            self.compute,
+                            f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                            dtype=accumulator_dtype,
+                            shape=masked_value.shape,
+                        )
                     )
-                )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
@@ -3767,11 +3774,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
-
+                # Use logical_index if it was unpacked, otherwise fall back to physical index
+                index_var = (
+                    f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
+                    if logical_index is not None
+                    else f"{reduction_range_prefix}index"
+                )
                 self.compute.splice(
                     f"""\
                 {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
-                    {accumulator}, {accumulator_index}, {value}, {reduction_range_prefix}index
+                    {accumulator}, {accumulator_index}, {value}, {index_var}
                 )
                 {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
                 {accumulator_index} = {where_cond(f"{accumulator_index}_next", accumulator_index)}
@@ -5215,7 +5227,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 call_args.append(expr)
                 arg_types.append(type(expr))
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None):
+    def call_kernel(
+        self, name: str, node: Optional[IRNode] = None, deallocate_ws: bool = True
+    ):
         wrapper = V.graph.wrapper_code
         wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
@@ -5232,8 +5246,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton_meta=self.triton_meta,
         )
 
-        for ws in reversed(self.args.workspace_args):
-            wrapper.generate_workspace_deallocation(ws)
+        if deallocate_ws:
+            self.deallocate_workspaces()
 
     def codegen_nan_check(self) -> None:
         wrapper = V.graph.wrapper_code
