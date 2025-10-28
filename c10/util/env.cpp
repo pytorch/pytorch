@@ -3,7 +3,9 @@
 #include <fmt/format.h>
 #include <cstdlib>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <string>
 
 namespace c10::utils {
 
