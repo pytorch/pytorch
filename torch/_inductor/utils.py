@@ -714,12 +714,19 @@ def cache_on_self_and_args(
 ) -> Callable[Concatenate[Any, P], RV]:
     cache = {}
 
-    @functools.wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> RV:
-        key = (id(self), args, tuple(sorted(kwargs.items())))
-        if key not in cache:
-            cache[key] = fn(self, *args, **kwargs)
-        return cache[key]
+    ctx = {"fn": fn, "cache": cache}
+    exec(
+        """\
+        def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> RV:
+            key = (id(self), args, tuple(sorted(kwargs.items())))
+            if key not in cache:
+                cache[key] = fn(self, *args, **kwargs)
+            return cache[key]
+        """.lstrip(),
+        ctx,
+    )
+
+    wrapper = functools.wraps(fn)(ctx["wrapper"])  # type: ignore[bad-argument-type]
 
     return wrapper
 
