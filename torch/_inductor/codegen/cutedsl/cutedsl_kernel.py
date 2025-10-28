@@ -441,40 +441,18 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             #   val_frag[0] = tensor[index]
             #   result = val_frag.load()
 
-            index_frag = self.kernel.cse.generate(
-                self.kernel.body,
-                "cute.make_fragment(1, cutlass.Int32)",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
+            index_frag = self.kernel.cse.newvar(dtype=torch.int32)
+            self.kernel.body.writeline(
+                f"{index_frag} = cute.make_fragment(1, cutlass.Int32)"
             )
+            self.kernel.body.writeline(f"{index_frag}.store({index_str})")
 
-            self.kernel.cse.generate(
-                self.kernel.body,
-                f"{index_frag}.store({index_str})",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
-            )
+            val_frag = self.kernel.cse.newvar(dtype=var_dtype)
+            self.kernel.body.writeline(f"{val_frag} = cute.make_fragment(1, {cute_dtype})")
 
-            val_frag = self.kernel.cse.generate(
-                self.kernel.body,
-                f"cute.make_fragment(1, {cute_dtype})",
-                dtype=var_dtype,
-                bounds=ValueRanges.unknown(),
-            )
-
-            index_var = self.kernel.cse.generate(
-                self.kernel.body,
-                f"{index_frag}[0]",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
-            )
-
-            self.kernel.cse.generate(
-                self.kernel.body,
-                f"{val_frag}[0] = ({var}[{index_var}])",
-                dtype=var_dtype,
-                bounds=ValueRanges.unknown(),
-            )
+            index_var = self.kernel.cse.newvar(dtype=torch.int32)
+            self.kernel.body.writeline(f"{index_var} = {index_frag}[0]")
+            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{index_var}])")
 
             final_expr = f"{val_frag}.load()"
 
