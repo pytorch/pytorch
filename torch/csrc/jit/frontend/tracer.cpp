@@ -22,6 +22,8 @@
 #include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class.h>
 
+#include <torch/headeronly/dummy.h>
+
 #include <memory>
 #include <sstream>
 #include <string>
@@ -884,6 +886,17 @@ void addInputs(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
   Value* v = getValueTrace(obj);
   n->addInput(v);
+}
+
+void addInputs(Node* n, const char* name, const dummy_types::Dummy& value) {
+  // v2_8::Dummy only has id field
+  Graph* g = n->owningGraph();
+
+  // Create constant for id field
+  Value* id_val = g->insertConstant(static_cast<int64_t>(value.get_id()));
+  recordSourceLocation(id_val->node());
+
+  n->addInput(id_val);
 }
 
 void addOutput(Node* node, const at::Tensor& output) {

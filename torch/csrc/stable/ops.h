@@ -274,6 +274,17 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
+inline torch::stable::Tensor op(
+    const torch::stable::Tensor& self,
+    const dummy_types::Dummy& dummy) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{torch::stable::detail::from(self), torch::stable::detail::from(dummy)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+
 // New ops should be added here if they use a brand new shim API
 
 #endif

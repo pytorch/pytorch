@@ -76,6 +76,8 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymNodeImpl.h>
 
+#include <torch/headeronly/dummy.h>
+
 #include <c10/core/DispatchKeySet.h>
 #include <array>
 #include <cstddef>
@@ -302,6 +304,8 @@ struct TORCH_PYTHON_API PythonArgs {
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
   inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
+
+  inline dummy_types::Dummy dummy(int i);
 
  private:
   // Non-inline functions' symbols are exposed to torch_python DLL
@@ -1171,6 +1175,27 @@ inline PyObject* PythonArgs::pyobject(int i) {
   if (!args[i])
     return Py_None;
   return args[i];
+}
+
+inline dummy_types::Dummy PythonArgs::dummy(int i) {
+  if (!args[i])
+    TORCH_CHECK(false, "Expected 1 arg for Dummy");
+
+  // Parse Python object to dummy type
+  // For now, we'll expect a tuple of (foo, id) integers
+  if (PyTuple_Check(args[i])) {
+    PyObject* id_obj = PyTuple_GET_ITEM(args[i], 0);
+    int32_t id = static_cast<int32_t>(THPUtils_unpackLong(id_obj));
+    return dummy_types::Dummy(id);
+  }
+
+  TORCH_CHECK_TYPE(
+      false,
+      fmt::format(
+          "{}(): argument '{}' must be a tuple of (id,) for dummy_types::Dummy, but got {}",
+          signature.name,
+          signature.params[i].name,
+          Py_TYPE(args[i])->tp_name));
 }
 
 /*

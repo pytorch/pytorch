@@ -9,6 +9,7 @@
 #include <torch/library.h>
 
 #include <torch/csrc/stable/c/shim.h>
+#include <torch/headeronly/dummy.h>
 
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
@@ -70,6 +71,9 @@ static StableIValue from_ivalue(
       StableIValue* sivp = new StableIValue(
           from_ivalue(inner_type, ivalue, extension_build_version));
       return torch::stable::detail::_from(sivp, extension_build_version);
+    }
+    case c10::TypeKind::DummyType: {
+      return torch::stable::detail::_from(ivalue.toDummy(), extension_build_version);
     }
     default: {
       TORCH_CHECK(
@@ -144,6 +148,10 @@ static c10::IValue to_ivalue(
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
       delete sivp;
       return ival;
+    }
+    case c10::TypeKind::DummyType: {
+      return c10::IValue(
+          torch::stable::detail::_to<dummy_types::Dummy>(stable_ivalue, extension_build_version));
     }
     default: {
       TORCH_CHECK(

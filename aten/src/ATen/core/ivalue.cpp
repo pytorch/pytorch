@@ -144,6 +144,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return QuantizerType::get();
       case Tag::Enum:
         return v.toEnumHolder()->type();
+      case Tag::Dummy:
+        return DummyType::get();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
@@ -345,6 +347,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
       return rhs.isList() && lhs.toList() == rhs.toList();
+    case Tag::Dummy:
+      return rhs.isDummy() && lhs.toDummy() == rhs.toDummy();
     case Tag::Blob:
     case Tag::Future:
     case Tag::Await:
@@ -412,6 +416,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::ComplexDouble:
     case Tag::Enum:
     case Tag::Stream:
+    case Tag::Dummy:
     case Tag::Uninitialized:
       TORCH_CHECK(false,
           "unhashable type: '" + v.type()->repr_str() + "'");
@@ -659,6 +664,9 @@ std::ostream& IValue::repr(
       return out << enum_holder->qualifiedClassName() << "." <<
           enum_holder->name();
     }
+    case IValue::Tag::Dummy: {
+      return out << "Dummy";
+    }
     case IValue::Tag::Object: {
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind(), ". Perhaps you've frozen a module with custom classes?");
     }
@@ -854,6 +862,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       auto py_obj = v.toPyObject();
       return out << "<PyObject at" << py_obj << ">";
     }
+    case IValue::Tag::Dummy:
+      return out << "Dummy";
     case IValue::Tag::Generator:
       return out << "Generator";
     case IValue::Tag::Quantizer:

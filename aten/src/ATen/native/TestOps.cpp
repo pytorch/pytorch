@@ -20,10 +20,12 @@
 #include <ATen/ops/_test_optional_intlist_native.h>
 #include <ATen/ops/_test_string_default_native.h>
 #include <ATen/ops/_test_warn_in_autograd_native.h>
+#include <ATen/ops/_test_versioning_native.h>
 #include <ATen/ops/empty_like.h>
 #endif
 
 #include <c10/util/irange.h>
+#include <torch/headeronly/dummy.h>
 
 namespace at::native {
 
@@ -128,6 +130,15 @@ Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool
   return self;
 }
 
+
+Tensor _test_versioning(
+    const Tensor& self,
+    dummy_types::Dummy dummy) {
+  Tensor output = at::empty_like(self);
+  int32_t fill_value = dummy.get_id();
+  output.fill_(fill_value);
+  return output;
+}
 } // namespace at::native
 
 namespace at::functionalization {

@@ -59,7 +59,8 @@ namespace c10 {
   _(SymFloatType)           \
   _(SymBoolType)            \
   _(UnionType)              \
-  _(DynamicType)
+  _(DynamicType)            \
+  _(DummyType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -110,6 +111,7 @@ TORCH_DECLARE_SINGLETON(MemoryFormatType)
 TORCH_DECLARE_SINGLETON(AnyListType)
 TORCH_DECLARE_SINGLETON(AnyTupleType)
 TORCH_DECLARE_SINGLETON(AnyClassType)
+TORCH_DECLARE_SINGLETON(DummyType)
 
 namespace detail {
 template <typename T, typename Enable = void>
