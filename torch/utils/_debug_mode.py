@@ -241,11 +241,18 @@ class DebugMode(TorchDispatchMode):
         import torch.distributed.tensor  # noqa: F401
 
         self.supports_higher_order_operators = True
-        self.record_torchfunction = record_torchfunction
-        self.record_faketensor = record_faketensor
-        self.record_realtensor = record_realtensor
-        self.record_tensor_attributes = record_tensor_attributes or []
 
+        # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
+        # WARNING: currently incompatible with torch.compile due to dynamo guard failures.
+        self.record_torchfunction = record_torchfunction
+        # Records __torch_dispatch__ calls on FakeTensors.
+        self.record_faketensor = record_faketensor
+        # Records __torch_dispatch__ calls on real tensors.
+        self.record_realtensor = record_realtensor
+        # Optional list[str] of tensor attributes, to be annotated in the string dump.
+        self.record_tensor_attributes = record_tensor_attributes or []
+        # Uses ModTracker to record nn.Module entrances, as _NNModuleCall entries.
+        # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
 
         self.module_tracker: Optional[ModTracker] = None
