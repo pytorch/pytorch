@@ -2099,14 +2099,13 @@ class TestPatternMatcherLogging(LoggingTestCase):
         def target_pattern(xs: list[torch.Tensor]):
             return xs
 
-        class BackendTwo:
-            def __init__(self) -> None:
-                super().__init__()
+        class Backend:
+            def __init__(self, example_inputs) -> None:
                 self.pm = PatternMatcherPass()
                 register_replacement(
                     src_pattern,
                     target_pattern,
-                    [[torch.empty(4, 5), torch.empty(4, 5)]],
+                    example_inputs,
                     fwd_only,
                     self.pm,
                 )
@@ -2117,57 +2116,20 @@ class TestPatternMatcherLogging(LoggingTestCase):
                 self.pm.apply(gm.graph)
                 return gm.forward
 
-        def test_function():
-            xs = [torch.randn(4, 5), torch.randn(4, 5)]
-            return torch.ops.custom.list_op(xs)
+        def run_test(example_inputs, expected_length):
+            def test_function():
+                xs = [torch.randn(4, 5) for _ in range(expected_length)]
+                return torch.ops.custom.list_op(xs)
 
-        compiled_fn = torch.compile(test_function, backend=BackendTwo())
-        result = compiled_fn()
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0].shape, torch.Size([4, 5]))
-        self.assertEqual(result[1].shape, torch.Size([4, 5]))
+            backend = Backend([example_inputs])
+            compiled_fn = torch.compile(test_function, backend=backend)
+            result = compiled_fn()
+            self.assertEqual(len(result), expected_length)
+            for i in range(expected_length):
+                self.assertEqual(result[i].shape, torch.Size([4, 5]))
 
-    def test_list_tensor_pattern_replacement_single_item(self):
-        @torch.library.custom_op("custom::list_op", mutates_args=())
-        def list_op(xs: list[torch.Tensor]) -> list[torch.Tensor]:
-            return [x + 1 for x in xs]
-
-        @list_op.register_fake
-        def list_op_fake(xs: list[torch.Tensor]) -> list[torch.Tensor]:
-            return xs
-
-        def src_pattern(xs: list[torch.Tensor]):
-            return torch.ops.custom.list_op(xs)
-
-        def target_pattern(xs: list[torch.Tensor]):
-            return xs
-
-        class BackendSingle:
-            def __init__(self) -> None:
-                super().__init__()
-                self.pm = PatternMatcherPass()
-                register_replacement(
-                    src_pattern,
-                    target_pattern,
-                    [[torch.empty(4, 5)]],
-                    fwd_only,
-                    self.pm,
-                )
-
-            def __call__(
-                self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
-            ):
-                self.pm.apply(gm.graph)
-                return gm.forward
-
-        def test_function():
-            xs = [torch.randn(4, 5)]
-            return torch.ops.custom.list_op(xs)
-
-        compiled_fn = torch.compile(test_function, backend=BackendSingle())
-        result = compiled_fn()
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].shape, torch.Size([4, 5]))
+        run_test([torch.empty(4, 5), torch.empty(4, 5)], expected_length=2)
+        run_test([torch.empty(4, 5)], expected_length=1)
 
 
 if __name__ == "__main__":
