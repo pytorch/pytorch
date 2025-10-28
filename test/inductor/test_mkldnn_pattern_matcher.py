@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_X86,
     MI300_ARCH,
+    MI350_ARCH,
     parametrize,
     skipIfNoXPU,
     skipIfRocm,
@@ -177,6 +178,7 @@ class TestPatternMatcherBase(TestCase):
         is_dynamic=False,
         quantizer=None,
         compile_options={},  # noqa: B006
+        quantization_with_autocast=False,
     ):
         if not hasattr(self, "device"):
             has_xpu = any(
@@ -206,9 +208,15 @@ class TestPatternMatcherBase(TestCase):
             assert check_autocast == torch.float32
             maybe_autocast = contextlib.nullcontext()
         if check_quantization:
-            convert_model = _generate_qdq_quantized_model(
-                mod, inputs, is_qat, is_dynamic, quantizer
-            )
+            if quantization_with_autocast:
+                with maybe_autocast:
+                    convert_model = _generate_qdq_quantized_model(
+                        mod, inputs, is_qat, is_dynamic, quantizer
+                    )
+            else:
+                convert_model = _generate_qdq_quantized_model(
+                    mod, inputs, is_qat, is_dynamic, quantizer
+                )
             with torch.no_grad(), maybe_autocast:
                 _ = torch.compile(convert_model)(*inputs)
                 matcher_check_fn()
@@ -752,7 +760,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
-            mod = mod
             v = torch.randn(2, 10)
 
             def matcher_check_fn():
@@ -827,9 +834,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for dtype in dtypes:
             torch._dynamo.reset()
-            autocast_enabled = (
-                True if dtype in [torch.bfloat16, torch.float16] else False
-            )
+            autocast_enabled = dtype in [torch.bfloat16, torch.float16]
             with (
                 torch.no_grad(),
                 torch.autocast(
@@ -1106,7 +1111,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(2, 4, 16).to(dtype)
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
-    def _qconv2d_test_helper(self, device="cpu", int8_mixed_bf16=False):
+    def _qconv2d_test_helper(
+        self,
+        device="cpu",
+        int8_mixed_bf16=False,
+        quantization_with_autocast=False,
+    ):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1139,7 +1149,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(
                 counters["inductor"]["qconv_weight_prepack_matcher_nodes"],
-                18 if int8_mixed_bf16 else 12,
+                (16 if quantization_with_autocast else 18) if int8_mixed_bf16 else 12,
             )
             self.assertEqual(
                 counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 3
@@ -1151,6 +1161,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn,
             check_quantization=True,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+            quantization_with_autocast=quantization_with_autocast,
         )
 
     @skipIfNoDynamoSupport
@@ -1174,12 +1185,22 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_qconv2d_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
         """
         self._qconv2d_test_helper(int8_mixed_bf16=True)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
+    def test_qconv2d_int8_mixed_bf16_use_autocast(self):
+        r"""
+        This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
+        """
+        self._qconv2d_test_helper(int8_mixed_bf16=True, quantization_with_autocast=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2330,6 +2351,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         bias=True,
         is_dynamic=False,
         is_qat=False,
+        quantization_with_autocast=False,
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias, do_permute=False):
@@ -2368,6 +2390,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             check_quantization=True,
             is_qat=is_qat,
             is_dynamic=is_dynamic,
+            quantization_with_autocast=quantization_with_autocast,
         )
 
     @skipIfNoDynamoSupport
@@ -2438,6 +2461,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    def test_qlinear_int8_mixed_bf16_use_autocast(self):
+        r"""
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
+        """
+        for bias in [True, False]:
+            self._qlinear_test_helper(
+                (torch.randn((2, 4)),),
+                int8_mixed_bf16=True,
+                bias=bias,
+                quantization_with_autocast=True,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
     @skipIfNoXPU
     def test_qlinear_int8_mixed_bf16_xpu(self):
         r"""
@@ -2482,6 +2520,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
         for bias in [True, False]:
             self._qlinear_test_helper(
                 (torch.randn((2, 3, 4)),), int8_mixed_bf16=True, bias=bias
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_use_autocast(self):
+        r"""
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
+        """
+        for bias in [True, False]:
+            self._qlinear_test_helper(
+                (torch.randn((2, 3, 4)),),
+                int8_mixed_bf16=True,
+                bias=bias,
+                quantization_with_autocast=True,
             )
 
     @skipIfNoDynamoSupport
@@ -2552,6 +2605,37 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 do_permute=True,
                 matcher_check_fn=matcher_check_fn,
                 bias=bias,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_and_not_contiguous_use_autocast(
+        self,
+    ):
+        r"""
+        This testcase will quantize a single Linear Module for int8_bf16.
+        * Input dim exceeds 2
+        * Input not contiguous
+        """
+        for bias in [True, False]:
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    16 if bias else 15,
+                )
+
+            self._qlinear_test_helper(
+                (torch.randn((2, 4, 3, 4)),),
+                int8_mixed_bf16=True,
+                do_permute=True,
+                matcher_check_fn=matcher_check_fn,
+                bias=bias,
+                quantization_with_autocast=True,
             )
 
     @skipIfNoDynamoSupport
@@ -2902,8 +2986,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     mod,
                     (v,),
                     [
-                        "aoti_torch_cpu__qlinear_pointwise_tensor",
-                        "aoti_torch_cpu__qlinear_pointwise_binary_tensor",
+                        f"aoti_torch_{device}__qlinear_pointwise_tensor",
+                        f"aoti_torch_{device}__qlinear_pointwise_binary_tensor",
                     ],
                     [],
                     check_quantization=True,
@@ -4334,14 +4418,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         out_feature = 64
         q_min, q_max = -32, 31
         # we only test for qlinear_binary in this case
-        test_for_pointwise_binary = (
-            True
-            if M == 1
+        test_for_pointwise_binary = bool(
+            M == 1
             and inplace_add
             and not expand_a_scale
             and not dynamic
             and not has_bias
-            else False
         )
         if test_for_pointwise_binary and not IS_X86:
             self.skipTest("Some UTs are only supported on x86_64 CPUs")
@@ -4608,7 +4690,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             def __init__(
                 self,
                 input_dim,
-                transpose_for_score=False,
                 num_attention_heads=None,
                 attention_head_size=None,
             ) -> None:
@@ -4618,12 +4699,10 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 self.k_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
                 self.v_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
                 self.softmax = torch.nn.Softmax(dim=-1)
-                self.transpose_for_score = transpose_for_score
-                if self.transpose_for_score:
-                    assert num_attention_heads is not None
-                    assert attention_head_size is not None
-                    self.num_attention_heads = num_attention_heads
-                    self.attention_head_size = attention_head_size
+                self.num_attention_heads = num_attention_heads
+                self.attention_head_size = attention_head_size
+                self.all_head_size = self.num_attention_heads * self.attention_head_size
+                self.dense = torch.nn.Linear(self.all_head_size, self.all_head_size)
 
             def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
                 new_x_shape = x.size()[:-1] + (
@@ -4637,19 +4716,21 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 q = self.q_proj(x)
                 k = self.k_proj(x)
                 v = self.v_proj(x)
-                if self.transpose_for_score:
-                    q = self.transpose_for_scores(q)
-                    k = self.transpose_for_scores(k)
-                    v = self.transpose_for_scores(v)
+                q = self.transpose_for_scores(q)
+                k = self.transpose_for_scores(k)
+                v = self.transpose_for_scores(v)
                 scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim**0.5)
                 attention = self.softmax(scores)
                 weighted = torch.matmul(attention, v)
-                return weighted
+                weighted = weighted.permute(0, 2, 1, 3).contiguous()
+                weighted = weighted.reshape(
+                    weighted.size()[:-2] + (self.all_head_size,)
+                )
+                return self.dense(weighted)
 
-        for annotate_matmul in [False, True]:
+        for annotate_matmul in [True, False]:
             mod = SelfAttnLikeModule(
                 input_dim=64 * 16,
-                transpose_for_score=True,
                 num_attention_heads=16,
                 attention_head_size=64,
             ).eval()
@@ -4657,12 +4738,17 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
             def matcher_check_fn():
                 self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 4
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
                     3 if annotate_matmul and not TEST_ACL else 0,
                 )
+                if IS_X86:  # Some issues on ARM
+                    self.assertEqual(
+                        counters["inductor"]["quant_lift_up_count"],
+                        4 if annotate_matmul and not TEST_ACL else 1,
+                    )
 
             quantizer = X86InductorQuantizer()
             quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())

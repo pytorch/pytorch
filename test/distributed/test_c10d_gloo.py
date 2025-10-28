@@ -25,6 +25,7 @@ if not c10d.is_available() or not c10d.is_gloo_available():
 
 import test_c10d_common
 from test_c10d_common import (
+    FFTModel,
     gpus_for_rank,
     LOOPBACK,
     ModuleForDdpCommHook,
@@ -134,6 +135,32 @@ def simple_reduce_tests(rank, world_size):
             ),
         )
 
+    # Extend tests for cfloat dtype
+    tests.extend(
+        (
+            (
+                c10d.ReduceOp.SUM,
+                torch.tensor([complex(rank + 1.0, rank + 1.0)], dtype=torch.cfloat),
+                torch.tensor(
+                    [
+                        complex(
+                            world_size * (world_size + 1) / 2,
+                            world_size * (world_size + 1) / 2,
+                        )
+                    ],
+                    dtype=torch.cfloat,
+                ),
+            ),
+            (
+                c10d.ReduceOp.AVG,
+                torch.tensor([complex(rank + 1.0, rank + 1.0)], dtype=torch.cfloat),
+                torch.tensor(
+                    [complex(float((world_size + 1) / 2), float((world_size + 1) / 2))],
+                    dtype=torch.cfloat,
+                ),
+            ),
+        )
+    )
     return tests
 
 
@@ -372,6 +399,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     torch.tensor([i * num + j], dtype=torch.float32), output[1]
                 )
+
+            # Run with 1 input tensor of cfloat dtype
+            x = fn(torch.tensor([complex(self.rank, self.rank)], dtype=torch.cfloat))
+            output = broadcast([x], i, 0)
+            self.assertEqual(
+                torch.tensor([complex(i, i)], dtype=torch.cfloat), output[0]
+            )
 
         # Test overloaded convenience function
         x = torch.tensor([self.rank + 1.0])
@@ -1425,7 +1459,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = pg = self._create_process_group_gloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts()
         )
 
@@ -1604,6 +1638,22 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         torch.cuda.current_stream().synchronize()
 
         work.wait()
+
+    @requires_gloo()
+    def test_send_recv_complex(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        # Generate the same random tensor
+        torch.manual_seed(0)
+        send_tensor = torch.rand(10, 10, dtype=torch.cfloat)
+        if self.rank == 0:
+            pg.send([send_tensor], 1, 0).wait()
+        if self.rank == 1:
+            recv_tensor = torch.rand(10, 10, dtype=torch.cfloat)
+            pg.recv([recv_tensor], 0, 0).wait()
+            self.assertEqual(send_tensor, recv_tensor)
 
 
 class DistributedDataParallelTest(
@@ -2270,6 +2320,24 @@ class DistributedDataParallelTest(
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
+    @requires_gloo()
+    def test_ddp_complex_params(self):
+        process_group = self._get_process_group()
+        N, C, H, W = 1, 16, 64, 64
+        ddp_model = DistributedDataParallel(
+            FFTModel(hin=H, win=W, n_features=C),
+            process_group=process_group,
+        )
+        optimizer = torch.optim.Adam(ddp_model.parameters(), lr=0.001)
+
+        inp = torch.ones((N, C, H, W), dtype=torch.float32)
+
+        # train step
+        out = ddp_model(inp)
+        loss = torch.sum(out)
+        loss.backward()
+        optimizer.step()
+
 
 class ReducerModule(nn.Module):
     def __init__(self) -> None:
@@ -2449,7 +2517,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.9")
+        self.assertEqual(ver, "2.10")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]

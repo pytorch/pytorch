@@ -61,7 +61,7 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
     def cpp_scratch(
         self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
     ) -> Optional[tuple[list[str], str]]:
-        return None
+        return [f"void *global_scratch_{idx} = 0;"], f"global_scratch_{idx}"
 
 
 register_device_op_overrides("xpu", XPUDeviceOpOverrides())

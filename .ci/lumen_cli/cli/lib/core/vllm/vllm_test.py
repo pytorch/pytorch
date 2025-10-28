@@ -11,7 +11,7 @@ from typing import Any
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
-from cli.lib.common.path_helper import copy, remove_dir
+from cli.lib.common.path_helper import copy, get_path, remove_dir
 from cli.lib.common.pip_helper import (
     pip_install_first_match,
     pip_install_packages,
@@ -43,6 +43,10 @@ class VllmTestParameters:
 
     torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
 
+    cleaning_script: Path = env_path_field(
+        "cleaning_script", ".github/ci_configs/vllm/use_existing_torch.py"
+    )
+
     def __post_init__(self):
         if not self.torch_whls_path.exists():
             raise ValueError("missing torch_whls_path")
@@ -60,6 +64,9 @@ class VllmTestRunner(BaseRunner):
         self.work_directory = "vllm"
         self.test_plan = ""
         self.test_type = TestInpuType.UNKNOWN
+
+        self.shard_id = args.shard_id
+        self.num_shards = args.num_shards
 
         if args.test_plan:
             self.test_plan = args.test_plan
@@ -89,11 +96,13 @@ class VllmTestRunner(BaseRunner):
         self._set_envs(params)
 
         clone_vllm(dst=self.work_directory)
+        self.cp_torch_cleaning_script(params)
         with working_directory(self.work_directory):
             remove_dir(Path("vllm"))
             self._install_wheels(params)
             self._install_dependencies()
         # verify the torches are not overridden by test dependencies
+
         check_versions()
 
     def run(self):
@@ -101,11 +110,31 @@ class VllmTestRunner(BaseRunner):
         main function to run vllm test
         """
         self.prepare()
-        with working_directory(self.work_directory):
-            if self.test_type == TestInpuType.TEST_PLAN:
-                run_test_plan(self.test_plan, "vllm", sample_vllm_test_library())
-            else:
-                raise ValueError(f"Unknown test type {self.test_type}")
+        try:
+            with working_directory(self.work_directory):
+                if self.test_type == TestInpuType.TEST_PLAN:
+                    if self.num_shards > 1:
+                        run_test_plan(
+                            self.test_plan,
+                            "vllm",
+                            sample_vllm_test_library(),
+                            self.shard_id,
+                            self.num_shards,
+                        )
+                    else:
+                        run_test_plan(
+                            self.test_plan, "vllm", sample_vllm_test_library()
+                        )
+                else:
+                    raise ValueError(f"Unknown test type {self.test_type}")
+        finally:
+            # double check the torches are not overridden by other packages
+            check_versions()
+
+    def cp_torch_cleaning_script(self, params: VllmTestParameters):
+        script = get_path(params.cleaning_script, resolve=True)
+        vllm_script = Path(f"./{self.work_directory}/use_existing_torch.py")
+        copy(script, vllm_script)
 
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
@@ -208,6 +237,8 @@ def preprocess_test_in(
     target_path = Path(target_file)
     lines = target_path.read_text().splitlines()
 
+    pkgs_to_add = []
+
     # Remove lines starting with the package names (==, @, >=) — case-insensitive
     pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
     kept_lines = [line for line in lines if not pattern.match(line)]
@@ -224,7 +255,11 @@ def preprocess_test_in(
     ]
 
     # Write back: header_lines + blank + kept_lines
-    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    out_lines = header_lines + [""] + kept_lines
+    if pkgs_to_add:
+        out_lines += [""] + pkgs_to_add
+
+    out = "\n".join(out_lines) + "\n"
     target_path.write_text(out)
     logger.info("[INFO] Updated %s", target_file)
 

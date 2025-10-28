@@ -24,12 +24,16 @@ These schema definitions enable the DTensor system to:
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
+from torch._C import (
+    _DTensor_OpSchema_post_init,
+    _DTensor_OpSchema_recompute_comparison_key,
+)
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -201,7 +205,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.mesh_shape
-        return f"[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"OpStragety[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -312,7 +316,7 @@ class OpSchema:
     order preserved). It is mainly used by the DTensor's dispatching logic to perform various
     actions (i.e. sharding propagation, caching sharding decisions, redistribute, etc.)
 
-    NOTE: this should be used as a read only data class
+    NOTE: this must be used as a read only data class
     TODO: make this a frozen dataclass
 
     Args:
@@ -328,6 +332,10 @@ class OpSchema:
     kwargs_schema: KwargsType
 
     schema_info: Optional[RuntimeSchemaInfo] = None
+
+    _comparison_key: Optional[tuple[object, ...]] = None
+
+    has_symints: bool = field(init=False)
 
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:
@@ -365,35 +373,30 @@ class OpSchema:
 
     def __str__(self) -> str:
         args_schema: list[str] = []
-        mesh_shape = None
+        device_mesh = None
+
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
                 args_schema.append(str(arg))
-                mesh_shape = arg.mesh.shape
+                device_mesh = arg.mesh
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
-                mesh_shape = arg.mesh_shape
+                device_mesh = arg.mesh
             elif isinstance(arg, TupleStrategy):
                 first_op_strategy = arg.children[0]
                 assert isinstance(first_op_strategy, OpStrategy)
-                mesh_shape = first_op_strategy.mesh_shape
+                device_mesh = first_op_strategy.mesh
                 args_schema.append(str(arg))
             else:
                 args_schema.append(str(arg))
-        return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
+
+        return f"{self.op}({', '.join(args_schema)}) on {device_mesh})"
 
     def __post_init__(self) -> None:
-        has_symints = False
-        for a in self.args_schema:
-            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
-                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
-                    has_symints = True
-                    break
-        self.has_symints = has_symints
+        _DTensor_OpSchema_post_init(self)
 
-    def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
-        arg = self.args_schema[arg_idx]
+    def arg_type_tensor_or_tensor_list_like(self, arg: object) -> bool:
         is_tensor = isinstance(arg, DTensorSpec)
         if is_tensor:
             return True
@@ -475,32 +478,13 @@ class OpSchema:
         return "out" in self.op._schema.overload_name
 
     def is_view_op(self) -> bool:
-        return any(
-            a.alias_info is not None and not a.alias_info.is_write
-            for a in self.op._schema.arguments
-        )
+        return self.op._schema._is_view_op()
+
+    def _recompute_comparison_key(self) -> None:
+        _DTensor_OpSchema_recompute_comparison_key(self)
 
     def __hash__(self) -> int:
-        # Only hash args and kwargs that op indicates to hash
-        if not self.schema_info:
-            static_argnum = len(self.args_schema)
-            static_kwargkey = None
-        else:
-            static_argnum = self.schema_info.static_argnum
-            static_kwargkey = self.schema_info.static_kwargkey
-
-        args_to_hash = tuple(
-            tuple(e) if isinstance(e, list) else e
-            for i, e in enumerate(self.args_schema)
-            if self.arg_type_tensor_or_tensor_list_like(i) or i >= static_argnum
-        )
-        if static_kwargkey is not None:
-            kwargs_to_hash = tuple(
-                self.kwargs_schema.get(k, None) for k in static_kwargkey
-            )
-            return hash((self.op, args_to_hash, kwargs_to_hash))
-        else:
-            return hash((self.op, args_to_hash))
+        return hash(self._comparison_key)
 
     def __eq__(self, other: object) -> bool:
         # early return checks
@@ -513,31 +497,7 @@ class OpSchema:
         if len(self.args_schema) != len(other.args_schema):
             return False
 
-        # compare each element and early return if any of them is different
-        if not self.schema_info:
-            static_argnum = len(self.args_schema)
-            static_kwargkey = None
-        else:
-            static_argnum = self.schema_info.static_argnum
-            static_kwargkey = self.schema_info.static_kwargkey
-
-        for i, (self_arg, other_arg) in enumerate(
-            zip(self.args_schema, other.args_schema)
-        ):
-            if isinstance(self_arg, DTensorSpec) and self_arg != other_arg:
-                return False
-            elif i >= static_argnum and self_arg != other_arg:
-                return False
-
-        # check kwarg equality when there's a static kwarg key
-        if static_kwargkey:
-            for key in static_kwargkey:
-                if self.kwargs_schema.get(key, None) != other.kwargs_schema.get(
-                    key, None
-                ):
-                    return False
-
-        return True
+        return self._comparison_key == other._comparison_key
 
     def gen_fake_args(self) -> ArgsType:
         """
@@ -584,6 +544,7 @@ class OpSchema:
                 new_arg_schema.append(arg)
         self.args_schema = tuple(new_arg_schema)
         self.kwargs_schema = origin_schema.kwargs_schema
+        self._recompute_comparison_key()
 
 
 @dataclass

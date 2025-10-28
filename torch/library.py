@@ -6,17 +6,8 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Sequence
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -104,7 +95,7 @@ class Library:
                 " is a reserved namespace. Please try creating a library with another name.",
             )
 
-        frame = traceback.extract_stack(limit=3)[0]
+        frame = traceback.extract_stack(limit=2)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m: Optional[Any] = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno
@@ -251,6 +242,7 @@ class Library:
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
+        # pyrefly: ignore  # bad-argument-type
         assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
 
         if isinstance(op_name, str):
@@ -562,7 +554,7 @@ def _(lib: Library, schema, alias_analysis=""):
 def impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
 ) -> Callable[[Callable[..., object]], None]: ...
@@ -652,6 +644,7 @@ def impl(
         >>> y2 = torch.sin(x) + 1
         >>> assert torch.allclose(y1, y2)
     """
+
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
@@ -674,7 +667,7 @@ if not TYPE_CHECKING:
 def _impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
     disable_dynamo: bool = False,

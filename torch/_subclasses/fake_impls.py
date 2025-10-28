@@ -5,8 +5,9 @@ import itertools
 import math
 import operator
 import sys
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._custom_op
@@ -16,11 +17,11 @@ from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
     canonicalize_dim,
-    contiguous_for_memory_format_or_false,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
     is_contiguous,
+    is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_float_dtype,
     is_integer_dtype,
@@ -157,8 +158,7 @@ def _is_op_registered_to_fake_rule(op):
 
 
 def _deregister_op_impl(op):
-    if op in op_implementations_dict:
-        del op_implementations_dict[op]
+    op_implementations_dict.pop(op, None)
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
@@ -593,6 +593,21 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     raise ValueError(msg)
 
 
+@register_op_impl(aten._reshape_copy.default)
+def _reshape_copy(fake_mode, func, a, *shape):
+    if a.is_sparse or a.is_mkldnn:
+        return NotImplemented
+
+    shape = utils.infer_size(*shape, a.numel())
+    if is_contiguous_or_false(a):
+        view = _view_meta(fake_mode, func, a, *shape)
+        return view.clone(memory_format=torch.contiguous_format)
+    else:
+        return _view_meta(
+            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+        )
+
+
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(fake_mode, func, a, *shape):
@@ -807,7 +822,8 @@ def slice_forward(
     # create unbacked if case unknown
     if new_size is None:
         new_size = shape_env.create_unbacked_symint()
-        torch._check_is_size(new_size, max=sizes[dim])
+        torch._check(new_size >= 0)
+        torch._check(new_size <= sizes[dim])
 
     # stride
     new_stride = strides[dim] * step
@@ -1104,8 +1120,6 @@ def conv(fake_mode, func, *args, **kwargs):
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
-        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
-            mem_fmt = None
         else:
             if func is aten.convolution.default:
                 conv_backend = torch._C._select_conv_backend(**kwargs)
@@ -1122,15 +1136,40 @@ def conv(fake_mode, func, *args, **kwargs):
                     groups=kwargs["groups"],
                     bias_sizes=kwargs["bias_sizes"],
                 )
+            # Expand 1d -> 2d.
+            # Note: Avoid expanding before calling _select_conv_backend,
+            # as the function handles 2D expansion internally.
+            if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+                # Note: Using input.to(memory_format=contiguous) does not work.
+                kwargs["input"] = kwargs["input"].contiguous().unsqueeze(2)
+                kwargs["weight"] = kwargs["weight"].unsqueeze(2)
+                if len(kwargs["stride"]) == 1:
+                    kwargs["stride"].insert(0, 1)
+                    kwargs["padding"].insert(0, 0)
+                    kwargs["dilation"].insert(0, 1)
+                    kwargs["output_padding"].insert(0, 0)
             mem_fmt = torch._C._conv_determine_backend_memory_format(
                 kwargs["input"], kwargs["weight"], conv_backend
             )
+            # revert 2d -> 1d
+            if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+                kwargs["input"] = kwargs["input"].squeeze(2)
+                kwargs["weight"] = kwargs["weight"].squeeze(2)
+                if len(kwargs["stride"]) == 2:
+                    kwargs["stride"].pop(0)
+                    kwargs["padding"].pop(0)
+                    kwargs["dilation"].pop(0)
+                    kwargs["output_padding"].pop(0)
 
     def convert(t, mem_fmt):
         if t is None:
             return t
         if mem_fmt is not None:
-            t = t.to(memory_format=mem_fmt)
+            # channels last only support 4d, try to expand dim then convert it back later.
+            if t.dim() == 3 and mem_fmt == torch.channels_last:
+                t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
+            else:
+                t = t.to(memory_format=mem_fmt)
         return FakeTensor(fake_mode, t, device)
 
     with in_kernel_invocation_manager(fake_mode):
@@ -1297,7 +1336,7 @@ def make_fast_binary_impl(
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and not op.device.type == "cpu":
+            if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
             # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:
@@ -1339,13 +1378,13 @@ def make_fast_binary_impl(
                     continue
                 definitely_contiguous = (
                     definitely_contiguous
-                    and contiguous_for_memory_format_or_false(
+                    and is_contiguous_for_memory_format_or_false(
                         op, memory_format=torch.contiguous_format
                     )
                 )
                 definitely_channels_last = (
                     definitely_channels_last
-                    and contiguous_for_memory_format_or_false(
+                    and is_contiguous_for_memory_format_or_false(
                         op, memory_format=torch.channels_last
                     )
                 )

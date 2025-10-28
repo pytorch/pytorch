@@ -22,9 +22,19 @@ def get_cuda_arch() -> Optional[str]:
             major, minor = torch.cuda.get_device_capability(0)
             return str(major * 10 + minor)
         return str(cuda_arch)
-    except Exception as e:
-        log.error("Error getting cuda arch: %s", e)
+    except Exception:
+        log.exception("Error getting cuda arch")
         return None
+
+
+@clear_on_fresh_cache
+@functools.lru_cache(1)
+def is_datacenter_blackwell_arch() -> bool:
+    arch = get_cuda_arch()
+    if arch is None:
+        return False
+    arch_number = int(arch)
+    return arch_number >= 100 and arch_number < 110
 
 
 @clear_on_fresh_cache
@@ -35,8 +45,8 @@ def get_cuda_version() -> Optional[str]:
         if cuda_version is None:
             cuda_version = torch.version.cuda
         return cuda_version
-    except Exception as e:
-        log.error("Error getting cuda version: %s", e)
+    except Exception:
+        log.exception("Error getting cuda version")
         return None
 
 

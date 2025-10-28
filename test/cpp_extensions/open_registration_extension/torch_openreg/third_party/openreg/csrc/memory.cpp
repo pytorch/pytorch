@@ -1,37 +1,18 @@
+#include "memory.h"
+
 #include <include/openreg.h>
 
-#include <sys/mman.h>
-#include <unistd.h>
-#include <cstdlib>
-#include <cstring>
 #include <map>
 #include <mutex>
 
-namespace openreg {
-namespace internal {
+namespace {
 
-class ScopedMemoryProtector {
- public:
-  ScopedMemoryProtector(const orPointerAttributes& info)
-      : m_info(info), m_protected(false) {
-    if (m_info.type == orMemoryType::orMemoryTypeDevice) {
-      if (mprotect(m_info.pointer, m_info.size, PROT_READ | PROT_WRITE) ==
-          0) {
-        m_protected = true;
-      }
-    }
-  }
-  ~ScopedMemoryProtector() {
-    if (m_protected) {
-      mprotect(m_info.pointer, m_info.size, PROT_NONE);
-    }
-  }
-  ScopedMemoryProtector(const ScopedMemoryProtector&) = delete;
-  ScopedMemoryProtector& operator=(const ScopedMemoryProtector&) = delete;
-
- private:
-  orPointerAttributes m_info;
-  bool m_protected;
+struct Block {
+  orMemoryType type = orMemoryType::orMemoryTypeUnmanaged;
+  int device = -1;
+  void* pointer = nullptr;
+  size_t size = 0;
+  int refcount{0};
 };
 
 class MemoryManager {
@@ -46,7 +27,7 @@ class MemoryManager {
       return orErrorUnknown;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    long page_size = sysconf(_SC_PAGESIZE);
+    long page_size = openreg::get_pagesize();
     size_t aligned_size = ((size - 1) / page_size + 1) * page_size;
     void* mem = nullptr;
     int current_device = -1;
@@ -54,26 +35,20 @@ class MemoryManager {
     if (type == orMemoryType::orMemoryTypeDevice) {
       orGetDevice(&current_device);
 
-      mem = mmap(
-          nullptr,
-          aligned_size,
-          PROT_READ | PROT_WRITE,
-          MAP_PRIVATE | MAP_ANONYMOUS,
-          -1,
-          0);
-      if (mem == MAP_FAILED)
+      mem = openreg::mmap(aligned_size);
+      if (mem == nullptr)
         return orErrorUnknown;
-      if (mprotect(mem, aligned_size, PROT_NONE) != 0) {
-        munmap(mem, aligned_size);
+      if (openreg::mprotect(mem, aligned_size, F_PROT_NONE) != 0) {
+        openreg::munmap(mem, aligned_size);
         return orErrorUnknown;
       }
     } else {
-      if (posix_memalign(&mem, page_size, aligned_size) != 0) {
+      if (openreg::alloc(&mem, page_size, aligned_size) != 0) {
         return orErrorUnknown;
       }
     }
 
-    m_registry[mem] = {type, current_device, mem, aligned_size};
+    m_registry[mem] = {type, current_device, mem, aligned_size, 0};
     *ptr = mem;
     return orSuccess;
   }
@@ -86,13 +61,15 @@ class MemoryManager {
     auto it = m_registry.find(ptr);
     if (it == m_registry.end())
       return orErrorUnknown;
+
     const auto& info = it->second;
     if (info.type == orMemoryType::orMemoryTypeDevice) {
-      mprotect(info.pointer, info.size, PROT_READ | PROT_WRITE);
-      munmap(info.pointer, info.size);
+      openreg::mprotect(info.pointer, info.size, F_PROT_READ | F_PROT_WRITE);
+      openreg::munmap(info.pointer, info.size);
     } else {
-      ::free(info.pointer);
+      openreg::free(info.pointer);
     }
+
     m_registry.erase(it);
     return orSuccess;
   }
@@ -104,36 +81,39 @@ class MemoryManager {
       orMemcpyKind kind) {
     if (!dst || !src || count == 0)
       return orErrorUnknown;
+
     std::lock_guard<std::mutex> lock(m_mutex);
-    orPointerAttributes dst_info = getPointerInfo(dst);
-    orPointerAttributes src_info = getPointerInfo(src);
+    Block* dst_info = getBlockInfoNoLock(dst);
+    Block* src_info = getBlockInfoNoLock(src);
+
     switch (kind) {
       case orMemcpyHostToDevice:
-        if (dst_info.type != orMemoryType::orMemoryTypeDevice ||
-            src_info.type == orMemoryType::orMemoryTypeDevice)
+        if ((!dst_info || dst_info->type != orMemoryType::orMemoryTypeDevice) ||
+            (src_info && src_info->type == orMemoryType::orMemoryTypeDevice))
           return orErrorUnknown;
         break;
       case orMemcpyDeviceToHost:
-        if (dst_info.type == orMemoryType::orMemoryTypeDevice ||
-            src_info.type != orMemoryType::orMemoryTypeDevice)
+        if ((dst_info && dst_info->type == orMemoryType::orMemoryTypeDevice) ||
+            (!src_info || src_info->type != orMemoryType::orMemoryTypeDevice))
           return orErrorUnknown;
         break;
       case orMemcpyDeviceToDevice:
-        if (dst_info.type != orMemoryType::orMemoryTypeDevice ||
-            src_info.type != orMemoryType::orMemoryTypeDevice)
+        if ((!dst_info || dst_info->type != orMemoryType::orMemoryTypeDevice) ||
+            (!src_info || src_info->type != orMemoryType::orMemoryTypeDevice))
           return orErrorUnknown;
         break;
       case orMemcpyHostToHost:
-        if (dst_info.type == orMemoryType::orMemoryTypeDevice ||
-            src_info.type == orMemoryType::orMemoryTypeDevice)
+        if ((dst_info && dst_info->type == orMemoryType::orMemoryTypeDevice) ||
+            (src_info && src_info->type == orMemoryType::orMemoryTypeDevice))
           return orErrorUnknown;
         break;
     }
-    {
-      ScopedMemoryProtector dst_protector(dst_info);
-      ScopedMemoryProtector src_protector(src_info);
-      ::memcpy(dst, src, count);
-    }
+
+    unprotectNoLock(dst_info);
+    unprotectNoLock(src_info);
+    ::memcpy(dst, src, count);
+    protectNoLock(dst_info);
+    protectNoLock(src_info);
 
     return orSuccess;
   }
@@ -145,17 +125,16 @@ class MemoryManager {
       return orErrorUnknown;
 
     std ::lock_guard<std::mutex> lock(m_mutex);
-    orPointerAttributes info = getPointerInfo(ptr);
+    Block* info = getBlockInfoNoLock(ptr);
 
-    attributes->type = info.type;
-    if (info.type == orMemoryType::orMemoryTypeUnmanaged) {
+    if (!info) {
+      attributes->type = orMemoryType::orMemoryTypeUnmanaged;
       attributes->device = -1;
       attributes->pointer = const_cast<void*>(ptr);
-      attributes->size = 0;
     } else {
-      attributes->device = info.device;
-      attributes->pointer = info.pointer;
-      attributes->size = info.size;
+      attributes->type = info->type;
+      attributes->device = info->device;
+      attributes->pointer = info->pointer;
     }
 
     return orSuccess;
@@ -163,65 +142,82 @@ class MemoryManager {
 
   orError_t unprotect(void* ptr) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    orPointerAttributes info = getPointerInfo(ptr);
-    if (info.type != orMemoryType::orMemoryTypeDevice) {
-      return orErrorUnknown;
-    }
-    if (mprotect(info.pointer, info.size, PROT_READ | PROT_WRITE) != 0) {
-      return orErrorUnknown;
-    }
-    return orSuccess;
+    return unprotectNoLock(getBlockInfoNoLock(ptr));
   }
 
   orError_t protect(void* ptr) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    orPointerAttributes info = getPointerInfo(ptr);
-    if (info.type != orMemoryType::orMemoryTypeDevice) {
-      return orErrorUnknown;
-    }
-    if (mprotect(info.pointer, info.size, PROT_NONE) != 0) {
-      return orErrorUnknown;
-    }
-    return orSuccess;
+    return protectNoLock(getBlockInfoNoLock(ptr));
   }
 
  private:
   MemoryManager() = default;
-  orPointerAttributes getPointerInfo(const void* ptr) {
-    auto it = m_registry.upper_bound(const_cast<void*>(ptr));
-    if (it == m_registry.begin())
-      return {};
-    --it;
-    const char* p_char = static_cast<const char*>(ptr);
-    const char* base_char = static_cast<const char*>(it->first);
-    if (p_char >= base_char && p_char < (base_char + it->second.size)) {
-      return it->second;
+
+  orError_t unprotectNoLock(Block* info) {
+    if (info && info->type == orMemoryType::orMemoryTypeDevice) {
+      if (info->refcount == 0) {
+        if (openreg::mprotect(
+                info->pointer, info->size, F_PROT_READ | F_PROT_WRITE) != 0) {
+          return orErrorUnknown;
+        }
+      }
+
+      info->refcount++;
     }
-    return {};
+
+    return orSuccess;
   }
-  std::map<void*, orPointerAttributes> m_registry;
+
+  orError_t protectNoLock(Block* info) {
+    if (info && info->type == orMemoryType::orMemoryTypeDevice) {
+      if (info->refcount == 1) {
+        if (openreg::mprotect(info->pointer, info->size, F_PROT_NONE) != 0) {
+          return orErrorUnknown;
+        }
+      }
+
+      info->refcount--;
+    }
+
+    return orSuccess;
+  }
+
+  Block* getBlockInfoNoLock(const void* ptr) {
+    auto it = m_registry.upper_bound(const_cast<void*>(ptr));
+    if (it != m_registry.begin()) {
+      --it;
+      const char* p_char = static_cast<const char*>(ptr);
+      const char* base_char = static_cast<const char*>(it->first);
+      if (p_char >= base_char && p_char < (base_char + it->second.size)) {
+        return &it->second;
+      }
+    }
+
+    return nullptr;
+  }
+
+  std::map<void*, Block> m_registry;
   std::mutex m_mutex;
 };
 
-} // namespace internal
-} // namespace openreg
+} // namespace
 
 orError_t orMalloc(void** devPtr, size_t size) {
-  return openreg::internal::MemoryManager::getInstance().allocate(
+  return MemoryManager::getInstance().allocate(
       devPtr, size, orMemoryType::orMemoryTypeDevice);
 }
 
 orError_t orFree(void* devPtr) {
-  return openreg::internal::MemoryManager::getInstance().free(devPtr);
+  return MemoryManager::getInstance().free(devPtr);
 }
 
 orError_t orMallocHost(void** hostPtr, size_t size) {
-  return openreg::internal::MemoryManager::getInstance().allocate(
+  return MemoryManager::getInstance().allocate(
       hostPtr, size, orMemoryType::orMemoryTypeHost);
 }
 
 orError_t orFreeHost(void* hostPtr) {
-  return openreg::internal::MemoryManager::getInstance().free(hostPtr);
+  return MemoryManager::getInstance().free(hostPtr);
 }
 
 orError_t orMemcpy(
@@ -229,21 +225,35 @@ orError_t orMemcpy(
     const void* src,
     size_t count,
     orMemcpyKind kind) {
-  return openreg::internal::MemoryManager::getInstance().memcpy(
-      dst, src, count, kind);
+  return MemoryManager::getInstance().memcpy(dst, src, count, kind);
+}
+
+orError_t orMemcpyAsync(
+    void* dst,
+    const void* src,
+    size_t count,
+    orMemcpyKind kind,
+    orStream_t stream) {
+  if (!stream) {
+    return orErrorUnknown;
+  }
+
+  auto& mm = MemoryManager::getInstance();
+
+  return orLaunchKernel(
+      stream, &MemoryManager::memcpy, &mm, dst, src, count, kind);
 }
 
 orError_t orPointerGetAttributes(
     orPointerAttributes* attributes,
     const void* ptr) {
-  return openreg::internal::MemoryManager::getInstance().getPointerAttributes(
-      attributes, ptr);
+  return MemoryManager::getInstance().getPointerAttributes(attributes, ptr);
 }
 
 orError_t orMemoryUnprotect(void* devPtr) {
-  return openreg::internal::MemoryManager::getInstance().unprotect(devPtr);
+  return MemoryManager::getInstance().unprotect(devPtr);
 }
 
 orError_t orMemoryProtect(void* devPtr) {
-  return openreg::internal::MemoryManager::getInstance().protect(devPtr);
+  return MemoryManager::getInstance().protect(devPtr);
 }

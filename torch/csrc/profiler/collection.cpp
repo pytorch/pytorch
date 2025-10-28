@@ -172,7 +172,7 @@ bool InputOutputEncoder::isSupportedScalarList(
   return true;
 }
 
-// This function returns a lambda which is is a custom-iterator-like getter.
+// This function returns a lambda which is a custom-iterator-like getter.
 // Each invocation of the lambda returns input values for one op.
 //
 // io_type is used to filter the ivalues between 'Shapes' and 'Concrete Args'.
@@ -397,7 +397,9 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   event->start_time_ = c10::getApproximateTime();
   event->allow_tf32_cublas_ =
-      at::globalContext().float32Precision("cuda", "matmul") == "tf32";
+      at::globalContext().float32Precision(
+          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+      at::Float32Precision::TF32;
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
@@ -613,6 +615,7 @@ std::string Result::name() const {
       ATTRIBUTE(OutOfMemory, std::string("[OutOfMemory]")),
       ATTRIBUTE(PyCall, toString(e)),
       ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
+      ATTRIBUTE(PythonGC, std::string("Python GC")),
       [](const auto& e) -> std::string { return e.name_; }));
 }
 
@@ -631,6 +634,7 @@ libkineto::ActivityType Result::kinetoType() const {
       ATTRIBUTE(OutOfMemory, libkineto::ActivityType::CPU_INSTANT_EVENT),
       ATTRIBUTE(PyCall, libkineto::ActivityType::PYTHON_FUNCTION),
       ATTRIBUTE(PyCCall, libkineto::ActivityType::PYTHON_FUNCTION),
+      ATTRIBUTE(PythonGC, libkineto::ActivityType::PYTHON_FUNCTION),
       ATTRIBUTE(Kineto, e.activity_type_)));
 }
 
@@ -650,6 +654,7 @@ int64_t Result::endTimeNS() const {
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_ns_),
+      ATTRIBUTE(PythonGC, start_time_ns_ + e.duration_ns_),
       [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
 
   // In rare cases we're willing to tolerate ops which are missing an end time
@@ -700,11 +705,18 @@ RecordQueue::RecordQueue(
       activities_{std::move(activities)} {
   if (tracePython()) {
     python_tracer_ = python_tracer::PythonTracerBase::make(this);
+    if (getPythonGcEvents()) {
+      python_tracer_->register_gc_callback();
+    }
   }
 }
 
 bool RecordQueue::tracePython() const {
   return config_.with_stack && activities_.count(ActivityType::CPU);
+}
+
+bool RecordQueue::getPythonGcEvents() const {
+  return config_.experimental_config.record_python_gc_info;
 }
 
 ThreadLocalSubqueue* RecordQueue::getSubqueue() {
@@ -951,8 +963,9 @@ class TransferEvents {
  public:
   TransferEvents(
       std::vector<std::shared_ptr<Result>>& results,
-      trace_ptr_t& trace)
-      : results_{results} {
+      trace_ptr_t& trace,
+      const ProfilerConfig& config)
+      : results_{results}, config_{config} {
     auto* trace_activities_ptr = trace->get()->activities();
     TORCH_INTERNAL_ASSERT(trace_activities_ptr != nullptr);
     trace_activities_ = *trace_activities_ptr;
@@ -1082,13 +1095,25 @@ class TransferEvents {
   void extractEventsFromTrace() {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
-      const auto* linked_activity = activity->linkedActivity();
-      if (e && linked_activity) {
-        e->visit(c10::overloaded(
-            [&](ExtraFields<EventType::Kineto>& i) {
-              i.linked_activity_ = toResult(linked_activity);
-            },
-            [](auto&) { TORCH_INTERNAL_ASSERT(false); }));
+      if (e) {
+        if (config_.experimental_config.expose_kineto_event_metadata) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::TorchOp>& i) {
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [](auto&) { return; }));
+        }
+        const auto* linked_activity = activity->linkedActivity();
+        if (linked_activity) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.linked_activity_ = toResult(linked_activity);
+              },
+              [](auto&) { TORCH_INTERNAL_ASSERT(false); }));
+        }
       }
     }
   }
@@ -1165,6 +1190,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
+  const ProfilerConfig& config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1172,7 +1198,7 @@ class TransferEvents {
 class TransferEvents {
  public:
   template <class... Args>
-  TransferEvents(Args&&...) {}
+  TransferEvents(Args&&... /*unused*/) {}
 };
 #endif
 
@@ -1191,7 +1217,7 @@ trace_ptr_t addKinetoEvents(
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
   TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
-  TransferEvents transfer{results, trace};
+  TransferEvents transfer{results, trace, config};
   return trace;
 }
 
@@ -1487,6 +1513,31 @@ RecordQueue::getRecords(
     }
     queue.allocations_.clear();
     materialize(queue.ooms_);
+
+    std::optional<int64_t> pending_start;
+    for (auto& e : queue.pythongc_) {
+      if (e.first.find("start") != std::string::npos) {
+        pending_start = e.second;
+      } else if (e.first.find("stop") != std::string::npos) {
+        if (pending_start.has_value()) {
+          out.emplace_back(Result::create(
+              /*start_time_ns_=*/converter(pending_start.value()),
+              /*start_tid_=*/queue.tid(),
+              /*kineto_info_=*/queue.kineto_info(),
+              /*extra_fields_=*/
+              // NOLINTNEXTLINE
+              ExtraFields<EventType::PythonGC>{
+                  e.first,
+                  converter(e.second) - converter(pending_start.value())}));
+          pending_start.reset();
+        } else {
+          // Handle the case where "stop" is found without a matching "start"
+          // For example, you might want to log a warning or take other action:
+          LOG(WARNING) << R"("stop" event found without a matching "start": )"
+                       << e.first;
+        }
+      }
+    }
 
     for (auto& i : queue.py_calls_) {
       python_enters.push_back(

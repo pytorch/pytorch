@@ -13,11 +13,12 @@ exclude_patterns = [
     '**/fb/**',
     'functorch/docs/**',
     'functorch/examples/**',
-    'functorch/notebooks/**',
+    'functorch/docs/source/tutorials/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
+    'test/test_torchfuzz_repros.py',
     # CPython tests
     'test/dynamo/cpython/**',
     # Tests from the NumPy test suite
@@ -27,6 +28,7 @@ exclude_patterns = [
     'torch/lib/**',
     'venv/**',
     '**/*.pyi',
+    "tools/experimental/torchfuzz/**",
     'tools/test/test_selective_build.py',
 ]
 command = [
@@ -49,7 +51,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.14.0',
     'pyflakes==3.4.0',
-    'torchfix==0.4.0 ; python_version >= "3.9" and python_version < "3.13"',
+    'torchfix==0.4.0 ; python_version >= "3.10" and python_version < "3.13"',
 ]
 
 
@@ -123,6 +125,7 @@ is_formatter = true
 code = 'MYPY'
 include_patterns = [
     'setup.py',
+    'functorch/dim/**/*.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -132,7 +135,7 @@ include_patterns = [
     'test/test_complex.py',
     'test/test_datapipe.py',
     'test/test_futures.py',
-    # 'test/test_numpy_interop.py',
+    'test/test_numpy_interop.py',
     'test/test_torch.py',
     'test/test_type_hints.py',
     'test/test_type_info.py',
@@ -152,7 +155,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
+    'numpy==1.26.4 ; python_version >= "3.10" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
     'mypy==1.16.0',
@@ -195,6 +198,7 @@ exclude_patterns = [
     'tools/test/gen_operators_yaml_test.py',
     'tools/test/gen_oplist_test.py',
     'tools/test/test_selective_build.py',
+    'tools/experimental/torchfuzz/**',
 ]
 command = [
     'python3',
@@ -203,6 +207,46 @@ command = [
     '--code=MYPYSTRICT',
     '--',
     '@{{PATHSFILE}}'
+]
+
+
+[[linter]]
+code = 'PYREFLY'
+include_patterns = [
+    'torch/**/*.py',
+    'torch/**/*.pyi',
+    'torchgen/**/*.py',
+    'torchgen/**/*.pyi',
+    'functorch/**/*.py',
+    'functorch/**/*.pyi',
+]
+exclude_patterns = []
+command = [
+    'python3',
+    'tools/linter/adapters/pyrefly_linter.py',
+    '--config=pyrefly.toml',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'numpy==2.1.0 ; python_version >= "3.12"',
+    'expecttest==0.3.0',
+    'pyrefly==0.36.2',
+    'sympy==1.13.3',
+    'types-requests==2.27.25',
+    'types-pyyaml==6.0.2',
+    'types-tabulate==0.8.8',
+    'types-protobuf==5.29.1.20250403',
+    'types-setuptools==79.0.0.20250422',
+    'types-jinja2==2.11.9',
+    'types-colorama==0.4.6',
+    'filelock==3.18.0',
+    'junitparser==2.1.1',
+    'rich==14.1.0',
+    'optree==0.17.0',
+    'types-openpyxl==3.1.5.20250919',
+    'types-python-dateutil==2.9.0.20251008'
 ]
 
 [[linter]]
@@ -583,7 +627,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=#include <pybind11\/(^|[^(gil\.h)])',
+    '--pattern=#include <pybind11\/(^|[^(gil_simple\.h)])',
     '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
     '--linter-name=PYBIND11_INCLUDE',
     '--match-first-only',
@@ -789,8 +833,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=cudaSetDevice(',
-    '--pattern=cudaGetDevice(',
+    '--pattern=(cudaSetDevice|cudaGetDevice)\\(',
     '--linter-name=RAWCUDADEVICE',
     '--error-name=raw CUDA API usage',
     """--error-description=\
@@ -964,7 +1007,6 @@ exclude_patterns = [
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
     'test/fx/**',  # should be run through test/test_fx.py
-    'test/bottleneck_test/**',  # excluded by test/run_test.py
     'test/package/**',  # excluded by test/run_test.py
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
@@ -1095,11 +1137,8 @@ command = [
 [[linter]]
 code = 'WORKFLOWSYNC'
 include_patterns = [
-    '.github/workflows/pull.yml',
-    '.github/workflows/trunk.yml',
-    '.github/workflows/periodic.yml',
-    '.github/workflows/mac-mps.yml',
-    '.github/workflows/slow.yml',
+    '.github/workflows/*.yml',
+    '.github/workflows/*.yaml',
 ]
 command = [
     'python3',
@@ -1259,6 +1298,7 @@ exclude_patterns = [
     'test/test_masked.py',
     'test/test_maskedtensor.py',
     'test/test_matmul_cuda.py',
+    'test/test_scaled_matmul_cuda.py',
     'test/test_meta.py',
     'test/test_metal.py',
     'test/test_mkl_verbose.py',
@@ -1410,8 +1450,6 @@ exclude_patterns = [
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/__init__.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/timer_interface.py',
-    'torch/utils/bottleneck/__init__.py',
-    'torch/utils/bottleneck/__main__.py',
     'torch/utils/bundled_inputs.py',
     'torch/utils/checkpoint.py',
     'torch/utils/collect_env.py',
@@ -1454,7 +1492,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'usort==1.0.8.post1',
     'isort==6.0.1',
-    'ruff==0.12.9',  # sync with RUFF
+    'ruff==0.13.1',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1568,10 +1606,10 @@ include_patterns = [
 exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
-    'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'test/dynamo/cpython/**',
+    'test/test_torchfuzz_repros.py',
     'scripts/**',
     'third_party/**',
     'fb/**',
@@ -1589,7 +1627,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.12.9',  # sync with PYFMT
+    'ruff==0.13.1',  # sync with PYFMT
 ]
 is_formatter = true
 

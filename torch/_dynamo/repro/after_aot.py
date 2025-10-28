@@ -17,6 +17,8 @@ This is primarily used by PyTorch developers and researchers to debug issues in
 the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 """
 
+from __future__ import annotations
+
 import argparse
 import copy
 import functools
@@ -28,10 +30,9 @@ import subprocess
 import sys
 import textwrap
 import uuid
-from collections.abc import Sequence
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
 
@@ -76,7 +77,6 @@ from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch._inductor.cpp_builder import normalize_path_separator
-from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -90,7 +90,10 @@ from .. import config
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
+    from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
 
 
@@ -106,9 +109,9 @@ use_buck = is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallable",
+    unconfigured_compiler_fn: _CompileFxCallable,
     compiler_name: str,
-) -> "_CompileFxCallable":
+) -> _CompileFxCallable:
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -120,8 +123,8 @@ def wrap_compiler_debug(
     @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargs"],
+        example_inputs: Sequence[InputType],
+        **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
@@ -161,7 +164,7 @@ def wrap_compiler_debug(
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
         # recursively attempt to accuracy minify in that case!
         def deferred_for_real_inputs(
-            real_inputs: Sequence["InputType"], **_kwargs: object
+            real_inputs: Sequence[InputType], **_kwargs: object
         ) -> Any:
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
@@ -173,7 +176,7 @@ def wrap_compiler_debug(
             with config.patch(repro_after=None):
                 return inner_debug_fn(real_inputs)
 
-        def inner_debug_fn(real_inputs: Sequence["InputType"]) -> Any:
+        def inner_debug_fn(real_inputs: Sequence[InputType]) -> Any:
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
@@ -367,13 +370,16 @@ isolate_fails_code_str = None
 
         try:
             if isinstance(kernel, Autotuner):
+                # pyrefly: ignore [missing-attribute]
                 if isinstance(kernel.fn, Heuristics):
                     model_str += "ERROR: Repro will not work as intended, "
                     model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
                     break
 
                 config_strs = []
+                # pyrefly: ignore [missing-attribute]
                 for kernel_config in kernel.configs:
+                    # pyrefly: ignore [bad-argument-type]
                     config_strs.append(f"""triton.Config(
                             {str(kernel_config.kwargs)},
                             num_warps={kernel_config.num_warps},
@@ -391,8 +397,10 @@ isolate_fails_code_str = None
                 """).strip()
 
             model_str += "\n@triton.jit\n"
+            # pyrefly: ignore [missing-attribute]
             src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
             fn_name = (
+                # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
                 else kernel.fn._fn_name
@@ -406,7 +414,9 @@ isolate_fails_code_str = None
             model_str += "ERROR: Repro will not work as intended, "
             model_str += f"User defined triton kernel exception: {e}\n"
 
+    # pyrefly: ignore [unbound-name]
     if len(kernel_side_table.constant_args) > 0:
+        # pyrefly: ignore [unbound-name]
         model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
@@ -417,8 +427,10 @@ isolate_fails_code_str = None
     # Extract from graph placeholders and their corresponding arguments
     placeholder_targets = fx_placeholder_targets(gm)
     for placeholder, arg in zip(placeholder_targets, args):
+        # pyrefly: ignore [unbound-name]
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
+        # pyrefly: ignore [unbound-name]
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
@@ -428,16 +440,20 @@ isolate_fails_code_str = None
             writer.unsupported(placeholder, arg)
 
         # Extract symbolic variables from the same arguments
+        # pyrefly: ignore [unbound-name]
         if isinstance(arg, torch.SymInt):
             sym_name = str(arg.node)
             if arg.node.hint is not None:
                 used_syms[sym_name] = arg.node.hint
+        # pyrefly: ignore [unbound-name]
         elif isinstance(arg, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
             for dim in arg.shape:
+                # pyrefly: ignore [unbound-name]
                 if isinstance(dim, torch.SymInt) and dim.node.hint is not None:
                     used_syms[str(dim.node)] = dim.node.hint
             for stride in arg.stride():
+                # pyrefly: ignore [unbound-name]
                 if isinstance(stride, torch.SymInt) and stride.node.hint is not None:
                     used_syms[str(stride.node)] = stride.node.hint
 
@@ -755,6 +771,7 @@ def repro_common(
     # TODO: speed this up
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
+    # pyrefly: ignore [bad-assignment]
     torch._inductor.config.generate_intermediate_hooks = True
 
     return mod, args

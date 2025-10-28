@@ -31,11 +31,10 @@ import logging
 import sys
 import traceback
 import types
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import FunctionType
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
-from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
@@ -52,6 +51,7 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
+    StepUnsupported,
     unimplemented_v2,
     Unsupported,
 )
@@ -68,8 +68,6 @@ from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
-    counters,
-    create_nested_fn_cache,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -79,6 +77,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    raise_type_error_exc,
     ValueMutationNew,
     VariableTracker,
 )
@@ -105,7 +104,7 @@ CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
 
 
-# Module‐level cache keyed by the function object
+# Module-level cache keyed by the function object
 _spec_cache = WeakKeyDictionary()
 
 
@@ -134,7 +133,7 @@ class FunctionSpec:
         self.defaults = func.__defaults__ or ()
         self.kwdefaults = func.__kwdefaults__ or {}
 
-        # Map positional‐default names → their index in self.defaults
+        # Map positional-default names → their index in self.defaults
         self.pos_default_map = dict(
             zip(self.all_pos_names[-len(self.defaults) :], range(len(self.defaults)))
         )
@@ -277,11 +276,6 @@ def _create_nested_fn(
 ):
     from types import FunctionType
 
-    # Add caching for the actual IDs of user functions so that we can use them in the ID_MATCH guard.
-    cache_key = str(id(code)) + str(id(closure)) + str(id(f_globals))
-    if create_nested_fn_cache.get(cache_key):
-        return create_nested_fn_cache.get(cache_key)
-
     func = FunctionType(code, f_globals, name, defaults, closure)
     func.__kwdefaults__ = kwdefaults
 
@@ -293,7 +287,7 @@ def _create_nested_fn(
     # TypeError: __annotations__ must be set to a dict object
     assert annotations is None or isinstance(annotations, dict)
     func.__annotations__ = annotations
-    create_nested_fn_cache.set(cache_key, func)
+
     return func
 
 
@@ -527,15 +521,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Please fix your call to patch_dynamo_config by using simpler inputs. "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
-        elif self.fn is torch._dynamo.set_fullgraph:
+        elif self.fn is torch._dynamo.error_on_graph_break:
             try:
                 bound = inspect.signature(self.fn).bind(*args, **kwargs)
-                fullgraph = bound.arguments["fullgraph"].as_python_constant()
-                assert isinstance(fullgraph, bool)
-                return variables.SetFullgraphVariable(fullgraph)
+                error_on_graph_break = bound.arguments[
+                    "error_on_graph_break"
+                ].as_python_constant()
+                assert isinstance(error_on_graph_break, bool)
+                return variables.ErrorOnGraphBreakVariable(error_on_graph_break)
             except Exception as e:
                 raise RuntimeError(
-                    "Improper set_fullgraph() call. Please fix your call to set_fullgraph(). "
+                    "Improper error_on_graph_break() call. Please fix your call to error_on_graph_break(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
         # Handle a `nonstrict_trace(fn)` call
@@ -715,8 +711,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
-            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-                return tracer.inline_call_()
+            return tracer.inline_call_()
         except ObservedException as e:
             tracer.generator_exhausted = True
             raise e
@@ -726,8 +721,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
-        finally:
-            counters["unimplemented"] |= counters["inline_call"]
 
     def call_obj_hasattr(self, tx, name):
         if name in self.python_type().__dict__:
@@ -883,7 +876,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             retval = self.next_variable(tx)
 
             # The exception raised before is still active. We need to check the exception
-            # table one more time to find the next target. But why? Let’s walk
+            # table one more time to find the next target. But why? Let's walk
             # through an example and its generated bytecode: https://godbolt.org/z/ebdTbMv8M
             #
             #     z = 0
@@ -1079,7 +1072,7 @@ class UserMethodVariable(UserFunctionVariable):
         # One way is to simplly use `__func__` to unwrap it.
         #
         # For recursive dict-tag optimizations, it can be faster to fetch the
-        # function directly from `cls.__dict__`; that’s why we pass on
+        # function directly from `cls.__dict__`; that's why we pass on
         # `source_fn`. Whenever it is possible to access the function from
         # cls.__dict__, we pass that on to `source_fn`. Because bind_args
         # operates on the unbound function, most guards should target
@@ -1323,8 +1316,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def const_getattr(self, tx, name):
         if name == "__name__":
-            return self.fn_name.as_python_constant()
+            return self.get_name()
+        if name == "__code__":
+            return self.get_code()
+        if name == "__defaults__":
+            d = getattr(self, "defaults", None)
+            return d.as_python_constant() if d else None
         return super().const_getattr(tx, name)
+
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
+        if name == "__code__":
+            return variables.ConstantVariable.create(hasattr(self, "code"))
+        if name == "__defaults__":
+            return variables.ConstantVariable.create(hasattr(self, "defaults"))
+        return super().call_obj_hasattr(tx, name)
 
     def has_self(self):
         return False
@@ -1472,17 +1477,29 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if inspect.getattr_static(value, "_torchdynamo_orig_callable", False):
-            install_guard(
-                AttrSource(source, "_torchdynamo_orig_callable").make_guard(
-                    GuardBuilder.FUNCTION_MATCH
+        # Use closure match guard (i.e. guard on __code__ object instead of
+        # function id) to avoid guarding on nested functions.
+        if inspect.getattr_static(value, "_torchdynamo_disable", False):
+            # For torch._dynamo.disable function, ensure that the original
+            # function is guarded. Otherwise, the else branch will guard on the
+            # _dynamo.disable.__code__
+            guard_on_source = source
+            guard_on_value = value
+
+            while getattr(guard_on_value, "_torchdynamo_orig_callable", False):
+                guard_on_value = guard_on_value._torchdynamo_orig_callable
+                guard_on_source = AttrSource(
+                    guard_on_source, "_torchdynamo_orig_callable"
                 )
-            )
+
+            guard_on_source.make_guard(GuardBuilder.CLOSURE_MATCH)
+        elif inspect.isbuiltin(value):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
-            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
 
     def call_function(
@@ -1521,6 +1538,8 @@ class SkipFunctionVariable(VariableTracker):
             raise SkipFrame(
                 f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
             )
+        elif self.value is torch._dynamo.step_unsupported:
+            raise StepUnsupported
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -2084,8 +2103,8 @@ class PolyfilledFunctionVariable(VariableTracker):
             return self.call_function(tx, args, kwargs)
 
         method = getattr(self.fn, name, None)
-        assert method is not None, f"Member {name} not found in {self.fn}"
-        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        if not (method or is_function(method)):
+            raise_type_error_exc(tx, f"Cannot find callable {name} in {self.fn}")
         options = {}
         if self.source:
             options["source"] = AttrSource(self.source, name)
@@ -2444,7 +2463,11 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
             )
 
         if self.rank == 1:
-            assert len(args) + len(kwargs) == 4
+            if len(args) + len(kwargs) != 4:
+                raise_type_error_exc(
+                    tx,
+                    f"TMA metadata rank=1 requires exactly 4 arguments, got {len(args) + len(kwargs)}",
+                )
             dims = [
                 kwargs["dim"] if "dim" in kwargs else args[1],
             ]
@@ -2452,7 +2475,11 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
                 kwargs["block_dim"] if "block_dim" in kwargs else args[2],
             ]
         else:
-            assert len(args) + len(kwargs) == 6
+            if len(args) + len(kwargs) != 6:
+                raise_type_error_exc(
+                    tx,
+                    f"TMA metadata rank=2 requires exactly 6 arguments, got {len(args) + len(kwargs)}",
+                )
             dims = [
                 kwargs["dim1"] if "dim1" in kwargs else args[1],
                 kwargs["dim0"] if "dim0" in kwargs else args[2],

@@ -4,14 +4,15 @@ import collections
 import dataclasses
 import heapq
 import logging
-from typing import Callable, TYPE_CHECKING, TypedDict, Union
+from typing import Callable, Optional, TYPE_CHECKING, TypedDict, Union
 
 from torch._environment import is_fbcode
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
+from . import config
 from .ir import MultiOutputLayout, NoneLayout
-from .utils import get_dtype_size
+from .utils import get_dtype_size, is_nonfreeable_buffers
 from .virtualized import V
 
 
@@ -76,7 +77,7 @@ def get_freeable_input_buf(
     Create and keep track of all input buffers that can be freed during the program
 
     Returns:
-        A dictionary containing all freeble input buffers, keyed by their names.
+        A dictionary containing all freeable input buffers, keyed by their names.
     """
 
     def _dep_size_hint(dep: Dep) -> int:
@@ -92,14 +93,7 @@ def get_freeable_input_buf(
     for node in nodes:
         for dep in node.read_writes.reads:
             if dep.name in graph_inputs:
-                dep_name = dep.name
-                # Subgraphs have a prefix for the name, cleanup the prefix
-                # before checking for known strings.
-                if V.graph.name:
-                    dep_name = dep_name.removeprefix(V.graph.name + "_")
-                if not dep_name.startswith(
-                    ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
-                ):
+                if not is_nonfreeable_buffers(dep):
                     dep_name_to_succ_nodes[dep.name].add(node)
                     dep_name_to_size[dep.name] = _dep_size_hint(dep)
 
@@ -315,7 +309,11 @@ def compute_memory_timeline(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
-) -> tuple[list[BufferInfo], dict[BaseSchedulerNode, int]]:
+) -> tuple[
+    list[BufferInfo],
+    dict[BaseSchedulerNode, int],
+    dict[Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode],
+]:
     """
     Compute buffer allocation and deallocation sizes and map their
     lifetime to the node schedule
@@ -329,15 +327,33 @@ def compute_memory_timeline(
 
     # get buffers' size and liveliness information
     buf_info_list: list[BufferInfo] = []
+    buf_to_snode_last_use: dict[
+        Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode
+    ] = {}
+
+    def _get_end_step_and_snode(
+        buf: Union[FreeableInputBuffer, SchedulerBuffer],
+    ) -> tuple[int, Optional[BaseSchedulerNode]]:
+        max_step: int = -1
+        max_step_snode: Optional[BaseSchedulerNode] = None
+        succ_nodes = buf.mpi_buffer.succ_nodes
+        if succ_nodes:
+            for succ_node in succ_nodes:
+                step = node_to_step[succ_node]
+                if step > max_step:
+                    max_step = step
+                    max_step_snode = succ_node
+            assert max_step_snode is not None
+        return max_step, max_step_snode
+
     # 1. for freeable input buffers
     for buf_name, input_buf in name_to_freeable_input_buf.items():
-        end_step = (
-            len(nodes) - 1
-            if buf_name in graph_outputs
-            else max(
-                node_to_step[succ_node] for succ_node in input_buf.mpi_buffer.succ_nodes
-            )
-        )
+        end_step = -1
+        if buf_name not in graph_outputs:
+            end_step, end_step_snode = _get_end_step_and_snode(input_buf)
+            assert end_step_snode is not None
+            buf_to_snode_last_use[input_buf] = end_step_snode
+
         buf_info_list.append(
             BufferInfo(
                 input_buf,
@@ -354,17 +370,17 @@ def compute_memory_timeline(
             # note: it is possible for a non-graph-output sched_buf to have no succ_nodes and
             # to be only used by its defining op (e.g., due to fusion when all consumers of
             # the buffer are fused with its defining op). In such cases, end_step is step.
-            end_step = (
-                len(nodes) - 1
-                if sched_buf.get_name() in graph_outputs
-                else max(
-                    [
-                        node_to_step[succ_node]
-                        for succ_node in sched_buf.mpi_buffer.succ_nodes
-                    ],
-                    default=step,
-                )
-            )
+            buf_name = sched_buf.get_name()
+            end_step = -1
+            if buf_name not in graph_outputs:
+                end_step, end_step_snode = _get_end_step_and_snode(sched_buf)
+                if end_step == -1:
+                    end_step = step
+                    buf_to_snode_last_use[sched_buf] = node
+                else:
+                    assert end_step_snode is not None
+                    buf_to_snode_last_use[sched_buf] = end_step_snode
+
             buf_info_list.append(
                 BufferInfo(
                     sched_buf,
@@ -375,7 +391,7 @@ def compute_memory_timeline(
                 )
             )
 
-    return buf_info_list, node_to_step
+    return buf_info_list, node_to_step, buf_to_snode_last_use
 
 
 def estimate_peak_memory(
@@ -392,7 +408,7 @@ def estimate_peak_memory(
         List[int]: memory usage at each node (or each step).
     """
 
-    buf_info_list, _ = compute_memory_timeline(
+    buf_info_list, _, _ = compute_memory_timeline(
         nodes, name_to_freeable_input_buf, graph_outputs
     )
 
@@ -416,6 +432,73 @@ def estimate_peak_memory(
     return (max_memory, memories_at_nodes)
 
 
+@dataclasses.dataclass
+class SNodeMemory:
+    size_alloc: int
+    size_free: int
+
+
+def estimate_peak_memory_allocfree(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    graph_outputs: OrderedSet[str],
+) -> tuple[
+    int,
+    list[tuple[int, int]],
+    dict[BaseSchedulerNode, SNodeMemory],
+    dict[Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode],
+]:
+    """
+    Alternative version of estimate_peak_memory, that respects the fact,
+    that every SchedulerNode has multiple phases:
+    1. alloc ( outputs )
+    2. run_kernel
+    3. dealloc last_use buffers
+    estimate_peak_memory collapses memory into one value: size_alloc - size_free
+    While peak memory happens after alloc.
+
+    Duplicating the code to not migrate all callsites at once,
+    In future usages of estimate_peak_memory will migrate to this version.
+    """
+
+    buf_info_list, _, buf_to_snode_last_use = compute_memory_timeline(
+        nodes, name_to_freeable_input_buf, graph_outputs
+    )
+
+    # incremental memory changes at each step
+    step_idx_allocfree = [SNodeMemory(0, 0) for _ in range(len(nodes))]
+
+    # for each buffer, update memory when created and when freed
+    for buf_info in buf_info_list:
+        step_idx_allocfree[buf_info.start_step].size_alloc += buf_info.size_alloc
+        if buf_info.end_step != -1:
+            step_idx_allocfree[buf_info.end_step].size_free += buf_info.size_free
+
+    snodes_allocfree = {}
+    for i, node in enumerate(nodes):
+        snodes_allocfree[node] = step_idx_allocfree[i]
+
+    max_memory = 0
+    cur_memory = 0
+    snodes_curr_memory = []
+    for t in range(len(nodes)):
+        alloc = step_idx_allocfree[t].size_alloc
+        free = step_idx_allocfree[t].size_free
+        cur_memory += alloc
+        post_alloc = cur_memory
+        max_memory = max(max_memory, cur_memory)
+        cur_memory -= free
+        post_free = cur_memory
+        snodes_curr_memory.append((post_alloc, post_free))
+
+    return (
+        max_memory,
+        snodes_curr_memory,
+        snodes_allocfree,
+        buf_to_snode_last_use,
+    )
+
+
 def topological_sort_lpmf(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
@@ -429,7 +512,7 @@ def topological_sort_lpmf(
     Buffer memory optimization for video codec application modeled in Simulink
     https://www.cs.york.ac.uk/rts/docs/DAC-1964-2006/PAPERS/2006/DAC06/PDFFILES/P0689.PDF
 
-    The algorithm maintain the max memory so far.
+    The algorithm maintains the max memory so far.
     At every iteration, for each scheduleable node, it computes:
         - how much memory needs to be allocated for the output buffers of this node;
         - how much memory can be freed as a result of executing this node.
@@ -485,6 +568,7 @@ def topological_sort_lpmf(
         elif buf_name in name_to_freeable_input_buf:
             output_memory += name_to_freeable_input_buf[buf_name].mpi_buffer.size_free
     max_memory = max(live_memory, output_memory)
+    memory_gap = max_memory - live_memory
 
     # compute the amount of memory that is allocated when a node is scheduled
     # and the amount of memory that can be freed when a node is scheduled
@@ -500,17 +584,33 @@ def topological_sort_lpmf(
 
     # schedule nodes one at a time
     schedule: list[BaseSchedulerNode] = []
+    size_threshold = config.size_threshold_for_succ_based_strategy
     num_iters: int = 0
     while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule:
-        selected_node = min(
-            nodes_to_schedule,
-            key=lambda node: (
-                max(live_memory + node.mpi_node.size, max_memory),
-                node.mpi_node.size - node_info[node]["memory_to_free"],
-                node.mpi_node.index,
-            ),
-        )
+        if (
+            size_threshold > 0
+            and min(node.mpi_node.size for node in nodes_to_schedule) > size_threshold
+        ):
+            selected_node = min(
+                nodes_to_schedule,
+                key=lambda node: min(
+                    (
+                        succ_node.mpi_node.index
+                        for succ_node in node.mpi_node.succ_nodes
+                    ),
+                    default=len(nodes),
+                ),
+            )
+        else:
+            selected_node = min(
+                nodes_to_schedule,
+                key=lambda node: (
+                    node.mpi_node.size if node.mpi_node.size > memory_gap else 0,
+                    node.mpi_node.size - node_info[node]["memory_to_free"],
+                    node.mpi_node.index,
+                ),
+            )
         nodes_to_schedule.remove(selected_node)
         schedule.append(selected_node)
         num_iters += 1
@@ -519,6 +619,7 @@ def topological_sort_lpmf(
         live_memory += selected_node.mpi_node.size
         max_memory = max(max_memory, live_memory)
         live_memory -= node_info[selected_node]["memory_to_free"]
+        memory_gap = max_memory - live_memory
 
         # update successor nodes and nodes_to_schedule
         for succ_node in selected_node.mpi_node.succ_nodes:
@@ -798,12 +899,22 @@ def reorder_for_peak_memory(
         graph_outputs,
     )
 
+    # export graph for simulator if needed
+    if config.reorder_for_peak_memory_debug:
+        export_graph_for_simulator(
+            nodes,
+            name_to_freeable_input_buf,
+            name_to_fused_node,
+            graph_inputs,
+            graph_outputs,
+        )
+
     # Validate planning info before proceeding with reordering
     try:
         validate_graph_acyclic(nodes)
         validate_unique_buffer_names(nodes, name_to_buf, name_to_freeable_input_buf)
-    except RuntimeError as e:
-        torch_log.error("Memory planning validation failed: %s", e)
+    except RuntimeError:
+        torch_log.exception("Memory planning validation failed")
         if not is_fbcode():  # TODO: remove after ensuring OSS side is safe
             raise
 
@@ -831,8 +942,8 @@ def reorder_for_peak_memory(
                 PeakMemoryResult(order, peak_memory, method.__name__)
             )
             torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
-        except Exception as e:
-            torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
+        except Exception:
+            torch_log.exception("Failed to reorder for %s", method.__name__)
             if not is_fbcode():  # TODO: remove after ensuring OSS side is safe
                 raise
 
@@ -848,3 +959,112 @@ def reorder_for_peak_memory(
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
 
     return best_result.order
+
+
+def export_graph_for_simulator(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    name_to_fused_node: dict[str, BaseSchedulerNode],
+    graph_inputs: OrderedSet[str],
+    graph_outputs: OrderedSet[str],
+) -> None:
+    """
+    This is for debugging purposes. It will dump a json file that records graph information.
+    The graph can then be used in a simulator: https://fburl.com/code/3l3d3qi4
+    """
+
+    class ORMBuffer(TypedDict):
+        name: str
+        size_alloc: int
+        size_free: int
+        size: int  # for backward compatibility
+        is_input: bool
+        is_output: bool
+        deps: list[str]
+        unmet_deps: list[str]
+
+    class ORMNode(TypedDict):
+        name: str
+        buffer_names: list[str]
+
+    class ORMGraph(TypedDict):
+        nodes: list[ORMNode]
+        buffers: list[ORMBuffer]
+
+    orm_buffers: list[ORMBuffer] = []
+    orm_nodes: list[ORMNode] = []
+
+    # get orm buffers for freeable input buffers
+    for buf_name, input_buf in name_to_freeable_input_buf.items():
+        orm_buf_input_buffer: ORMBuffer = {
+            "name": buf_name,
+            "size_alloc": input_buf.mpi_buffer.size_free,
+            "size_free": input_buf.mpi_buffer.size_free,
+            "size": input_buf.mpi_buffer.size_free,
+            "is_input": True,
+            "is_output": buf_name in graph_outputs,
+            "deps": [],
+            "unmet_deps": [],
+        }
+        orm_buffers.append(orm_buf_input_buffer)
+
+    # get orm buffers for scheduler buffers
+    name_to_buf: dict[str, SchedulerBuffer] = {
+        buf.get_name(): buf for node in nodes for buf in node.get_outputs()
+    }  # need to reassign due to probably node pruning
+    for buf_name, sched_buf in name_to_buf.items():
+        if sched_buf.defining_op is None:
+            continue
+        deps = [
+            pred_buf.get_name()
+            for pred_buf in name_to_fused_node[
+                sched_buf.defining_op.get_name()
+            ].mpi_node.pred_buffers
+        ]
+        orm_buf_scheduler_buffer: ORMBuffer = {
+            "name": buf_name,
+            "size_alloc": sched_buf.mpi_buffer.size_alloc,
+            "size_free": sched_buf.mpi_buffer.size_free,
+            "size": sched_buf.mpi_buffer.size_free,
+            "is_input": False,
+            "is_output": buf_name in graph_outputs,
+            "deps": deps,
+            "unmet_deps": [
+                buf_name for buf_name in deps if buf_name not in graph_inputs
+            ],
+        }
+        orm_buffers.append(orm_buf_scheduler_buffer)
+
+    # get orm nodes
+    for node in nodes:
+        orm_node: ORMNode = {
+            "name": node.get_name(),
+            "buffer_names": list(node.get_buffer_names()),
+        }
+        orm_nodes.append(orm_node)
+
+    # create the graph object
+    g: ORMGraph = {
+        "nodes": orm_nodes,
+        "buffers": orm_buffers,
+    }
+
+    # dump the graph
+    import json
+    import os
+
+    import torch
+    from functorch.compile import get_graph_being_compiled
+
+    name = os.path.splitext(get_graph_being_compiled())[0] + "_fused"
+
+    g_str = json.dumps(g, indent=2)
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": name,
+            "encoding": "string",
+        },
+        payload_fn=lambda: g_str,
+    )

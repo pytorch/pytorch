@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import warnings
 from collections.abc import KeysView
 from contextlib import contextmanager
 from typing import Any, Optional
@@ -40,7 +41,9 @@ def process_inputs(
                         return x
                     source = ConstantSource(f"sym_{idx}")
                     return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source), hint=x, source=source
+                        shape_env.create_symbol(x, source, positive=x >= 0),
+                        hint=x,
+                        source=source,
                     )
             if isinstance(x, torch.ScriptObject):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -245,55 +248,67 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
     finally:
         # after exit, compare state of attributes with snapshot
         # to detect which tensor attributes were assigned
-        assigned_tensor_attributes = []
 
-        def _collect_assigned_tensor_attributes(kp, v, _v):
-            if _v is not v:
-                module_name, attr, *rest = kp
-                if isinstance(v, torch.Tensor):
-                    module_prefix = f"{module_name.key}." if module_name.key else ""
-                    assigned_tensor_attributes.append(
-                        f"self.{module_prefix}{attr.key}{pytree.keystr(rest)}"
-                    )
-                # TODO(avik): Assigning all other types are allowed right now.
-                # Maybe in the future we want to limit this to primitive types?
-            return v
+        def _collect_assigned_tensor_attributes(snapshot, new_attrs):
+            assigned_tensor_attributes = []
+
+            def _compare_values(path, old_val, new_val):
+                """Recursively compare values, handling containers."""
+                # Same object, no change
+                if old_val is new_val:
+                    return
+
+                if old_val is None or new_val is None:
+                    if isinstance(new_val, torch.Tensor):
+                        assigned_tensor_attributes.append(path)
+                    return
+
+                # Check if it's a tensor that was reassigned
+                if isinstance(new_val, torch.Tensor):
+                    assigned_tensor_attributes.append(path)
+                    return
+
+                # Handle dict containers
+                if isinstance(old_val, dict) and isinstance(new_val, dict):
+                    all_keys = set(old_val.keys()) | set(new_val.keys())
+                    for key in all_keys:
+                        old_item = old_val.get(key)
+                        new_item = new_val.get(key)
+                        _compare_values(f"{path}[{key!r}]", old_item, new_item)
+                    return
+
+                # Handle list/tuple containers
+                if isinstance(old_val, (list, tuple)) and isinstance(
+                    new_val, (list, tuple)
+                ):
+                    # Different lengths = mutation happened
+                    max_len = max(len(old_val), len(new_val))
+                    for i in range(max_len):
+                        old_item = old_val[i] if i < len(old_val) else None
+                        new_item = new_val[i] if i < len(new_val) else None
+                        _compare_values(f"{path}[{i}]", old_item, new_item)
+                    return
+
+                # For other types, just check if they're different objects
+                # (we don't care about non-tensor mutations)
+
+            for module_name in snapshot.keys() | new_attrs.keys():
+                old_module_attrs = snapshot.get(module_name, {})
+                new_module_attrs = new_attrs.get(module_name, {})
+
+                for attr_name in old_module_attrs.keys() | new_module_attrs.keys():
+                    module_prefix = f"self.{module_name}." if module_name else "self."
+                    full_path = f"{module_prefix}{attr_name}"
+
+                    old_val = old_module_attrs.get(attr_name)
+                    new_val = new_module_attrs.get(attr_name)
+                    _compare_values(full_path, old_val, new_val)
+
+            return assigned_tensor_attributes
 
         new_attrs = _get_all_module_attributes(mod)
-
-        # Check for added/deleted attributes across all modules
-        for module_name in snapshot.keys() | new_attrs.keys():
-            old_module_attrs = snapshot.get(module_name, {})
-            new_module_attrs = new_attrs.get(module_name, {})
-
-            if len(new_module_attrs) != len(old_module_attrs):
-                added_attrs = new_module_attrs.keys() - old_module_attrs.keys()
-                deleted_attrs = old_module_attrs.keys() - new_module_attrs.keys()
-
-                module_prefix = f"self.{module_name}." if module_name else "self."
-
-                if len(added_attrs) > 0:
-                    formatted_attrs = [f"{module_prefix}{attr}" for attr in added_attrs]
-                    raise ValueError(
-                        f"During torch.export, following attrs were created in the model.forward: {formatted_attrs} "
-                        f"Such attributes must be registered as buffers using the `register_buffer` "
-                        f"API and must be initialized at model.__init__ "
-                        f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                    )
-
-                if len(deleted_attrs) > 0:
-                    formatted_attrs = [
-                        f"{module_prefix}{attr}" for attr in deleted_attrs
-                    ]
-                    raise ValueError(
-                        f"During torch.export, following attrs were deleted in the model.forward: {formatted_attrs} "
-                        f"Such attributes must be registered as buffers using the `register_buffer` "
-                        f"API and must be initialized at model.__init__ "
-                        f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                    )
-
-        pytree.tree_map_with_path(
-            _collect_assigned_tensor_attributes, snapshot, new_attrs
+        assigned_tensor_attributes = _collect_assigned_tensor_attributes(
+            snapshot, new_attrs
         )
         # restore state of all attributes (including, e.g., of primitive types)
         _restore_all_module_attributes(mod, snapshot)
@@ -303,8 +318,9 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                 noun, verb = "attributes", "were"
             else:
                 noun, verb = "attribute", "was"
-            raise ValueError(
+            warnings.warn(
                 f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
                 "Such attributes must be registered as buffers using the `register_buffer` API "
-                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer).",
+                stacklevel=2,
             )

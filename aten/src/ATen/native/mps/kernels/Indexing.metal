@@ -358,6 +358,7 @@ kernel void index_copy_strided(
     constant long* input_strides,
     constant long* output_strides,
     constant long* source_strides,
+    constant long& indices_stride,
     uint thread_index [[thread_position_in_grid]]) {
   int pos[max_ndim];
   pos_from_thread_index(int(thread_index), pos, sizes, ndim);
@@ -374,7 +375,7 @@ kernel void index_copy_strided(
   // find the last index in the indices array that equals this coordinate
   int last_matching_index = -1;
   for (uint i = 0; i < indices_numel; i++) {
-    if (indices[i] == orig_dim) {
+    if (indices[i * indices_stride] == orig_dim) {
       last_matching_index = int(i);
     }
   }
@@ -413,6 +414,7 @@ kernel void index_copy_strided(
       constant long*,                                           \
       constant long*,                                           \
       constant long*,                                           \
+      constant long&,                                           \
       uint);
 
 #define REGISTER_MASKED_FILL_SCALAR(SIZE, DTYPE)                            \

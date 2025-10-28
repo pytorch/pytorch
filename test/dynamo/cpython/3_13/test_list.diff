@@ -67,17 +67,17 @@ index 23ef902aa0b..b9afb1ef26e 100644
 @@ -36,7 +90,7 @@ class ListTest(list_tests.CommonTest):
              # earlier due to a newlib bug.  See the following mailing list
              # thread for the details:
- 
+
              self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
- 
+
          # This code used to segfault in Py2.4a3
 @@ -49,28 +103,31 @@ class ListTest(list_tests.CommonTest):
              list(sequence=[])
- 
+
      def test_keywords_in_subclass(self):
 -        class subclass(list):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class subclass(list):
 +                pass
          u = subclass([1, 2])
@@ -85,12 +85,12 @@ index 23ef902aa0b..b9afb1ef26e 100644
          self.assertEqual(list(u), [1, 2])
          with self.assertRaises(TypeError):
              subclass(sequence=())
- 
+
 -        class subclass_with_init(list):
 -            def __init__(self, seq, newarg=None):
 -                super().__init__(seq)
 -                self.newarg = newarg
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class subclass_with_init(list):
 +                def __init__(self, seq, newarg=None):
 +                    super().__init__(seq)
@@ -99,13 +99,13 @@ index 23ef902aa0b..b9afb1ef26e 100644
          self.assertIs(type(u), subclass_with_init)
          self.assertEqual(list(u), [1, 2])
          self.assertEqual(u.newarg, 3)
- 
+
 -        class subclass_with_new(list):
 -            def __new__(cls, seq, newarg=None):
 -                self = super().__new__(cls, seq)
 -                self.newarg = newarg
 -                return self
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class subclass_with_new(list):
 +                def __new__(cls, seq, newarg=None):
 +                    self = super().__new__(cls, seq)
@@ -116,7 +116,7 @@ index 23ef902aa0b..b9afb1ef26e 100644
          self.assertEqual(list(u), [1, 2])
 @@ -117,14 +174,15 @@ class ListTest(list_tests.CommonTest):
              lst *= size
- 
+
      def test_repr_mutate(self):
 -        class Obj:
 -            @staticmethod
@@ -126,7 +126,7 @@ index 23ef902aa0b..b9afb1ef26e 100644
 -                except IndexError:
 -                    pass
 -                return 'obj'
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class Obj:
 +                @staticmethod
 +                def __repr__():
@@ -135,7 +135,7 @@ index 23ef902aa0b..b9afb1ef26e 100644
 +                    except IndexError:
 +                        pass
 +                    return 'obj'
- 
+
          mylist = [Obj() for _ in range(5)]
          self.assertEqual(repr(mylist), '[obj, obj, obj]')
 @@ -220,26 +278,28 @@ class ListTest(list_tests.CommonTest):
@@ -143,11 +143,11 @@ index 23ef902aa0b..b9afb1ef26e 100644
          # optimization causes failures in code that relies on distinct
          # function addresses.
 -        class L(list): pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class L(list): pass
          with self.assertRaises(TypeError):
              (3,) + L([1,2])
- 
+
      def test_equal_operator_modifying_operand(self):
          # test fix for seg fault reported in bpo-38588 part 2.
 -        class X:
@@ -164,7 +164,7 @@ index 23ef902aa0b..b9afb1ef26e 100644
 -            def __eq__(self, other):
 -                list3.clear()
 -                return NotImplemented
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class X:
 +                def __eq__(self,other) :
 +                    list2.clear()
@@ -179,29 +179,29 @@ index 23ef902aa0b..b9afb1ef26e 100644
 +                def __eq__(self, other):
 +                    list3.clear()
 +                    return NotImplemented
- 
+
          list1 = [X()]
          list2 = [Y()]
 @@ -250,24 +310,26 @@ class ListTest(list_tests.CommonTest):
          self.assertFalse(list3 == list4)
- 
+
      def test_lt_operator_modifying_operand(self):
 -        # See gh-120298
 -        class evil:
 -            def __lt__(self, other):
 -                other.clear()
 -                return NotImplemented
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            # See gh-120298
 +            class evil:
 +                def __lt__(self, other):
 +                    other.clear()
 +                    return NotImplemented
- 
+
          a = [[evil()]]
          with self.assertRaises(TypeError):
              a[0] < a
- 
+
      def test_list_index_modifing_operand(self):
 -        # See gh-120384
 -        class evil:
@@ -210,7 +210,7 @@ index 23ef902aa0b..b9afb1ef26e 100644
 -            def __iter__(self):
 -                yield from self.lst
 -                self.lst.clear()
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            # See gh-120384
 +            class evil:
 +                def __init__(self, lst):
@@ -218,7 +218,7 @@ index 23ef902aa0b..b9afb1ef26e 100644
 +                def __iter__(self):
 +                    yield from self.lst
 +                    self.lst.clear()
- 
+
          lst = list(range(5))
          operand = evil(lst)
 @@ -286,19 +348,21 @@ class ListTest(list_tests.CommonTest):
@@ -229,39 +229,39 @@ index 23ef902aa0b..b9afb1ef26e 100644
 -            def __eq__(self, other):
 -                lst.clear()
 -                return NotImplemented
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class X:
 +                def __eq__(self, other):
 +                    lst.clear()
 +                    return NotImplemented
- 
+
          lst = [X()]
          with self.assertRaises(ValueError):
              lst.index(lst)
- 
+
 -        class L(list):
 -            def __eq__(self, other):
 -                str(other)
 -                return NotImplemented
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class L(list):
 +                def __eq__(self, other):
 +                    str(other)
 +                    return NotImplemented
- 
+
          lst = L([X()])
          lst.count(lst)
 @@ -324,6 +388,7 @@ class ListTest(list_tests.CommonTest):
              a.append(4)
              self.assertEqual(list(it), [])
- 
+
 +    @unittest.skip("Fails on python <=3.13.2 and passes on >=3.13.3")
      def test_deopt_from_append_list(self):
          # gh-132011: it used to crash, because
          # of `CALL_LIST_APPEND` specialization failure.
 @@ -345,4 +410,4 @@ class ListTest(list_tests.CommonTest):
          self.assertEqual(rc, 0)
- 
+
  if __name__ == "__main__":
 -    unittest.main()
 +    run_tests()

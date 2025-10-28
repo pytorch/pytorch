@@ -59,9 +59,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
         self.model_class_name_suffix = (
-            config.aot_inductor.model_name_for_generated_files
-            if config.aot_inductor.compile_standalone
-            else ""
+            ""
+            if config.aot_inductor.dynamic_linkage
+            else config.aot_inductor.model_name_for_generated_files
         )
         self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
 
@@ -221,7 +221,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.add_device_include(self.device)
 
         if V.graph.aot_mode:
-            if not config.aot_inductor.compile_standalone:
+            if config.aot_inductor.dynamic_linkage:
                 with open(
                     os.path.join(
                         os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
@@ -584,7 +584,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Weights are promoted in the JIT mode
                     num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                     # release GIL to support multiple instances inference (in different threads of the same process)
-                    self.prefix.splice("py::gil_scoped_release release;")
+                    self.prefix.splice("py::gil_scoped_release_simple release;")
 
                 self.prefix.splice(
                     f"""
@@ -721,6 +721,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     )
             self.prefix.writeline("}")
 
+    # MSVC string was longer than the limit of 16380 single-byte characters.
+    # https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026
+    MSVC_C2026_MAX_STRING_LENGTH = 16000
+
+    def codegen_write_arg_with_large_length_string(
+        self,
+        arg_name: str,
+        arg_str_val: str,
+        max_truncate_length: int = MSVC_C2026_MAX_STRING_LENGTH,
+    ):
+        def truncate_string(s: str, length: int) -> list[str]:
+            return [s[i : i + length] for i in range(0, len(s), length)]
+
+        if len(arg_str_val) > max_truncate_length:
+            truncated_strs = truncate_string(arg_str_val, max_truncate_length)
+            self.prefix.writeline(f"{arg_name} =")
+            for truncate_str in truncated_strs:
+                self.prefix.writeline(f'R"({truncate_str})"')
+            self.prefix.writeline(";")
+        else:
+            self.prefix.writeline(f'{arg_name} = R"({arg_str_val})";')
+
     def codegen_model_constructor(self):
         """
         // Generated code example
@@ -745,7 +767,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         num_outputs = len(V.graph.graph_outputs)
         num_constants = len(V.graph.constants)
         include_weights = (
-            "true" if config.aot_inductor.package_constants_in_so else "false"
+            "true"
+            if config.aot_inductor.package_constants_in_so
+            and config.aot_inductor.package_constants_on_disk_format != "binary_blob"
+            else "false"
         )
         self.prefix.splice(
             f"""
@@ -868,11 +893,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     .replace("\t", "\\t")
                 )
 
-            self.prefix.writeline(
-                f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";'
+            # Origin code: self.prefix.writeline(f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";')
+            # Fix msvc C2026 error via codegen_write_arg_with_large_length_string
+            self.codegen_write_arg_with_large_length_string(
+                arg_name="in_spec_", arg_str_val=config.aot_inductor.serialized_in_spec
             )
-            self.prefix.writeline(
-                f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";'
+            # Origin code: self.prefix.writeline(f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";')
+            # Fix msvc C2026 error via codegen_write_arg_with_large_length_string
+            self.codegen_write_arg_with_large_length_string(
+                arg_name="out_spec_",
+                arg_str_val=config.aot_inductor.serialized_out_spec,
             )
 
             for idx, output in enumerate(V.graph.graph_outputs):
@@ -1141,7 +1171,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1219,6 +1249,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         *,
         debug_args: Optional[list[str]] = None,
+        debug_handle: Optional[int] = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1235,14 +1266,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
+            self.write_provenance_debug_handle(shim_fn, debug_handle)
             shim_fn_codes = (
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
             if enable_kernel_profile:
+                debug_handle_str = "" if debug_handle is None else f":{debug_handle}"
                 shim_fn_codes = textwrap.dedent(
                     f"""
                     {{
-                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);
+                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}{debug_handle_str}", nullptr);
                       {shim_fn_codes}
                     }}
                     """
@@ -1265,6 +1298,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             extern_kernel.get_kernel_name(), args, device
         )
@@ -1323,6 +1357,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
@@ -1338,6 +1373,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         out_view: Optional[str],
         args: list[str],
         device: str,
+        debug_handle: Optional[int] = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1346,9 +1382,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             args.insert(0, out)
 
-        self.generate_c_shim_extern_kernel_call(kernel, args, device)
+        self.generate_c_shim_extern_kernel_call(
+            kernel, args, device, debug_handle=debug_handle
+        )
 
-    def generate_scatter_fallback(
+    def _get_scatter_reduce_enum(self, reduce):
+        # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+        get_operator_enum = {"add": "sum", "multiply": "prod"}
+        if reduce in get_operator_enum:
+            reduce = get_operator_enum[reduce]
+
+        return reduce
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -1358,6 +1404,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reduce,
         kwargs,
     ):
+        reduce = self._get_scatter_reduce_enum(reduce)
+
         # call the ABI shim function instead of the ATen one
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
@@ -1378,7 +1426,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
@@ -1437,7 +1485,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
 
-    def codegen_dynamic_scalar(self, node):
+    def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 
@@ -1484,22 +1532,29 @@ class CppWrapperCpu(PythonWrapperCodegen):
         start_cpp_str = self.val_to_arg_str_for_prim_type(node.start, int)
         end_cpp_str = self.val_to_arg_str_for_prim_type(node.end, int)
         size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
+        step_cpp_str = self.val_to_arg_str_for_prim_type(node.step, int)
         sym = node.unbacked_size_symbol
 
         def codegen_clamp(index_str, start=True):
-            suf = "start" if start else "end"
+            suf = "st" if start else "en"
             index_ = f"{sym}_{suf}_index"
             self.writeline(
-                f"auto {index_} = {index_str} < 0 ? {index_str} + {size_cpp_str} : {index_str};"
+                f"int64_t {index_} = {index_str} < 0 ? {index_str} + {size_cpp_str} : {index_str};"
             )
             self.writeline(
-                f"auto {sym}_{suf}_clamped = {index_} < 0 ? 0 : ({index_} > {size_cpp_str} ? {size_cpp_str} : {index_});"
+                f"int64_t {sym}_{suf}_cl = {index_} < 0 ? 0 : ({index_} > {size_cpp_str} ? {size_cpp_str} : {index_});"
             )
 
         codegen_clamp(start_cpp_str, start=True)
         codegen_clamp(end_cpp_str, start=False)
-        self.writeline(f"auto {sym}_raw = {sym}_end_clamped - {sym}_start_clamped;")
-        self.writeline(f"auto {sym} = {sym}_raw < 0 ? 0 : {sym}_raw;")
+        if node.step == 1:
+            step_str = f"{sym}_en_cl - {sym}_st_cl"
+        else:
+            step_str = (
+                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} + 1) / {step_cpp_str}"
+            )
+        self.writeline(f"int64_t {sym}_with_step = {step_str};")
+        self.writeline(f"int64_t {sym} = {sym}_with_step < 0 ? 0 : {sym}_with_step;")
         self.unbacked_symbol_decls.add(str(sym))
 
     def make_buffer_free(self, buffer):
@@ -1676,6 +1731,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"
+            )
+            self.wrapper_call.writeline(
+                f"wrap_with_raii_handle_if_needed({old_handle_name});"
             )
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
@@ -1926,7 +1984,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         finally:
             self.pop_codegened_graph()
 
-    def codegen_while_loop(self, while_loop):
+    def codegen_while_loop(self, while_loop, stack_output=False):
+        if stack_output:
+            raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
         is_bool_pred = isinstance(
             while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
         )
@@ -2287,7 +2347,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         scoped_lines.writeline("{")
         with scoped_lines.indent():
-            scoped_lines.writeline("py::gil_scoped_acquire acquire;")
+            scoped_lines.writeline("py::gil_scoped_acquire_simple acquire;")
             scoped_lines.writelines(lines_in_scope.split("\n"))
         scoped_lines.writelines("}")
         return scoped_lines._lines

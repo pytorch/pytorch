@@ -5,12 +5,12 @@ import itertools
 import numbers
 import operator
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch._meta_registrations
@@ -382,6 +382,7 @@ def to_real_dtype(dtype: torch.dtype):
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
+    # pyrefly: ignore  # unsupported-operation
     loss = (self - target) ** 2
     return apply_loss_reduction(loss, reduction)
 
@@ -415,6 +416,7 @@ def smooth_l1_loss(
     beta: float = 1.0,
 ):
     loss = (self - target).abs()
+    # pyrefly: ignore  # unsupported-operation
     loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
     return apply_loss_reduction(loss, reduction)
 
@@ -922,7 +924,7 @@ def im2col(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater {'than' zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1007,7 +1009,7 @@ def col2im(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater than zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1171,6 +1173,8 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 @register_decomposition(aten._softmax)
 @out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
     x = x.contiguous()
@@ -1180,7 +1184,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
         x_max = torch.amax(x, dim, keepdim=True)
@@ -1194,6 +1198,8 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 @register_decomposition(aten._log_softmax)
 @out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
     x = x.contiguous()
@@ -1203,7 +1209,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         shifted = x
     else:
         x_max = torch.amax(x, dim, keepdim=True)
@@ -1447,7 +1453,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         # To avoid PendingUnbackedSymbolNotFound errors, we tell the compiler it's fine to not bind these.
         with ctx():
             indices = [i.item() for i in tensor_indices_or_sections]
-        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        # WARNING: Tempted to torch._check(x>0) on the indices here?  You
         # can't: tensor_split works with negative values in indices:
         #
         # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))
@@ -1547,9 +1553,9 @@ def native_group_norm_backward(
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
 
-    cpg, _rem = divmod(C, group)
+    cpg = C // group
     torch._check(
-        _rem == 0,
+        C == cpg * group,
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 
@@ -1718,8 +1724,8 @@ def native_layer_norm_backward(
 
     return (
         _maybe_cast(d_input, input.dtype),
-        _maybe_cast(d_weight, input.dtype),
-        _maybe_cast(d_bias, input.dtype),
+        _maybe_cast(d_weight, weight.dtype if weight is not None else None),
+        _maybe_cast(d_bias, bias.dtype if bias is not None else None),
     )
 
 
@@ -2784,7 +2790,7 @@ def _index_add(
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
-            python_type == bool
+            python_type is bool
             or utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
@@ -4073,6 +4079,7 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
+        # pyrefly: ignore  # unbound-name
         w = w.expand(self.shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)
@@ -4889,7 +4896,9 @@ def _reflection_pad_backward(grad_output, x, padding):
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
+    # pyrefly: ignore  # bad-argument-type
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
+    # pyrefly: ignore  # bad-argument-type
     amax = torch.amax(self, dim=dim, keepdim=keepdim)
     return amin, amax
 
@@ -5134,6 +5143,7 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
         alpha = int(alpha)
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
+        # pyrefly: ignore  # unsupported-operation
         result = result * alpha
     if beta == 0:
         return result

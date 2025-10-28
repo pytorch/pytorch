@@ -87,17 +87,13 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import (
-    AttributeMutationExisting,
-    AttributeMutationNew,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -162,6 +158,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
+        # Used when we materialize class.__dict__ to a MappingProxyObject. In
+        # this case, we don't want to allow mutation in the class because there
+        # is no way to reflect it in the created MappingProxyVariable.
+        self.ban_mutation = False
 
     def as_python_constant(self):
         return self.value
@@ -278,7 +278,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             if type(self.value) is type:
-                raise_observed_exception(AttributeError, tx)
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    msg=f"type object '{self.value.__name__}' has no attribute '{name}'",
+                )
             else:
                 # Cannot reason about classes with a custom metaclass
                 # See: test_functions::test_getattr_metaclass
@@ -294,9 +298,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
             if isinstance(obj.__func__, property):
-                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
-                    tx, [self], {}
-                )
+                fget_vt = VariableTracker.build(tx, obj.__func__.fget)
+                return fget_vt.call_function(tx, [self], {})
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -420,6 +423,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif self.value is collections.OrderedDict and name == "move_to_end":
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
@@ -436,8 +441,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and isinstance(args[0], UserDefinedClassVariable)
             and args[0].value is collections.OrderedDict
         ):
-            assert len(args) == 1
-            assert len(kwargs) == 0
+            if kwargs and len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
@@ -448,6 +458,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 args[0],
                 args[1:],
+            )
+        elif name == "__setattr__" and self.ban_mutation:
+            unimplemented_v2(
+                gb_type="Class attribute mutation when the __dict__ was already materialized",
+                context=str(self.value),
+                explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+                hints=graph_break_hints.SUPPORTABLE,
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -579,7 +596,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
-            assert args[0].is_python_constant()
+            if not args[0].is_python_constant():
+                raise_type_error_exc(
+                    tx, "torch.cuda.device() requires a constant argument"
+                )
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
@@ -681,8 +701,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
             if self.value.__module__ == "torch.return_types":
-                assert len(args) == 1
-                assert not kwargs
+                if kwargs or len(args) != 1:
+                    raise_args_mismatch(
+                        tx,
+                        "torch.return_types",
+                        "1 args and 0 kwargs",
+                        f"{len(args)} args and {len(kwargs)} kwargs",
+                    )
                 items = args[0].force_unpack_var_sequence(tx)
             else:
                 field_defaults = self.value._field_defaults
@@ -708,7 +733,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                 assert all(x is not None for x in items)
 
-            return variables.NamedTupleVariable(items, self.value)
+            # Modify mutability of namedtuple for sourcelesss instantiations.
+            from .base import AttributeMutationNew
+
+            return variables.NamedTupleVariable(
+                items, self.value, mutation_type=AttributeMutationNew()
+            )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
@@ -840,9 +870,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
     def fn(self):
-        return self.value
-
-    def python_type(self):
         return self.value
 
 
@@ -1206,7 +1233,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif callable(self.value):
             if self.source:
                 source = AttrSource(self.cls_source, "__call__")
-                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
@@ -1352,7 +1379,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx)
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                )
             return result
 
         if name == "__dict__":
@@ -1434,6 +1465,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj_from_class is subobj
             and self.cls_source is not None
             and self.source is not None
+            and hasattr(self.value, "__dict__")
+            and name not in self.value.__dict__
         )
 
         if isinstance(subobj, property):
@@ -1443,12 +1476,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Get the getter function
                 source = AttrSource(source, "fget")
 
-            # Avoid using UserMethodVariable here because there is no way to
-            # access the method object here. Direct inline by creating the
-            # UserFunctionVariable.
-            return variables.UserFunctionVariable(
-                subobj.fget, source=source
-            ).call_function(tx, [self], {})
+            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
             # emulate its `__get__`, which is implemented in C.
@@ -1626,7 +1655,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx)
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1657,7 +1690,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         def __eq__(self, other):
             return (
-                type(self) == type(other)
+                type(self) is type(other)
                 and self.cls == other.cls
                 and self.fields == other.fields
             )
@@ -1738,6 +1771,21 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         ctor = self.python_type()
         return ctor(*args, **kwargs)
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Handle specific pytree classes
+        import torch.utils._pytree as pytree
+
+        if self.value_type is pytree.LeafSpec:
+            # Create a new LeafSpec instance by calling the constructor
+            codegen.add_push_null(
+                lambda: codegen.load_import_from("torch.utils._pytree", "LeafSpec")
+            )
+            codegen.extend_output(create_call_function(0, False))
+            return
+
+        # For other frozen dataclasses, fall back to the base class behavior
+        super().reconstruct(codegen)
+
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
     def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
@@ -1763,7 +1811,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        fn_variable = VariableTracker.build(tx, self.value.forward.__func__)
         args = [self] + args
         return tx.inline_user_function_return(
             fn_variable,
@@ -1915,7 +1963,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 "dict_vt must be constructed by builder.py when source is present"
             )
             self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
+                {}, type(value), mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
@@ -1954,6 +2002,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def user_cls(self):
+        return self._dict_vt.user_cls
 
     @property
     def items(self):
@@ -2140,9 +2192,6 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = (
-            AttributeMutationExisting() if self.source else AttributeMutationNew()
-        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to

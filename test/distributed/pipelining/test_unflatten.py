@@ -73,7 +73,9 @@ class UnflattenTests(TestCase):
 
 
 devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(UnflattenTests, globals(), only_for=devices)
+instantiate_device_type_tests(
+    UnflattenTests, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

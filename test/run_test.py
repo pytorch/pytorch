@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from collections import defaultdict
@@ -28,7 +29,6 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
-    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    TEST_XPU,
 )
 
 
@@ -171,10 +172,12 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "test_openreg",
 ]
 
 S390X_BLOCKLIST = [
@@ -186,28 +189,15 @@ S390X_BLOCKLIST = [
     "lazy/test_meta_kernel",
     "onnx/test_utility_funs",
     "profiler/test_profiler",
-    "test_ao_sparsity",
     "test_jit",
-    "test_metal",
-    "test_mps",
-    "dynamo/test_torchrec",
-    "inductor/test_aot_inductor_utils",
-    "inductor/test_coordinate_descent_tuner",
-    "test_jiterator",
-    "inductor/test_cpu_cpp_wrapper",
-    "export/test_converter",
-    "inductor/test_inductor_freezing",
     "dynamo/test_utils",
     "test_nn",
-    "functorch/test_ops",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "test_quantization",
     "inductor/test_torchinductor",
     "inductor/test_torchinductor_dynamic_shapes",
     "inductor/test_torchinductor_opinfo",
-    "test_binary_ufuncs",
-    "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
     "inductor/test_best_config",
@@ -226,9 +216,12 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
+    "test_metal",
     # lacks quantization support
     "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",
+    # sysctl -n hw.memsize is not available
+    "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
     "test_decomp",
     # https://github.com/pytorch/pytorch/issues/146698
@@ -247,6 +240,10 @@ S390X_BLOCKLIST = [
     "inductor/test_config",
     "test_public_bindings",
     "test_testing",
+    # depend on z3-solver
+    "fx/test_z3_gradual_types",
+    "test_proxy_tensor",
+    "test_openreg",
 ]
 
 XPU_BLOCKLIST = [
@@ -258,6 +255,7 @@ XPU_BLOCKLIST = [
     "profiler/test_profiler_tree",
     "profiler/test_record_function",
     "profiler/test_torch_tidy",
+    "test_openreg",
 ]
 
 XPU_TEST = [
@@ -286,6 +284,7 @@ RUN_PARALLEL_BLOCKLIST = [
     # temporarily sets a global config
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
+    "test_privateuseone_python_backend",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -402,6 +401,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
+QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
 
 def _is_cpp_test(test):
@@ -655,27 +655,33 @@ def run_test(
     return ret_code
 
 
-def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
+def install_cpp_extensions(extensions_dir, env=os.environ):
     # Wipe the build folder, if it exists already
-    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
-    if os.path.exists(cpp_extensions_test_build_dir):
-        shutil.rmtree(cpp_extensions_test_build_dir)
+    build_dir = os.path.join(extensions_dir, "build")
+    if os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
 
     # Build the test cpp extensions modules
-    # FIXME: change setup.py command to pip command
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    return_code = shell(cmd, cwd=extensions_dir, env=env)
     if return_code != 0:
         return None, return_code
 
-    install_directory = ""
-    # install directory is the one that is named site-packages
-    for root, directories, _ in os.walk(
-        os.path.join(cpp_extensions_test_dir, "install")
-    ):
-        for directory in directories:
-            if "-packages" in directory:
-                install_directory = os.path.join(root, directory)
+    # Get the site-packages directory prepared for PYTHONPATH
+    platlib_path = sysconfig.get_paths()["platlib"]
+    platlib_rel = os.path.relpath(
+        platlib_path, os.path.splitdrive(platlib_path)[0] + os.sep
+    )
+    install_directory = os.path.join(extensions_dir, "install", platlib_rel)
 
     assert install_directory, "install_directory must not be empty"
     return install_directory, 0
@@ -768,6 +774,9 @@ def run_test_retries(
                 "Test succeeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
+            # This is for log classifier so it can prioritize consistently
+            # failing tests instead of reruns. [1:-1] to remove quotes
+            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -822,8 +831,17 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    install_cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    wheel_cmd = [sys.executable, "-m", "build", "--wheel", "--no-isolation"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
@@ -831,8 +849,9 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         exts_to_build = [
             (install_cmd, "no_python_abi_suffix_test"),
         ]
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+        if TEST_CUDA:
             exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
@@ -908,11 +927,12 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
-def run_test_with_openreg(test_module, test_directory, options):
-    # TODO(FFFrog): Will remove this later when windows/macos are supported.
-    if not IS_LINUX:
-        return 0
-
+# test_openreg is designed to run all tests under torch_openreg, which
+# is an torch backend similar to CUDA or MPS and implemented by using
+# third-party accelerator integration mechanism. Therefore, if all the
+# tests under torch_openreg are passing, it can means that the mechanism
+# mentioned above is working as expected.
+def test_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
@@ -921,14 +941,20 @@ def run_test_with_openreg(test_module, test_directory, options):
         return return_code
 
     with extend_python_path([install_dir]):
-        return run_test(test_module, test_directory, options)
+        cmd = [
+            sys.executable,
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            os.path.join(openreg_dir, "tests"),
+            "-v",
+        ]
+        return shell(cmd, cwd=test_directory, env=os.environ)
 
 
 def test_distributed(test_module, test_directory, options):
-    # MPI tests are broken with Python-3.9
-    mpi_available = subprocess.call(
-        "command -v mpiexec", shell=True
-    ) == 0 and sys.version_info < (3, 9)
+    mpi_available = shutil.which("mpiexec")
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
 
@@ -1097,6 +1123,9 @@ def run_doctests(test_module, test_directory, options):
     if torch.mps.is_available():
         os.environ["TORCH_DOCTEST_MPS"] = "1"
 
+    if torch.distributed.is_available():
+        os.environ["TORCH_DOCTEST_DISTRIBUTED"] = "1"
+
     if 0:
         # TODO: could try to enable some of these
         os.environ["TORCH_DOCTEST_QUANTIZED_DYNAMIC"] = "1"
@@ -1168,12 +1197,14 @@ def handle_log_file(
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
-    if RERUN_DISABLED_TESTS:
-        # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
+    if is_distributed_test:
+        # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
+        rerun_options = ["-x", "--reruns=0"]
+    elif RERUN_DISABLED_TESTS:
+        # ASAN tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
-        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210). The same logic applies
-        # to ASAN, which is also slow
-        count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
+        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210).
+        count = 15 if TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
@@ -1250,8 +1281,7 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_openreg": run_test_with_openreg,
-    "test_transformers_privateuse1": run_test_with_openreg,
+    "test_openreg": test_openreg,
 }
 
 
@@ -1446,6 +1476,11 @@ def parse_args():
         help="exclude inductor tests",
     )
     parser.add_argument(
+        "--exclude-quantization-tests",
+        action="store_true",
+        help="exclude quantization tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1617,6 +1652,9 @@ def get_selected_tests(options) -> list[str]:
 
     if options.exclude_aot_dispatch_tests:
         options.exclude.extend(AOT_DISPATCH_TESTS)
+
+    if options.exclude_quantization_tests:
+        options.exclude.extend(QUANTIZATION_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:

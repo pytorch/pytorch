@@ -6,7 +6,6 @@ from logging import getLogger
 from typing import Optional, Union
 
 import torch
-from torch import Tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import Shard
@@ -44,7 +43,8 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     else:
         # TODO: Logs way too much
         warnings.warn(
-            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
+            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return False
 
@@ -73,7 +73,8 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     if not is_rng_supported_mesh(device_mesh):
         warnings.warn(
             "DTensor manual_seed() may not have complete support "
-            f"on {device_mesh.device_type} device mesh"
+            f"on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return
 
@@ -83,7 +84,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     #     "DTensor manual_seed() is deprecated, since DTensor no longer maintains a separate copy of generator state. "
     #     "Use `torch.manual_seed` instead"
     # )
-    # Note: we still need to ensure setting `run_state_sync=False` to support the the pp case
+    # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
@@ -103,6 +104,44 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     torch.manual_seed(seed)
 
 
+class _PhiloxState:
+    """
+    Convenience accessor for interpreting the packed bits of (seed: uint64, offset: uint64) in the philox state,
+    which for some reason is actually exposed as a size-16 uint8 tensor.
+
+    The state is always moved to .cpu since it is necessary for it to be on CPU before applying it back to a generator.
+    """
+
+    def __init__(self, state: torch.Tensor):
+        self._state = state.to("cpu")
+
+    @property
+    def state(self):
+        return self._state
+
+    @property
+    def offset(self) -> int:
+        return int(self._state[8:].view(dtype=torch.int64).item())
+
+    @offset.setter
+    def offset(self, offset: int) -> None:
+        offset_tensor = torch.tensor([offset], dtype=torch.uint64, device="cpu").view(
+            torch.uint8
+        )
+        self._state[8:] = offset_tensor
+
+    @property
+    def seed(self) -> int:
+        return int(self._state[:8].view(dtype=torch.int64).item())
+
+    @seed.setter
+    def seed(self, seed: int) -> None:
+        seed_tensor = torch.tensor([seed], dtype=torch.uint64, device="cpu").view(
+            torch.uint8
+        )
+        self._state[:8] = seed_tensor
+
+
 class _RNGStateTracker:
     """
     _RNGStateTracker stores Random Number Generator (RNG) state (a ByteTensor object)
@@ -113,6 +152,7 @@ class _RNGStateTracker:
     """
 
     def __init__(self, device: torch.device):
+        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
@@ -120,13 +160,7 @@ class _RNGStateTracker:
                 f"{self.__class__.__name__} instantiation requires the presence of "
                 f"{device.type} device but couldn't find."
             )
-
-        self._states: dict[str, Tensor] = {}
         self._use_distribute_region = True
-
-    @property
-    def rng_states(self) -> dict[str, Tensor]:
-        return self._states
 
     @property
     def distribute_region_enabled(self) -> bool:
@@ -135,27 +169,6 @@ class _RNGStateTracker:
     @distribute_region_enabled.setter
     def distribute_region_enabled(self, value) -> None:
         self._use_distribute_region = value
-
-    def rng_state_is_sync(self, name) -> bool:
-        return name in self.rng_states
-
-    def get_seed(self, name: str) -> int:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        seed_tensor = (self.rng_states[name])[0:8].view(dtype=torch.int64)
-        return int(seed_tensor.item())
-
-    def set_seed(self, name: str, seed: int) -> None:
-        seed_tensor = torch.tensor([seed], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        offset_tensor = torch.tensor([0], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _distribute_region(
         self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
@@ -222,9 +235,6 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self._device.type == "hpu":
             self._device_handle.unset_rng_ctx("philox")
 
-    def _manual_seed(self, parallel_seed: int) -> None:
-        self.set_seed("parallel-rng", parallel_seed)
-
     @contextlib.contextmanager
     def _distribute_region(
         self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
@@ -233,29 +243,25 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             # This is a little hacky, but for any user-passed generator, we store its state under a unique key,
             # not because we need to keep a copy of it but because its the easiest way to make it work with the
             # existing set/get APIs. We also ensure we remove it from rng_states after each _distribute_region.
-            g_name = "user-passed-generator"
-            assert g_name not in self.rng_states
-            self.rng_states[g_name] = generator.get_state()
+            state = _PhiloxState(generator.get_state())
         else:
-            g_name = "parallel-rng"
-            assert g_name not in self.rng_states
-            self.rng_states[g_name] = self._get_device_state().to("cpu")
+            state = _PhiloxState(self._get_device_state())
 
         if self.distribute_region_enabled:
             if self._device.type == "hpu":
                 self._device_handle.set_rng_ctx("philox")
-            old_offset = self.get_offset(g_name)
-            self._set_pre_op_offset(g_name, spec)
+            old_offset = state.offset
+            self._set_pre_op_offset(state, spec)
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
                 assert self._device_handle is not None
-                self._device_handle.set_rng_state(self.rng_states[g_name])
+                self._device_handle.set_rng_state(state.state)
                 try:
                     yield  # execute the region code
                 finally:
                     # update offset to synchronize among ranks
-                    self._set_post_op_offset(g_name, spec, old_offset)
+                    self._set_post_op_offset(state, spec, old_offset)
             if self._device.type == "hpu":
                 self._device_handle.unset_rng_ctx("philox")
         else:
@@ -265,32 +271,11 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             # ensure we (a) propagate the state advancement back to the user's RNG so its visible and impacts any future
             # usage of that RNG (dtensor or non-dtensor), (b) drop it from our own cache so that if the user updates
             # the seed value in their rng and uses it with DTensor again, we always use the latest value
-            generator.set_state(self.rng_states.pop(g_name))
+            generator.set_state(state.state)
         else:
-            self._set_device_state(self.rng_states.pop(g_name))
+            self._set_device_state(state.state)
 
-    def get_offset(self, name: str) -> int:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        offset_tensor = (self.rng_states[name])[8:].view(dtype=torch.int64)
-        return int(offset_tensor.item())
-
-    def set_offset(self, name: str, offset: int) -> None:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = torch.tensor([offset], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
-
-    def _set_pre_op_offset(self, name: str, spec: DTensorSpec) -> None:
+    def _set_pre_op_offset(self, state: _PhiloxState, spec: DTensorSpec) -> None:
         """Set the starting RNG offset for current device's local shard before actual
         op execution. The pre_op_offset value should start from the current RNG offset
         and increment by the size of local shard until it reaches the size of the whole
@@ -298,7 +283,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         will be the same.
 
         Args:
-            name (str): The name of the generator to use (should be a key in self.rng_states)
+            state (:class:`Tensor`): The generator state to modify
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we prepare the offset for running random ops.
 
@@ -401,15 +386,15 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         local_size = prod(local_size_on_rank_0)
 
         # get current RNG offset
-        current_offset = self.get_offset(name)
+        current_offset = state.offset
 
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-        self.set_offset(name, current_offset + offset_incr)
+        state.offset = current_offset + offset_incr
 
     def _set_post_op_offset(
-        self, name: str, spec: DTensorSpec, old_offset: int
+        self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
     ) -> None:
         """Sets the RNG to a synchronized state after running the local random op. Every
         rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
@@ -417,7 +402,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         random ops.
 
         Args:
-            name (str): The name of the generator to use (should be a key in self.rng_states)
+            state (:class:`Tensor`): The generator state to modify.
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we post-process the offset for running random ops.
 
@@ -432,7 +417,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         numel = (numel + 3) // 4 * 4
-        self.set_offset(name, old_offset + numel)
+        state.offset = old_offset + numel
 
     def _calc_shard_linear_idx(
         self, shard_coord: list[int], shard_size: list[int]

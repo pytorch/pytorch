@@ -1,145 +1,145 @@
 {
-  "  2": {
+  "  1": {
     "docstring_len": 44,
     "lines": 4,
     "name": "class ShortWithDocstring",
     "status": "good"
   },
-  "  7": {
+  "  6": {
     "docstring_len": 0,
     "lines": 3,
     "name": "class Short",
     "status": "good"
   },
-  " 11": {
+  " 10": {
     "docstring_len": 44,
     "lines": 6,
     "name": "class LongWithDocstring",
     "status": "good"
   },
-  " 14": {
+  " 13": {
     "docstring_len": 0,
     "lines": 3,
     "name": "def LongWithDocstring.short1",
     "status": "good"
   },
-  " 20": {
+  " 17": {
     "docstring_len": 0,
-    "lines": 4,
+    "lines": 6,
     "name": "class LongWithoutDocstring",
     "status": "good"
   },
-  " 21": {
+  " 20": {
     "docstring_len": 0,
     "lines": 3,
     "name": "def LongWithoutDocstring.short1",
     "status": "good"
   },
-  " 25": {
+  " 24": {
     "docstring_len": 10,
     "lines": 6,
     "name": "class LongWithShortDocstring",
     "status": "good"
   },
-  " 28": {
+  " 27": {
     "docstring_len": 0,
     "lines": 3,
     "name": "def LongWithShortDocstring.short1",
     "status": "good"
   },
-  " 32": {
+  " 31": {
     "docstring_len": 10,
     "lines": 6,
     "name": "class _Protected",
     "status": "good"
   },
-  " 35": {
+  " 34": {
     "docstring_len": 0,
     "lines": 3,
     "name": "def _Protected.short1",
     "status": "good"
   },
-  " 42": {
+  " 38": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 6,
     "name": "def short",
     "status": "good"
   },
-  " 46": {
+  " 45": {
     "docstring_len": 44,
     "lines": 8,
     "name": "def long",
     "status": "good"
   },
-  " 59": {
+  " 54": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 7,
     "name": "def long_without_docstring",
     "status": "good"
   },
-  " 69": {
+  " 62": {
     "docstring_len": 44,
-    "lines": 15,
+    "lines": 21,
     "name": "class ImpossibleCombo",
     "status": "good"
   },
-  " 72": {
+  " 71": {
     "docstring_len": 0,
     "lines": 12,
     "name": "def ImpossibleCombo.needs_docs",
     "status": "good"
   },
-  " 73": {
+  " 72": {
     "docstring_len": 0,
     "lines": 11,
     "name": "def ImpossibleCombo.needs_docs.not_short",
     "status": "good"
   },
-  " 74": {
+  " 73": {
     "docstring_len": 0,
     "lines": 6,
     "name": "class ImpossibleCombo.needs_docs.not_short.Long",
     "status": "good"
   },
-  " 81": {
+  " 80": {
     "docstring_len": 0,
     "lines": 3,
     "name": "class ImpossibleCombo.needs_docs.not_short.Short",
     "status": "good"
   },
-  " 86": {
+  " 85": {
     "docstring_len": 0,
     "lines": 21,
     "name": "class NotDocstring",
     "status": "good"
   },
-  " 87": {
+  " 86": {
     "docstring_len": 0,
     "lines": 2,
     "name": "def NotDocstring.short1",
     "status": "good"
   },
-  " 97": {
+  " 92": {
     "docstring_len": 0,
-    "lines": 2,
+    "lines": 6,
     "name": "def NotDocstring.long_with_override",
     "status": "good"
   },
-  "100": {
+  " 99": {
     "docstring_len": 0,
     "lines": 2,
     "name": "def NotDocstring.short2",
     "status": "good"
   },
-  "103": {
+  "102": {
     "docstring_len": 0,
     "lines": 4,
     "name": "def NotDocstring.short3",
     "status": "good"
   },
-  "112": {
+  "107": {
     "docstring_len": 0,
-    "lines": 1,
+    "lines": 5,
     "name": "def long_with_omit",
     "status": "good"
   }

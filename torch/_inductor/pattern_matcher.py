@@ -63,7 +63,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -270,6 +270,7 @@ class Match:
                 ]
             )
 
+        # pyrefly: ignore [bad-context-manager]
         with context:
             if trace_fn is None:
                 trace_fn = functools.partial(
@@ -1127,6 +1128,10 @@ class GraphPatternEntry(PatternEntry):
 
 @dataclasses.dataclass
 class ReplacementPatternEntry(PatternEntry):
+    """
+    The replacement pattern for the graph
+    """
+
     normalize_args: Callable[..., list[Any]]
 
     @staticmethod
@@ -1136,6 +1141,12 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
         args: Sequence[torch.fx.Node],
     ) -> None:
+        """
+        Inserts the replacement graph into the toplevel graph at the match
+        """
+
+        added_replacement_nodes: list[torch.fx.Node] = []
+
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
@@ -1149,6 +1160,7 @@ class ReplacementPatternEntry(PatternEntry):
                 if node.op == "call_function":
                     assert callable(target)
                     result = graph.call_function(target, args, kwargs)
+                    added_replacement_nodes.append(result)
                     _transfer_meta(
                         new_meta=result.meta,
                         old_node=node,
@@ -1186,10 +1198,16 @@ class ReplacementPatternEntry(PatternEntry):
                     if graph_name is None:
                         assert isinstance(target, str)
                         _, graph_name = unique_graph_name_with_root(
-                            graph.owning_module, target
+                            # pyrefly: ignore [unbound-name]
+                            graph.owning_module,
+                            target,
                         )
+                        # pyrefly: ignore [unbound-name]
                         graph.owning_module.register_module(graph_name, sub_gm)
-                    return graph.get_attr(graph_name)
+                    # pyrefly: ignore [unbound-name]
+                    getattr_node = graph.get_attr(graph_name)
+                    added_replacement_nodes.append(getattr_node)
+                    return getattr_node
 
                 raise NotImplementedError(f"unhandled {node}")
 
@@ -1245,13 +1263,22 @@ class ReplacementPatternEntry(PatternEntry):
                 old: Union[torch.fx.Node, None],
                 new: Union[torch.fx.Node, Sequence[torch.fx.Node], None],
             ) -> None:
+                def filter_nodes_in_newly_added_nodes(node: torch.fx.Node) -> bool:
+                    # Do not replace the use of a node if it is being used by
+                    # nodes in the replaced graph
+                    return node not in added_replacement_nodes
+
                 if old is None:
                     assert new is None
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
-                    old.replace_all_uses_with(None)  # type: ignore[arg-type]
-                    graph.erase_node(old)
+                    old.replace_all_uses_with(
+                        None,  # type: ignore[arg-type]
+                        delete_user_cb=filter_nodes_in_newly_added_nodes,
+                    )
+                    if len(old.users) == 0:
+                        graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
                     if "val" not in new.meta:
@@ -1271,8 +1298,11 @@ class ReplacementPatternEntry(PatternEntry):
                                 new, tag_name, old.meta[tag_name], OrderedSet(args)
                             )
 
-                    old.replace_all_uses_with(new)
-                    graph.erase_node(old)
+                    old.replace_all_uses_with(
+                        new, delete_user_cb=filter_nodes_in_newly_added_nodes
+                    )
+                    if len(old.users) == 0:
+                        graph.erase_node(old)
                     return
 
                 # `new` is not a node: it's a list of nodes.
@@ -1306,7 +1336,9 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError("can't handle")
+                        raise AssertionError(
+                            "Deleted index from getitem, did you erase the index and not properly replace it?"
+                        )
                     replace(user, new[idx])
                 graph.erase_node(old)
 
@@ -1371,7 +1403,7 @@ def check_and_add_duplicate_pattern(
 
     new_graph_str = str(graph)
     for graph_str in equiv_pattern_reprs:
-        if not new_graph_str == graph_str:
+        if new_graph_str != graph_str:
             continue
         if skip_duplicates:
             return True
@@ -1471,6 +1503,7 @@ def register_replacement(
                         return search_fn(*args_new[len(args_new) - len(args) :])
 
                     try:
+                        # pyrefly: ignore [bad-argument-type]
                         specific_graph = trace_fn(search_fn_new, sym_args + args)
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
@@ -1621,6 +1654,7 @@ def _serialize_pattern(
                 if isinstance(attr, type) and issubclass(
                     attr, (PatternExpr, _TargetExpr)
                 ):
+                    # pyrefly: ignore [bad-argument-type]
                     pattern_matcher_imports.append(name)
             except TypeError:
                 pass
@@ -1903,12 +1937,14 @@ class PatternMatcherPass:
     def __init__(
         self,
         pass_name: Optional[str] = None,
+        subsystem: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.patterns: defaultdict[
             tuple[str, torch.fx.node.Target], list[PatternEntry]
         ] = defaultdict(list)
         self.pass_name = pass_name
+        self.subsystem = subsystem
 
         # For a particular generated pattern repr, store all of the str representations
         # of the graph used to generate them. Because we ignore certain patterns
@@ -1948,7 +1984,7 @@ class PatternMatcherPass:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
         assert isinstance(gm, torch.fx.GraphModule)
-        with GraphTransformObserver(gm, pass_name):
+        with GraphTransformObserver(gm, pass_name, self.subsystem):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":
@@ -1976,7 +2012,8 @@ class PatternMatcherPass:
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                    if is_match(m) and entry.extra_check(m):
+
+                    if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
                         entry.apply(m, graph, node)
                         counters[backend]["pattern_matcher_count"] += 1
@@ -2025,10 +2062,14 @@ def fx_to_pattern(
     argnum = itertools.count()
 
     class Converter(torch.fx.Interpreter):
+        # pyrefly: ignore [bad-override]
         call_method = _not_implemented
+        # pyrefly: ignore [bad-override]
         call_module = _not_implemented
+        # pyrefly: ignore [bad-override]
         get_attr = _not_implemented
 
+        # pyrefly: ignore [bad-override]
         def placeholder(
             self,
             target: str,  # type: ignore[override]
@@ -2049,6 +2090,7 @@ def fx_to_pattern(
             else:
                 return KeywordArg(name)
 
+        # pyrefly: ignore [bad-override]
         def call_function(
             self,
             target: str,  # type: ignore[override]
@@ -2083,6 +2125,7 @@ def fx_to_pattern(
                 assert isinstance(args, Collection)
                 assert len(rv) == len(args)
                 for r, arg in zip(rv, args):
+                    # pyrefly: ignore [missing-attribute]
                     r.users = len(arg.users)
             else:
                 rv.users = len(n.users)
@@ -2157,7 +2200,10 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
         torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")
     )
     GraphPatternEntry(
-        pattern=pattern, handler=pointless_view, extra_check=_return_true
+        pattern=pattern,
+        handler=pointless_view,
+        extra_check=_return_true,
+        # pyrefly: ignore [bad-argument-type]
     ).register(matcher_pass.patterns)
     matcher_pass.apply(gm.graph)
 
@@ -2247,6 +2293,7 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 new_node.node.name = self.new_graph._graph_namespace.create_name(
                     old_node.name, None
                 )
+            # pyrefly: ignore [bad-return]
             return new_node
 
     return CopyGraph(input_graph).transform()

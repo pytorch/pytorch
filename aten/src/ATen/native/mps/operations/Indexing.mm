@@ -17,7 +17,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <fmt/format.h>
@@ -230,7 +229,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
                 index.numel());
     int64_t idx = index.item<int64_t>();
     TORCH_CHECK(idx == 0, "index_copy_(): the only valid index for a 0-dim tensor is 0, but got ", idx);
-    result.copy_(source);
+    result.copy_(source.squeeze());
     return;
   }
 
@@ -254,11 +253,12 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
     }
   }
 
-  TORCH_CHECK(source.size(dim) == index.numel(),
+  const auto source_size_dim = source.dim() > 0 ? source.size(dim) : 1;
+  TORCH_CHECK(index.numel() == source_size_dim,
               "index_copy_(): Number of indices (",
               index.numel(),
               ") should be equal to source.size(dim) (",
-              source.size(dim),
+              source_size_dim,
               ")");
 
   auto stream = getCurrentMPSStream();
@@ -281,7 +281,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
       [computeEncoder setComputePipelineState:indexCopyPSO];
       mtl_setArgs(computeEncoder, result, self, source, index, dim_arg, self.sizes(), ndim, indices_numel);
       if (!is_dense) {
-        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides());
+        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides(), index.strides());
       }
       mtl_dispatch1DJob(computeEncoder, indexCopyPSO, result.numel());
     }
@@ -595,28 +595,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)
 }
 
 Tensor index_select_mps(const Tensor& self, int64_t dim, const Tensor& index) {
-  IntArrayRef input_shape = self.sizes();
-  auto num_input_dims = input_shape.size();
-
-  auto num_indices = index.numel();
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
-
-  dim = maybe_wrap_dim(dim, self.dim());
-  std::vector<int64_t> shape_data(num_input_dims);
-
-  // Calculate new shape
-  for (const auto i : c10::irange(num_input_dims)) {
-    if (i == static_cast<decltype(i)>(dim)) {
-      shape_data[i] = num_indices;
-    } else {
-      shape_data[i] = input_shape[i];
-    }
-  }
-
-  IntArrayRef output_shape = IntArrayRef(shape_data.data(), num_input_dims);
-
-  Tensor result = at::empty(output_shape, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
+  Tensor result = at::empty({0}, self.options());
   index_select_out_mps(self, dim, index, result);
   return result;
 }
@@ -638,25 +617,11 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "index_select(): self and output must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(output.dim() == 0 || index.size(-1) == output.size(dim),
-              "index_select(): index and output must have the same size at `dim`th dimension, but got ",
-              index.size(-1),
-              " and ",
-              output.size(dim),
-              ".");
-
-  for (const auto i : irange(self.dim())) {
-    if (i == dim)
-      continue;
-    TORCH_CHECK(self.size(i) == output.size(i),
-                "index_select(): self and output must have the same dimensions except for `dim`th dimension, but got ",
-                self.size(i),
-                " and ",
-                output.size(i),
-                " at dimension ",
-                i,
-                ".");
+  auto output_size = self.sizes().vec();
+  if (self.dim() > 0) {
+    output_size[dim] = num_indices;
   }
+  at::native::resize_output(output, output_size);
 
   // Empty index
   if (num_indices == 0 || self.numel() == 0) {
@@ -942,6 +907,8 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "index_fill_(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_fill_(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(self.is_complex() || !source.is_complex(),
+              "index_fill_(): Converting complex Scalar to non-complex type is not supported");
   // MPS.scatter crashes if used with complex dtypes
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "index_fill_(): Complex types are yet not supported");
 

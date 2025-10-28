@@ -386,7 +386,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   ASSERT_TRUE(
       setenv(c10d::TORCH_NCCL_ENABLE_MONITORING[0].c_str(), "1", 1) == 0);
   auto tempFilename = c10::str(
-      std::filesystem::temp_directory_path().string(), "/nccl_trace_rank_");
+      std::filesystem::temp_directory_path().string(), "/comm_lib_trace_rank_");
   ASSERT_TRUE(
       setenv("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", tempFilename.c_str(), 1) == 0);
   // Enable nccl flight recorder.
@@ -401,7 +401,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   // The only difference is that we are storing traces also in memory for
   // validation.
   std::string fileNamePrefix = c10d::getCvarString(
-      {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+      {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/comm_lib_trace_rank_");
   std::unique_ptr<TestDebugInfoWriter> wrterForTestPtr =
       std::make_unique<TestDebugInfoWriter>(fileNamePrefix);
   std::vector<uint8_t>& traces = wrterForTestPtr->getTraces();

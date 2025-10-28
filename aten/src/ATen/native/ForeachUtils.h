@@ -103,15 +103,13 @@ inline bool _check_tensors_share_device_and_dtype(
         tensor.is_non_overlapping_and_dense();
   };
 
-  for (const auto& tensorList : tensorLists) {
-    for (const auto& tensor : tensorList) {
-      if (!is_tensor_okay(tensor)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return std::all_of(
+      tensorLists.cbegin(),
+      tensorLists.cend(),
+      [&](const TensorList& tensorList) {
+        return std::all_of(
+            tensorList.cbegin(), tensorList.cend(), is_tensor_okay);
+      });
 }
 
 // Helper function called in check_fast_path_restrictions to check if
@@ -157,11 +155,9 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
     bool does_op_promote_integer_inputs_to_float = false) {
   for (const auto i : c10::irange(tensorList.size())) {
     // For division, integer inputs will result in float.
-    if (does_op_promote_integer_inputs_to_float) {
-      if (at::isIntegralType(
-              tensorList[i].scalar_type(), /*includeBool*/ true)) {
-        return false;
-      }
+    if (does_op_promote_integer_inputs_to_float &&
+        at::isIntegralType(tensorList[i].scalar_type(), /*includeBool*/ true)) {
+      return false;
     }
     if (!scalarList.empty()) {
       const auto& scalar =
@@ -338,36 +334,34 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
               }
             }),
         "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32/64 notwithstanding");
-    if (!grouped_tensors_with_indices.count(key)) {
-      grouped_tensors_with_indices.insert(
-          {key,
-           TensorsAndIndicesT{
-               [&]() -> nested_optional_tensorvec_t {
-                 nested_optional_tensorvec_t nested_tensorvec;
-                 nested_tensorvec.reserve(num_lists);
-                 for (const auto& i : c10::irange(num_lists)) {
-                   std::vector<std::optional<at::Tensor>> tensors;
-                   if (!nested_tensorlist[i].empty()) {
-                     // NB: num_tensors is the max possible length for any of
-                     // the inner lists of tensor references. Reserving the max
-                     // trades memory for perf. This should not have significant
-                     // impact.
-                     tensors.reserve(num_tensors);
-                   }
-                   nested_tensorvec.emplace_back(tensors);
-                 }
-                 return nested_tensorvec;
-               }(),
-               [&]() -> IndicesT {
-                 if (!with_indices) {
-                   return {};
-                 } else {
-                   IndicesT indices;
-                   indices.reserve(num_tensors);
-                   return indices;
-                 }
-               }()}});
-    }
+    grouped_tensors_with_indices.try_emplace(
+        key,
+        TensorsAndIndicesT{
+            [&]() -> nested_optional_tensorvec_t {
+              nested_optional_tensorvec_t nested_tensorvec;
+              nested_tensorvec.reserve(num_lists);
+              for (const auto& i : c10::irange(num_lists)) {
+                std::vector<std::optional<at::Tensor>> tensors;
+                if (!nested_tensorlist[i].empty()) {
+                  // NB: num_tensors is the max possible length for any of
+                  // the inner lists of tensor references. Reserving the max
+                  // trades memory for perf. This should not have significant
+                  // impact.
+                  tensors.reserve(num_tensors);
+                }
+                nested_tensorvec.emplace_back(std::move(tensors));
+              }
+              return nested_tensorvec;
+            }(),
+            [&]() -> IndicesT {
+              if (!with_indices) {
+                return {};
+              } else {
+                IndicesT indices;
+                indices.reserve(num_tensors);
+                return indices;
+              }
+            }()});
     for (const auto& list_index : c10::irange(num_lists)) {
       if (!nested_tensorlist[list_index].empty()) {
         grouped_tensors_with_indices[key].first[list_index].emplace_back(

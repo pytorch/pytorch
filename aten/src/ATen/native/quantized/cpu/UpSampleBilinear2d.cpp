@@ -35,7 +35,7 @@ struct UpsampleBilinearParamW {
 
 // at::native functions for the native_functions.yaml
 template <typename scalar_t>
-static void upsample_bilinear2d_out_frame(
+void upsample_bilinear2d_out_frame(
     Tensor& output,
     const Tensor& input,
     int64_t input_height,

@@ -112,17 +112,28 @@ class DebugLevel(Enum):
     DETAIL = ...
 
 class ReduceOp:
+    # pyrefly: ignore  # unknown-name
     def __init__(self, op: RedOpType) -> None: ...
 
+    # pyrefly: ignore  # unknown-name
     SUM: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     AVG: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     PRODUCT: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     MIN: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     MAX: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     BAND: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     BOR: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     BXOR: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     PREMUL_SUM: RedOpType = ...
+    # pyrefly: ignore  # unknown-name
     UNUSED: RedOpType = ...
 
     # mypy error being ignored:
@@ -298,6 +309,8 @@ class Backend:
         def _timeout(self) -> timedelta: ...
         @_timeout.setter
         def _timeout(self, val: timedelta) -> None: ...
+        global_ranks_in_group: list[int]
+        group_name: str
 
     def __init__(
         self,
@@ -594,7 +607,8 @@ class ProcessGroup:
     def group_desc(self) -> str: ...
 
 class FakeProcessGroup(Backend):
-    def __init__(self, rank: int, world_size: int) -> None: ...
+    @staticmethod
+    def _create_internal(rank: int, world_size: int) -> FakeProcessGroup: ...
 
 class FakeWork(Work):
     seq_id: int
@@ -608,8 +622,6 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self): ...
 
@@ -651,8 +663,6 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -736,7 +746,7 @@ def _allow_inflight_collective_as_graph_input() -> bool: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: str) -> None: ...
 
-# Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
+# Initializes the device state in CUmodule so that it's able to perform NVSHMEM
 # operations.  CUmodule is a pointer to a CUDA module, carried by a int64 in
 # Python. At C++ interface, it is converted to a uintptr_t.
 def _nvshmemx_cumodule_init(module: int) -> None: ...
@@ -771,6 +781,8 @@ class _SymmetricMemory:
     def set_backend(name: str) -> None: ...
     @staticmethod
     def get_backend(device: torch.device) -> Optional[str]: ...
+    @staticmethod
+    def get_mempool_allocator(device: torch.device) -> Any: ...
     @property
     def rank(self) -> int: ...
     @property
@@ -806,6 +818,12 @@ class _SymmetricMemory:
         channel: int = 0,
         timeout_ms: int = 0,
     ) -> None: ...
+    def get_remote_tensor(
+        self,
+        peer: int,
+        sizes: torch.types._size,
+        dtype: torch.dtype,
+    ) -> torch.Tensor: ...
     @staticmethod
     def memset32(
         tensor: torch.Tensor, offset: int, val: int, count: int = 1
@@ -830,12 +848,18 @@ class _SymmetricMemory:
     def signal_pad_size(self) -> int: ...
 
 class ProcessGroupXCCL(Backend):
+    class Options(Backend.Options):
+        def __init__(self): ...
+
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-    ): ...
+        options: Options,
+    ) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...

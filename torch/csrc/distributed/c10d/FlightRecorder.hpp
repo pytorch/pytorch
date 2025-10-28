@@ -20,10 +20,10 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.9")
+DEFINE_CONSTANT(version_val, "2.10")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
-DEFINE_CONSTANT(nccl_version_key, "nccl_version")
+DEFINE_CONSTANT(comm_lib_version_key, "comm_lib_version")
 DEFINE_CONSTANT(version_key, "version")
 DEFINE_CONSTANT(pg_config_key, "pg_config")
 DEFINE_CONSTANT(pg_status_key, "pg_status")
@@ -76,10 +76,17 @@ class TORCH_API DebugInfoWriter {
   }
 
  protected:
-  DebugInfoWriter(const std::string& namePrefix, int rank) {
+  DebugInfoWriter(
+      const std::string& namePrefix,
+      int rank,
+      bool enableDynamicFilename = false) {
     filename_ = c10::str(namePrefix, rank);
+    enable_dynamic_filename_ = enableDynamicFilename;
+    rank_ = rank;
   }
   std::string filename_;
+  int rank_;
+  bool enable_dynamic_filename_;
 
  private:
   static std::unique_ptr<DebugInfoWriter> writer_;
@@ -176,10 +183,10 @@ struct FlightRecorder {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
-  std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
+  std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_;
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
-      pg_name_to_ranks_ = {};
-  std::string nccl_version_;
+      pg_name_to_ranks_;
+  std::string comm_lib_version_;
 
   std::optional<size_t> record(
       size_t pg_id,
@@ -200,7 +207,7 @@ struct FlightRecorder {
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
-  void record_accelerator_version(const std::string nccl_version);
+  void record_accelerator_version(const std::string comm_lib_version);
 
   void update_state(Entry& r);
 
@@ -223,6 +230,8 @@ struct FlightRecorder {
   TORCH_API void retire_id(
       std::optional<size_t> id,
       bool compute_duration = true);
+
+  TORCH_API void reset_all();
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
@@ -255,6 +264,15 @@ struct FlightRecorder {
       bool includeStackTraces,
       bool onlyActive);
 };
+
+// Whether to include stack trace in the Flight Recorder trace (default true)
+static std::vector<std::string> TORCH_INCLUDE_STACK_TRACE = {
+    "TORCH_INCLUDE_STACK_TRACE"};
+
+// Whether to include only active collectives in the Flight Recorder trace
+// (default false)
+static std::vector<std::string> TORCH_INCLUDE_ONLY_ACTIVE = {
+    "TORCH_INCLUDE_ONLY_ACTIVE"};
 
 // Dumps the fr traces and additional information about the Process
 // Group.

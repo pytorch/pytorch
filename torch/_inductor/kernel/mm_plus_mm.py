@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 
 import logging
+from typing import TYPE_CHECKING, Union
 
 import torch
 
+from .. import config as inductor_config
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings
 from ..select_algorithm import (
@@ -15,6 +17,10 @@ from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid
 
+
+if TYPE_CHECKING:
+    from torch._inductor.ir import ChoiceCaller
+    from torch._inductor.select_algorithm import KernelTemplate
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +53,7 @@ mm_plus_mm_template = TritonTemplate(
     stride_dn = {{stride("D", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -90,7 +96,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k1, other=0.)
             b = tl.load(B, mask=rk[:, None] < k1, other=0.)
-        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -103,7 +109,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             c = tl.load(C, mask=rk[None, :] < k2, other=0.)
             d = tl.load(D, mask=rk[:, None] < k2, other=0.)
-        acc += tl.dot(c, d, input_precision=FLOAT32_PRECISION)
+        acc += tl.dot(c, d, allow_tf32=ALLOW_TF32)
         C += BLOCK_K * stride_ck
         D += BLOCK_K * stride_dk
 
@@ -113,7 +119,7 @@ mm_plus_mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
     cache_codegen_enabled_for_template=True,
 )
@@ -137,6 +143,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         or not V.graph.sizevars.statically_known_list_equals(
             mat2.get_size(), mat4.get_size()
         )
+        or inductor_config.triton.native_matmul
     ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/triton-lang/triton/issues/967
@@ -150,27 +157,20 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     assert layout1 == layout2
     # options to tune from
-    choices = (
-        [aten_mm_plus_mm.bind(kernel_inputs.nodes(), layout1)]
-        if use_aten_gemm_kernels()
-        else []
-    )
+    choices: list[ChoiceCaller] = []
 
-    if use_triton_template(layout1):
-        # Get template params using the new unified function
-        for kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout1, mm_plus_mm_template.name, "mm_plus_mm"
-        ):
-            # Apply BLOCK_K constraint specific to mm_plus_mm
-            # see https://github.com/triton-lang/triton/issues/1298
-            # BLOCK_K = K causes llvm error
-            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
-                mm_plus_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=kernel_inputs.nodes(),
-                    layout=layout1,
-                    **kwargs,
-                )
+    # Collect all templates for unified call
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    if use_aten_gemm_kernels():
+        templates_to_use.append(aten_mm_plus_mm)
+
+    if use_triton_template(layout1, check_max_autotune=False):
+        templates_to_use.append(mm_plus_mm_template)
+
+    # Single unified call for all templates
+    choices.extend(
+        V.choices.get_template_configs(kernel_inputs, templates_to_use, "mm_plus_mm")
+    )
 
     return autotune_select_algorithm(
         "mm_plus_mm", choices, kernel_inputs.nodes(), layout1
