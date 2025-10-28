@@ -119,11 +119,9 @@ CI_PT_ROOT = ""
 CI_TEST_PREFIX = ""
 DISABLED_TESTS_FILE = ""
 GRAPH_EXECUTOR : Optional[ProfilingMode] = None
-LOG_SUFFIX = ""
 PYTEST_SINGLE_TEST = ""
 REPEAT_COUNT = 0
 RERUN_DISABLED_TESTS = False
-RUN_PARALLEL = 0
 SHOWLOCALS = False
 SLOW_TESTS_FILE = ""
 TEST_BAILOUTS = False
@@ -964,11 +962,9 @@ def parse_cmd_line_args():
     global CI_TEST_PREFIX
     global DISABLED_TESTS_FILE
     global GRAPH_EXECUTOR
-    global LOG_SUFFIX
     global PYTEST_SINGLE_TEST
     global REPEAT_COUNT
     global RERUN_DISABLED_TESTS
-    global RUN_PARALLEL
     global SHOWLOCALS
     global SLOW_TESTS_FILE
     global TEST_BAILOUTS
@@ -991,8 +987,6 @@ def parse_cmd_line_args():
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
     parser.add_argument('--discover-tests', action='store_true')
-    parser.add_argument('--log-suffix', type=str, default="")
-    parser.add_argument('--run-parallel', type=int, default=1)
     parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
     parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
     parser.add_argument('--rerun-disabled-tests', action='store_true')
@@ -1023,8 +1017,6 @@ def parse_cmd_line_args():
 
     SLOW_TESTS_FILE = args.import_slow_tests
     DISABLED_TESTS_FILE = args.import_disabled_tests
-    LOG_SUFFIX = args.log_suffix
-    RUN_PARALLEL = args.run_parallel
     TEST_BAILOUTS = args.test_bailouts
     USE_PYTEST = args.use_pytest
     PYTEST_SINGLE_TEST = args.pytest_single_test
@@ -1195,7 +1187,7 @@ def get_report_path(argv=None, pytest=False):
     if argv is None:
         argv = UNITTEST_ARGS
     test_filename = sanitize_test_filename(argv[0])
-    test_report_path = TEST_SAVE_XML + LOG_SUFFIX
+    test_report_path = TEST_SAVE_XML
     test_report_path = os.path.join(test_report_path, test_filename)
     if pytest:
         test_report_path = test_report_path.replace('python-unittest', 'python-pytest')
@@ -1331,17 +1323,6 @@ def run_tests(argv=None):
             assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
                 len(failed_tests), '\n\t'.join(failed_tests))
 
-    elif RUN_PARALLEL > 1:
-        test_cases = discover_test_cases_recursively(suite)
-        test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
-        processes = []
-        for i in range(RUN_PARALLEL):
-            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
-            processes.append(subprocess.Popen(command, universal_newlines=True))
-        failed = False
-        for p in processes:
-            failed |= wait_for_process(p) != 0
-        assert not failed, "Some test shards have failed"
     elif USE_PYTEST:
         pytest_args = argv + ["--use-main-module"]
         test_report_path = ""
