@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional
 
 import torch.fx as fx
 
+
 log = logging.getLogger(__name__)
 bucket_log = logging.getLogger(f"{__name__}.bucketing")
 
@@ -694,7 +695,9 @@ class OverlapPreservingBucketer:
         ]
 
         for i, (start_pos, wait_pos) in enumerate(combinations):
-            if self._try_rail_position(bucket_info, candidate, start_pos, wait_pos, why):
+            if self._try_rail_position(
+                bucket_info, candidate, start_pos, wait_pos, why
+            ):
                 bucket_log.debug(
                     "bucketed %s with %s using rail position %d: (start=%s, wait=%s)",
                     candidate.name,
@@ -716,7 +719,9 @@ class OverlapPreservingBucketer:
         """
 
         from torch._inductor.fx_passes.bucketing import (
+            is_all_reduce_tensor,
             merge_all_gather_bucket,
+            merge_all_reduce_bucket,
             merge_reduce_scatter_bucket,
         )
 
@@ -741,6 +746,13 @@ class OverlapPreservingBucketer:
                 bucket,
                 insert_before=next_node,
                 mode="custom_ops",
+            )
+        elif is_all_reduce_tensor(bucket[0]):
+            new_nodes, replacements = merge_all_reduce_bucket(
+                self.graph,
+                bucket,
+                mode="custom_ops",
+                insert_before=next_node,
             )
         else:
             assert is_reduce_scatter(bucket[0])
