@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
@@ -23,6 +24,7 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
     compiled_autograd_enabled,
+    DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
@@ -341,7 +343,7 @@ class FSDPParam:
                 self._spmd_placements = (Replicate(), fsdp_placement)
             elif isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP
                 self._spmd_placements = (fsdp_placement,)
-            else:  # DDP
+            elif isinstance(self.mesh_info, DDPMeshInfo):  # DDP
                 self._spmd_placements = (Replicate(),)
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
