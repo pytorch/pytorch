@@ -9696,6 +9696,17 @@ def ___make_guard_fn():
             def foo_impl(x, y):
                 return torch.cat([x, y])
 
+            def setup_context(ctx, inputs, output):
+                (x, _) = inputs
+                ctx.xs = x.shape[0]
+
+            def foo_backward(ctx, grad):
+                return grad[: ctx.xs], grad[ctx.xs :]
+
+            torch.library.register_autograd(
+                "mylib::foo", foo_backward, setup_context=setup_context
+            )
+
             @torch.compile(backend="aot_eager", fullgraph=True)
             def f(x, i):
                 i0, i1 = i.tolist()

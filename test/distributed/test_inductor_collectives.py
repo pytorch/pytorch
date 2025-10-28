@@ -414,6 +414,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model = Model().to(self.device)
+            model.emb.weight.requires_grad = False
             model_compiled = torch.compile(model)
             inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
             out = model_compiled(inp, self.world_size, **self.get_world_trs())
