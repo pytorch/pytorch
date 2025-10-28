@@ -6656,9 +6656,14 @@ Done""",
         c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
         self.assertTrue(gradcheck(fn2, (c)))
 
+    @unittest.skipIf(TEST_CUDA, "CPU-only test")
     def test_gradcheck_adjusted_atol_complex_inputs(self):
-        from torch.autograd.gradcheck import GradcheckError
+        # Regression test for incorrect atol transformation for
+        # complex inputs, allowing fast gradcheck to fail and slow gradcheck to pass.
+        # See issue: <insert>
 
+        # this particular seed on CPU triggers a specific input tangent vector u in [0,1)^d such that
+        # v^T(j_n - j_a)u is interesting.
         torch.manual_seed(97)
 
         def sample_func(z):
@@ -6675,11 +6680,10 @@ Done""",
                              )
         atol = 8.3e-6
         rtol = 1e-9
-        # fails fast gradcheck
-        with self.assertRaises(GradcheckError):
-            gradcheck(sample_func, (z,), fast_mode=True,
-                      atol=atol, rtol=rtol)
-        # passes slow gradcheck
+
+        # check both fast and slow gradcheck pass after the fix to _adjusted_atol()
+        self.assertTrue(gradcheck(sample_func, (z,), fast_mode=True,
+                      atol=atol, rtol=rtol))
         self.assertTrue(gradcheck(sample_func, (z,), fast_mode=False,
                                   atol=atol, rtol=rtol))
 
