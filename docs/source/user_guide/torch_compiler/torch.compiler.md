@@ -80,50 +80,55 @@ Some of the most commonly used backends include:
      - Uses OpenVINO for inference optimizations. `Read more <https://docs.openvino.ai/torchcompile>`__
 ```
 
-## Read More
+
+
 
 ```{toctree}
-:caption: Getting Started for PyTorch Users
-:maxdepth: 2
-
-torch.compiler_get_started
-torch.compiler_api
-torch.compiler.config
-torch.compiler_dynamic_shapes
-torch.compiler_fine_grain_apis
-torch.compiler_backward
-torch.compiler_aot_inductor
-torch.compiler_inductor_profiling
-torch.compiler_profiling_torch_compile
-torch.compiler_faq
-torch.compiler_troubleshooting
-torch.compiler_performance_dashboard
-torch.compiler_inductor_provenance
-```
-
-```{toctree}
-:caption: torch.compile Programming Model
-:maxdepth: 2
-
-compile/programming_model
-```
-
-```{toctree}
-:caption: Deep Dive for PyTorch Developers
 :maxdepth: 1
+:hidden:
 
-torch.compiler_dynamo_overview
-torch.compiler_dynamo_deepdive
-torch.compiler_nn_module
-torch.compiler_cudagraph_trees
-torch.compiler_fake_tensor
+{ref}torch_compiler_get_started
+```
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+core_concepts
 ```
 
 ```{toctree}
-:caption: HowTo for PyTorch Backend Vendors
 :maxdepth: 1
+:hidden:
 
-torch.compiler_custom_backends
-torch.compiler_transformations
-torch.compiler_ir
+
+export_concepts
+```
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+performance
+```
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+advanced
+```
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+
+troubleshooting_faqs
+```
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+api_reference
 ```

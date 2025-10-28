@@ -20,7 +20,7 @@ This guide provides comprehensive documentation for `torch.compile`, PyTorch's c
 :maxdepth: 1
 :hidden:
 
-getting_started
+{ref}torch_compiler_get_started
 ```
 ```{toctree}
 :maxdepth: 1
