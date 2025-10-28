@@ -89,12 +89,13 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_tf32 = True
         super().tearDown()
 
-    def cublas_addmm(self,
+    def cublas_addmm(
+        self,
         size: int,
         dtype: torch.dtype,
         reduced_precision: bool = False,
         fp16_accumulate: bool = False,
-        bias_shape_modifier: Callable = None,
+        bias_shape_modifier: Callable | None = None,
     ):
         #
         # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
