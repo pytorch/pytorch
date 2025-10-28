@@ -547,7 +547,9 @@ def has_uses(
     Uses in view ops will follow the views uses.
     """
 
-    def get_use_aggregate_fn(use_aggregate_type: LogicalConnective) -> Callable[Iterator, bool]:
+    def get_use_aggregate_fn(
+        use_aggregate_type: LogicalConnective,
+    ) -> Callable[[Iterator[Any]], bool]:
         match use_aggregate_type:
             case LogicalConnective.AND:
                 return all
@@ -594,9 +596,7 @@ def has_uses_tagged_as(
     """
 
     return has_uses(
-        target,
-        lambda use: any(tag in use_tags for tag in use.tags),
-        use_aggregate_type
+        target, lambda use: any(tag in use_tags for tag in use.tags), use_aggregate_type
     )
 
 
