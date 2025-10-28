@@ -1060,6 +1060,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             frozen_model_iter_fn = export_nativert(model, example_inputs)
         elif args.torchscript_jit_trace:
             frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
+        elif args.aot_precompile:
+            frozen_model_iter_fn = aot_precompile(model, example_inputs)
         else:
             if kwargs["hf_llm"]:
                 # If it's an llm, we want to optimize model.forward, and use
@@ -1495,6 +1497,37 @@ def export(model, example_inputs):
     return opt_export
 
 
+def aot_precompile(model, example_inputs):
+    example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+
+    with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
+        save_path = f.name
+
+    with fresh_cache(), torch._dynamo.config.patch("enable_aot_compile", True):
+        compiled_fn = torch.compile(
+            model,
+            fullgraph=True,
+            options={"guard_filter_fn": lambda guards: [False for _ in guards]},
+        ).forward.aot_compile((example_args, example_kwargs))
+
+        compiled_fn.save_compiled_function(save_path)
+
+        torch._dynamo.reset()
+        with open(save_path, "rb") as f:
+            load_start_time = time.perf_counter()
+            loaded_fn = torch.compiler.load_compiled_function(f)
+            load_end_time = time.perf_counter()
+            print(
+                f"AOT Precompile loading time: {load_end_time - load_start_time} seconds"
+            )
+
+            def opt_aot_precompile(_, example_inputs, collect_outputs=False):
+                example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+                return loaded_fn(model, *example_args, **example_kwargs)
+
+            return opt_aot_precompile
+
+
 def export_nativert(model, example_inputs):
     optimized = NativeRTCache.load(model, example_inputs)
 
@@ -1718,8 +1751,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception as e:
-                log.error("Failed to save memory snapshot, %s", e)
+            except Exception:
+                log.exception("Failed to save memory snapshot")
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2251,9 +2284,11 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+                exception_string = str(e)
+                accuracy_status = f"fail_exception: {exception_string}"
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if not is_same:
                 accuracy_status = "eager_two_runs_differ"
@@ -2274,6 +2309,7 @@ class BenchmarkRunner:
                     or self.args.export_aot_inductor
                     or self.args.export_nativert
                     or self.args.torchscript_jit_trace
+                    or self.args.aot_precompile
                 ):
                     # apply export on module directly
                     # no need for n iterations
@@ -2369,9 +2405,11 @@ class BenchmarkRunner:
                     force_max_multiplier=force_max_multiplier,
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+                exception_string = str(e)
+                accuracy_status = f"fail_exception: {exception_string}"
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if not is_same:
                 if self.args.skip_accuracy_check:
@@ -2729,6 +2767,7 @@ class BenchmarkRunner:
                 self.args.export_aot_inductor
                 or self.args.export_nativert
                 or self.args.torchscript_jit_trace
+                or self.args.aot_precompile
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
@@ -3506,6 +3545,11 @@ def parse_args(args=None):
         help="Measure pass rate with Export+AOTInductor",
     )
     group.add_argument(
+        "--aot-precompile",
+        action="store_true",
+        help="Measure pass rate with AOT Precompile",
+    )
+    group.add_argument(
         "--export-nativert",
         action="store_true",
         help="Measure pass rate with Export+NativeRT",
@@ -3935,6 +3979,10 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
+    elif args.aot_precompile:
+        optimize_ctx = aot_precompile
+        experiment = speedup_experiment
+        output_filename = "aot_precompile.csv"
     elif args.export_nativert:
         optimize_ctx = export_nativert
         experiment = speedup_experiment
@@ -4016,7 +4064,7 @@ def run(runner, args, original_dir=None):
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
-            speedup_experiment if not args.backend == "torchao" else latency_experiment
+            speedup_experiment if args.backend != "torchao" else latency_experiment
         )
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"

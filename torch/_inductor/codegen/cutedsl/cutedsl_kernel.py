@@ -275,7 +275,7 @@ class CuteDSLTemplateKernel(Kernel):
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
 
-    def unpack_buffers(self):
+    def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
         """Generate buffer unpacking code via render hook."""
 
         def hook():
@@ -286,9 +286,11 @@ class CuteDSLTemplateKernel(Kernel):
             # Generate unpacking assignments: in_ptr4 = buffers[0], etc.
             unpacking_lines = []
             for i, buffer_name in enumerate(tensor_buffers):
-                unpacking_lines.append(f"{buffer_name} = buffers[{i}]")
+                # pyrefly: ignore [bad-argument-type]
+                unpacking_lines.append(f"{buffer_name} = {buffer_list_name}[{i}]")
 
-            return "\n        ".join(unpacking_lines)
+            indent = " " * indent_width
+            return "\n" + indent + ("\n" + indent).join(unpacking_lines)
 
         # Register the hook and return placeholder
         placeholder = "<UNPACK_BUFFERS>"
@@ -493,6 +495,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
+    # pyrefly: ignore [bad-override]
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
