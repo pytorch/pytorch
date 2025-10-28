@@ -358,6 +358,7 @@ static void attachAllocatorHooks() {
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorDeregisterHook);
+    return true;
   }();
 }
 
