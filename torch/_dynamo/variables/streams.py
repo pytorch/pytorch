@@ -104,7 +104,7 @@ class StreamContextVariable(ContextWrappingVariable):
             self._target_stream_proxies() + self._initial_stream_proxies(),
             {},
         )
-        return ConstantVariable.create(None)
+        return ConstantVariable.create(1)
 
     def exit(self, tx: "InstructionTranslator", *args: tuple[Any]) -> "VariableTracker":
         # to stream, from stream is the order of the arguments
