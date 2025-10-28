@@ -17,7 +17,6 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._local_tensor import (
-    local_tensor_mode,
     LocalIntNode,
     LocalTensor,
     LocalTensorMode,
@@ -715,9 +714,6 @@ class LocalDTensorTestBase(DTensorTestBase):
         self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
-        lm = local_tensor_mode()
-        if lm is not None:
-            breakpoint()
         return LocalTensorMode(frozenset(range(self.world_size)))
 
     def setUp(self) -> None:
