@@ -1510,7 +1510,10 @@ def should_prefer_unfused_addmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    return has_uses_tagged_as(match.output_node(), (torch.Tag.pointwise, torch.Tag.reduction))
+    return has_uses_tagged_as(
+        match.output_node(),
+        (torch.Tag.pointwise, torch.Tag.reduction),
+    )
 
 
 @register_graph_pattern(
