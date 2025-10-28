@@ -408,8 +408,6 @@ def set_default_dtype(fp_dtype="numpy", int_dtype="numpy"):
 
     if int_dtype in ["numpy", "pytorch"]:
         int_dtype = torch.int64
-    else:
-        int_dtype = int_dtype
 
     new_defaults = _dtypes_impl.DefaultDTypes(
         float_dtype=float_dtype, complex_dtype=complex_dtype, int_dtype=int_dtype
