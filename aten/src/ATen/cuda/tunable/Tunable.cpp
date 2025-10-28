@@ -590,12 +590,49 @@ void TuningContext::EnableNumericsCheck(bool value) {
   numerics_check_enable_ = value;
 }
 
-bool TuningContext::IsNumericsCheckEnabled() const {
-  const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-  if (env == "1") {
-    return true;
+NumericalCheckConfig TuningContext::GetNumericalCheckConfig() const {
+  const auto env_opt = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+
+  if (!env_opt.has_value()) {
+    return numerics_cfg_;
   }
-  return numerics_check_enable_;
+
+  const std::string& env = env_opt.value();
+
+  if (env == "0") {
+    return NumericalCheckConfig(false, 1e-5, 1e-5);
+  }
+
+  const size_t underscore = env.find('_');
+
+  TORCH_CHECK(
+      underscore != std::string::npos,
+      "Invalid PYTORCH_TUNABLEOP_NUMERICAL_CHECK format. "
+      "Expected 'atol_rtol', got: ",
+      env);
+
+  double atol = 0.0;
+  double rtol = 0.0;
+
+  try {
+    atol = std::stod(env.substr(0, underscore));
+    rtol = std::stod(env.substr(underscore + 1));
+  } catch (const std::exception& e) {
+    TORCH_CHECK(false, "Failed to parse PYTORCH_TUNABLEOP_NUMERICAL_CHECK: ", e.what());
+  }
+
+  TORCH_CHECK( atol > 0.0 && rtol > 0.0, "Tolerance values must be positive. atol=", atol, ", rtol=", rtol);
+  return NumericalCheckConfig(true, atol, rtol);
+}
+
+void TuningContext::SetNumericalCheckConfig(bool enabled, double atol, double rtol) {
+  TORCH_CHECK(atol > 0.0 && rtol > 0.0, "Numerical check tolerances must be positive");
+  numerics_cfg_ = {enabled, atol, rtol};
+}
+
+bool TuningContext::IsNumericsCheckEnabled() const {
+  const auto cfg = GetNumericalCheckConfig();
+  return cfg.enabled || numerics_check_enable_;
 }
 
 void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {

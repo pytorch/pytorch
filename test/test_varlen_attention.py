@@ -238,7 +238,10 @@ class TestVarlenAttention(NNTestCase):
 
         total_tokens = shape.batch_size * shape.max_seq_len
         x_packed = torch.randn(
-            total_tokens, shape.embed_dim, device=device, dtype=dtype,
+            total_tokens,
+            shape.embed_dim,
+            device=device,
+            dtype=dtype,
         )
         cu_seq = torch.tensor(
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
@@ -256,12 +259,25 @@ class TestVarlenAttention(NNTestCase):
         )
         grad_out = torch.randn_like(out)
 
+        # we don't support double backward, so we skip test_autograd_registration, test_aot_dispatch_dynamic, and test_aot_dispatch_static
         torch.library.opcheck(
             torch.ops.torch_nn_attention._varlen_attn_backward,
-            (grad_out, q, k, v, out, lse, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False),
-            test_utils=["test_schema", "test_faketensor"] # doesn't support double bwd
+            (
+                grad_out,
+                q,
+                k,
+                v,
+                out,
+                lse,
+                cu_seq,
+                cu_seq,
+                shape.max_seq_len,
+                shape.max_seq_len,
+                False,
+                rng_state,
+            ),
+            test_utils=["test_schema", "test_faketensor"],
         )
-
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -278,7 +294,11 @@ class TestVarlenAttention(NNTestCase):
 
         total_tokens = shape.batch_size * shape.max_seq_len
         x_packed = torch.randn(
-            total_tokens, shape.embed_dim, device=device, dtype=dtype, requires_grad=True
+            total_tokens,
+            shape.embed_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
         )
         cu_seq = torch.tensor(
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
@@ -306,9 +326,7 @@ class TestVarlenAttention(NNTestCase):
 
         custom_ops_called = any(
             "torch_nn_attention._varlen_attn" in op for op in called_ops
-        ) and any(
-            "torch_nn_attention._varlen_attn_backward" in op for op in called_ops
-        )
+        ) and any("torch_nn_attention._varlen_attn_backward" in op for op in called_ops)
         assert custom_ops_called
 
     @unittest.skipIf(

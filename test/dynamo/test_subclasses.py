@@ -286,7 +286,7 @@ class OptionalScaledTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         return OptionalScaledTensor(
             inner_tensors["_data"],
-            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
+            inner_tensors.get("_scale", None),
             constant=metadata["_constant"],
         )
 
@@ -3166,7 +3166,6 @@ class GraphModule(torch.nn.Module):
     ):
         slice_1: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_10)
         slice_2: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_10, add_2);  tangents_1 = add_2 = None
-
         add_4: "f64[s64, s55]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
         return (
             None,  # None

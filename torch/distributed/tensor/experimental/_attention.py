@@ -3,11 +3,11 @@ import itertools
 import logging
 import types
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import Any, cast, Mapping, Optional, Protocol, Sequence, TypeAlias
+from typing import Any, cast, Optional, Protocol, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -465,7 +465,7 @@ def _templated_ring_attention(
         )
         sdpa_merger.step(out, logsumexp, partial)
 
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     return *sdpa_merger.results(), *rest
 
 
@@ -632,7 +632,7 @@ def _templated_ring_attention_backward(
         grad_query,
         grad_key,
         grad_value,
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         *rest,
     )
 
@@ -1068,22 +1068,39 @@ def _context_parallel_buffers(
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if isinstance(buffer, torch.Tensor):
             # TODO: the load balance doesn't perform error handling.
+
+            # NOTE: assuming batch dim is 0
+
             if load_balance_indices is not None:
-                if load_balance_indices.size(0) == 1:  # identical load-balance in batch
+                # TODO: we should expclitly ask users to unsqueeze the batch dim.
+                # But this is a BC breaking ask.
+                # However, what we have done today is also not very safe.
+                idx_batch_size = load_balance_indices.size(0)
+                data_batch_size = buffer.size(0) if seq_dim > 0 else 1
+
+                if idx_batch_size != 1 and idx_batch_size != data_batch_size:
+                    raise ValueError(
+                        "Cannot rearrange buffer: "
+                        f"load_balance_indices has shape {load_balance_indices.shape}, "
+                        f"but buffer has shape {buffer.shape}."
+                    )
+
+                if seq_dim == 0:
                     buffer = torch.index_select(
-                        buffer, dim=seq_dim, index=load_balance_indices[0]
+                        buffer, dim=0, index=load_balance_indices[0]
                     )
                 else:
-                    # load_balance_indices has shape (batch_size, seq_length)
-                    # TODO: this for-loop can be done in a smarter way
-                    for i in range(load_balance_indices.size(dim=0)):
-                        # NOTE: assuming batch dim is 0
-                        buffer_batch_i = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=load_balance_indices[i]
-                        )
-                        buffer[i] = buffer_batch_i
-            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+                    indices = load_balance_indices
+                    if idx_batch_size == 1:
+                        size = [data_batch_size] + list(indices.size())[1:]
+                        indices = indices.expand(*size)
 
+                    for i in range(data_batch_size):
+                        buffer[i] = torch.index_select(
+                            buffer[i], dim=seq_dim - 1, index=indices[i]
+                        )
+
+            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
             sharded_buffer = distribute_tensor(
                 buffer, mesh, [Shard(seq_dim)], src_data_rank=None
             ).to_local()
@@ -1310,7 +1327,6 @@ class _ContextParallel(ParallelStyle):
         placement = [Shard(self.seq_dim)]
         all_args = []
 
-        # pyrefly: ignore  # bad-assignment, bad-argument-type
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, DTensor):
@@ -1580,19 +1596,26 @@ def context_parallel_unshard(
         unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
 
         if restore_indices is not None:
-            if restore_indices.size(0) == 1:  # identical load-balance in batch
-                unsharded_b = torch.index_select(
-                    unsharded_b, dim=dim, index=restore_indices[0]
+            # NOTE: assuming batch dim is 0
+            idx_batch_size = restore_indices.size(0)
+            data_batch_size = unsharded_b.size(0)
+            if idx_batch_size != 1 and idx_batch_size != data_batch_size:
+                raise ValueError(
+                    "Cannot restore buffer: "
+                    f"restore_indices has shape {restore_indices.shape}, "
+                    f"but unsharded_b has shape {unsharded_b.shape}."
                 )
-            else:
-                # restore_indices has shape (batch_size, seq_length)
-                # TODO: this for-looop can be done in a smarter way
-                for i in range(restore_indices.size(dim=0)):
-                    # NOTE: assuming batch dim is 0
-                    unsharded_b_batch_i = torch.index_select(
-                        unsharded_b[i], dim=dim - 1, index=restore_indices[i]
-                    )
-                    unsharded_b[i] = unsharded_b_batch_i
+
+            for i in range(data_batch_size):
+                index = (
+                    restore_indices[0]  # identical load-balance in batch
+                    if idx_batch_size == 1
+                    else restore_indices[i]
+                )
+                unsharded_b_batch_i = torch.index_select(
+                    unsharded_b[i], dim=dim - 1, index=index
+                )
+                unsharded_b[i] = unsharded_b_batch_i
 
         unsharded_buffers.append(unsharded_b)
 

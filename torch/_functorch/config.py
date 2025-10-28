@@ -312,6 +312,9 @@ graphsafe_rng_functionalization = True
 # through compile_fx, we can remove this
 force_non_lazy_backward_lowering = False
 
+# only for testing, used to turn functionalization off in AOTDispatcher
+_test_disable_functionalization = True
+
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
 strict_autograd_cache = False

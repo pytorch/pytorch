@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
@@ -186,6 +186,7 @@ class CoordescTuner:
 
     def check_all_tuning_directions(
         self,
+        # pyrefly: ignore [missing-attribute]
         func: Callable[["triton.Config"], float],
         best_config,
         best_timing,
@@ -238,7 +239,7 @@ class CoordescTuner:
         try:
             candidate_timing = self.call_func(func, candidate_config)
         except Exception as e:
-            log.debug("Got exception %s", e)
+            log.debug("Got exception %s", e)  # noqa: G200
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):
@@ -255,10 +256,12 @@ class CoordescTuner:
 
     def autotune(
         self,
+        # pyrefly: ignore [missing-attribute]
         func: Callable[["triton.Config"], float],
+        # pyrefly: ignore [missing-attribute]
         baseline_config: "triton.Config",
-        baseline_timing: Optional[float] = None,
-    ) -> "triton.Config":
+        baseline_timing: float | None = None,
+    ) -> "triton.Config":  # pyrefly: ignore  # missing-attribute
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 
