@@ -1676,8 +1676,8 @@ def _allclose_with_type_promotion(a, b, rtol, atol):
     a = a.to(dtype=promoted_type)
     b = b.to(dtype=promoted_type)
     # below exprs lhs, effectively
-    abs_vals_re = torch.abs(torch.real(a-b))
-    abs_vals_im = torch.abs(torch.imag(a-b))
+    abs_vals_re = torch.abs(torch.real(a - b))
+    abs_vals_im = torch.abs(torch.imag(a - b))
     # checks |input_i - other_i| <= atol + rtol * |other_i|
     rhs_cmp = atol + rtol * torch.abs(torch.real(b))
     # effectively need lhs <= rhs_cmp
@@ -1780,7 +1780,6 @@ def _adjusted_atol(atol, u, v):
     sum_u = u.sum()
     modified_atol = atol * float(sum_u) * float(sum_v)
     return modified_atol
-
 
 
 FAST_FAIL_SLOW_OK_MSG = """

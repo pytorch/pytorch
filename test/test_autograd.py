@@ -6667,25 +6667,28 @@ Done""",
         torch.manual_seed(97)
 
         def sample_func(z):
-            return 1. / torch.norm(z)
+            return 1.0 / torch.norm(z)
 
         # Input needs to be at least 2-dim. to trigger
         # in gradcheck an input projection vector u
         # that is not all 1s.
         eps = 10e-3  # eps distance factor from origin, to get
         # some interesting numerical vs analytic discrepancy.
-        z = eps * torch.rand(2,
-                             dtype=torch.complex128,
-                             requires_grad=True,
-                             )
+        z = eps * torch.rand(
+            2,
+            dtype=torch.complex128,
+            requires_grad=True,
+        )
         atol = 8.3e-6
         rtol = 1e-9
 
         # check both fast and slow gradcheck pass after the fix to _adjusted_atol()
-        self.assertTrue(gradcheck(sample_func, (z,), fast_mode=True,
-                      atol=atol, rtol=rtol))
-        self.assertTrue(gradcheck(sample_func, (z,), fast_mode=False,
-                                  atol=atol, rtol=rtol))
+        self.assertTrue(
+            gradcheck(sample_func, (z,), fast_mode=True, atol=atol, rtol=rtol)
+        )
+        self.assertTrue(
+            gradcheck(sample_func, (z,), fast_mode=False, atol=atol, rtol=rtol)
+        )
 
     def test_gradcheck_get_numerical_jacobian(self):
         # get_numerical_jacobian is deprecated and no longer used internally by gradcheck
