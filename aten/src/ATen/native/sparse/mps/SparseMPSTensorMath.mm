@@ -469,7 +469,7 @@ static std::tuple<Tensor, Tensor, int64_t> mps_intersect_binary_search(
   });
 
   const int64_t match_count = static_cast<int64_t>(counter.item<int32_t>());
-  return std::make_tuple(outA_idx, outB_idx, match_count);
+  return std::make_tuple(std::move(outA_idx), std::move(outB_idx), match_count);
 }
 
 
