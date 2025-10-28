@@ -1266,17 +1266,15 @@ def _output_json_for_dashboard(
                 metric: MetricInfo
 
             # Benchmark extra info
-            benchmark_extra_info = (
-                {
-                    "input_config": input_config,
-                    "device": device,
-                    "arch": device_arch,
-                    "operator_name": backend,
-                    "attn_type": config.attn_type,
-                    "shape": str(config.shape),
-                    "max_autotune": config.max_autotune,
-                },
-            )
+            benchmark_extra_info = {
+                "input_config": input_config,
+                "device": device,
+                "arch": device_arch,
+                "operator_name": backend,
+                "attn_type": config.attn_type,
+                "shape": str(config.shape),
+                "max_autotune": config.max_autotune,
+            }
             # Add record for forward latency
             record_fwd_latency = BenchmarkRecord(
                 benchmark=BenchmarkInfo(
