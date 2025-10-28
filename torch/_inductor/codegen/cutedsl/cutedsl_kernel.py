@@ -16,7 +16,7 @@ from torch._inductor.codegen.common import (
     Kernel,
     ValueRanges,
 )
-from torch._inductor.ir import Buffer, ComputedBuffer, InputBuffer, NoneAsConstantBuffer
+from torch._inductor.ir import Buffer, ComputedBuffer, InputBuffer
 from torch._inductor.ops_handler import StoreMode
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
@@ -230,12 +230,6 @@ class CuteDSLTemplateKernel(Kernel):
         renames = IndentedBuffer(initial_indent=1)
 
         for i, input_node in enumerate(self.input_nodes):
-            if isinstance(input_node, NoneAsConstantBuffer):
-                if i < len(argnames):
-                    template_name = argnames[i]
-                    renames.writeline(f"{template_name} = None")
-                continue
-
             buf_name = input_node.get_name()
             self.args.input(buf_name)
 

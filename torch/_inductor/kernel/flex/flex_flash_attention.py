@@ -214,7 +214,9 @@ def create_flex_flash_attention_kernel(
 
     input_nodes = [query, key, value, lse]
     if has_full_blocks:
-        input_nodes.extend([kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices])
+        input_nodes.extend(
+            [kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices]
+        )
 
     if needs_block_mask and not has_full_blocks:
         raise NotImplementedError(
