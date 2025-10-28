@@ -113,7 +113,7 @@ sort with non-constant keys
   Explanation: Cannot perform sort with non-constant key. First non-constant key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
   Hint: Use something else as the key.
 
-  Developer debug context: TensorVariable()
+  Developer debug context: LazyVariableTracker(realized: TensorVariable())
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0207.html
 
@@ -216,7 +216,7 @@ Unsupported context manager
   Hint: If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then it may be the case that it was created outside the compiled region, which Dynamo does not support. Supported context managers can cross graph break boundaries only if they are local non-closure variables, or are intermediate values.
   Hint: File an issue to PyTorch. Simple context managers can potentially be supported, but note that context managers can't be supported in general
 
-  Developer debug context: Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on ConstantVariable(int: 3)
+  Developer debug context: Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on LazyVariableTracker(realized: ConstantVariable(int: 3))
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0142.html
 
@@ -424,7 +424,7 @@ from user code:
         @torch.compile(backend="eager")
         def fn(x):
             d = {"a": 1}
-            optree.tree_flatten(d)
+            optree.tree_flatten_with_path(d)
             return torch.sin(x)
 
         fn(torch.randn(4))
@@ -434,10 +434,10 @@ from user code:
             first_graph_break,
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
+  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten_with_path.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: PyCapsule.flatten_with_path, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
@@ -543,7 +543,7 @@ Dynamic slicing with Tensor arguments
   Explanation: Creating slices with Tensor arguments is not supported. e.g. `l[:x]`, where `x` is a 1-element tensor.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: TensorVariable(), step: ConstantVariable(NoneType: None)
+  Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: LazyVariableTracker(realized: TensorVariable()), step: ConstantVariable(NoneType: None)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0038.html
 
@@ -869,6 +869,51 @@ from user code:
     if x.sum() > 0:""",
         )
 
+    # Test that the bytecode source attribution is correct with VariableTracker
+    @make_logging_test(trace_bytecode=True)
+    def test_variable_tracker_source_attribution(self, records):
+        def inner(x):
+            return x + 1
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = inner(x)
+            return inner(x)
+
+        fn(torch.ones(3))
+
+        def find_trace_bytecode_lines(long_string):
+            # Split the string into lines
+            lines = long_string.split("\n")
+            # More comprehensive pattern to capture LazyVariableTracker info
+            pattern = r"LazyVariableTracker\([^)]*\)"
+            # Find all lines containing the pattern
+            result = [line for line in lines if re.search(pattern, line)]
+            return result
+
+        # Get all log messages, not just the last one
+        all_messages = []
+        for record in records:
+            msg = munge_exc(record.getMessage(), skip=0)
+
+            all_messages.append(msg)
+
+        # Combine all messages to search through
+        combined_msg = "\n".join(all_messages)
+        all_lines = find_trace_bytecode_lines(combined_msg)
+
+        # For now, just check that we found some lines with LazyVariableTracker
+        self.assertGreater(
+            len(all_lines), 0, "Should find at least one LazyVariableTracker line"
+        )
+
+        self.assertIn(
+            "LazyVariableTracker(unrealized: <class 'function'>)", all_lines[0]
+        )
+        self.assertIn(
+            "LazyVariableTracker(realized: UserFunctionVariable())", all_lines[3]
+        )
+
     @make_logging_test(graph_breaks=True)
     def test_data_dependent_branching_gb(self, records):
         def fn(x):
@@ -1141,17 +1186,17 @@ NOTE: the most recent `torch.compile` tracing attempt might not be where you app
 Most recent bytecode instructions traced (max 20):
 TRACE RESUME 0 []
 TRACE LOAD_FAST 'x' []
-TRACE LOAD_CONST 1 [LazyVariableTracker()]
-TRACE BINARY_OP 0 [LazyVariableTracker(), ConstantVariable(int: 1)]
+TRACE LOAD_CONST 1 [LazyVariableTracker(unrealized: <class 'torch.Tensor'>)]
+TRACE BINARY_OP 0 [LazyVariableTracker(unrealized: <class 'torch.Tensor'>), ConstantVariable(int: 1)]
 TRACE STORE_FAST 'y' [TensorVariable()]
 TRACE LOAD_FAST 'x' []
 TRACE LOAD_FAST 'y' [TensorVariable()]
 TRACE BINARY_OP 0 [TensorVariable(), TensorVariable()]
 TRACE STORE_FAST 'z' [TensorVariable()]
 TRACE LOAD_GLOBAL 'torch' []
-TRACE LOAD_ATTR '_dynamo' [LazyVariableTracker()]
-TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker()]
-TRACE CALL 0 [NullVariable, LazyVariableTracker()]""",
+TRACE LOAD_ATTR '_dynamo' [LazyVariableTracker(unrealized: <class 'module'>)]
+TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker(unrealized: <class 'module'>)]
+TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]""",
         )
 
     @torch._dynamo.config.patch(verbose=True)
