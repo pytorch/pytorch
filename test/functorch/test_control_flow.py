@@ -1236,7 +1236,7 @@ def forward(self, pred_1, x_1):
         from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
         # This is a helper function that extracts the metadata from the tensor and
-        # sets the requries_grad flag to false. This is needed as we compare the
+        # sets the requires_grad flag to false. This is needed as we compare the
         # metadata of the operands and the gradients
         def _extract_tensor_metadata_except_requires_grad(arg):
             metadata = _extract_tensor_metadata(arg)

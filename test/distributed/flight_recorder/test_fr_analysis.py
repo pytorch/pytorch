@@ -314,7 +314,7 @@ class FlightRecorderE2ETest(TestCase):
         self.assertEqual(db.collectives[0].record_id, 2)
         self.assertEqual(db.collectives[0].collective_name, "nccl:coalesced")
         self.assertEqual(db.collectives[0].pass_check, True)
-        # Test case 4: mis-matched uneven all-gather case.
+        # Test case 4: miss-matched uneven all-gather case.
         details4 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
         # sequence ID should not increase for coalesced collectives
         details4["dump_file_rank_0"]["entries"].append(

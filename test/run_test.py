@@ -1626,7 +1626,7 @@ def get_selected_tests(options) -> list[str]:
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
-        # Exclude all xpu specifc tests otherwise
+        # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
 
     # Filter to only run onnx tests when --onnx option is specified

@@ -853,7 +853,7 @@ class TestFFT(TestCase):
 
         torch.backends.cuda.cufft_plan_cache.clear()
 
-        # check that stll works after clearing cache
+        # check that still works after clearing cache
         with plan_cache_max_size(devices[0], 10):
             self._test_fft_ifft_rfft_irfft(devices[0], dtype)
 

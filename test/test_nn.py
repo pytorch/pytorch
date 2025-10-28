@@ -1809,17 +1809,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 num_params - 1,
             )
 
-            # Removing the weight norm reparametrization restores the Parameter
+            # Removing the weight norm reparameterization restores the Parameter
             l = torch.nn.utils.remove_weight_norm(l, name=name)
             self.assertEqual(
                 sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params,
             )
 
-            # Make sure that, upon removal of the reparametrization, the
+            # Make sure that, upon removal of the reparameterization, the
             # `._parameters` and `.named_parameters` contain the right params.
             # Specifically, the original weight ('weight_ih_l0') should be placed
-            # back in the parameters, while the reparametrization components
+            # back in the parameters, while the reparameterization components
             # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
             self.assertTrue(name in l._parameters)
             self.assertIsNotNone(l._parameters[name])
@@ -7308,7 +7308,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             count_tensor
         )
 
-        # Test batch_norm_backward_elemt gives the same answer for all
+        # Test batch_norm_backward_element gives the same answer for all
         # combinations of contiguous as channels_last input
         for a, b in [
                 (torch.channels_last, torch.contiguous_format),
@@ -7332,8 +7332,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # The target of this test is to test the functionality and accuracy of
         #   those single-GPU cuda kernels used in SyncBatchNorm
         # They are:
-        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
-        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
+        #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_element
+        #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_element
 
         def _batch_norm_stats(data, memory_format, mean_axes):
             mean1, _ = torch.batch_norm_stats(data, 1e-5)
