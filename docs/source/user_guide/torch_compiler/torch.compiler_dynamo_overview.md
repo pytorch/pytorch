@@ -22,7 +22,7 @@ backends to make PyTorch code faster with a single line decorator
 The following diagram demonstrates how PyTorch works with `torch.compile`
 and without it:
 
-```{image} _static/img/dynamo/TorchDynamo.png
+```{image} ../../_static/img/dynamo/TorchDynamo.png
 ```
 
 `TorchInductor` is one of the backends
@@ -329,7 +329,7 @@ def compiled_example(a, b):
 
 The following diagram demonstrates how `torch.compile` transforms and optimizes user-written code: it first extracts computation graphs from the user-written function, and compiles these graphs into optimized functions, then assembles them into a new function, which is functionally equivalent to the user-written code but optimized to have a good computation speed.
 
-```{image} _static/img/dynamo/flowchart.jpg
+```{image} ../../_static/img/dynamo/flowchart.jpg
 ```
 
 To learn more about how all this is implemented internally, see {ref}`torch.compiler_dynamo_deepdive`.
