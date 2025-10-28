@@ -1837,12 +1837,10 @@ class BuiltinVariable(VariableTracker):
                 variables.IteratorVariable,
                 variables.ConstDictVariable,
                 variables.NNModuleVariable,
+                variables.TensorVariable,
             ),
         ):
             return obj.call_method(tx, "__iter__", [], {})
-        elif isinstance(obj, variables.TensorVariable):
-            m = obj.var_getattr(tx, "__iter__")
-            return m.call_function(tx, [], {})
         else:
             # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
             # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
