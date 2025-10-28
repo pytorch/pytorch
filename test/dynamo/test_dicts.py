@@ -1623,6 +1623,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             self.assertNotEqual(self.thetype, other)
             self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
 
+    @make_dynamo_test
+    def test_dict___iter__(self):
+        d = self.thetype({1: 2})
+        it = d.__iter__()
+        self.assertEqual(next(it), 1)
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict

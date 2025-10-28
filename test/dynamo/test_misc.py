@@ -1272,6 +1272,20 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         r2 = opt_fn(d)
         self.assertEqual(r1, r2)
 
+    def test_tensor__iter__(self):
+        def fn(x):
+            it = x.__iter__()
+            for y in it:
+                y.add_(1.0)
+            return y
+
+        torch._dynamo.testing.standard_test(
+            self,
+            fn,
+            1,
+            expected_ops=20,
+        )
+
     def test_tensor_iter(self):
         def fn(x):
             for y in x:
@@ -1960,6 +1974,15 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         res2, res3 = func()
         self.assertTrue(same(res2, torch.ones(2)))
         self.assertTrue(same(res3, torch.ones(3)))
+
+    def test_range___iter__(self):
+        def func(x):
+            it = range(3).__iter__()
+            return x + next(it)
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertTrue(same(func(x), opt_func(x)))
 
     def test_range_iter_side_effects(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -9607,6 +9630,18 @@ def ___make_guard_fn():
         res, msg = fn(img1)
         self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1")
         self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str___iter__(self):
+        def fn(x):
+            s = "a"
+            if next(s.__iter__()) == "a":
+                return x + 1
+            else:
+                return x
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_str_format_return2(self):
         @torch.compile(backend="eager", fullgraph=True)

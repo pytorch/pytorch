@@ -294,6 +294,10 @@ class BaseListVariable(VariableTracker):
                 [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
                 {},
             )
+        elif name == "__iter__":
+            return ListIteratorVariable(
+                list(self.items), mutation_type=ValueMutationNew()
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -472,9 +476,9 @@ class RangeVariable(BaseListVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
-        if self.python_type() is not range:
-            return super().call_obj_hasattr(tx, name)
-        return variables.ConstantVariable.create(hasattr(range(0), name))
+        if self.python_type() is range:
+            return variables.ConstantVariable.create(name in range.__dict__)
+        return super().call_obj_hasattr(tx, name)
 
     def range_equals(self, other: "RangeVariable"):
         r0, r1 = self, other
@@ -1063,6 +1067,13 @@ class DequeVariable(CommonListMethodsVariable):
         ):
             self.items[:] = self.items[slice_within_maxlen]
         return result
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
+        if self.python_type() is collections.deque:
+            return variables.ConstantVariable.create(name in collections.deque.__dict__)
+        return super().call_obj_hasattr(tx, name)
 
 
 class TupleVariable(BaseListVariable):
