@@ -308,6 +308,20 @@ class RuntimeSchemaInfo:
     needs_pytree: bool = False
 
 
+def is_inplace_op(op: OpOverload) -> bool:
+    # simple analysis of function schema to determine
+    # if this is an inplace variant, it might not
+    # be entirely correct, but it's good enough for now.
+    return op._schema.name[-1] == "_"
+
+
+def is_out_variant_op(op: OpOverload) -> bool:
+    # simple analysis of function schema to determine
+    # if this is an out variant, it might not
+    # be entirely correct, but it's good enough for now.
+    return "out" in op._schema.overload_name
+
+
 @dataclass
 class OpSchema:
     """
@@ -464,16 +478,10 @@ class OpSchema:
         return mesh
 
     def is_inplace_op(self) -> bool:
-        # simple analysis of function schema to determine
-        # if this is an inplace variant, it might not
-        # be entirely correct, but it's good enough for now.
-        return self.op._schema.name[-1] == "_"
+        return is_inplace_op(self.op)
 
     def is_out_variant_op(self) -> bool:
-        # simple analysis of function schema to determine
-        # if this is an out variant, it might not
-        # be entirely correct, but it's good enough for now.
-        return "out" in self.op._schema.overload_name
+        return is_out_variant_op(self.op)
 
     def is_view_op(self) -> bool:
         return self.op._schema._is_view_op()
