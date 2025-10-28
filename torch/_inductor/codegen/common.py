@@ -1071,6 +1071,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             tuple[OpVarT, ...],
         ],
         values: tuple[OpVarT, ...],
+        reverse: bool = False,
     ) -> tuple[OpVarT, ...]:
         raise NotImplementedError(
             f"{type(self).__name__}: scan should be handled by CSEProxy"
@@ -2194,6 +2195,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
         values: tuple[CSEVariable, ...],
+        reverse: bool = False,
     ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
@@ -2813,8 +2815,9 @@ class CSEProxy(DefaultHandler):
             tuple[CSEVariable, ...],
         ],
         values: tuple[CSEVariable, ...],
+        reverse: bool = False,
     ) -> tuple[CSEVariable, ...]:
-        return self.kernel.scan(dtypes, combine_fn, values)
+        return self.kernel.scan(dtypes, combine_fn, values, reverse)
 
     def sort(
         self,
