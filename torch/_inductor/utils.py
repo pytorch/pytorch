@@ -586,7 +586,8 @@ def has_uses(
         if use.op != "call_function":
             return False
         if not (
-            isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+            isinstance(use.target, torch._ops.OpOverload)
+            or use.target is operator.getitem
         ):
             return False
 
@@ -610,7 +611,11 @@ def has_uses_tagged_as(
     """
 
     use_tag_selector = lambda use: any(use_tag in use_tags for use_tag in use.tags)
-    return has_uses(target, use_tag_selector, use_aggregate_type)
+    return has_uses(
+        target,
+        lambda use: any(tag in use_tags for tag in use.tags),
+        use_aggregate_type
+    )
 
 
 def gen_gm_and_inputs(
