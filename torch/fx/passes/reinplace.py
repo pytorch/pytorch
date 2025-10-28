@@ -2,8 +2,9 @@
 import _operator
 import itertools
 from collections import defaultdict
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
