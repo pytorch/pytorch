@@ -776,7 +776,10 @@ def run_test_retries(
         elif num_failures[current_failure] >= 3:
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
-            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
+            if current_failure == "null":
+                print_to_file(f"FAILED CONSISTENTLY: {test_file}")
+            else:
+                print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
