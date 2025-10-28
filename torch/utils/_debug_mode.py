@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 __all__ = ["DebugMode", "get_active_debug_mode"]
 
 REDISTRIBUTE_FUNC = "redistribute_input"
+_DISPATCH_RECORD_HOOKS: list[Callable] = []
+_DISPATCH_LOG_HOOKS: list[Callable] = []
 
 
 def _stringify_shape(shape) -> str:
@@ -84,8 +86,17 @@ def _arg_to_str(arg, attributes) -> str:
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
 
-    def __init__(self, call_depth: int):
+    def __init__(
+        self,
+        call_depth: int,
+        record: Optional[dict[str, Any]] = None,
+        log: Optional[dict[str, Any]] = None,
+    ):
         self.call_depth = call_depth
+
+        # results from dispatch hooks
+        self.record = record
+        self.log = log
 
     def stringify_args(self, attributes: list[str]) -> None:
         """
@@ -146,7 +157,11 @@ class _OpCall(_DebugCall):
         else:
             op_name = str(self.op)
 
-        return f"{op_name}({args_str}{kwargs_str})"
+        base_str = f"{op_name}({args_str}{kwargs_str})"
+
+        if self.log:
+            base_str += f"  # {self.log}"
+        return base_str
 
     def __iter__(self):
         # for BC; tuple(self) returns (op, args, kwargs, call_depth)
@@ -226,6 +241,33 @@ class _NNModuleCall(_DebugCall):
         ]
 
 
+def _run_hook(hook, *args):
+    out = hook(*args)
+    assert out is None or isinstance(out, dict)
+    return out
+
+
+def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> None:
+    global _DISPATCH_RECORD_HOOKS, _DISPATCH_LOG_HOOKS
+    if _DISPATCH_RECORD_HOOKS:
+        record = {}
+        for hook in _DISPATCH_RECORD_HOOKS:
+            hook_out = _run_hook(hook, func, types, args, kwargs, result)
+            if hook_out is not None:
+                record.update(hook_out)
+        if record:
+            call.record = record
+
+    if _DISPATCH_LOG_HOOKS:
+        log = {}
+        for hook in _DISPATCH_LOG_HOOKS:
+            hook_out = _run_hook(hook, func, types, args, kwargs, result)
+            if hook_out is not None:
+                log.update(hook_out)
+        if log:
+            call.log = log
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -295,22 +337,26 @@ class DebugMode(TorchDispatchMode):
             kwargs = {}
 
         # Record the operation with its call depth
+        call = None
         if torch.distributed.tensor.DTensor in types:
-            self._record_call(_OpCall(func, args, kwargs, self.call_depth))
+            call = _OpCall(func, args, kwargs, self.call_depth)
+            self._record_call(call)
             return NotImplemented
         elif FakeTensor in types or isinstance(
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self._record_call(
-                        _OpCall(func, args, kwargs, self.call_depth + 1)
-                    )
+                    call = _OpCall(func, args, kwargs, self.call_depth + 1)
+                    self._record_call(call)
         elif len(types) == 0:
             if self.record_realtensor:
-                self._record_call(_OpCall(func, args, kwargs, self.call_depth + 1))
+                call = _OpCall(func, args, kwargs, self.call_depth + 1)
+                self._record_call(call)
 
         result = func(*args, **kwargs)
+        if call:
+            _run_dispatch_hooks(call, func, types, args, kwargs, result)
 
         return result
 
@@ -382,6 +428,39 @@ class DebugMode(TorchDispatchMode):
                 for op in self.operators
             )
         return result
+
+    @staticmethod
+    @contextlib.contextmanager
+    def dispatch_hooks(
+        record_hook: Optional[Callable] = None,
+        log_hook: Optional[Callable] = None,
+    ):
+        global _DISPATCH_RECORD_HOOKS, _DISPATCH_LOG_HOOKS
+
+        if record_hook:
+            _DISPATCH_RECORD_HOOKS.append(record_hook)
+        if log_hook:
+            _DISPATCH_LOG_HOOKS.append(log_hook)
+        try:
+            yield
+        finally:
+            if record_hook:
+                _DISPATCH_RECORD_HOOKS.pop()
+            if log_hook:
+                _DISPATCH_LOG_HOOKS.pop()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def record_outputs():
+        def dispatch_hook(func, types, args, kwargs, result):
+            with torch._C._DisablePythonDispatcher():
+                out = tree_map(
+                    lambda x: x.clone() if isinstance(x, torch.Tensor) else x, result
+                )
+            return {"output": out}
+
+        with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
+            yield
 
 
 def get_active_debug_mode() -> Optional[DebugMode]:
