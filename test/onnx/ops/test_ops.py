@@ -1069,7 +1069,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         class Model(torch.nn.Module):
             def forward(self, Q, K, V, past_key, past_value):
-                output, _, _, _ = torch.onnx.ops.attention(
+                output, present_key, present_value, _ = torch.onnx.ops.attention(
                     Q,
                     K,
                     V,
@@ -1078,7 +1078,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
                     # Switched argument order
                     past_value=past_value,
                 )
-                return output
+                return output, present_key, present_value
 
         model = Model()
         onnx_program = self.export(
@@ -1127,7 +1127,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         class FullAttentionModel(torch.nn.Module):
             def forward(self, Q, K, V, attn_mask, past_key, past_value):
-                output, _, _, _ = torch.onnx.ops.attention(
+                output, present_key, present_value, qk_matmul = torch.onnx.ops.attention(
                     Q,
                     K,
                     V,
@@ -1135,7 +1135,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
                     past_key=past_key,
                     past_value=past_value,
                 )
-                return output
+                return output, present_key, present_value, qk_matmul
 
         model = FullAttentionModel()
         onnx_program = self.export(
@@ -1503,7 +1503,8 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             outputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len]
         )
-        onnx_testing.assert_onnx_program(onnx_program)
+        # ORT does not allow all outputs when past key/value are not provided
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
 
 if __name__ == "__main__":
