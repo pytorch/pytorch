@@ -212,7 +212,7 @@ class PlacementVariable(DistributedVariable):
                 value_type = type(self.value)
                 if inspect.getattr_static(value_type, "__getattr__", None) is not None:
                     unimplemented_v2(
-                        gb_type="custom __getattr__ not supported",
+                        gb_type="Placement with custom __getattr__ not supported",
                         context=f"{value_type.__name__} with custom __getattr__",
                         explanation="Dynamo does not support Placement types with custom __getattr__ methods",
                         hints=[
