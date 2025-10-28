@@ -1123,6 +1123,9 @@ def run_doctests(test_module, test_directory, options):
     if torch.mps.is_available():
         os.environ["TORCH_DOCTEST_MPS"] = "1"
 
+    if torch.distributed.is_available():
+        os.environ["TORCH_DOCTEST_DISTRIBUTED"] = "1"
+
     if 0:
         # TODO: could try to enable some of these
         os.environ["TORCH_DOCTEST_QUANTIZED_DYNAMIC"] = "1"
