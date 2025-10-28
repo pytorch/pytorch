@@ -98,6 +98,33 @@ def rand(seed, offset, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
     return _uint_to_uniform_float(source)
 
 
+def rand_eager_kernel(seed, offset_blocks, tid, VEC, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
+    inv = _f32(1.0 / 4294967296.0)  # 2^-32
+    half = _f32(0.5) * inv
+
+    tid_u64 = _u64(tid)
+
+    VEC_u64 = _u64(VEC)
+    subseq = tid_u64 // VEC_u64
+    which4 = (tid_u64 % VEC_u64) // _u64(4)
+    lane = _u32(tid_u64 % _u64(4))
+
+    offblk = _u64(offset_blocks) + which4
+
+    c0 = _u32(offblk & _u64(0xFFFFFFFF))
+    c1 = _u32((offblk >> _u64(32)) & _u64(0xFFFFFFFF))
+    c2 = _u32(subseq & _u64(0xFFFFFFFF))
+    c3 = _u32((subseq >> _u64(32)) & _u64(0xFFFFFFFF))
+
+    u0, u1, u2, u3 = halide_philox(seed, c0, c1, c2, c3, n_rounds)
+
+    v01 = hl.select(lane == _u32(0), u0, u1)
+    v23 = hl.select(lane == _u32(2), u2, u3)
+    rand_int = hl.select((lane == _u32(0)) | (lane == _u32(1)), v01, v23)
+
+    return _f32(1.0) - (_f32(rand_int) * inv + half)
+
+
 def randn(seed, offset):
     i1, i2, _, _ = randint4x(seed, offset, PHILOX_N_ROUNDS_DEFAULT)
     u1 = _uint_to_uniform_float(i1)

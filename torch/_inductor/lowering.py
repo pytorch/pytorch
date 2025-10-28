@@ -2435,8 +2435,6 @@ def get_seed_and_threads_per_round(x_device_index: int, nelem: int):
     UNROLL = 4
     prop = torch.cuda.get_device_properties(x_device_index)
     threads_per_round = prop.multi_processor_count * prop.max_threads_per_multi_processor
-    #rounds_per_thread = (nelem + threads_per_round * UNROLL - 1) // (threads_per_round * UNROLL)
-    #used_offset = rounds_per_thread * UNROLL
     gen = torch.cuda.default_generators[x_device_index]
     seed = int(gen.initial_seed())
     return seed, threads_per_round

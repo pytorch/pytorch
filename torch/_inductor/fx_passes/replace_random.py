@@ -15,18 +15,12 @@ from ..pattern_matcher import (
 )
 from ..virtualized import V
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
-import os
-import math
-
-from typing import Sequence, Optional
-import torch
-import triton
-import triton.language as tl
-from torch.library import triton_op, wrap_triton, register_fake, register_kernel, custom_op
+from torch.library import custom_op, register_fake
 
 # ---- host helpers ----
 def _compute_grid_x(nelem: int, block: int, device_index: int) -> int:

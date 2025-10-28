@@ -418,6 +418,10 @@ class HalideOverrides(OpOverrides):
         return f"halide_helpers.randn({seed}, {offset})"
 
     @staticmethod
+    def rand_eager(seed, base_offset, threads_per_round, tid, vec):
+        return f"halide_helpers.rand_eager_kernel({seed}, {base_offset}, {threads_per_round}, {tid}, {vec})"
+    
+    @staticmethod
     def randint64(seed, offset, low, high):
         return f"halide_helpers.randint64({seed}, {offset}, {low}, {high})"
 
