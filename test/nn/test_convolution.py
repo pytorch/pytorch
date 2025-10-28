@@ -3599,7 +3599,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     input_format=input_format,
                     weight_format=weight_format,
                 )
-                # test when input channels is 1 and not converted to channels last
+                # test when input channel is 1 and not converted to channels last
                 helper(
                     nn.Conv2d,
                     2,

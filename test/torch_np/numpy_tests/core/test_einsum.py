@@ -922,7 +922,7 @@ class TestEinsum(TestCase):
         tp = np.tensordot(A, B, axes=(0, 0))
         assert_equal(es, tp)
         # The following is the original test case from the bug report,
-        # made repeatable by changing random arrays to arranges.
+        # made repeatable by changing random arrays to aranges.
         A = np.arange(3 * 3).reshape(3, 3).astype(np.float64)
         B = np.arange(3 * 3 * 64 * 64).reshape(3, 3, 64, 64).astype(np.float32)
         es = np.einsum("cl, cpxy->lpxy", A, B)
