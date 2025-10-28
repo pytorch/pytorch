@@ -313,6 +313,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
         self.assertTrue(hasattr(debug_mode.operators[0], "args"))
+        self.assertEqual(id(debug_mode.operators[0].args[0]), id(y))
 
     @parametrize("has_inner_mode", [True, False])
     @parametrize("has_outer_mode", [True, False])

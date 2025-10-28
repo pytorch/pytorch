@@ -86,7 +86,9 @@ def _arg_to_str(arg, attributes) -> str:
 
 def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
     """
-    from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
+    from Observer (genai/llama4x/tools/hash/observer.py)
+
+    Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
     This is used to generate a deterministic summary value for tensor comparison.
     """
@@ -122,9 +124,7 @@ class _DebugCall:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
         """
-        raise NotImplementedError(
-            "Subclasses must implement stringify_args(), even if no-op"
-        )
+        raise NotImplementedError("Subclasses must implement stringify_args(), even if no-op")
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
@@ -305,11 +305,18 @@ class DebugMode(TorchDispatchMode):
         import torch.distributed.tensor  # noqa: F401
 
         self.supports_higher_order_operators = True
-        self.record_torchfunction = record_torchfunction
-        self.record_faketensor = record_faketensor
-        self.record_realtensor = record_realtensor
-        self.record_tensor_attributes = record_tensor_attributes or []
 
+        # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
+        # WARNING: currently incompatible with torch.compile due to dynamo guard failures.
+        self.record_torchfunction = record_torchfunction
+        # Records __torch_dispatch__ calls on FakeTensors.
+        self.record_faketensor = record_faketensor
+        # Records __torch_dispatch__ calls on real tensors.
+        self.record_realtensor = record_realtensor
+        # Optional list[str] of tensor attributes, to be annotated in the string dump.
+        self.record_tensor_attributes = record_tensor_attributes or []
+        # Uses ModTracker to record nn.Module entrances, as _NNModuleCall entries.
+        # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
 
         self.module_tracker: Optional[ModTracker] = None
