@@ -102,7 +102,9 @@ class _DebugCall:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
         """
-        raise NotImplementedError("Subclasses must implement stringify_args(), even if no-op")
+        raise NotImplementedError(
+            "Subclasses must implement stringify_args(), even if no-op"
+        )
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
