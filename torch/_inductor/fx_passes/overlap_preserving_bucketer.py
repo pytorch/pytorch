@@ -1,8 +1,39 @@
+import dataclasses
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import torch.fx as fx
+
+log = logging.getLogger(__name__)
+bucket_log = logging.getLogger(f"{__name__}.bucketing")
+
+
+@dataclasses.dataclass(slots=True)
+class WhyNoBucket:
+    name1: str
+    name2: str
+    reason: str
+    args: tuple[Any, ...]
+
+    def __init__(self, node1: fx.Node, node2: fx.Node) -> None:
+        self.name1 = node1.name
+        self.name2 = node2.name
+        self.reason = ""
+        self.args = ()
+
+    def __call__(self, reason: str, *args: Any) -> None:
+        self.reason = reason
+        self.args = args
+        bucket_log.debug(self)
+
+    def __str__(self) -> str:
+        return f"cannot bucket {self.name1} with {self.name2}: " + (
+            self.reason % self.args
+        )
+
+
 from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
@@ -178,7 +209,6 @@ class OverlapPreservingBucketer:
 
     def bucket_collectives(self) -> None:
         """Main entry point for bucketing collectives."""
-
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
@@ -200,7 +230,12 @@ class OverlapPreservingBucketer:
                     grouped_collectives[key].add(start)
 
             # Find buckets for this PG
-            for collective_group in grouped_collectives.values():
+            for key, collective_group in grouped_collectives.items():
+                bucket_log.debug(
+                    "bucketing collective group with key %s: %s",
+                    key,
+                    [n.name for n in collective_group],
+                )
                 buckets = self._find_buckets(collective_group)
                 all_buckets.extend(buckets)
 
@@ -250,12 +285,14 @@ class OverlapPreservingBucketer:
         collective_group: OrderedSet[fx.Node],
     ) -> list[CollBucket]:
         """Find valid buckets within a group of similar collectives."""
-
         max_bucket_bytes = int(self.max_bucket_memory_gb * 1024 * 1024 * 1024)
         buckets = []
         processed: OrderedSet[fx.Node] = OrderedSet()
 
-        for start_node in collective_group:
+        # Sort collectives by node index for efficient distance checking
+        sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
+
+        for start_node in sorted_collectives:
             if start_node in processed:
                 continue
 
@@ -267,14 +304,18 @@ class OverlapPreservingBucketer:
             processed.add(start_node)
             start_node_idx = self.node_idx[start_node]
 
-            # TODO - limit within range
-            for candidate in collective_group:
+            # Check candidates in sorted order, break when beyond max distance
+            for candidate in sorted_collectives:
                 if candidate in processed:
                     continue
 
                 candidate_idx = self.node_idx[candidate]
                 # Check if candidate is within max distance from the bucket start
-                if abs(candidate_idx - start_node_idx) > self.max_coll_distance:
+                distance = abs(candidate_idx - start_node_idx)
+                if distance > self.max_coll_distance:
+                    # Since sorted, all remaining candidates will be too far
+                    if candidate_idx > start_node_idx:
+                        break
                     continue
 
                 candidate_bytes = self.collective_info[candidate].size_bytes
@@ -343,6 +384,7 @@ class OverlapPreservingBucketer:
         candidate: fx.Node,
         start_pos: fx.Node,
         wait_pos: fx.Node,
+        why: WhyNoBucket,
     ) -> bool:
         """
         Check that (start_pos, wait_pos) doesn't violate any hiding intervals or collectives.
@@ -374,6 +416,12 @@ class OverlapPreservingBucketer:
         # Check 1: All bucket hiding compute must be between new start and wait
         for compute_pos in bucket_hiding_compute_positions:
             if not (new_start_event.position < compute_pos < new_wait_event.position):
+                why(
+                    "hiding compute at pos %d not between start %d and wait %d",
+                    compute_pos,
+                    new_start_event.position,
+                    new_wait_event.position,
+                )
                 return False
 
         def get_wait(n: fx.Node) -> fx.Node:
@@ -437,6 +485,11 @@ class OverlapPreservingBucketer:
         for hiding_interval in hiding_intervals:
             for execution_interval in execution_intervals:
                 if enclosed_interval(hiding_interval, execution_interval):
+                    why(
+                        "hiding interval %s enclosed by execution interval %s",
+                        hiding_interval,
+                        execution_interval,
+                    )
                     return False
 
         return True
@@ -485,6 +538,7 @@ class OverlapPreservingBucketer:
         candidate: fx.Node,
         start_pos: fx.Node,
         wait_pos: fx.Node,
+        why: WhyNoBucket,
     ) -> bool:
         """
         Try a specific rail position for the candidate.
@@ -496,7 +550,7 @@ class OverlapPreservingBucketer:
 
         # Quick check: does this violate hiding intervals?
         if not self._preserves_hiding_intervals(
-            bucket_info, candidate, start_pos, wait_pos
+            bucket_info, candidate, start_pos, wait_pos, why
         ):
             return False
 
@@ -517,6 +571,7 @@ class OverlapPreservingBucketer:
         ):
             # Restore start constraints
             self.restore_to_event(start_to_move, start_prev, start_next)
+            why("path exists between starts")
             return False
 
         # Merge starts
@@ -544,6 +599,7 @@ class OverlapPreservingBucketer:
             self.aug_graph.unmerge_node(candidate)
             # Restore start constraints
             self.restore_to_event(start_to_move, start_prev, start_next)
+            why("path exists between waits")
             return False
 
         # Merge waits - success!
@@ -601,6 +657,9 @@ class OverlapPreservingBucketer:
         Check if candidate can be added to bucket without interfering
         with comm/compute overlap.
         """
+        existing_coll = bucket_info.collectives[0]
+        why = WhyNoBucket(existing_coll, candidate)
+
         candidate_info = self.collective_info[candidate]
 
         # Step 1: Quick check using precomputed ancestors
@@ -608,10 +667,10 @@ class OverlapPreservingBucketer:
         # so if any of these checks fail then the merge will not be topologically valid
         # even ignoring comm/compute overlap
         if self._has_ancestor_conflicts(bucket_info, candidate):
+            why("has ancestor conflicts")
             return False
 
         # Step 2: Try different rail positions
-        existing_coll = bucket_info.collectives[0]
         existing_wait = self.collective_info[existing_coll].wait_node
 
         candidate_start = candidate
@@ -632,10 +691,19 @@ class OverlapPreservingBucketer:
             (candidate_start, existing_wait),  # Keep start in place, move wait early
         ]
 
-        for start_pos, wait_pos in combinations:
-            if self._try_rail_position(bucket_info, candidate, start_pos, wait_pos):
+        for i, (start_pos, wait_pos) in enumerate(combinations):
+            if self._try_rail_position(bucket_info, candidate, start_pos, wait_pos, why):
+                bucket_log.debug(
+                    "bucketed %s with %s using rail position %d: (start=%s, wait=%s)",
+                    candidate.name,
+                    existing_coll.name,
+                    i + 1,
+                    start_pos.name,
+                    wait_pos.name,
+                )
                 return True
 
+        why("all rail positions failed")
         return False
 
     def _apply_bucket(self, bucket_info: CollBucket) -> None:
