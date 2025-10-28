@@ -1076,7 +1076,22 @@ class DictTests(torch._dynamo.test_case.TestCase):
     def test_newly_constructed_default_dict(self):
         def f(x):
             d = defaultdict(list)
-            d[0] = 42
+            d[0] = [
+                42,
+            ]
+            return x + 1, d
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+
+    @unittest.expectedFailure
+    def test_newly_constructed_default_dict_with_dict(self):
+        def f(x):
+            d = defaultdict(dict, {2: {"a": 1}})
+            d[0] = {"b": 2}
             return x + 1, d
 
         x = torch.ones(2)
