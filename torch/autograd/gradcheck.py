@@ -1766,7 +1766,6 @@ def _adjusted_atol(atol, u, v):
     # (sum(u_r) + sum(u_i)) * sum(v) increase in atol for complex inputs, eg.
     # a statistical factor of 2 as compared to the real case.
 
-    modified_atol = atol
     sum_v = 1.0 if v is None else v.sum()
 
     if isinstance(u, tuple):
@@ -1774,20 +1773,14 @@ def _adjusted_atol(atol, u, v):
         ur, ui = u[0], u[1]
         sum_ur = ur.sum()
         sum_ui = ui.sum()
-        correct_modified_atol = atol * (float(sum_ur) + float(sum_ui)) * float(sum_v)
-        # for now, use the incorrect original modified atol, so we can try to
-        # get a regression test working.
-        modified_atol = atol * float(sum_ur) * float(sum_v)
-        return modified_atol
-        # FIXME use correct_modified_atol
-#        return correct_modified_atol
+        complex_modified_atol = atol * (float(sum_ur) + float(sum_ui)) * float(sum_v)
+        return complex_modified_atol
 
-    else:
-        # case of real input
-        sum_u = u.sum()
-        modified_atol = atol * float(sum_u) * float(sum_v)
-
+    # case of real input
+    sum_u = u.sum()
+    modified_atol = atol * float(sum_u) * float(sum_v)
     return modified_atol
+
 
 
 FAST_FAIL_SLOW_OK_MSG = """
