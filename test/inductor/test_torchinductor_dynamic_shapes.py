@@ -1216,6 +1216,46 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(actual, expect)
         check_count(2)  # Reused existing kernel
 
+    def test_concat_with_dynamic_shapes_and_squeeze(self, device):
+        """Test concat with dynamic shapes and squeeze operations.
+
+        When using torch.compile() with dynamic=True, squeeze operations may
+        conditionally remove dimensions based on static analysis. This can lead
+        to concat inputs having different ranks in the IR, which previously
+        caused an assertion failure in ConcatKernel.create().
+
+        This test verifies the fix handles dimension mismatches correctly by
+        normalizing tensor ranks through padding shorter size vectors.
+
+        Reproduces issue #166279
+        """
+
+        def fn(x, y):
+            # Squeeze conditionally removes dimensions
+            a = torch.squeeze(x, dim=2)  # May or may not remove dim based on static analysis
+            b = torch.squeeze(y, dim=2)  # May or may not remove dim based on static analysis
+            return torch.cat([a, b], dim=0)
+
+        # Create tensors with size-1 dimension that will be squeezed
+        x = torch.randn(2, 3, 1, device=device)
+        y = torch.randn(2, 3, 1, device=device)
+
+        # Compile with dynamic shapes
+        fn_opt = torch.compile(fn, dynamic=True)
+
+        # Run and compare results
+        expected = fn(x, y)
+        actual = fn_opt(x, y)
+        self.assertEqual(actual, expected)
+
+        # Test with different batch sizes to ensure it works dynamically
+        x2 = torch.randn(4, 3, 1, device=device)
+        y2 = torch.randn(4, 3, 1, device=device)
+
+        expected2 = fn(x2, y2)
+        actual2 = fn_opt(x2, y2)
+        self.assertEqual(actual2, expected2)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
