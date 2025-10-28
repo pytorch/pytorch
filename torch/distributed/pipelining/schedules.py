@@ -97,8 +97,6 @@ class _ComputationType(Enum):
             return _ComputationType.FULL_BACKWARD
         elif action == "OVERLAP_F_B":
             return _ComputationType.OVERLAP_F_B
-        elif action == "OVERLAP_F_B":
-            return _ComputationType.OVERLAP_F_B
         elif action == "REDUCE_GRAD":
             return _ComputationType.REDUCE_GRAD
         else:
