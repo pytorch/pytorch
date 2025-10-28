@@ -1211,7 +1211,9 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 # Make dynamo graph to have same input/output spec as user code
 def argument_names(
-    f_sig: inspect.Signature, args: list[Any], kwargs: dict[str, Any]
+    f_sig: inspect.Signature,
+    args: Union[list[Any], tuple[Any, ...]],
+    kwargs: dict[str, Any],
 ) -> list[str]:
     def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
         # Get a list of Parameter objects from the Signature object
