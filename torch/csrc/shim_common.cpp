@@ -11,7 +11,6 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/dummy.h>
 
-
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
     const c10::IValue& ivalue,
