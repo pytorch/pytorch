@@ -1265,7 +1265,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
 
     graph_pass.apply(graph)
 
-    for _node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function",
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,
     ):

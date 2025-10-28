@@ -3545,9 +3545,7 @@ class Scheduler:
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             for hint_override in config.multi_kernel_hints:
                 choice_timings = multi_node.choice_timings(hint_override)
-                for choice, _unfused_time in sorted(
-                    choice_timings.items(), key=lambda x: x[1]
-                ):
+                for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
                     if not isinstance(
                         choice, torch._inductor.select_algorithm.TritonTemplateCaller
                     ):
