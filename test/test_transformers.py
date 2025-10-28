@@ -1107,6 +1107,7 @@ class TestTransformers(NNTestCase):
                 )[0]
 
     @tf32_on_and_off(0.003)
+    @parametrize("batch_size", [0, 5])
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
                   (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
@@ -1116,7 +1117,7 @@ class TestTransformers(NNTestCase):
                          if attn_dim is not None else "no_attn_mask")))
     @parametrize("dropout_p", [0.0, 0.2, 0.5])
     @sdpa_kernel(backends=[SDPBackend.MATH])
-    def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
+    def test_scaled_dot_product_attention(self, device, batch_size, input_dim, attn_mask_dim, is_causal, dropout_p):
         def sdp_ref(
                 q,
                 k,
@@ -1140,12 +1141,13 @@ class TestTransformers(NNTestCase):
         # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
         dtypes = [torch.double, torch.float]
         for dtype in dtypes:
+            N = batch_size
 
             def rand_tensor(*shape):
                 return torch.randn(shape, device=device, dtype=dtype)
 
             # This test compares python and C++ implementations of SDP.
-            N, N_prime, L, S, E = 5, 2, 4, 3, 6
+            N_prime, L, S, E = 2, 4, 3, 6
             if input_dim == 3:
                 query = rand_tensor(N, L, E)
                 key = rand_tensor(N, S, E)
