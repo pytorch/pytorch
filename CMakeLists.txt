@@ -1392,9 +1392,6 @@ if(BUILD_JNI)
   add_subdirectory(android/pytorch_android)
 endif()
 
-include(cmake/Summary.cmake)
-caffe2_print_configuration_summary()
-
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)
   string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
@@ -1435,10 +1432,11 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
 endif()
 
 if(USE_PRIORITIZED_TEXT_FOR_LD)
-  add_compile_options(
-    $<$<COMPILE_LANGUAGE:C,CXX>:-ffunction-sections>
-    $<$<COMPILE_LANGUAGE:C,CXX>:-fdata-sections>
-  )
+  append_cxx_flag_if_supported("-ffunction-sections" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fdata-sections" CMAKE_CXX_FLAGS)
+  append_c_flag_if_supported("-ffunction-sections" CMAKE_C_FLAGS)
+  append_c_flag_if_supported("-fdata-sections" CMAKE_C_FLAGS)
+
   set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
   set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
 
@@ -1469,13 +1467,16 @@ if(USE_PRIORITIZED_TEXT_FOR_LD)
     endif()
   endif()
 
+  string(REPLACE ";" ", " _linker_targets_pretty "${LINKER_OPT_TARGETS}")
+  message(STATUS "prioritized text linker script to targets ${_linker_targets_pretty}")
+
   foreach(tgt IN LISTS LINKER_OPT_TARGETS)
     if(TARGET ${tgt})
       add_dependencies("${tgt}" generate_linker_script)
       target_link_options_if_supported(${tgt} "-T,${LINKER_SCRIPT_FILE_OUT}")
       set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
     else()
-       message(WARNING "Requested target '${tgt}' for linker script optimization was not found.")
+      message(WARNING "Requested target '${tgt}' for linker script optimization was not found.")
     endif()
   endforeach()
 
@@ -1487,3 +1488,6 @@ else()
     ]])
   endif()
 endif()
+
+include(cmake/Summary.cmake)
+caffe2_print_configuration_summary()
