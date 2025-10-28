@@ -87,7 +87,6 @@ core_sources_common = [
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/profiler/util.cpp",
-    "torch/csrc/shim_common.cpp",
 ]
 
 torch_unpickler_common = [
@@ -483,6 +482,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/shim_common.cpp",
 ]
 
 libtorch_core_sources = sorted(
