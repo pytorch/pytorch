@@ -1693,7 +1693,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         from torch._higher_order_ops.utils import _maybe_fake_tracing
-        from torch._inductor.utils import is_pointwise_use
+        from torch._inductor.utils import has_only_uses
 
         with tx.fake_mode:
             sub_args_fake = [
@@ -1712,8 +1712,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
             for node in fx.graph.nodes:
                 # Check that the combine_fn is pointwise, if combine_mode='pointwise'
-                if not all(
-                    is_pointwise_use(use) or use.op == "output" for use in node.users
+                if not has_only_uses(
+                    node,
+                    lambda use: any(tag in (torch.Tag.pointwise) for tag in use.tags) or use.op == "output"
                 ):
                     raise RuntimeError(
                         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
