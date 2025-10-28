@@ -1678,6 +1678,8 @@ def _make_user_magic(method, user_type):
     def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):
             return x
+        if isinstance(x, SymInt):
+            return x.node.guard_int("", 0)
         if isinstance(x, SymBool):
             return x.node.guard_bool("", 0)
         raise AssertionError("expect to be called with constant SymBools")
