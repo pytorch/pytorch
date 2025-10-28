@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, overload, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -232,11 +232,46 @@ def replicate_impl(
     return arg_module
 
 
-@contract(state_cls=_ReplicateState)
+@overload
+# pyrefly: ignore [inconsistent-overload]
 def replicate(
     module: nn.Module,
-    **kwargs,
-) -> nn.Module:
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    device_id: Optional[Union[int, torch.device]] = ...,
+    reshard_after_forward: Optional[Union[bool, int]] = ...,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> ReplicateModule: ...
+
+
+@overload
+# pyrefly: ignore [inconsistent-overload]
+def replicate(
+    module: list[nn.Module],
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    reshard_after_forward: Union[bool, int] = ...,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> list[ReplicateModule]: ...
+
+
+@contract(state_cls=_ReplicateState)  # type: ignore[misc]
+def replicate(
+    module: nn.Module,
+    *,
+    mesh: Optional[DeviceMesh] = None,
+    reshard_after_forward: Optional[Union[bool, int]] = None,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
+    mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
+    offload_policy: OffloadPolicy = OffloadPolicy(),
+    ignored_params: Optional[set[nn.Parameter]] = None,
+):
     r"""Replicates a module
 
     Args:
@@ -248,24 +283,23 @@ def replicate(
         >>> replicate(module)
     """
 
-    if "device_id" in kwargs:
-        if not isinstance(kwargs["device_id"], (int, torch.device)):
-            raise RuntimeError(
-                "Expected device_id to be int or torch.device, "
-                f"but got {type(kwargs['device_id'])}"
-            )
-
     if not is_composable_with_replicate(module):
         raise RuntimeError(
             "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
         )
 
-    device_mesh = kwargs.pop("device_mesh", None)
-    if device_mesh is None:
-        device_mesh = replicate_mesh()
+    if mesh is None:
+        mesh = replicate_mesh()
 
-    module = replicate_impl(module, mesh=device_mesh, **kwargs)
-    return module
+    return replicate_impl(
+        module,
+        mesh,
+        reshard_after_forward=reshard_after_forward,
+        shard_placement_fn=shard_placement_fn,
+        mp_policy=mp_policy,
+        offload_policy=offload_policy,
+        ignored_params=ignored_params,
+    )
 
 
 class ReplicateModule(FSDPModule):
