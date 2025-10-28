@@ -991,7 +991,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def codegen_nan_check(self) -> None:
         raise NotImplementedError("NYI: codegen_nan_check")
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:
+    def deallocate_workspaces(self):
+        wrapper = V.graph.wrapper_code
+        for ws in reversed(self.args.workspace_args):
+            wrapper.generate_workspace_deallocation(ws)
+
+    def call_kernel(
+        self, name: str, node: Optional[IRNode] = None, deallocate_ws: bool = True
+    ) -> None:
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager

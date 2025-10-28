@@ -77,21 +77,36 @@ CONVERT_TEMPLATE(double, int64_t)
 CONVERT_TEMPLATE(double, float)
 CONVERT_TEMPLATE(double, double)
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-CONVERT_TEMPLATE(float16_t, uint8_t)
-CONVERT_TEMPLATE(float16_t, int8_t)
-CONVERT_TEMPLATE(float16_t, int16_t)
-CONVERT_TEMPLATE(float16_t, int32_t)
-CONVERT_TEMPLATE(float16_t, int64_t)
-CONVERT_TEMPLATE(float16_t, float16_t)
-CONVERT_TEMPLATE(float16_t, float)
-CONVERT_TEMPLATE(float16_t, double)
-CONVERT_TEMPLATE(uint8_t, float16_t)
-CONVERT_TEMPLATE(int8_t, float16_t)
-CONVERT_TEMPLATE(int16_t, float16_t)
-CONVERT_TEMPLATE(int32_t, float16_t)
-CONVERT_TEMPLATE(int64_t, float16_t)
-CONVERT_TEMPLATE(float, float16_t)
-CONVERT_TEMPLATE(double, float16_t)
+
+#define CONVERT_FROM_FP16_TEMPLATE(to_type)                            \
+  template <>                                                          \
+  inline void convert(const at::Half* src, to_type* dst, int64_t n) {  \
+    const float16_t* srcPtr = reinterpret_cast<const float16_t*>(src); \
+    return convertImpl<float16_t, to_type>(srcPtr, dst, n);            \
+  }
+
+#define CONVERT_TO_FP16_TEMPLATE(from_type)                             \
+  template <>                                                           \
+  inline void convert(const from_type* src, at::Half* dst, int64_t n) { \
+    float16_t* dstPtr = reinterpret_cast<float16_t*>(dst);              \
+    return convertImpl<from_type, float16_t>(src, dstPtr, n);           \
+  }
+
+CONVERT_FROM_FP16_TEMPLATE(uint8_t)
+CONVERT_FROM_FP16_TEMPLATE(int8_t)
+CONVERT_FROM_FP16_TEMPLATE(int16_t)
+CONVERT_FROM_FP16_TEMPLATE(int32_t)
+CONVERT_FROM_FP16_TEMPLATE(int64_t)
+CONVERT_FROM_FP16_TEMPLATE(float16_t)
+CONVERT_FROM_FP16_TEMPLATE(float)
+CONVERT_FROM_FP16_TEMPLATE(double)
+CONVERT_TO_FP16_TEMPLATE(uint8_t)
+CONVERT_TO_FP16_TEMPLATE(int8_t)
+CONVERT_TO_FP16_TEMPLATE(int16_t)
+CONVERT_TO_FP16_TEMPLATE(int32_t)
+CONVERT_TO_FP16_TEMPLATE(int64_t)
+CONVERT_TO_FP16_TEMPLATE(float)
+CONVERT_TO_FP16_TEMPLATE(double)
 #endif
 #ifdef __ARM_FEATURE_BF16
 CONVERT_TEMPLATE(bfloat16_t, uint8_t)

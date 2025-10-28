@@ -34,7 +34,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import GetAttrKey, register_pytree_node, tree_map_only
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -519,6 +519,24 @@ class BlockMask:
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
+    # Attribute lists for pytree flatten/unflatten
+    _TENSOR_ATTRS = [
+        "kv_num_blocks",
+        "kv_indices",
+        "full_kv_num_blocks",
+        "full_kv_indices",
+        "q_num_blocks",
+        "q_indices",
+        "full_q_num_blocks",
+        "full_q_indices",
+    ]
+
+    _CONTEXT_ATTRS = [
+        "seq_lengths",
+        "BLOCK_SIZE",
+        "mask_mod",
+    ]
+
     def __init__(
         self,
         seq_lengths: tuple[int, int],
@@ -912,6 +930,31 @@ class BlockMask:
             self.as_tuple(flatten=False),
         )
         return BlockMask(*mapped_attributes)
+
+    def _flatten(self):
+        """Flatten BlockMask into a list of tensors and context."""
+        tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
+        context = tuple(getattr(self, attr) for attr in self._CONTEXT_ATTRS)
+        return tensors, context
+
+    @classmethod
+    def _unflatten(cls, tensors, context):
+        """Unflatten tensors and context back into a BlockMask."""
+        kwargs = {
+            **dict(zip(cls._CONTEXT_ATTRS, context)),
+            **dict(zip(cls._TENSOR_ATTRS, tensors)),
+        }
+        return cls(**kwargs)
+
+    def _flatten_with_keys(self):
+        """Flatten BlockMask with keys for better tracing."""
+        tensors = tuple(
+            (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
+        )
+        context = tuple(
+            (GetAttrKey(attr), getattr(self, attr)) for attr in self._CONTEXT_ATTRS
+        )
+        return tensors, context
 
 
 def _broadcast_to_dim(x, dim):
@@ -1605,3 +1648,12 @@ def flex_attention(
     return _finalize_outputs(
         out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
     )
+
+
+register_pytree_node(
+    BlockMask,
+    BlockMask._flatten,
+    BlockMask._unflatten,
+    flatten_with_keys_fn=BlockMask._flatten_with_keys,
+    serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+)
