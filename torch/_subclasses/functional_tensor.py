@@ -145,7 +145,7 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            not torch._export.config.enable_auto_functionalized_v2_for_export
+            torch._export.config.enable_auto_functionalized_v2_for_export
             and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
@@ -267,6 +267,7 @@ class FunctionalTensor(torch.Tensor):
                 device=self.device,
                 layout=self.layout,
             )
+        # pyrefly: ignore [not-iterable]
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):
@@ -404,7 +405,8 @@ class FunctionalTensorMode(TorchDispatchMode):
                         warnings.warn(
                             f"At pre-dispatch tracing, we assume that any custom op marked with "
                             f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
-                            f"Found {func} to be one such op."
+                            f"Found {func} to be one such op.",
+                            stacklevel=2,
                         )
                     return False
                 return True
@@ -450,13 +452,15 @@ class FunctionalTensorMode(TorchDispatchMode):
             import torch._export.config as export_config
             import torch._inductor.config as inductor_config
 
-            if (
-                not export_config.enable_auto_functionalized_v2_for_export
-                or not inductor_config.enable_auto_functionalized_v2
-            ):
+            if torch.compiler.is_exporting():
+                if export_config.enable_auto_functionalized_v2_for_export:
+                    return do_auto_functionalize_v2(self, func, args, kwargs)
+
                 return do_auto_functionalize(self, func, args, kwargs)
-            else:
+
+            if inductor_config.enable_auto_functionalized_v2:
                 return do_auto_functionalize_v2(self, func, args, kwargs)
+            return do_auto_functionalize(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
