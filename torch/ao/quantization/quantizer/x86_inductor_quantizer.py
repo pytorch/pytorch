@@ -372,6 +372,7 @@ def _config_checker(method: Callable) -> Callable:
         if quantizer._need_skip_config(quantization_config):
             warnings.warn(
                 f"Skip the quantization config for {name}.",
+                stacklevel=2,
             )
             return quantizer
         return method(quantizer, name, quantization_config)
@@ -417,6 +418,7 @@ class X86InductorQuantizer(Quantizer):
         # As we use `_need_skip_config` to skip all invalid configurations,
         # we can safely assume that the all existing non-None configurations
         # have the same quantization mode.
+        # pyrefly: ignore [bad-assignment]
         for qconfig in (
             list(self.module_name_qconfig.values())
             + list(self.operator_type_qconfig.values())
@@ -463,7 +465,10 @@ class X86InductorQuantizer(Quantizer):
             current_mode.qat_state is not None
             and current_mode.qat_state != quantization_config.is_qat
         ):
-            warnings.warn("Mixed QAT and Non-QAT quantization config is not supported.")
+            warnings.warn(
+                "Mixed QAT and Non-QAT quantization config is not supported.",
+                stacklevel=2,
+            )
             need_skip = True
         if current_mode.dynamic_state is not None:
             input_activation_spec = quantization_config.input_activation
@@ -472,14 +477,15 @@ class X86InductorQuantizer(Quantizer):
                 and current_mode.dynamic_state != input_activation_spec.is_dynamic
             ):
                 warnings.warn(
-                    "Mixed dynamic and static quantization config is not supported."
+                    "Mixed dynamic and static quantization config is not supported.",
+                    stacklevel=2,
                 )
                 need_skip = True
         return need_skip
 
     def set_global(self, quantization_config: QuantizationConfig):
         if self._need_skip_config(quantization_config):
-            warnings.warn("Skip the global quantization config.")
+            warnings.warn("Skip the global quantization config.", stacklevel=2)
             return self
         self.global_config = quantization_config
         return self
@@ -488,7 +494,8 @@ class X86InductorQuantizer(Quantizer):
         if not isinstance(self.global_config, QuantizationConfig):
             warnings.warn(
                 "The global_config for X86InductorQuantizer is currently invalid. \
-                Please ensure that you use set_global to establish the global quantization configuration."
+                Please ensure that you use set_global to establish the global quantization configuration.",
+                stacklevel=2,
             )
         return self.global_config
 
@@ -507,7 +514,8 @@ class X86InductorQuantizer(Quantizer):
             )
         else:
             warnings.warn(
-                f"function: Unable to customize quantization config for {function_type} by X86InductorQuantizer."
+                f"function: Unable to customize quantization config for {function_type} by X86InductorQuantizer.",
+                stacklevel=2,
             )
         return self
 
@@ -524,7 +532,8 @@ class X86InductorQuantizer(Quantizer):
             )
         else:
             warnings.warn(
-                f"Module: Unable to customize quantization config for {module_type} by X86InductorQuantizer."
+                f"Module: Unable to customize quantization config for {module_type} by X86InductorQuantizer.",
+                stacklevel=2,
             )
         return self
 
@@ -550,7 +559,8 @@ class X86InductorQuantizer(Quantizer):
             self.operator_type_qconfig[operator_type] = quantization_config
         else:
             warnings.warn(
-                f"operator: Unable to quantize {operator} by X86InductorQuantizer."
+                f"operator: Unable to quantize {operator} by X86InductorQuantizer.",
+                stacklevel=2,
             )
         return self
 
@@ -808,6 +818,7 @@ class X86InductorQuantizer(Quantizer):
                 )
                 binary_node.meta[QUANT_ANNOTATION_KEY] = (
                     _X86InductorQuantizationAnnotation(
+                        # pyrefly: ignore [bad-argument-type]
                         input_qspec_map=binary_node_input_qspec_map,
                         _annotated=True,
                     )
@@ -878,6 +889,7 @@ class X86InductorQuantizer(Quantizer):
                 )
                 binary_node.meta[QUANT_ANNOTATION_KEY] = (
                     _X86InductorQuantizationAnnotation(
+                        # pyrefly: ignore [bad-argument-type]
                         input_qspec_map=binary_node_input_qspec_map,
                         # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                         output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
@@ -1085,6 +1097,7 @@ class X86InductorQuantizer(Quantizer):
                 quantization_config
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                # pyrefly: ignore [bad-argument-type]
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
             )
@@ -1139,6 +1152,7 @@ class X86InductorQuantizer(Quantizer):
                 quantization_config
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                # pyrefly: ignore [bad-argument-type]
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -1312,7 +1326,8 @@ class X86InductorQuantizer(Quantizer):
                 if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
                     if quantization_config is not None:
                         warnings.warn(
-                            f"The input of maxpool2d is not quantized, skip annotate maxpool2d with config {quantization_config}."
+                            f"The input of maxpool2d is not quantized, skip annotate maxpool2d with config {quantization_config}.",
+                            stacklevel=2,
                         )
                     return
 
@@ -1352,11 +1367,7 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_output_share_observer_as_input(
         self, input_node: Node, source_node: Node
     ):
-        source_node_quantization_annotation = (
-            source_node.meta[QUANT_ANNOTATION_KEY]
-            if QUANT_ANNOTATION_KEY in source_node.meta
-            else None
-        )
+        source_node_quantization_annotation = source_node.meta.get(QUANT_ANNOTATION_KEY)
         if (
             source_node_quantization_annotation
             and source_node_quantization_annotation._is_output_of_quantized_pattern
@@ -1395,10 +1406,8 @@ class X86InductorQuantizer(Quantizer):
                     return
 
                 # Get the quantization_annotation from getitem_node
-                maxpool_node_quantization_annotation = (
-                    maxpool_node.meta[QUANT_ANNOTATION_KEY]
-                    if QUANT_ANNOTATION_KEY in maxpool_node.meta
-                    else None
+                maxpool_node_quantization_annotation = maxpool_node.meta.get(
+                    QUANT_ANNOTATION_KEY
                 )
                 if (
                     maxpool_node_quantization_annotation
@@ -1499,6 +1508,7 @@ class X86InductorQuantizer(Quantizer):
             has_unary = unary_op is not None
             seq_partition = [torch.nn.Linear, binary_op]
             if has_unary:
+                # pyrefly: ignore [bad-argument-type]
                 seq_partition.append(unary_op)
             fused_partitions = find_sequential_partitions(gm, seq_partition)
             for fused_partition in fused_partitions:
