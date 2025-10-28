@@ -233,18 +233,19 @@ class TestVarlenAttention(NNTestCase):
         q, k, v = attention_block.get_varlen_qkv(x_packed)
 
         torch.library.opcheck(
-            torch.ops.torch_nn_attention._varlen_attn,
+            torch.ops.torch_attn._varlen_attn,
             (q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False),
         )
 
-        out, lse, rng_state = torch.ops.torch_nn_attention._varlen_attn(
+        out, lse, rng_state = torch.ops.torch_attn._varlen_attn(
             q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False
         )
         grad_out = torch.randn_like(out)
 
-        # we don't support double backward, so we skip test_autograd_registration, test_aot_dispatch_dynamic, and test_aot_dispatch_static
+        # we don't support double backward
+        # skipping test_autograd_registration, test_aot_dispatch_dynamic, test_aot_dispatch_static
         torch.library.opcheck(
-            torch.ops.torch_nn_attention._varlen_attn_backward,
+            torch.ops.torch_attn._varlen_attn_backward,
             (
                 grad_out,
                 q,
@@ -308,8 +309,8 @@ class TestVarlenAttention(NNTestCase):
         called_ops = mode.called_ops
 
         custom_ops_called = any(
-            "torch_nn_attention._varlen_attn" in op for op in called_ops
-        ) and any("torch_nn_attention._varlen_attn_backward" in op for op in called_ops)
+            "torch_attn._varlen_attn" in op for op in called_ops
+        ) and any("torch_attn._varlen_attn_backward" in op for op in called_ops)
         assert custom_ops_called
 
     @unittest.skipIf(
