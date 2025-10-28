@@ -119,6 +119,15 @@ class TestDTensorDebugMode(TestCase):
       aten::detach(t: f32[1, 8])""",
         )
 
+        # test stack trace
+        with DebugMode() as debug_mode:
+            z = x_dtensor + y_dtensor
+            with DebugMode.dispatch_stack_trace(cpp=False):
+                z.sum().backward()
+
+        self.assertTrue(debug_mode.operators[0].stack_trace is None)
+        self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
+
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 

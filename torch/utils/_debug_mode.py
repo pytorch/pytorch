@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Optional, TYPE_CHECKING
+import traceback
+from typing import Optional
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -11,15 +12,15 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map
-
-
-if TYPE_CHECKING:
-    from torch.distributed._tools.mod_tracker import ModTracker
+from torch.utils._traceback import CapturedTraceback
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
 
+
 REDISTRIBUTE_FUNC = "redistribute_input"
+RECORD_STACK_TRACE = False
+CPP_STACK_TRACE = False
 
 
 def _stringify_shape(shape) -> str:
@@ -81,29 +82,40 @@ def _arg_to_str(arg, attributes) -> str:
     return str(arg)
 
 
+def _get_stack_trace(cpp=False) -> str:
+    from torch.fx.experimental.symbolic_shapes import uninteresting_files
+
+    summary = CapturedTraceback.extract(cpp=cpp).summary()
+    summary = [
+        frame for frame in summary if frame.filename not in uninteresting_files()
+    ]
+    summary = traceback.StackSummary.from_list(summary)
+    return ",".join(summary.format())
+
+
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
-
     def __init__(self, call_depth: int):
-        self.call_depth = call_depth
+        global RECORD_STACK_TRACE, CPP_STACK_TRACE
+
+        self.call_depth: int = call_depth
+        self.stack_trace: Optional[str] = None
+        if RECORD_STACK_TRACE:
+            self.stack_trace = _get_stack_trace(cpp=CPP_STACK_TRACE)
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
 
-    def __repr__(self) -> str:
-        return self.render([])
-
 
 class _OpCall(_DebugCall):
     """Normal operator call"""
-
     def __init__(self, op, args: tuple, kwargs: dict, call_depth: int):
         super().__init__(call_depth)
         self.op = op
         self.args = args
         self.kwargs = kwargs
 
-    def render(self, attributes: list[str]) -> str:
+    def render(self, attributes: list[str] = []) -> str:
         args_str = ", ".join(_arg_to_str(arg, attributes) for arg in self.args)
 
         if self.kwargs:
@@ -122,24 +134,17 @@ class _OpCall(_DebugCall):
 
         return f"{op_name}({args_str}{kwargs_str})"
 
-    def __iter__(self):
-        # for BC; tuple(self) returns (op, args, kwargs, call_depth)
-        yield from [self.op, self.args, self.kwargs, self.call_depth]
-
 
 class _RedistributeCall(_DebugCall):
     """Redistribute call from DTensor dispatch"""
-
-    def __init__(
-        self, arg, src_placement, dst_placement, transform_info_str, call_depth
-    ):
+    def __init__(self, arg, src_placement, dst_placement, transform_info_str, call_depth):
         super().__init__(call_depth)
         self.arg = arg
         self.src_placement = src_placement
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
 
-    def render(self, attributes: list[str]) -> str:
+    def render(self, attributes: list[str] = []) -> str:
         arg_str = f"{_arg_to_str(self.arg, attributes)}"
         if self.transform_info_str is not None:  # prioritize over src/dst placements
             placement_str = f"trace: {self.transform_info_str}"
@@ -148,35 +153,6 @@ class _RedistributeCall(_DebugCall):
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
         return f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
-
-    def __iter__(self):
-        # for BC; tuple(self) returns (op, placement info, kwargs, call_depth)
-        yield REDISTRIBUTE_FUNC
-        if self.transform_info_str:
-            yield [self.arg, self.transform_info_str]
-        else:
-            yield [self.arg, self.src_placement, self.dst_placement]
-        yield {}
-        yield self.call_depth
-
-
-class _NNModuleCall(_DebugCall):
-    """Designates entering an nn.Module's forward method"""
-
-    def __init__(self, module_name: str, call_depth: int):
-        super().__init__(call_depth)
-        self.module_name = module_name
-
-    def render(self, attributes: list[str]) -> str:
-        return f"[nn.Mod] {self.module_name}"
-
-    def __iter__(self):
-        yield from [
-            f"[nn.Mod] {self.module_name}",
-            (),
-            {},
-            self.call_depth,
-        ]
 
 
 class DebugMode(TorchDispatchMode):
@@ -187,7 +163,6 @@ class DebugMode(TorchDispatchMode):
         record_faketensor=False,
         record_realtensor=True,
         record_tensor_attributes=None,
-        record_nn_module=False,
     ):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -197,12 +172,6 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
         self.record_tensor_attributes = record_tensor_attributes or []
-
-        self.record_nn_module = record_nn_module
-
-        self.module_tracker: Optional[ModTracker] = None
-        if self.record_nn_module:
-            self.module_tracker_setup()
 
         self.operators = []
         self.call_depth = 0
@@ -239,9 +208,7 @@ class DebugMode(TorchDispatchMode):
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self.operators.append(
-                        _OpCall(func, args, kwargs, self.call_depth + 1)
-                    )
+                    self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
         elif len(types) == 0:
             if self.record_realtensor:
                 self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
@@ -258,34 +225,27 @@ class DebugMode(TorchDispatchMode):
             torch._C._push_on_torch_function_stack(self)
 
         super().__enter__()
-        if self.record_nn_module:
-            self.module_tracker.__enter__()  # type: ignore[attribute, union-attr]
         return self
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def __exit__(self, *args):
         super().__exit__(*args)
-        if self.record_nn_module:
-            self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
 
-    def module_tracker_setup(self):
-        from torch.distributed._tools.mod_tracker import ModTracker
+    @staticmethod
+    @contextlib.contextmanager
+    def dispatch_stack_trace(cpp=False):
+        global RECORD_STACK_TRACE, CPP_STACK_TRACE
+        old_stack_trace, old_cpp = RECORD_STACK_TRACE, CPP_STACK_TRACE
 
-        self.module_tracker = ModTracker()
-
-        # module pre-fw hook: record module call
-        def pre_fw_hook(module, input):
-            fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
-            self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
-            self.call_depth += 1
-
-        # module post-fw hook: decrement call depth
-        def post_fw_hook(module, input, output):
-            self.call_depth -= 1
-
-        self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
+        RECORD_STACK_TRACE = True
+        CPP_STACK_TRACE = cpp
+        try:
+            yield
+        finally:
+            RECORD_STACK_TRACE = old_stack_trace
+            CPP_STACK_TRACE = old_cpp
 
     @contextlib.contextmanager
     def record_redistribute_calls(
@@ -314,7 +274,9 @@ class DebugMode(TorchDispatchMode):
         with torch._C.DisableTorchFunction():
             result = ""
             result += "\n".join(
-                "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
+                "  "
+                + "  " * op.call_depth
+                + op.render(self.record_tensor_attributes)
                 for op in self.operators
             )
         return result
