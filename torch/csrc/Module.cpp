@@ -2866,12 +2866,16 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
-  py::class_<dummy_types::Dummy>(py_module, "_Dummy")
+  py::class_<dummy_types::v2_9::Dummy>(py_module, "_Dummy")
       .def(py::init<int32_t>(), py::arg("id"))
-      .def("get_id", &dummy_types::Dummy::get_id)
-      .def_readwrite("id", &dummy_types::Dummy::id)
-      .def("__repr__", [](const dummy_types::Dummy& d) {
-        return "Dummy(id=" + std::to_string(d.get_id()) + ")";
+      .def(py::init<int8_t, int32_t>(), py::arg("foo"), py::arg("id"))
+      .def("get_foo", &dummy_types::v2_9::Dummy::get_foo)
+      .def("get_id", &dummy_types::v2_9::Dummy::get_id)
+      .def_readwrite("foo", &dummy_types::v2_9::Dummy::foo)
+      .def_readwrite("id", &dummy_types::v2_9::Dummy::id)
+      .def("__repr__", [](const dummy_types::v2_9::Dummy& d) {
+        return "Dummy(foo=" + std::to_string(d.get_foo()) +
+            ", id=" + std::to_string(d.get_id()) + ")";
       });
 
   auto nativert_module = py_module.def_submodule("_nativert");

@@ -888,15 +888,24 @@ void addInputs(
   n->addInput(v);
 }
 
-void addInputs(Node* n, const char* name, const dummy_types::Dummy& value) {
-  // v2_8::Dummy only has id field
+void addInputs(
+    Node* n,
+    const char* name,
+    const dummy_types::v2_9::Dummy& value) {
+  // For dummy types, we serialize them as a tuple of their fields
   Graph* g = n->owningGraph();
 
-  // Create constant for id field
+  // Create constants for foo and id fields
+  Value* foo_val = g->insertConstant(static_cast<int64_t>(value.get_foo()));
   Value* id_val = g->insertConstant(static_cast<int64_t>(value.get_id()));
+
+  recordSourceLocation(foo_val->node());
   recordSourceLocation(id_val->node());
 
-  n->addInput(id_val);
+  // Create a tuple containing the fields
+  std::vector<Value*> tuple_inputs = {foo_val, id_val};
+  Node* tuple_node = g->insertNode(g->createTuple(tuple_inputs));
+  n->addInput(tuple_node->output());
 }
 
 void addOutput(Node* node, const at::Tensor& output) {

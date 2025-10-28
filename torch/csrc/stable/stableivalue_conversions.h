@@ -15,6 +15,11 @@
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 
+constexpr uint64_t TORCH_VERSION_2_8_0 =
+    ((uint64_t)2 << 56) | ((uint64_t)8 << 48);
+constexpr uint64_t TORCH_VERSION_2_9_0 =
+    ((uint64_t)2 << 56) | ((uint64_t)9 << 48);
+
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
 template <typename T>
@@ -223,12 +228,21 @@ struct FromImpl<dummy_types::Dummy> {
       const dummy_types::Dummy& val,
       uint64_t extension_build_version,
       bool is_internal) {
-    (void)extension_build_version; // We don't actually use this for the legacy
-                                   // type
-    (void)is_internal; // Unused parameter
-    // Pack only the id into the higher 32 bits
-    uint64_t result = (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 32;
-    return static_cast<StableIValue>(result);
+    uint64_t version_to_check =
+        is_internal ? extension_build_version : aoti_torch_abi_version();
+
+    if (version_to_check < TORCH_VERSION_2_9_0) {
+      // Pack only the id into the higher 32 bits
+      uint64_t result = (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 32;
+      return static_cast<StableIValue>(result);
+    } else {
+      // Modern encoding: pack foo (8 bits) and id (32 bits) in leading bits
+      uint64_t result = 0;
+      result |= (static_cast<uint64_t>(val.foo) & 0xFF) << 56; // bits 1-8
+      result |= (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 24; // bits 8-40
+
+      return static_cast<StableIValue>(result);
+    }
   }
 };
 
@@ -400,15 +414,27 @@ struct ToImpl<dummy_types::Dummy> {
       StableIValue val,
       uint64_t extension_build_version,
       bool is_internal) {
-    (void)extension_build_version; // We don't actually use this for the legacy
-                                   // type
-    (void)is_internal; // Unused parameter
+    uint64_t version_to_check =
+        is_internal ? extension_build_version : aoti_torch_abi_version();
 
-    uint64_t packed = static_cast<uint64_t>(val);
-    // Extract id from higher 32 bits (bits 32-63)
-    int32_t id = static_cast<int32_t>((packed >> 32) & 0xFFFFFFFF);
+    if (version_to_check < TORCH_VERSION_2_9_0) {
+      // Legacy decoding: extract id from higher 32 bits
+      uint64_t packed = static_cast<uint64_t>(val);
+      int32_t id = static_cast<int32_t>((packed >> 32) & 0xFFFFFFFF);
 
-    return dummy_types::Dummy(id);
+      // Create new type with defaulted foo since legacy version didn't have foo
+      // field
+      return dummy_types::Dummy(id);
+    } else {
+      // Modern decoding: extract both foo and id from leading bits
+      uint64_t packed = static_cast<uint64_t>(val);
+      int8_t foo =
+          static_cast<int8_t>((packed >> 56) & 0xFF); // extract bits 56-63
+      int32_t id = static_cast<int32_t>(
+          (packed >> 24) & 0xFFFFFFFF); // extract bits 24-55
+
+      return dummy_types::Dummy(foo, id);
+    }
   }
 };
 

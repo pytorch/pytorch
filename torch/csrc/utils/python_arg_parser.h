@@ -1179,14 +1179,17 @@ inline PyObject* PythonArgs::pyobject(int i) {
 
 inline dummy_types::Dummy PythonArgs::dummy(int i) {
   if (!args[i])
-    TORCH_CHECK(false, "Expected 1 arg for Dummy");
+    TORCH_CHECK(false, "Expected 2 args for Dummy");
 
   // Parse Python object to dummy type
   // For now, we'll expect a tuple of (foo, id) integers
   if (PyTuple_Check(args[i])) {
-    PyObject* id_obj = PyTuple_GET_ITEM(args[i], 0);
+    TORCH_CHECK(PyTuple_GET_SIZE(args[i]) == 2, "Expected 2 args for Dummy");
+    PyObject* foo_obj = PyTuple_GET_ITEM(args[i], 0);
+    PyObject* id_obj = PyTuple_GET_ITEM(args[i], 1);
+    int8_t foo = static_cast<int8_t>(THPUtils_unpackLong(foo_obj));
     int32_t id = static_cast<int32_t>(THPUtils_unpackLong(id_obj));
-    return dummy_types::Dummy(id);
+    return dummy_types::Dummy(foo, id);
   }
 
   TORCH_CHECK_TYPE(

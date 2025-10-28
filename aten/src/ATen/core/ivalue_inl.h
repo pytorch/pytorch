@@ -1936,7 +1936,7 @@ std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>> /*unused
 }
 
 template<>
-inline dummy_types::Dummy generic_to(IValue ivalue, _fake_type<dummy_types::Dummy> /*unused*/) {
+inline dummy_types::v2_9::Dummy generic_to(IValue ivalue, _fake_type<dummy_types::v2_9::Dummy> /*unused*/) {
   return ivalue.toDummy();
 }
 

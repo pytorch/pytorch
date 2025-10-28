@@ -272,16 +272,36 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+constexpr uint64_t TORCH_VERSION_2_8_0 =
+    ((uint64_t)2 << 56) | ((uint64_t)8 << 48);
+constexpr uint64_t TORCH_VERSION_2_9_0 =
+    ((uint64_t)2 << 56) | ((uint64_t)9 << 48);
+
+#if TORCH_FEATURE_VERSION >= (((0ULL + 2) << 56) | ((0ULL + 8 << 48)))
 
 inline torch::stable::Tensor op(
     const torch::stable::Tensor& self,
-    const dummy_types::Dummy& dummy) {
-  const auto num_args = 2;
-  std::array<StableIValue, num_args> stack{torch::stable::detail::from(self), torch::stable::detail::from(dummy)};
-  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+    const dummy_types::Dummy& dummy,
+    std::optional<int64_t> scale = std::nullopt) {
+  if (aoti_torch_abi_version() <= TORCH_VERSION_2_8_0) {
+    if (scale.has_value() && scale.value() != 1) {
+      STD_TORCH_CHECK(false, "scale argument not supported in version <= 2.8.0");
+    }
+    const auto num_args = 2;
+    std::array<StableIValue, num_args> stack{torch::stable::detail::from(self), torch::stable::detail::from(dummy)};
+    TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+        "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
+    return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  } else {
+    const auto num_args = 3;
+    std::array<StableIValue, num_args> stack{
+        torch::stable::detail::from(self),
+        torch::stable::detail::from(dummy),
+        scale.has_value() ? torch::stable::detail::from(scale.value()) : torch::stable::detail::from(1)};
+    TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+        "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
+    return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  }
 }
 
 
