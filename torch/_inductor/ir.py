@@ -64,6 +64,7 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
+    IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
@@ -3650,12 +3651,36 @@ class Layout(OutputSpec):
         self.dtype = dtype
         assert len(size) == len(stride), f"size={size}, stride={stride}"
         assert all(isinstance(s, (Expr, int)) for s in size)
-        self.size = size
-        self.stride = stride
-        self.offset = offset
+        self._size = size
+        self._stride = stride
+        self._offset = offset
         self.is_pinned = is_pinned
         # is_pinned implies cpu
         assert (not self.is_pinned) or (self.device.type == "cpu")
+
+    @property
+    def size(self) -> Sequence[Expr]:
+        return self._size
+
+    @size.setter
+    def size(self, value: Sequence[Expr]) -> None:
+        self._size = value
+
+    @property
+    def stride(self) -> Sequence[Expr]:
+        return self._stride
+
+    @stride.setter
+    def stride(self, value: Sequence[Expr]) -> None:
+        self._stride = value
+
+    @property
+    def offset(self) -> Expr:
+        return self._offset
+
+    @offset.setter
+    def offset(self, value: Expr) -> None:
+        self._offset = value
 
     def __str__(self) -> str:
         offset = ""
@@ -3896,7 +3921,11 @@ class FixedLayout(Layout):
 
 
 class FlexibleLayout(Layout):
-    """A Tensor layout that we are allowed to change"""
+    """
+    A Tensor layout that we are allowed to change
+
+    Assumption: layout change should NOT add or remove free symbols
+    """
 
     allow_indexing = False
 
@@ -3981,6 +4010,33 @@ class FlexibleLayout(Layout):
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
+    @property
+    def size(self) -> Sequence[Expr]:
+        return self._size
+
+    @size.setter
+    def size(self, value: Sequence[Expr]) -> None:
+        self.assert_free_symbol_uses_unchanged("size", value)
+        self._size = value
+
+    @property
+    def stride(self) -> Sequence[Expr]:
+        return self._stride
+
+    @stride.setter
+    def stride(self, value: Sequence[Expr]) -> None:
+        self.assert_free_symbol_uses_unchanged("stride", value)
+        self._stride = value
+
+    @property
+    def offset(self) -> Expr:
+        return self._offset
+
+    @offset.setter
+    def offset(self, value: Expr) -> None:
+        self.assert_free_symbol_uses_unchanged("offset", value)
+        self._offset = value
+
     def as_stride_order(
         self, order: Sequence[int], allow_padding: bool = False
     ) -> FixedLayout:
@@ -4039,6 +4095,25 @@ class FlexibleLayout(Layout):
             self.is_pinned,
         )
 
+    def get_initial_free_symbol_uses(self) -> dict[tuple[str, bool], sympy.Symbol]:
+        initial_free_symbols = {}
+        for name in ["size", "stride", "offset"]:
+            for unbacked_only in [True, False]:
+                key = (name, unbacked_only)
+                initial_free_symbols[key] = OrderedSet(
+                    get_free_symbols(getattr(self, name), unbacked_only)
+                )
+
+        return initial_free_symbols
+
+    def assert_free_symbol_uses_unchanged(self, name: str, value: IterateExprs) -> None:
+        for unbacked_only in [True, False]:
+            old_free_symbols = self.initial_free_symbols[(name, unbacked_only)]
+            new_free_symbols = OrderedSet(get_free_symbols(value, unbacked_only))
+            assert new_free_symbols == old_free_symbols, (
+                f"Expected free symbols unchanged, but got {new_free_symbols} vs {old_free_symbols}"
+            )
+
     def __init__(
         self,
         device: torch.device,
@@ -4052,6 +4127,10 @@ class FlexibleLayout(Layout):
         else:
             strides = FlexibleLayout.contiguous_strides(size)
         super().__init__(device, dtype, size, strides, is_pinned=is_pinned)
+
+        # record the initial free symbols to check that we do not add new free symbols
+        # later when modifying sizes, strides, and offsets.
+        self.initial_free_symbols = self.get_initial_free_symbol_uses()
 
 
 class NonOwningLayout(Layout):
