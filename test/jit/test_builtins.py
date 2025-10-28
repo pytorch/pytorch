@@ -328,6 +328,7 @@ class TestTensorBuiltins(JitTestCase):
             "names",
             # We don't plan to support grad_dtype in TorchScript
             "grad_dtype",
+            "is_wrapped_number",
         }
 
         for p in properties:
