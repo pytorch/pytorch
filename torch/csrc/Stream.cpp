@@ -127,10 +127,9 @@ static void THPStream_dealloc(THPStream* self) {
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(
-      c10::Device(
-          static_cast<c10::DeviceType>(self->device_type),
-          static_cast<c10::DeviceIndex>(self->device_index)));
+  return THPDevice_New(c10::Device(
+      static_cast<c10::DeviceType>(self->device_type),
+      static_cast<c10::DeviceIndex>(self->device_index)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -138,12 +137,11 @@ static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
 
-  return PyBool_FromLong(
-      c10::Stream::unpack3(
-          self->stream_id,
-          static_cast<c10::DeviceIndex>(self->device_index),
-          static_cast<c10::DeviceType>(self->device_type))
-          .query());
+  return PyBool_FromLong(c10::Stream::unpack3(
+                             self->stream_id,
+                             static_cast<c10::DeviceIndex>(self->device_index),
+                             static_cast<c10::DeviceType>(self->device_type))
+                             .query());
 
   END_HANDLE_TH_ERRORS
 }
@@ -184,11 +182,10 @@ static PyObject* THPStream_wait_stream(PyObject* _self, PyObject* _other) {
     c10::Event new_event(
         static_cast<c10::DeviceType>(other_stream->device_type),
         c10::EventFlag::PYTORCH_DEFAULT);
-    new_event.record(
-        c10::Stream::unpack3(
-            other_stream->stream_id,
-            static_cast<c10::DeviceIndex>(other_stream->device_index),
-            static_cast<c10::DeviceType>(other_stream->device_type)));
+    new_event.record(c10::Stream::unpack3(
+        other_stream->stream_id,
+        static_cast<c10::DeviceIndex>(other_stream->device_index),
+        static_cast<c10::DeviceType>(other_stream->device_type)));
     c10::Stream::unpack3(
         self->stream_id,
         static_cast<c10::DeviceIndex>(self->device_index),
@@ -230,11 +227,10 @@ static PyObject* THPStream_record_event(
   }
   auto new_event = reinterpret_cast<THPEvent*>(_new_event);
   TORCH_CHECK(new_event, "event must not be null");
-  new_event->event.record(
-      c10::Stream::unpack3(
-          self->stream_id,
-          static_cast<c10::DeviceIndex>(self->device_index),
-          static_cast<c10::DeviceType>(self->device_type)));
+  new_event->event.record(c10::Stream::unpack3(
+      self->stream_id,
+      static_cast<c10::DeviceIndex>(self->device_index),
+      static_cast<c10::DeviceType>(self->device_type)));
   return reinterpret_cast<PyObject*>(new_event);
   END_HANDLE_TH_ERRORS
 }
@@ -284,9 +280,8 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
     at::accelerator::setDeviceIndex(stream_device_idx);
   }
   c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
-  at::accelerator::setCurrentStream(
-      c10::Stream::unpack3(
-          self->stream_id, stream_device_idx, stream_device_type));
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      self->stream_id, stream_device_idx, stream_device_type));
   // Save the current device index and previous stream to the context.
   auto ctx_device_index =
       THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
@@ -336,11 +331,10 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
       ctx_device_index.get(),
       "ctx_device_index should be present on the context dict.");
   auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
-  at::accelerator::setCurrentStream(
-      c10::Stream::unpack3(
-          prev_stream->stream_id,
-          static_cast<c10::DeviceIndex>(prev_stream->device_index),
-          static_cast<c10::DeviceType>(prev_stream->device_type)));
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      prev_stream->stream_id,
+      static_cast<c10::DeviceIndex>(prev_stream->device_index),
+      static_cast<c10::DeviceType>(prev_stream->device_type)));
   // Reset the current device to the previous device if they differ.
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
