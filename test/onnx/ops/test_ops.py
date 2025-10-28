@@ -427,7 +427,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             dynamo=True,
             fallback=False,
             verbose=False,
-            optimize=False,
             **options,
         )
         assert onnx_program is not None
