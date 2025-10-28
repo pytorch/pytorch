@@ -91,9 +91,7 @@ class _DebugCall:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
         """
-        raise NotImplementedError(
-            "Subclasses must implement stringify_args(), even if no-op"
-        )
+        raise NotImplementedError("Subclasses must implement stringify_args(), even if no-op")
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
@@ -243,11 +241,18 @@ class DebugMode(TorchDispatchMode):
         import torch.distributed.tensor  # noqa: F401
 
         self.supports_higher_order_operators = True
-        self.record_torchfunction = record_torchfunction
-        self.record_faketensor = record_faketensor
-        self.record_realtensor = record_realtensor
-        self.record_tensor_attributes = record_tensor_attributes or []
 
+        # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
+        # WARNING: currently incompatible with torch.compile due to dynamo guard failures.
+        self.record_torchfunction = record_torchfunction
+        # Records __torch_dispatch__ calls on FakeTensors.
+        self.record_faketensor = record_faketensor
+        # Records __torch_dispatch__ calls on real tensors.
+        self.record_realtensor = record_realtensor
+        # Optional list[str] of tensor attributes, to be annotated in the string dump.
+        self.record_tensor_attributes = record_tensor_attributes or []
+        # Uses ModTracker to record nn.Module entrances, as _NNModuleCall entries.
+        # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
 
         self.module_tracker: Optional[ModTracker] = None
@@ -298,7 +303,9 @@ class DebugMode(TorchDispatchMode):
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self._record_call(_OpCall(func, args, kwargs, self.call_depth + 1))
+                    self._record_call(
+                        _OpCall(func, args, kwargs, self.call_depth + 1)
+                    )
         elif len(types) == 0:
             if self.record_realtensor:
                 self._record_call(_OpCall(func, args, kwargs, self.call_depth + 1))
