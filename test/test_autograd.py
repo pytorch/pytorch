@@ -6660,7 +6660,7 @@ Done""",
     def test_gradcheck_adjusted_atol_complex_inputs(self):
         # Regression test for incorrect atol transformation for
         # complex inputs, allowing fast gradcheck to fail and slow gradcheck to pass.
-        # See issue: <insert>
+        # See issue: https://github.com/pytorch/pytorch/issues/166385
 
         # this particular seed on CPU triggers a specific input tangent vector u in [0,1)^d such that
         # v^T(j_n - j_a)u is interesting.
