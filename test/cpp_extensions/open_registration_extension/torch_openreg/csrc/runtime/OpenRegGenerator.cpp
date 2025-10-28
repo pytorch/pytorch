@@ -5,7 +5,7 @@ static std::vector<at::Generator> default_generators;
 
 namespace c10::openreg {
 // LITERALINCLUDE START: OPENREG GENERATOR IMPL
-const at::Generator& getDefaultOpenRegGenerator(c10::DeviceIndex device_index) {
+const at::Generator& getDefaultOpenRegGenerator(DeviceIndex device_index) {
   static bool flag [[maybe_unused]] = []() {
     auto deivce_nums = device_count();
     default_generators.resize(deivce_nums);
@@ -16,7 +16,7 @@ const at::Generator& getDefaultOpenRegGenerator(c10::DeviceIndex device_index) {
     return true;
   }();
 
-  c10::DeviceIndex idx = device_index;
+  DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = current_device();
   } else {
@@ -25,8 +25,8 @@ const at::Generator& getDefaultOpenRegGenerator(c10::DeviceIndex device_index) {
   return default_generators[idx];
 }
 
-at::Generator createOpenRegGenerator(c10::DeviceIndex device_index) {
-  c10::DeviceIndex idx = device_index;
+at::Generator createOpenRegGenerator(DeviceIndex device_index) {
+  DeviceIndex idx = device_index;
 
   if (idx == -1) {
     idx = current_device();
@@ -38,6 +38,7 @@ at::Generator createOpenRegGenerator(c10::DeviceIndex device_index) {
   openreg_gen->set_current_seed(default_rng_seed_val);
   return gen;
 }
+
 DeviceType device_type() {
   return DeviceType::PrivateUse1;
 }
