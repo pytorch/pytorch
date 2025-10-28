@@ -145,7 +145,9 @@ def use_native_matmul(mat1, mat2):
         raise AssertionError("native matmul doesn't support block_ptr codegen yet")
 
     # Currently only enable native matmul for triton on GPU.
-    if not (mat1.get_device().type == "cuda" and config.cuda_backend == "triton"):
+    if not (
+        mat1.get_device().type in ["cuda", "xpu"] and config.cuda_backend == "triton"
+    ):
         return False
 
     # Currently, tl.dot only supports following dtypes
