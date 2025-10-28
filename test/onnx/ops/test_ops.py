@@ -943,7 +943,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         attn_mask = torch.randint(
-            0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
+            0, 2, (batch_size, 1, kv_seq_len), dtype=torch.bool
         )
 
         class AttentionModel(torch.nn.Module):
@@ -959,6 +959,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             "Q": {0: "batch", 2: "q_seq_len"},
             "K": {0: "batch", 2: "kv_seq_len"},
             "V": {0: "batch", 2: "kv_seq_len"},
+            "attn_mask": {0: "batch", 2: "q_seq_len"},
         }
 
         onnx_program = self.export(
@@ -972,7 +973,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual("Attention", onnx_program.model.graph.node(0).op_type)
         node = onnx_program.model.graph.node(0)
         # Verify inputs
-        self.assertEqual(len(node.inputs), 3)  # Q, K, V (no optional inputs)
+        self.assertEqual(len(node.inputs), 4)
         self.assertEqual(
             node.inputs[0].shape, ["batch", q_num_heads, "q_seq_len", head_size]
         )
