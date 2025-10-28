@@ -415,7 +415,7 @@ class RedistributeTest(DTensorTestBase):
     def test_partial_to_shard(self, dtype):
         device_mesh = self.build_device_mesh()
         partial_spec = [Partial()]
-        my_rank = self.rank
+        my_rank = device_mesh.get_rank()
 
         input_sizes_and_shard_dim = [
             ((self.world_size * 3, 3), 0),

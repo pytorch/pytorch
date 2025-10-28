@@ -692,6 +692,7 @@ class LocalTensorMode(TorchDispatchMode):
             self.ranks = ranks
         self._disable = False
         self._old_get_coordinate = None
+        self._old_get_rank = None
 
     def __enter__(self) -> "LocalTensorMode":
         self._disable = False
@@ -837,14 +838,20 @@ class LocalTensorMode(TorchDispatchMode):
 
     def _patch_device_mesh(self) -> None:
         assert self._old_get_coordinate is None
+        assert self._old_get_rank is None
         self._old_get_coordinate = DeviceMesh.get_coordinate  # type: ignore[assignment]
+        self._old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
         DeviceMesh.get_coordinate = _LocalDeviceMesh.get_coordinate  # type: ignore[method-assign]
+        DeviceMesh.get_rank = _LocalDeviceMesh.get_rank  # type: ignore[assignment,method-assign]
 
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
+        assert self._old_get_rank is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
+        DeviceMesh.get_rank = self._old_get_rank
         # pyrefly: ignore [bad-assignment]
         self._old_get_coordinate = None
+        self._old_get_rank = None
 
 
 class _LocalDeviceMesh:
@@ -876,6 +883,14 @@ class _LocalDeviceMesh:
         # their meshes formed from root mesh and selecting the same dimensions
         # as the current mesh.
         return out  # type: ignore[return-value]
+
+    @staticmethod
+    def get_rank(self: DeviceMesh) -> int | SymInt:
+        # Returns per-rank global rank as SymInt(LocalIntNode) where each
+        # simulated rank gets its own rank value (e.g., {0: 0, 1: 1, ...}).
+        lm = local_tensor_mode()
+        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        return torch.SymInt(LocalIntNode({r: r for r in lm.ranks}))
 
 
 def reconcile_args(args: Any, kwargs: dict[str, Any] | None = None) -> Any:

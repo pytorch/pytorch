@@ -387,6 +387,22 @@ class TestLocalTensorWorld4(LocalTensorTestBase):
             full_tensor = dist_res.full_tensor()
             self.assertEqual(full_tensor, local_res)
 
+    def test_device_mesh_get_rank_patching(self):
+        """Test DeviceMesh.get_rank() returns per-rank values in LocalTensorMode."""
+        from torch.distributed._local_tensor import LocalIntNode
+
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            rank = device_mesh.get_rank()
+
+            # Verify it returns SymInt backed by LocalIntNode
+            self.assertIsInstance(rank, torch.SymInt)
+            self.assertIsInstance(rank.node, LocalIntNode)
+
+            # Verify each simulated rank has correct value
+            expected = {0: 0, 1: 1, 2: 2, 3: 3}
+            self.assertEqual(rank.node._local_ints, expected)
+
 
 class TestLocalTensorWorld8(LocalTensorTestBase):
     world_size = 8
