@@ -553,9 +553,15 @@ def is_pointwise_use(
     return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
 
 
-def has_pointwise_use(
-    use: Node,
-    is_pointwise_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
+class LogicalConnective(enum.Enum):
+    OR = enum.auto()
+    AND = enum.auto()
+
+
+def has_uses(
+    target: Node,
+    use_filter_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
+    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
 ) -> bool:
     """
     Is there an immediate pointwise use, i.e. a descendant in a graph
@@ -564,19 +570,42 @@ def has_pointwise_use(
     Uses in view ops will follow the views uses.
     """
 
-    if use.op != "call_function":
-        return False
-    if not (
-        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
-    ):
-        return False
+    def get_use_aggregate_fn(use_aggregate_type: LogicalConnective):
+        match use_aggregate_type:
+            case LogicalConnective.AND:
+                return all
+            case LogicalConnective.OR:
+                return any
+            case _:
+                return any
 
-    # Process getitem and view
-    target = cast(torch._ops.OpOverload, use.target)
-    if target is operator.getitem or is_view(target):
-        return any(has_pointwise_use(user, is_pointwise_fn) for user in use.users)
+    use_aggregate_fn = get_use_aggregate_fn(use_aggregate_type)
 
-    return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
+    def user_has_use(use: Node) -> bool:
+        if use.op != "call_function":
+            return False
+        if not (
+            isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+        ):
+            return False
+
+        # Process getitem and view
+        target = cast(torch._ops.OpOverload, use.target)
+        if target is operator.getitem or is_view(target):
+            return use_aggregate_fn(user_has_use(user) for user in use.users)
+
+        return use_filter_fn(target)
+
+    return use_aggregate_fn(user_has_use(user) for user in target.users)
+
+
+def has_uses_tagged_as(
+    target: Node,
+    use_tags: Collection[torch.Tag],
+    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
+) -> bool:
+    use_tag_selector = lambda use: any(use_tag in use_tags for use_tag in use.tags)
+    return has_uses(target, use_tag_selector, use_aggregate_type)
 
 
 def gen_gm_and_inputs(
