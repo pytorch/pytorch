@@ -671,6 +671,8 @@ class DTensor(torch.Tensor):
     def __metadata_guard__(
         cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
     ) -> bool:
+        # TODO - delete this - This is now unused after the PR -
+        # https://github.com/pytorch/pytorch/pull/165824
         orig_spec, orig_requires_grad = orig
         other_spec, other_requires_grad = other
         return (

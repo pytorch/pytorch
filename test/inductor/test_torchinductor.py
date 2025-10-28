@@ -14305,6 +14305,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
 
+    @skip_if_halide
+    @requires_cuda_and_triton
+    @skip_if_cpp_wrapper("skip cpp wrapper")
+    def test_triton_argmin_argmax_transpose_logical_index(self):
+        def fn(x):
+            x.tan_()
+            x = x.t()
+            return x.argmin()
+
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
+
+        def fn(x):
+            return (x.t().argmin(), x.t().argmax())
+
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(128, 64, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(8, 6, device=GPU_TYPE, dtype=torch.float16),))
+
+        def fn(x):
+            # Permute: (A, B, C) -> (C, A, B)
+            permuted = x.permute(2, 0, 1)
+            return (permuted.argmin(), permuted.argmax())
+
+        self.common(fn, (torch.randn(4, 6, 8, device=GPU_TYPE),))
+
+        def fn(x):
+            # sliced tensor with gaps in memory
+            sliced = x[:, :10]
+            return (sliced.argmin(), sliced.argmax())
+
+        self.common(fn, (torch.randn(10, 20, device=GPU_TYPE),))
+
+        # Test column major passed as input
+        def fn(x):
+            return (x.argmin(), x.argmax())
+
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
+
     # end of class CommonTemplate - add new tests here
 
 
