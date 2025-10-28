@@ -607,7 +607,7 @@ def has_uses_tagged_as(
     use_aggregate_type: LogicalConnective = LogicalConnective.OR,
 ) -> bool:
     """
-    Is there a use with the given tags?
+    Is there a use with given tags?
     """
 
     use_tag_selector = lambda use: any(use_tag in use_tags for use_tag in use.tags)
