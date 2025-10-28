@@ -119,7 +119,7 @@ non_blocking_remote_cache_write: bool = Config(
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
 # remote cache.
-autotune_local_cache: bool = True
+autotune_local_cache: bool = False
 
 # Enable autotune remote cache.
 #
@@ -710,6 +710,10 @@ split_reductions = True
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
+
+# A batch invariant mode that ensures Inductor generated reductions
+# are batch invariant.  WARNING: Expect perf hit in this mode.
+batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
