@@ -30,15 +30,6 @@
     output = {{get_output()}}
     output_transposed = output.transpose(1, 2)
 
-    # Collect any additional tensor buffers that were added during modifications
-    {% set tensor_buffers = get_tensor_buffers() -%}
-    {% if tensor_buffers -%}
-    buffers = [{% for buffer in tensor_buffers %}{{buffer}}{% if not loop.last %}, {% endif %}{% endfor %}]
-    buffers = list(buffers)
-    {% else -%}
-    buffers = None
-    {% endif -%}
-
     {% if NEEDS_BLOCK_MASK %}
     @cute.jit
     def mask_mod(b_idx, h_idx, q_idx, kv_idx, aux_tensors):
@@ -57,6 +48,15 @@
     block_sparse_tensors = None
     mask_mod = None
     {% endif %}
+
+    # Collect any additional tensor buffers that were added during modifications
+    {% set tensor_buffers = get_tensor_buffers() -%}
+    {% if tensor_buffers -%}
+    buffers = [{% for buffer in tensor_buffers %}{{buffer}}{% if not loop.last %}, {% endif %}{% endfor %}]
+    buffers = list(buffers)
+    {% else -%}
+    buffers = None
+    {% endif -%}
 
     # Out and LSE filled inplace
     _flash_attn_fwd(

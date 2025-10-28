@@ -65,6 +65,10 @@ class CuteDSLSubgraphInfo:
     body: IndentedBuffer
     template_mask: Optional[str] = None
     template_out: Optional[str] = None
+    cse: Optional[CSE[Any]] = None
+
+    def __post_init__(self):
+        self.only_copy_if_non_none_fields = ("cse",)
 
     def to_dict(self):
         return {
@@ -191,10 +195,15 @@ class CuteDSLTemplateKernel(Kernel):
                 body=IndentedBuffer(),
                 template_mask=None,
                 template_out=None,
+                cse=None,
             )
 
         subgraph = self.subgraph_bodies[body_name]
         for key, value in subgraph.to_dict().items():
+            if value is None and key in getattr(
+                subgraph, "only_copy_if_non_none_fields", ()
+            ):
+                continue
             setattr(self, key, value)
 
         try:
@@ -212,15 +221,25 @@ class CuteDSLTemplateKernel(Kernel):
                 setattr(self, key, value)
 
     @contextlib.contextmanager
-    def create_subgraph_body(self, body_name: str):
+    def create_subgraph_body(self, body_name: str, *, clear_cse: bool = False):
         """Create a new subgraph body for template processing."""
         assert body_name not in self.subgraph_bodies, (
             f"Subgraph body '{body_name}' already exists"
+        )
+        new_cse = (
+            type(self.cse)(
+                prefix=self.cse.prefix,
+                suffix=self.cse.suffix,
+                name_prefix=self.cse.name_prefix,
+            )
+            if clear_cse
+            else None
         )
         self.subgraph_bodies[body_name] = CuteDSLSubgraphInfo(
             body=IndentedBuffer(),
             template_mask=None,
             template_out=None,
+            cse=new_cse,
         )
         with self.set_subgraph_body(body_name):
             yield
@@ -331,7 +350,7 @@ class CuteDSLTemplateKernel(Kernel):
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
 
-        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
+        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}", clear_cse=True):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapperCuteDSL(
                 self, subgraph_number, fixed_inputs, mask
