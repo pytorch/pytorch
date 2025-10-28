@@ -4329,6 +4329,19 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         self.assertEqual(compiled(a, b), func(a, b))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_narrow_with_tensor_start(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x, start, end):
+            return torch.narrow(x, 0, start, end)
+
+        x = torch.tensor(
+            [False], device="cuda:0" if torch.cuda.is_available() else "cpu"
+        )
+        start = torch.tensor(0)
+        res = f(x, start, 0)
+        self.assertEqual(res.shape, torch.Size([0]))
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
