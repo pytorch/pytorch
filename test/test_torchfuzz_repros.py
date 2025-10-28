@@ -359,7 +359,9 @@ class TestFuzzerCompileIssues(TestCase):
             t3 = arg1  # size=(1,), stride=(1,), dtype=int64, device=cuda
             t4 = arg2  # size=(1,), stride=(1,), dtype=int64, device=cuda
             t5 = t3 + t3 + t4  # size=(1,), stride=(1,), dtype=int64, device=cuda
-            t6 = torch.exp(t5)  # size=(1,), stride=(1,), dtype=int64, device=cuda
+            t6 = torch.exp(  # noqa: F841
+                t5
+            )  # size=(1,), stride=(1,), dtype=int64, device=cuda  # noqa: F841
             t7 = torch.nn.functional.layer_norm(
                 t2, (111,)
             )  # size=(49, 112, 111), stride=(12432, 111, 1), dtype=float32, device=cuda
@@ -436,7 +438,7 @@ class TestFuzzerCompileIssues(TestCase):
         torch.manual_seed(9)
 
         def foo(arg0):
-            var_node_1 = arg0  # size=(1, 2), stride=(2, 1), dtype=int64, device=cuda
+            var_node_1 = arg0  # size=(1, 2), stride=(2, 1), dtype=int64, device=cuda  # noqa: F841
             var_node_5 = torch.full(
                 (1, 2), -66, dtype=torch.int32
             )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda

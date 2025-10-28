@@ -257,9 +257,14 @@ def create_hop_fw_bw(
             primals = primals_and_tangents[:num_fw_inputs]
             tangents = primals_and_tangents[num_fw_inputs:]
 
-            def prepare_fw_with_masks(fn: Callable[..., Any]) -> Callable[..., Any]:
+            def prepare_fw_with_masks(
+                fw_gm: torch.fx.GraphModule,
+            ) -> Callable[..., Any]:
                 def fw_with_masks(*args: Any) -> tuple[tuple[Any], list[bool]]:
-                    fw_out = fn(*args)
+                    # The Interpreter here is required to propagate metadata
+                    # from the dynamo graph body to the local_map graph body.
+                    # This is required for fx_traceback.annotate for work.
+                    fw_out = torch.fx.Interpreter(fw_gm).run(*args)
                     assert isinstance(fw_out, tuple), (
                         "Dynamo traced submodule should return tuple"
                     )
@@ -293,6 +298,11 @@ def create_hop_fw_bw(
             *[example_grads[i] for i in filtered_grads_idx],
         ]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
+        from torch._functorch._aot_autograd.graph_capture import (
+            copy_fwd_metadata_to_bw_nodes,
+        )
+
+        copy_fwd_metadata_to_bw_nodes(joint_hop_gm)
 
         from torch._functorch._aot_autograd.graph_compile import prepare_for_partitioner
         from torch._inductor.compile_fx import partition_fn
@@ -437,7 +447,8 @@ def autograd_key(
             fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx, *args, **kwargs
         )
 
-    return fw_gm(*args, **kwargs)
+    # TODO: get rid of this when we can install as a subgraph
+    return torch.fx.Interpreter(fw_gm).run(*args, **kwargs)
 
 
 @local_map_hop.py_functionalize_impl

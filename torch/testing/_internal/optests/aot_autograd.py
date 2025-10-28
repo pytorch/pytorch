@@ -38,8 +38,8 @@ def aot_autograd_check(
         assert_equals_fn=torch.testing.assert_close,
         check_gradients=True,
         try_check_data_specialization=False,
-        use_min_cut=True,
-        skip_correctness_check=False):
+        skip_correctness_check=False,
+        disable_functionalization=False):
     """Compares func(*args, **kwargs) in eager-mode to under AOTAutograd.
 
     Compares outputs and (if check_gradients=True) gradients produced by
@@ -64,14 +64,16 @@ def aot_autograd_check(
         c_args, c_kwargs = pytree.tree_unflatten(reconstructed_flat_args, args_spec)
         return func(*c_args, **c_kwargs)
 
-    if use_min_cut:
+    # cannot use the min cut partitioner without functionalization
+    if disable_functionalization:
         compiled_f = compiled_function(
             func_no_tensors,
             nop,
             nop,
             dynamic=dynamic,
-            partition_fn=min_cut_rematerialization_partition,
-            keep_inference_input_mutations=True
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True
         )
     else:
         compiled_f = compiled_function(
@@ -79,8 +81,9 @@ def aot_autograd_check(
             nop,
             nop,
             dynamic=dynamic,
-            partition_fn=default_partition,
-            keep_inference_input_mutations=True
+            partition_fn=min_cut_rematerialization_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=False
         )
 
     out = wrapper_set_seed(func_no_tensors, args)
