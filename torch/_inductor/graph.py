@@ -511,7 +511,7 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
-        # state used by for Kernel.workspace
+        # state used by for KernelArgs.workspace
         self.workspace_id = itertools.count()
 
         # track the current placeholder index that we are processing
@@ -586,7 +586,7 @@ class GraphLowering(torch.fx.Interpreter):
             isinstance(node, ir.ComputedBuffer)
             and node.name in self.buffer_to_padded_size
         ):
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             return self.buffer_to_padded_size[node.name]
         else:
             return node.get_size()
@@ -1117,7 +1117,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.constants[name].to(device_override),
             )
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def placeholder(
         self,
         target: str,  # type: ignore[override]
@@ -1342,7 +1342,7 @@ class GraphLowering(torch.fx.Interpreter):
         """
         return len(t.shape) == 1 and t.shape[0] <= 8
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def get_attr(
         self,
         target: str,  # type: ignore[override]
@@ -1400,7 +1400,7 @@ class GraphLowering(torch.fx.Interpreter):
     def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
         raise AssertionError
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def output(
         self,
         target: str,  # type: ignore[override]
@@ -1645,9 +1645,9 @@ class GraphLowering(torch.fx.Interpreter):
                         inp_args = eager_input_vals[0]
                         inp_kwargs = eager_input_vals[1]
                         args, kwargs = constrain_to_fake_tensors(
-                            # pyrefly: ignore  # unbound-name
+                            # pyrefly: ignore [unbound-name]
                             args,
-                            # pyrefly: ignore  # unbound-name
+                            # pyrefly: ignore [unbound-name]
                             kwargs,
                             inp_args,
                             inp_kwargs,
@@ -1746,7 +1746,7 @@ class GraphLowering(torch.fx.Interpreter):
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
                         if n.meta["val"]._is_view() or isinstance(
-                            # pyrefly: ignore  # missing-attribute
+                            # pyrefly: ignore [missing-attribute]
                             result.data,
                             ir.BaseView,
                         ):
@@ -1831,7 +1831,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 ),
                             )
                     if user.op == "output":
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
@@ -2180,7 +2180,7 @@ class GraphLowering(torch.fx.Interpreter):
                             continue
                         dynamic_grid = True
                         new_grid.append(grid_outputs[visited_grids[val]])
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     new_grids.append(tuple(new_grid))
 
                 if dynamic_grid:
@@ -2202,7 +2202,7 @@ class GraphLowering(torch.fx.Interpreter):
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor],
                 ) -> Union[int, float, torch.Tensor]:
                     if x is None:
-                        # pyrefly: ignore  # bad-return
+                        # pyrefly: ignore [bad-return]
                         return None
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
@@ -2479,11 +2479,11 @@ class GraphLowering(torch.fx.Interpreter):
 
         return mod
 
-    def get_output_names(self) -> list[str]:
+    def _get_output_names(self, graph_outputs: list[ir.IRNode]) -> list[str]:
         names = []
         shape_counter = itertools.count(0)
         none_counter = itertools.count(0)
-        for node in self.graph_outputs:
+        for node in graph_outputs:
             if isinstance(node, ir.NoneAsConstantBuffer):
                 names.append(f"{self.name}_none{next(none_counter)}")
             elif isinstance(node, ir.ShapeAsConstantBuffer):
@@ -2491,6 +2491,9 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 names.append(node.get_name())
         return names
+
+    def get_output_names(self) -> list[str]:
+        return self._get_output_names(self.graph_outputs)
 
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,

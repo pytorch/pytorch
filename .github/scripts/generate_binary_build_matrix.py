@@ -79,21 +79,21 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux'"
     ),
     "12.9": (
-        "nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | "
+        "nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | "
+        "nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
+        "nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | "
+        "nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | "
+        "nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | "
+        "nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | "
+        "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | "
+        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | "
+        "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | "
+        "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | "
+        "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'"
     ),
     "13.0": (
         "nvidia-cuda-nvrtc==13.0.48; platform_system == 'Linux' | "
@@ -241,7 +241,11 @@ def generate_libtorch_matrix(
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES
+            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
+            # in 2.10
+            windows_cuda_arches = CUDA_ARCHES.copy()
+            windows_cuda_arches.remove("12.9")
+            arches += windows_cuda_arches
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -305,7 +309,11 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES + XPU_ARCHES
+            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
+            # in 2.10
+            windows_cuda_arches = CUDA_ARCHES.copy()
+            windows_cuda_arches.remove("12.9")
+            arches += windows_cuda_arches + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
