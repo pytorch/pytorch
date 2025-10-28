@@ -2325,7 +2325,7 @@ class GuardBuilder(GuardBuilderBase):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
             self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            assert False
+            assert False, guard
 
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
@@ -3658,7 +3658,7 @@ class CheckFunctionManager:
             # increase in compile time. We first do a cache flush to measure the
             # guard latency more accurately. This cache flush is expensive.
             # Note  - If you are working on a guard optimization, it might be a
-            # good idea to increase this number for more stabiilty during
+            # good idea to increase this number for more stability during
             # development.
             latency = profile_guard_manager(
                 self.guard_manager.root, output_graph.local_scope, 1

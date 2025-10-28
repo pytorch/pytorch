@@ -442,13 +442,22 @@ class DTensorExportTest(TestCase):
 
         # Run model to verify it works
         output = model(*inputs)
-        with torch._dynamo.config.patch(install_free_tensors=True):
+        with torch._dynamo.config.patch(
+            install_free_tensors=(export_fn is _dynamo_graph_capture_for_export)
+        ):
             # TODO: switch to use the official graph_capture API once it is ready
             gm = export_fn(model)(*inputs)
         output_gm = gm(*inputs)
         self.assertEqual(output, output_gm)
 
-    def test_flex_attention_dtensor_export(self):
+    @parametrize(
+        "export_fn",
+        [
+            graph_capture_and_aot_export_joint_with_descriptors_v2,
+            graph_capture_and_aot_export_joint_with_descriptors,
+        ],
+    )
+    def test_flex_attention_dtensor_export(self, export_fn):
         device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
         model = FlexAttentionModel(self.device_type)
 
@@ -485,9 +494,7 @@ class DTensorExportTest(TestCase):
 
         flex_kwargs = {"block_mask": block_mask}
 
-        joint_gm = graph_capture_and_aot_export_joint_with_descriptors(
-            tp_model, inputs, flex_kwargs
-        )
+        joint_gm = export_fn(tp_model, inputs, flex_kwargs)
 
         self.assertTrue(
             _count_op(joint_gm, torch.ops.higher_order.flex_attention),

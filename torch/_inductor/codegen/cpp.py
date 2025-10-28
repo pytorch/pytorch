@@ -1120,6 +1120,14 @@ class CppOverrides(OpOverrides):
         code.writeline("()")
         return code
 
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
+
 
 CppOverrides._initialize_pointwise_overrides("cpp")
 

@@ -929,6 +929,8 @@ class VariableBuilder:
                 self.install_guards(GuardBuilder.CLASS_MATCH)
             elif inspect.isfunction(value):
                 self.install_guards(GuardBuilder.CLOSURE_MATCH)
+            elif callable(value):
+                self.install_guards(GuardBuilder.ID_MATCH)
             else:
                 self.install_guards(GuardBuilder.TYPE_MATCH)
             return NumpyVariable(value, source=self.source)
