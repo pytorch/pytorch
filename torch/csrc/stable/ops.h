@@ -245,4 +245,10 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+// New ops should be added here if they use a brand new shim API
+
+#endif
+
 HIDDEN_NAMESPACE_END(torch, stable)
