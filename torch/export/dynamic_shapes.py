@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import logging
 import sys
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from collections.abc import Callable
 from enum import auto, Enum
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -721,7 +721,7 @@ def _combine_args(f, args, kwargs) -> dict[str, Any]:
     # if `args` is in the key, flatten it into args_0, args_1, ...
     if 'args' in combined_args:
         flattened_args = {f'args_{i}': v for i, v in enumerate(combined_args['args'])}
-        combined_args = {**combined_args, **flattened_args}
+        combined_args = OrderedDict({**combined_args, **flattened_args})
         del combined_args['args']
     # flatten kwargs into combined_args
     if 'kwargs' in combined_args:

@@ -5496,21 +5496,13 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         w = Wrapped()
 
-        if is_retracebility_test(self._testMethodName):
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UserError,
-                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`"
-                ": `inputs` has 2 elements, but `dynamic_shapes` has 1 elements",
-            ):
-                export(w, args, dynamic_shapes={"args": ({0: batch}, {0: batch})})
-        else:
-            compiled = export(
-                w, args, dynamic_shapes=({0: batch}, {0: batch})
-            )
-            expected = w(*args)
-            mod = compiled.module()
-            got = mod(*args)
-            self.assertTrue(torch.allclose(expected, got))
+        compiled = export(
+            w, args, dynamic_shapes=({0: batch}, {0: batch})
+        )
+        expected = w(*args)
+        mod = compiled.module()
+        got = mod(*args)
+        self.assertTrue(torch.allclose(expected, got))
 
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
