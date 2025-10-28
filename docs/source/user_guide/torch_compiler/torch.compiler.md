@@ -87,8 +87,9 @@ Some of the most commonly used backends include:
 :maxdepth: 1
 :hidden:
 
-{ref}torch_compiler_get_started
+torch.compiler_get_started.md
 ```
+
 ```{toctree}
 :maxdepth: 1
 :hidden:

@@ -5,9 +5,9 @@ Understand how `torch.compile` works, including the programming model, graph bre
 ```{toctree}
 :maxdepth: 1
 
-{ref}dynamo_overview
-{ref}compiler_nn_module
-{ref}compiler_backward
-{ref}compile_programming_model
+torch.compiler_dynamo_overview.md
+torch.compiler_nn_module.md
+torch.compiler_backward.md
+compile/programming_model.md
 
 ```
