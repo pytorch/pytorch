@@ -448,7 +448,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             self.kernel.body.writeline(f"{index_frag}.store({index_str})")
 
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
-            self.kernel.body.writeline(f"{val_frag} = cute.make_fragment(1, {cute_dtype})")
+            self.kernel.body.writeline(
+                f"{val_frag} = cute.make_fragment(1, {cute_dtype})"
+            )
 
             index_var = self.kernel.cse.newvar(dtype=torch.int32)
             self.kernel.body.writeline(f"{index_var} = {index_frag}[0]")
