@@ -1533,8 +1533,7 @@ def should_prefer_unfused_addmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    output = match.output_node()
-    if has_uses_tagged_as(output, (torch.Tag.pointwise,)):
+    if has_uses_tagged_as(match.output_node(), (torch.Tag.pointwise, torch.Tag.reduction)):
         return True
     else:
         args_val = (arg.meta["val"] for arg in (inp, *match.args))
