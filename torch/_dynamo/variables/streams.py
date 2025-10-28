@@ -184,6 +184,7 @@ class StreamVariable(StreamContextVariable):
         super().__init__(target_values=[], initial_values=None, device=device, **kwargs)
         self.proxy = proxy
         self.value = value
+        # pyrefly: ignore [read-only]
         self.device = device
 
         self.user_object_index = user_object_index
