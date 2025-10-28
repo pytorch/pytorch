@@ -35,8 +35,9 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, \
-    IS_PPC, IS_ARM64, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
-    parametrize as parametrize_test, subtest, skipIfTorchDynamo, gcIfJetson, set_default_dtype
+    IS_PPC, IS_ARM64, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, TEST_GPU, \
+    parametrize as parametrize_test, subtest, \
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, HAS_ACCELERATOR
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -46,7 +47,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    skipMeta, get_all_device_types, onlyAccelerator
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -80,8 +81,8 @@ if TEST_NUMPY:
 # CI.
 
 class TestNN(NNTestCase):
-    _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = True
+    _do_cuda_memory_leak_check = TEST_CUDA
+    _do_cuda_non_default_stream = TEST_CUDA
 
     def _forward(self, module, input: _TensorOrTensors):
         with freeze_rng_state():
@@ -223,19 +224,20 @@ class TestNN(NNTestCase):
         for b in net.buffers():
             self.assertTrue(b.storage().is_shared())
 
-    def test_to(self):
+    def test_to(self, device):
         m = nn.Linear(3, 5)
         self.assertIs(m, m.to('cpu'))
         self.assertIs(m, m.to('cpu', dtype=torch.float32))
         self.assertEqual(m.double(), m.to(torch.float64))
         self.assertRaises(RuntimeError, lambda: m.to('cpu', copy=True))
 
-        if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                m2 = m.cuda(device=cuda)
-                self.assertIs(m2, m2.to(cuda))
+        if HAS_ACCELERATOR:
+            for gpu in [device,
+                        str(torch.device(0)) if torch.accelerator.device_count() == 1 else str(torch.device(1))]:
+                m2 = m.to(device)
+                self.assertIs(m2, m2.to(device))
                 self.assertEqual(m, m2.to('cpu'))
-                self.assertEqual(m2, m.to(cuda))
+                self.assertEqual(m2, m.to(device))
                 self.assertIs(m2, m2.to(dtype=torch.float32))
                 self.assertEqual(m2.double(), m2.to(dtype=torch.float64))
 
@@ -1933,7 +1935,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @set_default_dtype(torch.double)
-    def test_spectral_norm(self):
+    def test_spectral_norm(self, device):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
         m = torch.nn.utils.spectral_norm(m)
@@ -1970,7 +1972,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             if apply_dp:
                 if not TEST_MULTIGPU:
                     continue
-                device = torch.device('cuda:0')
+                device = torch.device(f'{device}:0')
 
                 def maybe_wrap(m):
                     return torch.nn.DataParallel(m, [0, 1])
@@ -2299,8 +2301,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inputs = torch.randn((), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_data_parallel_with_empty_parameter_shapes(self):
+    def test_data_parallel_with_empty_parameter_shapes(self, device):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2315,8 +2318,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         model = MyModule()
         devices = [0, 1]
         model_parallel = nn.DataParallel(model, device_ids=devices)
-        model_parallel.cuda(devices[0])
-        input_tensor = torch.ones(4, 2, device=f'cuda:{devices[0]}')
+        model_parallel.to(devices[0])
+        input_tensor = torch.ones(4, 2, device=f'{device}:{devices[0]}')
         output = model_parallel(input_tensor)
         self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
         self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
@@ -2324,22 +2327,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_double_backwards_gpu(self):
-        tensors = (torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
-                   torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
-                   torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double))
+    def test_broadcast_double_backwards_gpu(self, device):
+        tensors = (torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
+                   torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
+                   torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double))
         # TODO(#50743): the following segfaults with check_batched_grad=True
         _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
                                      check_batched_grad=False)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_not_requiring_grad(self):
+    def test_broadcast_not_requiring_grad(self, device):
         variables = [
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-            torch.randn(1, 2, device='cuda', requires_grad=False),
-            torch.randn(1, 2, device='cuda', requires_grad=False),
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-            torch.randn(1, 2, device='cuda', requires_grad=True),
+            torch.randn(1, 2, device=device, requires_grad=True),
+            torch.randn(1, 2, device=device, requires_grad=False),
+            torch.randn(1, 2, device=device, requires_grad=False),
+            torch.randn(1, 2, device=device, requires_grad=True),
+            torch.randn(1, 2, device=device, requires_grad=True),
         ]
         broadcasted_variables = Broadcast.apply((0, 1), *variables)
         for output_idx, broadcasted_var in enumerate(broadcasted_variables):
@@ -2347,8 +2350,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_no_grad(self):
-        x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device='cuda')
+    def test_broadcast_no_grad(self, device):
+        x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device=device)
         with torch.no_grad():
             broadcasted = Broadcast.apply((0, 1), x)
         self.assertTrue(x.requires_grad)
@@ -2789,12 +2792,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             target_lengths = target_lengths.to(dtype=torch.float)
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_lengthchecks_cuda(self):
+    @onlyAccelerator
+    def test_CTCLoss_lengthchecks_cuda(self, device):
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
             for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
-                targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
-                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device=device)
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2)
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
@@ -2806,8 +2809,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_long_targets(self):
+    @onlyAccelerator
+    def test_CTCLoss_long_targets(self, device):
         input_length = 4000
         vocab_size = 3
         batch_size = 4
@@ -2824,14 +2827,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
 
         with torch.backends.cudnn.flags(enabled=False):
-            res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
-                                                   reduction='sum', zero_infinity=True)
-            grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
+            res_gpu = torch.nn.functional.ctc_loss(log_probs.to(device),
+                                                   targets.to(device),
+                                                   input_lengths,
+                                                   target_lengths,
+                                                   reduction='sum',
+                                                   zero_infinity=True)
+            grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.to(device))
         self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
         self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_critical_target_len(self):
+    @onlyAccelerator
+    def test_CTCLoss_critical_target_len(self, device):
         # cudnn has an unexpected problem with target length 256, see issue #53505
         N = 1
         S = 256
@@ -2840,15 +2847,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         target = torch.randint(low=1, high=C, size=(S,), dtype=torch.int)
         input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.int)
         target_lengths = torch.tensor(S, dtype=torch.int)
-        inp = torch.randn(T, N, C, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+        inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
         with cudnn.flags(enabled=True):
             res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
-    def test_CTCLoss_zero_lengths(self):
+    def test_CTCLoss_zero_lengths(self, device):
         devices = ['cpu']
-        devices += ['cuda'] if TEST_CUDA else []
+        devices += [device] if HAS_ACCELERATOR else []
         N = 3
         S = 2
         C = 200
@@ -2870,16 +2877,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             res.sum().backward()
             self.assertTrue((inp.grad == 0).all().item())
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_zero_infinity(self):
+    @onlyAccelerator
+    def test_CTCLoss_zero_infinity(self, device):
         target_lengths = [60, 25, 20]
         input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int, device='cuda')
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int, device=device)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
         res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
                                            reduction='sum', zero_infinity=True)
         with torch.backends.cudnn.flags(enabled=False):
-            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths,
+            res2 = torch.nn.functional.ctc_loss(log_probs, targets.to(device).long(), input_lengths, target_lengths,
                                                 reduction='sum', zero_infinity=True)
         res_cpu = torch.nn.functional.ctc_loss(log_probs.cpu(), targets.cpu(), input_lengths, target_lengths,
                                                reduction='sum', zero_infinity=True)
@@ -2950,12 +2957,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_pack_sequence_batch_sizes_throw(self):
+    @onlyAccelerator
+    def test_pack_sequence_batch_sizes_throw(self, device):
         with self.assertRaisesRegex(ValueError, r"batch_sizes should always be on CPU"):
-            m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to('cuda')
-            a = torch.rand(5, 3, device='cuda')
-            b = torch.tensor([1, 1, 1, 1, 1], device='cuda')
+            m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to(device)
+            a = torch.rand(5, 3, device=device)
+            b = torch.tensor([1, 1, 1, 1, 1], device=device)
             input = nn.utils.rnn.PackedSequence(a, b)
 
     def test_Transformer_cell(self):
@@ -3223,13 +3230,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                 [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]))
             torch.testing.assert_close(result, ref_output, rtol=1e-5, atol=0)
 
-    def test_transformerdecoder(self):
-        def get_a_test_layer(use_cuda, activation, batch_first=False):
+    def test_transformerdecoder(self, device):
+        def get_a_test_layer(activation, batch_first=False, device='cpu'):
             d_model = 4
             nhead = 2
             dim_feedforward = 16
             dropout = 0.0
-            device = torch.device("cuda" if use_cuda else "cpu")
+            device = torch.device(device)
 
             layer = nn.TransformerDecoderLayer(
                 d_model,
@@ -3255,11 +3262,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
             activation = F.relu
-            use_cuda = torch.cuda.is_available()
-            device = torch.device("cuda" if use_cuda else "cpu")
+            device = torch.device(device)
 
-            decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation,
-                                             batch_first=batch_first)
+            decoder_layer = get_a_test_layer(activation=activation,
+                                             batch_first=batch_first, device=device)
 
             model = nn.TransformerDecoder(decoder_layer, 1).to(device)
 
@@ -3480,11 +3486,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             # gelu activation test cases
             activation = "gelu"
-            use_cuda = torch.cuda.is_available()
-            device = torch.device("cuda" if use_cuda else "cpu")
+            device = torch.device(device)
 
-            decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation,
-                                             batch_first=batch_first)
+            decoder_layer = get_a_test_layer(activation=activation,
+                                             batch_first=batch_first, device=device)
 
             model = nn.TransformerDecoder(decoder_layer, 1).to(device)
 
@@ -3551,9 +3556,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
         device = 1
-        input = torch.randn(5, 4, 10).cuda(device)
-        rnn.cuda(device)
-        hx = torch.randn(2, 4, 20).cuda(device)
+        input = torch.randn(5, 4, 10).to(device)
+        rnn.to(device)
+        hx = torch.randn(2, 4, 20).to(device)
         output = rnn(input, hx)
 
     def test_cudnn_forward_exception(self):
@@ -3626,7 +3631,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @tf32_on_and_off
-    def test_cudnn_weight_tying(self):
+    def test_cudnn_weight_tying(self, device):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
             nn.LSTM(10, 20, batch_first=True, bidirectional=True, proj_size=10),
@@ -3636,17 +3641,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         for rnn in rnns:
             rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
             rnn.cuda()
-            input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
-            hx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
+            input = torch.randn(5, 4, 10, requires_grad=True, device='cuda')
+            hx = torch.randn(2, 5, 20, requires_grad=True, device='cuda')
             all_vars = [input, hx] + list(rnn.parameters())
             opt = torch.optim.SGD(rnn.parameters(), lr=0.1)
             opt.zero_grad()
             if isinstance(rnn, nn.LSTM):
                 # LSTM with projections has different hx size
                 if rnn.proj_size > 0:
-                    hx = torch.randn(2, 5, 10, requires_grad=True, device="cuda")
+                    hx = torch.randn(2, 5, 10, requires_grad=True, device='cuda')
                     all_vars[1] = hx
-                cx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
+                cx = torch.randn(2, 5, 20, requires_grad=True, device='cuda')
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
 
@@ -3914,7 +3919,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
 
-    def test_projections_lstm_args_check(self):
+    def test_projections_lstm_args_check(self, device):
         input_size = 3
         hidden_size = 5
         proj_size = 2
@@ -3924,9 +3929,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         num_directions = 1
         bad_size = 7  # prime number so that no size can divide it.
 
-        def test(input_shape, hidden_h_shape, hidden_c_shape):
+        def test(input_shape, hidden_h_shape, hidden_c_shape, device='cuda'):
             for input, hidden in get_inputs(input_shape, hidden_h_shape, hidden_c_shape):
-                model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
+                model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size, device=device)
                 self.assertRaises(RuntimeError, lambda: model(input, hidden))
 
         correct_input_shape = (seq_len, batch_size, input_size)
@@ -3948,47 +3953,46 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # Incorrect input batch size
         input_shape = update_shape(correct_input_shape, 1, bad_size)
-        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape)
+        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape, device=device)
 
         # Incorrect hidden batch size
         input_shape = correct_input_shape
         hidden_h_shape = update_shape(correct_hidden_h_shape, 1, bad_size)
         hidden_c_shape = update_shape(correct_hidden_c_shape, 1, bad_size)
-        test(input_shape, hidden_h_shape, hidden_c_shape)
+        test(input_shape, hidden_h_shape, hidden_c_shape, device=device)
 
         # Incorrect input size
         input_shape = update_shape(correct_input_shape, 2, bad_size)
-        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape)
-
+        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape, device=device)
         # Incorrect hidden size
         input_shape = correct_input_shape
         hidden_h_shape = update_shape(correct_hidden_h_shape, 2, bad_size)
         hidden_c_shape = update_shape(correct_hidden_c_shape, 2, bad_size)
-        test(input_shape, hidden_h_shape, hidden_c_shape)
+        test(input_shape, hidden_h_shape, hidden_c_shape, device=device)
 
         # Incorrect hidden[0]
         input_shape = correct_input_shape
         hidden_h_shape = update_shape(correct_hidden_h_shape, 0, bad_size)
         hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
-        test(input_shape, hidden_h_shape, hidden_c_shape)
+        test(input_shape, hidden_h_shape, hidden_c_shape, device=device)
 
         # Incorrect proj size = hidden size
         input_shape = correct_input_shape
         hidden_h_shape = update_shape(correct_hidden_h_shape, 0, hidden_size)
         hidden_c_shape = correct_hidden_c_shape
-        test(input_shape, hidden_h_shape, hidden_c_shape)
+        test(input_shape, hidden_h_shape, hidden_c_shape, device=device)
 
         # Incorrect proj size != hidden size
         input_shape = correct_input_shape
         hidden_h_shape = update_shape(correct_hidden_h_shape, 0, bad_size)
         hidden_c_shape = correct_hidden_c_shape
-        test(input_shape, hidden_h_shape, hidden_c_shape)
+        test(input_shape, hidden_h_shape, hidden_c_shape, device=device)
 
         # Incorrect cell size != hidden size
         input_shape = correct_input_shape
         hidden_h_shape = correct_hidden_h_shape
         hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
-        test(input_shape, hidden_h_shape, hidden_c_shape)
+        test(input_shape, hidden_h_shape, hidden_c_shape, device=device)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_rnn_check_device(self):
@@ -4006,14 +4010,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         for mode in rnn_modes:
             model = getattr(nn, mode)(input_size, hidden_size, num_layers)
-            model_cuda = copy.deepcopy(model).to('cuda:0')
+            model_cuda = copy.deepcopy(model).to(0)
             input = torch.randn(correct_input_shape)
             hidden = torch.randn(correct_hidden_shape)
 
             # input and weights are not at the same device
             with self.assertRaisesRegex(RuntimeError,
                                         "Input and parameter tensors are not at the same device"):
-                model(input.to('cuda:0'))
+                model(input.to(0))
             with self.assertRaisesRegex(RuntimeError,
                                         "Input and parameter tensors are not at the same device"):
                 model_cuda(input)
@@ -4022,21 +4026,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(RuntimeError,
                                         r"Input and hidden tensors are not at the same device"):
                 if mode == 'LSTM':
-                    model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
+                    model(input, (hidden.to(0), hidden.to(0)))
                 else:
-                    model(input, (hidden.to('cuda:0')))
+                    model(input, (hidden.to(0)))
             with self.assertRaisesRegex(RuntimeError,
                                         r"Input and hidden tensors are not at the same device"):
                 if mode == 'LSTM':
-                    model_cuda(input.to('cuda:0'), (hidden, hidden))
+                    model_cuda(input.to(0), (hidden, hidden))
                 else:
-                    model_cuda(input.to('cuda:0'), (hidden))
+                    model_cuda(input.to(0), (hidden))
 
             # hidden tensors are not at the same CUDA device
             if mode == 'LSTM':
                 with self.assertRaisesRegex(RuntimeError,
                                             "Input and hidden tensors are not at the same device"):
-                    model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
+                    model(input.to(0), (hidden.to(0), hidden.to(1)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_projections_lstm_check_device(self):
@@ -4060,17 +4064,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # input and weights are not at the same device
         with self.assertRaisesRegex(RuntimeError,
                                     "Input and parameter tensors are not at the same device"):
-            model(input.to('cuda:0'))
+            model(input.to(0))
 
         # input and hiddens are not at the same device
         with self.assertRaisesRegex(RuntimeError,
                                     r"Input and hidden tensors are not at the same device"):
-            model(input, (hidden_h.to('cuda:0'), hidden_c.to('cuda:0')))
+            model(input, (hidden_h.to(0), hidden_c.to(0)))
 
         # hidden tensors are not at the same CUDA device
         with self.assertRaisesRegex(RuntimeError,
                                     "Input and hidden tensors are not at the same device"):
-            model(input.to('cuda:0'), (hidden_h.to('cuda:0'), hidden_c.to('cuda:1')))
+            model(input.to(0), (hidden_h.to(0), hidden_c.to(1)))
 
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
@@ -4356,8 +4360,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers), 'weight_hh_l0')
         check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers, proj_size=3), 'weight_hr_l0')
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_partial_flat_weights(self):
+    @onlyAccelerator
+    def test_partial_flat_weights(self, device):
         input_size = 10
         hidden_size = 6
         num_layers = 2
@@ -4369,12 +4373,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight_orig = m.weight_hh_l0
         del m.weight_hh_l0
         self.assertFalse(hasattr(m, "weight_hh_l0"))
-        # verifies that moving to CUDA with only some attributes defined
+        # verifies that moving to accelerator with only some attributes defined
         # does not throw an error
-        m.cuda()
+        m.to(device)
         # recompute the weight and make sure that module can be used
-        m.weight_hh_l0 = weight_orig.cuda()
-        inp = inp.cuda()
+        m.weight_hh_l0 = weight_orig.to(device)
+        inp = inp.to(device)
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
         # Relax tolerances: non-contiguous weights cause cuDNN to use different
@@ -4443,14 +4447,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
                         rnn(input)
 
-    def test_RNN_input_size_zero(self):
+    def test_RNN_input_size_zero(self, device):
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for device in get_all_device_types():
                 input = torch.zeros((5, 0, 3))
                 rnn = module(input_size=3, hidden_size=4)
-                if device == 'cuda':
-                    rnn.cuda()
-                    input = input.cuda()
+                if device in ['cuda', 'xpu', 'mps']:
+                    rnn.to(device)
+                    input = input.to(device)
                 outs = rnn(input)
                 self.assertEqual(outs[0].shape, torch.Size([5, 0, 4]))
                 # Check that backward does not cause a hard error
@@ -4712,9 +4716,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
-    def test_PReLU_backward_requires_grad_false(self):
+    def test_PReLU_backward_requires_grad_false(self, device):
         devices = ['cpu']
-        devices += ['cuda'] if TEST_CUDA else []
+        devices += [device] if HAS_ACCELERATOR else []
         for d in devices:
             m = nn.PReLU().to(d)
             x = torch.randn(2, 3, 4, 5, device=d, requires_grad=False)
@@ -5068,7 +5072,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         helper(self, torch.bfloat16)
         helper(self, torch.float16)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @onlyAccelerator
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_batchnorm_cudnn_nhwc(self):
         def run_test(input, grad_output):
@@ -5091,25 +5095,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device='cuda')
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
 
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device='cuda')
         grad = grad.contiguous(memory_format=torch.channels_last)
         run_test(input, grad)
         # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
         # not channels_last
-        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device='cuda')
         input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
-        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device='cuda')
         grad = grad.permute(0, 2, 1, 3)
         run_test(input, grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_batchnorm_cudnn_half(self):
+    @onlyAccelerator
+    def test_batchnorm_cudnn_half(self, device):
         # THNN
-        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
-        m = nn.BatchNorm2d(3).half().cuda()
+        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device=device, requires_grad=True)
+        m = nn.BatchNorm2d(3).half().to(device)
         thnn_output = m(input)
         thnn_output.sum().backward()
         thnn_input_grad = input.grad.data.clone()
@@ -5125,10 +5129,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(cudnn_output, thnn_output)
             self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_batchnorm_nonaffine_cuda_half_input(self):
-        input = torch.randn(16, 3, 24, 24, dtype=torch.half, device="cuda")
-        m = nn.BatchNorm2d(3, affine=False).cuda().float()  # keep running stats in FP32
+    @onlyAccelerator
+    def test_batchnorm_nonaffine_cuda_half_input(self, device):
+        input = torch.randn(16, 3, 24, 24, dtype=torch.half, device=device)
+        m = nn.BatchNorm2d(3, affine=False).to(device).float()  # keep running stats in FP32
         output = m(input)
         self.assertEqualTypeString(output, input)
         m.eval()
@@ -5215,7 +5219,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(torch.equal(running_var, bn.running_var))
 
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @onlyAccelerator
     @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
     @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
     @parametrize_test(
@@ -5252,14 +5256,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ],
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
-    def test_batchnorm(self, dims, mode, memory_format, ref_backend, mixed, dtype):
-        if torch.version.cuda:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"):
-                self.skipTest("Failed on CUDA")
+    def test_batchnorm(self, device, dims, mode, memory_format, ref_backend, mixed, dtype):
+        if HAS_ACCELERATOR:
+            _device = device.split(':')[0]
+            skip_tests = [
+                f"test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16_{_device}_{dtype_name(dtype)}",
+                f"test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16_{_device}_{dtype_name(dtype)}",
+                f"test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16_{_device}_{dtype_name(dtype)}",
+                f"test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16_{_device}_{dtype_name(dtype)}"]
+            skip_tests = skip_tests + (["test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"] if TEST_CUDA else [])
+            if self._testMethodName in skip_tests:
+                self.skipTest(f"Failed on {device.upper()}")
 
         if torch.version.hip:
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
@@ -5284,7 +5291,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             if backend in ("NHWC", "NHWC3D", "NCHW", "NCHW3D"):
                 return device
             if backend == "native":
-                return "cuda"
+                return device
             if backend == "cpu":
                 return "cpu"
             else:
@@ -5354,11 +5361,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             memory_format = _get_memory_format_from_name(memory_format_name)
 
             ref_memory_format = _get_backend_memory_format(ref_backend, memory_format)
-            ref_device = _get_ref_device(ref_backend, device="cuda")
+            ref_device = _get_ref_device(ref_backend, device=device)
 
             size = (4, 8, 2, 2, 2) if memory_format_name in ("NCHW3D", "NHWC3D") else (4, 8, 2, 2)
-            inp = _create_tensor(size, memory_format, dtype, device="cuda").detach().requires_grad_()
-            grad = _create_tensor(size, memory_format, dtype, device="cuda")
+            inp = _create_tensor(size, memory_format, dtype, device=device).detach().requires_grad_()
+            grad = _create_tensor(size, memory_format, dtype, device=device)
             ref_inp = inp.detach().clone(memory_format=ref_memory_format).to(device=ref_device).requires_grad_()
             ref_grad = grad.detach().clone(memory_format=ref_memory_format).to(device=ref_device)
 
@@ -5368,10 +5375,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         def _inference(memory_format_name, ref_backend, mixed, dtype):
             memory_format = _get_memory_format_from_name(memory_format_name)
             ref_memory_format = _get_backend_memory_format(ref_backend, memory_format)
-            ref_device = _get_ref_device(ref_backend, device="cuda")
+            ref_device = _get_ref_device(ref_backend, device=device)
 
             size = (2, 64, 50, 50, 50) if memory_format_name in ("NCHW3D", "NHWC3D") else (2, 64, 50, 50)
-            inp = _create_tensor(size, memory_format, dtype, device="cuda")
+            inp = _create_tensor(size, memory_format, dtype, device=device)
             ref_inp = inp.detach().clone(memory_format=ref_memory_format).to(device=ref_device)
             mod = _create_backend(inp, mixed).eval()
             ref_mod = _create_backend(ref_inp, mixed).eval()
@@ -5386,13 +5393,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         else:
             _inference(memory_format, ref_backend, mixed, dtype)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_batchnorm_nhwc_cuda(self):
+    @onlyAccelerator
+    def test_batchnorm_nhwc_cuda(self, device):
         for dtype in (torch.half, torch.float):
             (N, C, H, W) = 2, 64, 50, 50
             model = torch.nn.BatchNorm2d(C, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-            model = model.eval().cuda().to(dtype)
-            inp1 = torch.randn(N, C, H, W, device=torch.device('cuda'), dtype=dtype)
+            model = model.eval().to(device).to(dtype)
+            inp1 = torch.randn(N, C, H, W, device=device, dtype=dtype)
             inp2 = inp1.contiguous(memory_format=torch.channels_last)
             out1 = model(inp1)
             out2 = model(inp2)
@@ -5462,8 +5469,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         gradgradcheck(F.pdist, (inp,))
 
     @unittest.expectedFailure
-    def test_pdist_cuda_gradgrad_unimplemented(self):
-        inp = torch.randn(4, 5, device='cuda', requires_grad=True)
+    def test_pdist_cuda_gradgrad_unimplemented(self, device):
+        inp = torch.randn(4, 5, device=device, requires_grad=True)
         gradgradcheck(F.pdist, (inp,))
 
     # Merge into OpInfo?
@@ -5770,7 +5777,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(a, b)
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
-    def test_cosine_similarity_mixed_precision(self):
+    def test_cosine_similarity_mixed_precision(self, device):
         # test that CPU and CUDA behave consistently with various eps values
 
         # test: Negative eps should raise error on both CPU and CUDA
@@ -5781,9 +5788,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
             F.cosine_similarity(x1, x2, dim=0, eps=eps_negative)
 
-        if torch.cuda.is_available():
-            x1_cuda = x1.cuda()
-            x2_cuda = x2.cuda()
+        if HAS_ACCELERATOR:
+            x1_cuda = x1.to(device)
+            x2_cuda = x2.to(device)
             with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
                 F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_negative)
 
@@ -5793,7 +5800,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         result_cpu = F.cosine_similarity(x1, x2, dim=0, eps=eps_large_positive)
         self.assertTrue(torch.all(torch.isnan(result_cpu)) or torch.all(torch.isinf(result_cpu)))
 
-        if torch.cuda.is_available():
+        if HAS_ACCELERATOR:
             result_cuda = F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_large_positive)
             # both should produce NaN or inf consistently
             self.assertTrue(torch.all(torch.isnan(result_cuda)) or torch.all(torch.isinf(result_cuda)))
@@ -5805,9 +5812,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(result_cpu.shape, torch.Size([10]))
         self.assertTrue(torch.all(result_cpu >= -1.0) and torch.all(result_cpu <= 1.0))
 
-        if torch.cuda.is_available():
-            x3_cuda = x3.cuda()
-            x4_cuda = x4.cuda()
+        if HAS_ACCELERATOR:
+            x3_cuda = x3.to(device)
+            x4_cuda = x4.to(device)
             result_cuda = F.cosine_similarity(x3_cuda, x4_cuda, dim=1, eps=1e-8)
             self.assertTrue(torch.allclose(result_cpu, result_cuda.cpu(), rtol=1e-5, atol=1e-5))
 
@@ -5819,7 +5826,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(result.shape, torch.Size([2]))
         self.assertTrue(torch.all(torch.isclose(result, torch.ones(2, dtype=torch.float16), rtol=1e-3)))
 
-    def test_grid_sample_error_checking(self):
+    def test_grid_sample_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)
 
@@ -5850,9 +5857,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
             F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
 
-        if TEST_CUDA:
+        if HAS_ACCELERATOR:
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-                F.grid_sample(input.cuda(), grid, align_corners=False)
+                F.grid_sample(input.to(device), grid, align_corners=False)
 
     def test_affine_grid_error_checking(self):
         # 2D affine
@@ -5928,7 +5935,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
             F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
 
-    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     @parametrize_test('nd', [2, 3])
     def test_affine_grid_backward_cl_cf_consistency(self, device, nd):
         # Test based on reported issue: https://github.com/pytorch/pytorch/issues/124154
@@ -5954,11 +5960,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(theta_grad_cf, theta_grad_cl)
 
     @set_default_dtype(torch.double)
-    def test_grid_sample(self):
+    def test_grid_sample(self, device):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
         # so we test both cases.
-        def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad):
-            def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
+        def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad, device='cuda'):
+            def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners, device='cuda'):
                 for grid_dim_contig_order in [(0, 1, 2, 3), (0, 3, 1, 2), (3, 0, 1, 2), (0, 2, 1, 3)]:
                     # grid_dim_contig_order specifies the dimension order that can
                     # make grid to be contiguous.
@@ -6016,14 +6022,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-4, rtol=5e-5)
                     self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-4, rtol=5e-5)
 
-                    if TEST_CUDA:
-                        input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_(input_requires_grad)
-                        grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
+                    if HAS_ACCELERATOR:
+                        input_cuda = input_cpu.detach().transpose(0, 1).to(device) \
+                            .transpose(0, 1).requires_grad_(input_requires_grad)
+                        grid_cuda = get_grid(device, grid_cpu.detach()).requires_grad_()
                         out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                                  align_corners=align_corners)
                         self.assertEqual(out_cpu, out_cuda)
 
-                        out_cuda.backward(gradients.cuda())
+                        out_cuda.backward(gradients.to(device))
                         if input_requires_grad:
                             self.assertEqual(input_cpu.grad, input_cuda.grad)
                         self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5, rtol=0)
@@ -6034,13 +6041,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                                 align_corners=align_corners)
 
-                        input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_(input_requires_grad)
+                        input_cuda = base_input.to(device).expand_as(input_cuda).requires_grad_(input_requires_grad)
                         out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                                  align_corners=align_corners)
                         self.assertEqual(out_cpu, out_cuda)
 
             # test same size output
-            test_shape(N, C, H, W, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, H, W, H, W, mode, padding_mode, align_corners, device=device)
 
             # test larger output
             N = random.randint(2, 8)
@@ -6049,7 +6056,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IW = random.randint(2, 8)
             H = random.randint(IH + 1, 12)
             W = random.randint(IW + 1, 12)
-            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners, device=device)
 
             # test smaller output
             N = random.randint(2, 8)
@@ -6058,7 +6065,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IW = random.randint(2, 8)
             H = random.randint(2, IH)
             W = random.randint(2, IW)
-            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners, device=device)
 
             # test 1x1 inpput
             N = random.randint(2, 8)
@@ -6067,7 +6074,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IW = 1
             H = random.randint(2, 5)
             W = random.randint(2, 5)
-            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners, device=device)
 
             # testing empty grid
             N = random.randint(2, 8)
@@ -6075,7 +6082,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IH = random.randint(2, 8)
             IW = random.randint(2, 8)
             W = random.randint(3, IW + 2)
-            test_shape(N, C, IH, IW, 0, W, mode, padding_mode, align_corners)
+            test_shape(N, C, IH, IW, 0, W, mode, padding_mode, align_corners, device=device)
 
             # testing empty channel
             N = random.randint(2, 8)
@@ -6083,7 +6090,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IW = random.randint(2, 8)
             H = random.randint(3, IH + 2)
             W = random.randint(3, IW + 2)
-            test_shape(N, 0, IH, IW, H, W, mode, padding_mode, align_corners)
+            test_shape(N, 0, IH, IW, H, W, mode, padding_mode, align_corners, device=device)
 
             # testing empty batch
             C = random.randint(2, 8)
@@ -6091,7 +6098,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IW = random.randint(2, 8)
             H = random.randint(3, IH + 2)
             W = random.randint(3, IW + 2)
-            test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners)
+            test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners, device=device)
 
         for mode in ('bilinear', 'nearest', 'bicubic'):
             for padding_mode in ('zeros', 'border', 'reflection'):
@@ -6311,17 +6318,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                             lambda inp, grd: F.grid_sample(inp, grd, mode=mode, padding_mode=padding_mode,
                                                            align_corners=align_corners),
                             (input, grid)))
-                        test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
+                        test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad, device=device)
                         if TEST_CUDNN:
                             with cudnn.flags(enabled=False):
-                                test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
+                                test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad, device=device)
 
     @set_default_dtype(torch.double)
-    def test_grid_sample_3d(self):
+    def test_grid_sample_3d(self, device):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
         # so we test both cases.
-        def test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad):
-            def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners):
+        def test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad, device='cuda'):
+            def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners, device='cuda'):
                 input_cpu = torch.randn(C, N, ID, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
                 grid_cpu = torch.randn(D, N, H, W, 3).transpose(0, 1).requires_grad_()
                 out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
@@ -6331,14 +6338,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 gradients = torch.randn_like(out_cpu)
                 out_cpu.backward(gradients)
 
-                if TEST_CUDA:
-                    input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_(input_requires_grad)
-                    grid_cuda = grid_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
+                if HAS_ACCELERATOR:
+                    input_cuda = input_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_(input_requires_grad)
+                    grid_cuda = grid_cpu.detach().transpose(0, 1).to(device).transpose(0, 1).requires_grad_()
                     out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                              align_corners=align_corners)
                     self.assertEqual(out_cpu, out_cuda)
 
-                    out_cuda.backward(gradients.cuda())
+                    out_cuda.backward(gradients.to(device))
                     if input_requires_grad:
                         self.assertEqual(input_cpu.grad, input_cuda.grad)
                     self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5, rtol=0)
@@ -6350,14 +6357,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                             align_corners=align_corners)
 
-                    input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_(input_requires_grad)
-                    grid_cuda = grid_cpu.detach().cuda().requires_grad_()
+                    input_cuda = base_input.to(device).expand_as(input_cuda).requires_grad_(input_requires_grad)
+                    grid_cuda = grid_cpu.detach().to(device).requires_grad_()
                     out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                              align_corners=align_corners)
                     self.assertEqual(out_cpu, out_cuda)
 
             # test same size output
-            test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners, device=device)
 
             # test larger output
             N = random.randint(2, 7)
@@ -6368,7 +6375,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             D = random.randint(ID + 1, 10)
             H = random.randint(IH + 1, 10)
             W = random.randint(IW + 1, 10)
-            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners, device=device)
 
             # test smaller output
             N = random.randint(2, 7)
@@ -6379,7 +6386,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             D = random.randint(2, ID)
             H = random.randint(2, IH)
             W = random.randint(2, IW)
-            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners, device=device)
 
             # test 1x1 inpput
             N = random.randint(2, 7)
@@ -6389,7 +6396,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IW = 1
             H = random.randint(2, 5)
             W = random.randint(2, 5)
-            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+            test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners, device=device)
 
             # testing empty grid
             N = random.randint(2, 7)
@@ -6399,7 +6406,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             IW = random.randint(2, 7)
             D = random.randint(3, ID + 2)
             W = random.randint(3, IW + 2)
-            test_shape(N, C, ID, IH, IW, D, 0, W, mode, padding_mode, align_corners)
+            test_shape(N, C, ID, IH, IW, D, 0, W, mode, padding_mode, align_corners, device=device)
 
             # testing empty channel
             N = random.randint(2, 7)
@@ -6409,7 +6416,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             D = random.randint(3, ID + 2)
             H = random.randint(3, IH + 2)
             W = random.randint(3, IW + 2)
-            test_shape(N, 0, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+            test_shape(N, 0, ID, IH, IW, D, H, W, mode, padding_mode, align_corners, device=device)
 
             # testing empty batch
             C = random.randint(2, 5)
@@ -6419,7 +6426,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             D = random.randint(3, ID + 2)
             H = random.randint(3, IH + 2)
             W = random.randint(3, IW + 2)
-            test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
+            test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners, device=device)
 
         for mode in ('bilinear', 'nearest'):
             for padding_mode in ('zeros', 'border', 'reflection'):
@@ -6443,13 +6450,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         (grid,)))
 
                     for input_requires_grad in [False, True]:
-                        test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
+                        test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad, device=device)
 
-    def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
+    def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self, device):
 
         device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
+        if HAS_ACCELERATOR:
+            device_list.append(device)
 
         def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
             if align_corners:
@@ -6608,7 +6615,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     self.assertEqual(output_tensor_2d_x[0, 0, 0, :], output_tensor_3d_z[0, 0, 0, 0, :], atol=0, rtol=0)
 
     @set_default_dtype(torch.double)
-    def test_affine_grid(self):
+    def test_affine_grid(self, device):
         # test known input on CPU
         input = torch.arange(1., 7).view(1, 2, 3)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2]), align_corners=True)
@@ -6635,7 +6642,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     (inp,), check_forward_ad=True))
 
         # test CPU against CUDA
-        if TEST_CUDA:
+        if HAS_ACCELERATOR:
             N = random.randint(1, 8)
             C = random.randint(1, 8)
             H = random.randint(1, 8)
@@ -6648,16 +6655,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
                 gradients = torch.randn(out_cpu.size())
                 out_cpu.backward(gradients)
-                input_gpu = input_cpu.detach().cuda().requires_grad_()
+                input_gpu = input_cpu.detach().to(device).requires_grad_()
                 with warnings.catch_warnings(record=True):
                     warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
-                out_cuda.backward(gradients.cuda())
+                out_cuda.backward(gradients.to(device))
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)
 
     @set_default_dtype(torch.double)
-    def test_affine_grid_3d(self):
+    def test_affine_grid_3d(self, device):
         # test known input on CPU
         input = torch.arange(1., 13).view(1, 3, 4)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=True)
@@ -6687,7 +6694,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     (inp,), check_forward_ad=True))
 
         # test CPU against CUDA
-        if TEST_CUDA:
+        if HAS_ACCELERATOR:
             N = random.randint(1, 8)
             C = random.randint(1, 8)
             D = random.randint(1, 8)
@@ -6701,11 +6708,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
                 gradients = torch.randn(out_cpu.size())
                 out_cpu.backward(gradients)
-                input_gpu = input_cpu.detach().cuda().requires_grad_()
+                input_gpu = input_cpu.detach().to(device).requires_grad_()
                 with warnings.catch_warnings(record=True):
                     warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
-                out_cuda.backward(gradients.cuda())
+                out_cuda.backward(gradients.to(device))
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)
 
@@ -6773,7 +6780,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
     @set_default_dtype(torch.double)
-    def test_upsampling_not_recompute_scale_factor(self):
+    def test_upsampling_not_recompute_scale_factor(self, device):
         # test output against known input: result must match opencv
         in_t = torch.arange(8.).view(1, 2, 2, 2)
         expected_out_t = torch.tensor(
@@ -6803,8 +6810,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
 
         device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
+        if HAS_ACCELERATOR:
+            device_list.append(device)
 
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
@@ -6846,7 +6853,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE256)
     # see https://github.com/pytorch/pytorch/issues/177250
-    def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
+    def test_upsampling_bfloat16(self, device, dtype=torch.bfloat16):
         def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
             input = torch.randn(size, device=device, dtype=dtype).to(memory_format=memory_format).detach().requires_grad_(True)
             inputf = input.to(torch.float32).to(memory_format=torch.contiguous_format).detach().requires_grad_(True)
@@ -6890,15 +6897,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device)
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device, torch.channels_last_3d)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_interpolate_illegal_memory_access(self):
+    @onlyAccelerator
+    def test_interpolate_illegal_memory_access(self, device):
         in_s = 45
         out_s = 14
 
-        input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
+        input = torch.ones((1, 1, in_s), device=device, requires_grad=True)
         # note we allocated grad_output to be larger so out of bound access
         # would be visible in grad_input
-        grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
+        grad = torch.ones((1, 1, out_s * 2), device=device, requires_grad=True)
         grad = grad[:, :, :out_s]
 
         input_ref = input.detach().cpu().requires_grad_()
@@ -6918,7 +6925,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=-1e20, mode="bilinear"))
         self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=1e20, mode="bilinear"))
 
-    def test_interpolate_buffer_overflow(self):
+    def test_interpolate_buffer_overflow(self, device):
         # Test buffer overflow issue due to inaccurate floating point
         # representation for integer values. See issue below for details.
         # https://github.com/pytorch/pytorch/issues/88939
@@ -6980,7 +6987,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
     @set_default_dtype(torch.double)
-    def test_interpolate(self):
+    def test_interpolate(self, device):
         def _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs):
             test_sizes = [float(out_size),
                           torch.tensor(out_size, dtype=torch.float)]
@@ -7010,8 +7017,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             return torch.ones(size, requires_grad=True, device=device)
 
         device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
+        if HAS_ACCELERATOR:
+            device_list.append(device)
 
         for device in device_list:
             for scale_factor in [0.5, 1.5, 2]:
@@ -7055,7 +7062,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             m(inp)
 
     @tf32_on_and_off(0.005)
-    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     @parametrize_test('bias', [
         subtest(False, name='nobias'), subtest(True, name='bias')])
     @parametrize_test('weight_layout', [
@@ -7370,19 +7376,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_convert_sync_batchnorm(self):
+    @onlyAccelerator
+    def test_convert_sync_batchnorm(self, device):
         module = torch.nn.Sequential(
             torch.nn.BatchNorm1d(100),
             torch.nn.InstanceNorm1d(100)
-        ).cuda()
-
+        ).to(device)
         # necessary to have an anchor point for comparison, in case the
         # convert_sync_batchnorm updates in place
         comp_module = torch.nn.Sequential(
             torch.nn.BatchNorm1d(100),
             torch.nn.InstanceNorm1d(100)
-        ).cuda()
+        ).to(device)
         comp_module.load_state_dict(module.state_dict())
 
         sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
@@ -7395,9 +7400,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_sync_batchnorm_backward_elemt(self):
-        device = 'cuda'
+    @onlyAccelerator
+    def test_sync_batchnorm_backward_elemt(self, device):
         saved_input = torch.rand(2, 3, 2, 1, device=device)
         grad_output = torch.rand(2, 3, 2, 1, device=device)
         mean = torch.rand(3, device=device)
@@ -7437,8 +7441,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             )
             self.assertEqual(gI_actual, gI_contiguous)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_sync_batchnorm_accuracy_cuda(self):
+    @onlyAccelerator
+    def test_sync_batchnorm_accuracy_cuda(self, device):
         # The target of this test is to test the functionality and accuracy of
         #   those single-GPU cuda kernels used in SyncBatchNorm
         # They are:
@@ -7453,8 +7457,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(mean_ref, mean1)
             self.assertEqual(mean_ref, mean2)
 
-        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
-        _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device=device), torch.channels_last, (0, 2, 3))
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device=device), torch.channels_last_3d, (0, 2, 3, 4))
 
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
@@ -7511,7 +7515,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 r"unflattened_size must be tuple of tuples, but found element of type dict at pos 0"):
             nn.Unflatten(dim='features', unflattened_size=({'C': 2}, {'W': 5}, {'H': 5}))
 
-    def test_layer_norm_grads_with_create_graph_flag(self):
+    def test_layer_norm_grads_with_create_graph_flag(self, device):
         atol = 1e-5
         rtol = 1e-3
 
@@ -7525,9 +7529,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(grads1, grads2, rtol=rtol, atol=atol)
 
-        if TEST_CUDA:
-            x = x.to('cuda')
-            layer_norm = layer_norm.to('cuda')
+        if HAS_ACCELERATOR:
+            x = x.to(device)
+            layer_norm = layer_norm.to(device)
 
             grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
             grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
@@ -7541,8 +7545,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_layer_norm_backwards_eps(self):
+    @onlyAccelerator
+    def test_layer_norm_backwards_eps(self, device):
         dtype = torch.float
         m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
                       (32, 32), (1024, 32), (1024, 1024),
@@ -7554,10 +7558,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             for m, n in m_x_n_list:
                 x = torch.randn((m, n), dtype=dtype, requires_grad=True)
                 grad_output = torch.rand_like(x)
-                x_cuda = x.clone().detach().to("cuda").requires_grad_()
-                grad_output_cuda = grad_output.clone().detach().to("cuda")
+                x_cuda = x.clone().detach().to(device).requires_grad_()
+                grad_output_cuda = grad_output.clone().detach().to(device)
                 ln = nn.LayerNorm(n, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
-                ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
+                ln_cuda = nn.LayerNorm(n, device=device, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
                 ln_out = ln(x)
                 ln_out_cuda = ln_cuda(x_cuda)
                 ln_out.backward(grad_output)
@@ -7572,11 +7576,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 if bias and elementwise_affine:
                     self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @onlyAccelerator
     @largeTensorTest("40GB", device="cuda")
-    def test_layer_norm_large_tensor(self):
+    def test_layer_norm_large_tensor(self, device):
         # test for https://github.com/pytorch/pytorch/issues/136291
-        device = torch.device("cuda")
+        device = torch.device(device)
         b, n, dp = 16, 3000, 16
         pairwise_repr = torch.randn(b, n, n, dp)
 
@@ -7612,12 +7616,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
             res = arg_class(*arg_3)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @onlyAccelerator
     @largeTensorTest("20GB", device="cuda")
-    def test_large_max_pool2d_ch_last(self):
+    def test_large_max_pool2d_ch_last(self, device):
         # https://github.com/pytorch/pytorch/issues/165297
         N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
-        device = torch.device("cuda")
+        device = torch.device(device)
         x_cuda = torch.randn(N, C, H, W, device=device, dtype=torch.float16)
         x_cuda = x_cuda.to(memory_format=torch.channels_last)
         pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)

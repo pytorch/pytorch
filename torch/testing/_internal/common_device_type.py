@@ -1694,6 +1694,7 @@ def onlyAccelerator(fn):
 
     return only_fn
 
+
 def onlyPRIVATEUSE1(fn):
     device_type = torch._C._get_privateuse1_backend_name()
     device_mod = getattr(torch, device_type, None)
