@@ -54,6 +54,7 @@ class _ComputationType(Enum):
     RECV_B = 9
     FULL_BACKWARD = 10
     OVERLAP_F_B = 11
+    REDUCE_GRAD = 12
 
     def __str__(self):
         str_map = {
@@ -68,6 +69,7 @@ class _ComputationType(Enum):
             _ComputationType.RECV_B: "RECV_B",
             _ComputationType.FULL_BACKWARD: "B",
             _ComputationType.OVERLAP_F_B: "OVERLAP_F_B",
+            _ComputationType.REDUCE_GRAD: "REDUCE_GRAD",
         }
         return str_map[self]
 
@@ -95,6 +97,10 @@ class _ComputationType(Enum):
             return _ComputationType.FULL_BACKWARD
         elif action == "OVERLAP_F_B":
             return _ComputationType.OVERLAP_F_B
+        elif action == "OVERLAP_F_B":
+            return _ComputationType.OVERLAP_F_B
+        elif action == "REDUCE_GRAD":
+            return _ComputationType.REDUCE_GRAD
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -110,6 +116,7 @@ SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
+REDUCE_GRAD = _ComputationType.REDUCE_GRAD
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -119,7 +126,7 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
+    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
 )
 
 
@@ -1057,6 +1064,35 @@ class Schedule1F1B(PipelineScheduleSingle):
 
             pipeline_order[rank] = actions
         return pipeline_order
+
+
+def _requires_reduce_grad(action_type: _ComputationType):
+    return action_type in (I, W, B, OVERLAP_F_B)
+
+
+def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[_Action]:
+    """
+    REDUCE_GRAD refers to joint across minibatches grad reduction.
+    reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
+    """
+    stage_with_bw_count: dict[int, int] = defaultdict(int)
+    for a in actions:
+        if a is None:
+            continue
+        if _requires_reduce_grad(a.computation_type):
+            stage_with_bw_count[a.stage_index] += 1
+    actions_with_reduce_grad: list[_Action] = []
+    cnt: dict[int, int] = defaultdict(int)
+    for a in actions:
+        if a is None:
+            continue
+        actions_with_reduce_grad.append(a)
+        if _requires_reduce_grad(a.computation_type):
+            stage_index = a.stage_index
+            cnt[stage_index] += 1
+            if cnt[stage_index] == stage_with_bw_count[stage_index]:
+                actions_with_reduce_grad.append(_Action(stage_index, REDUCE_GRAD, None))
+    return actions_with_reduce_grad
 
 
 def _add_unshard_reshard(
