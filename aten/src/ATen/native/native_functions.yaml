@@ -14719,7 +14719,8 @@
 # Note: this function is only for testing.
 # 2.8.0: _test_versioning(Tensor self, Dummy dummy) -> Tensor (fills Tensor with Dummy.id)
 # 2.9.0: _test_versioning(Tensor self, Dummy dummy, *, int scale=1) -> Tensor (fills Tensor with Dummy.id * scale)
-- func: _test_versioning(Tensor self, Dummy dummy, *, int scale=1) -> Tensor
+# 2.10.0 (BC-breaking): _test_versioning(Tensor self, Dummy dummy, *, int scale=2) -> Tensor (scale 1 -> 2)
+- func: _test_versioning(Tensor self, Dummy dummy, *, int scale=2) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: _test_versioning

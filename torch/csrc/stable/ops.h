@@ -293,11 +293,19 @@ inline torch::stable::Tensor op(
         "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
     return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   } else {
+    StableIValue scale_val = scale.has_value() ? torch::stable::detail::from(scale.value()) :
+    #if TORCH_FEATURE_VERSION <= (((0ULL + 2) << 56) | ((0ULL + 9) << 48))
+        torch::stable::detail::from(1);
+    #else
+        torch::stable::detail::from(2);
+    #endif
+
     const auto num_args = 3;
     std::array<StableIValue, num_args> stack{
         torch::stable::detail::from(self),
         torch::stable::detail::from(dummy),
-        scale.has_value() ? torch::stable::detail::from(scale.value()) : torch::stable::detail::from(1)};
+        scale_val};
+
     TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
         "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
     return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);

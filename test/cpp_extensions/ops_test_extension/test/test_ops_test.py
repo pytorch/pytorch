@@ -31,7 +31,10 @@ if not IS_WINDOWS:
 
             # Create a test tensor
             input_tensor = torch.ones(1, 3)
-            expected_result = torch.empty_like(input_tensor).fill_(42)
+            if os.environ.get("TARGET", "0") != "V1" and os.environ.get("TARGET", "0") != "V2":
+                expected_result = torch.empty_like(input_tensor).fill_(42 * 2)
+            else:
+                expected_result = torch.empty_like(input_tensor).fill_(42)
             result = ops_test.ops.test_op_with_dummy(input_tensor)
             self.assertEqual(result, expected_result)
         
@@ -50,7 +53,6 @@ if not IS_WINDOWS:
             else:
                 result = ops_test.ops.test_op_with_dummy_scale3(input_tensor)
                 self.assertEqual(result, expected_result)
-
 
 
 if __name__ == "__main__":

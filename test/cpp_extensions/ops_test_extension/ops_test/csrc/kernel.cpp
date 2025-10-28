@@ -5,6 +5,9 @@
 // Uncomment to target V1 "2.8.0"
 // #define TORCH_TARGET_VERSION (((0ULL + 2) << 56) | ((0ULL + 8) << 48))
 
+// Uncomment to target V2 "2.9.0"
+// #define TORCH_TARGET_VERSION (((0ULL + 2) << 56) | ((0ULL + 9) << 48))
+
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/ops.h>
