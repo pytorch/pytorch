@@ -10,7 +10,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial, wraps
-from typing import Callable, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 from config_utils import heads_input_type, load_config_file, print_default_config
@@ -1394,12 +1394,12 @@ def main(
     dynamic: bool = False,
     calculate_bwd: bool = False,
     dtype: DtypeString = "bfloat16",
-    b: list[int] = [2, 8, 16],
-    nh: list[str] = ["16,16", "16,2"],
-    s: list[int] = [512, 1024, 4096],
-    d: list[int] = [64, 128],
-    mods: list[AttentionType] = ["noop", "causal", "alibi", "sliding_window"],
-    backend: list[Backend] = ["efficient"],
+    b: list[int] | None = None,
+    nh: list[str] | None = None,
+    s: list[int] | None = None,
+    d: list[int] | None = None,
+    mods: list[AttentionType] | None = None,
+    backend: list[Backend] | None = None,
     max_autotune: bool = False,
     decoding: bool = False,
     kv_size: Optional[list[int]] = None,
@@ -1458,22 +1458,24 @@ def main(
     np.random.seed(seed)
     torch.manual_seed(seed)
     results = []
-    experiment_count = 0
-    for config in tqdm(
-        generate_experiment_configs(
-            calculate_bwd,
-            dtype,
-            b,
-            nh,
-            s,
-            d,
-            mods,
-            decoding,
-            kv_size,
-            throughput,
-            backend,
-            max_autotune,
-        )
+    for experiment_count, config in enumerate(
+        tqdm(
+            generate_experiment_configs(
+                calculate_bwd,
+                dtype,
+                b,
+                nh,
+                s,
+                d,
+                mods,
+                decoding,
+                kv_size,
+                throughput,
+                backend,
+                max_autotune,
+            )
+        ),
+        start=1,
     ):
         results.append(
             Experiment(
@@ -1485,9 +1487,8 @@ def main(
             )
         )
 
-        experiment_count += 1
-        # Periodic memory cleanup every 10 experiments
-        if experiment_count % 10 == 0:
+        # Periodic memory cleanup every 50 experiments
+        if experiment_count % 50 == 0:
             cleanup_memory()
 
     print_results(results, save_path)
