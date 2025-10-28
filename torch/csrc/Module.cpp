@@ -398,21 +398,21 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
-      a->cdata->weak_use_count() == 1,
+      a->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t1's Tensor object but got  ",
-      a->cdata->weak_use_count() - 1);
+      a->cdata.weak_use_count() - 1);
   TORCH_CHECK(
-      b->cdata->weak_use_count() == 1,
+      b->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t2's Tensor object but got  ",
-      b->cdata->weak_use_count() - 1);
+      b->cdata.weak_use_count() - 1);
 
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+      a->cdata.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           /*ignore_hermetic_tls=*/false);
   std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+      b->cdata.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
@@ -422,13 +422,13 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // Swap the Tensor Impl
   {
-    c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+    at::Tensor tmp = a->cdata;
     a->cdata = b->cdata;
     b->cdata = tmp;
   }
 
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
+  a->cdata.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
+  b->cdata.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

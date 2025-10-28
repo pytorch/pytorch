@@ -44,9 +44,7 @@ PyObject* THPStorage_BasicNewWithStorage(
   TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
 
   auto s = (THPStorage*)obj;
-  new (&s->cdata) c10::MaybeOwned<c10::Storage>();
-  s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));
-
+  new (&s->cdata) c10::Storage(std::move(_storage));
   return obj;
 }
 
@@ -88,9 +86,7 @@ PyObject* THPStorage_NewWithStorage(
 
   auto s = reinterpret_cast<THPStorage*>(obj);
 
-  new (&s->cdata) c10::MaybeOwned<c10::Storage>();
-
-  s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));
+  new (&s->cdata) c10::Storage(std::move(_storage));
 
   if (!c10::impl::HermeticPyObjectTLS::get_state()) {
     const auto& storage = THPStorage_Unpack(s);
@@ -130,7 +126,7 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
 
 static void THPStorage_dealloc(PyObject* self) {
   THPStorage* _self = reinterpret_cast<THPStorage*>(self);
-  _self->cdata.~MaybeOwned<c10::Storage>();
+  _self->cdata.~Storage();
   Py_TYPE(_self)->tp_free(self);
 }
 

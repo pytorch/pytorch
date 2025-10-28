@@ -253,36 +253,6 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
     return;
 
   pybind11::gil_scoped_acquire gil;
-  // Two possibilities:
-  // 1. We are decref-ing an object that has a PyObjectSlot, like a Tensor or
-  // Storage. Then we must be careful about PyObject resurrection (see
-  // THPVariable_clear).
-  // 2. We are decref-ing some other Python object. We don't do
-  // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (has_pyobj_slot && Py_REFCNT(pyobj) > 1) {
-    if (THPVariable_Check(pyobj)) {
-      // It's still alive!  This can happen if a weak ref resurrected
-      // the PyObject without flipping ownership.  At this point it is
-      // too late to rescue the object, so just stub out the PyObject
-      // so that it fails on subsequent uses.  Don't raise an error here;
-      // you're probably in a destructor.
-      TORCH_WARN(
-          "Deallocating Tensor that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "Tensor and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this tensor via the PyObject will now fail.");
-      (reinterpret_cast<THPVariable*>(pyobj))->cdata =
-          c10::MaybeOwned<torch::autograd::Variable>();
-    } else if (THPStorage_Check(pyobj)) {
-      TORCH_WARN(
-          "Deallocating UntypedStorage that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "UntypedStorage and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this storage via the PyObject will now fail.");
-      (reinterpret_cast<THPStorage*>(pyobj))->cdata =
-          c10::MaybeOwned<c10::Storage>();
-    }
-  }
   Py_DECREF(pyobj);
 }
 

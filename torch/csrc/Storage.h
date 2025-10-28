@@ -11,7 +11,7 @@
 
 struct THPStorage {
   PyObject_HEAD
-  c10::MaybeOwned<c10::Storage> cdata;
+  c10::Storage cdata;
 };
 
 TORCH_PYTHON_API PyObject* THPStorage_Wrap(c10::Storage storage);
@@ -48,7 +48,7 @@ TORCH_PYTHON_API void THPStorage_assertNotNull(PyObject* obj);
 TORCH_PYTHON_API extern PyTypeObject THPStorageType;
 
 inline const c10::Storage& THPStorage_Unpack(THPStorage* storage) {
-  return *storage->cdata;
+  return storage->cdata;
 }
 
 inline const c10::Storage& THPStorage_Unpack(PyObject* obj) {
