@@ -51,16 +51,6 @@ class AttentionBlock(nn.Module):
         self.out_proj = nn.Linear(
             embed_dim, embed_dim, bias=False, device=device, dtype=dtype
         )
-        # with torch.no_grad():
-        #     self.qkv_proj.weight.zero_()
-        #     for i in range(3):
-        #         self.qkv_proj.weight[i*embed_dim:(i+1)*embed_dim, :] = torch.eye(
-        #             embed_dim, device=device, dtype=dtype
-        #         )
-        #     self.out_proj.weight.zero_()
-        #     self.out_proj.weight.copy_(
-        #         torch.eye(embed_dim, device=device, dtype=dtype)
-        #     )
 
     def get_varlen_qkv(
         self,
@@ -72,10 +62,6 @@ class AttentionBlock(nn.Module):
         q = q.view(-1, self.num_heads, self.head_dim)
         k = k.view(-1, self.num_heads, self.head_dim)
         v = v.view(-1, self.num_heads, self.head_dim)
-
-        # print(f"varlen q: {q}")
-        # print(f"varlen k: {k}")
-        # print(f"varlen v: {v}")
 
         return q, k, v
 
@@ -118,9 +104,6 @@ class AttentionBlock(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # print(f"sdpa q: {q}")
-        # print(f"sdpa k: {k}")
-        # print(f"sdpa v: {v}")
 
         attn_out = F.scaled_dot_product_attention(
             q, k, v, attn_mask=attn_mask, is_causal=is_causal
@@ -333,22 +316,14 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    # @parametrize("dtype", [torch.bfloat16, torch.float16])
-    # @parametrize("is_causal", [False, True])
-    @parametrize("dtype", [torch.bfloat16])
-    @parametrize("is_causal", [False])
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("is_causal", [False, True])
     def test_varlen_vs_sdpa(self, device, dtype, is_causal):
         torch.manual_seed(42)
 
-        # shape = VarlenShape(
-        #     batch_size=8, max_seq_len=2048, embed_dim=1024, num_heads=16
-        # )
         shape = VarlenShape(
             batch_size=2, max_seq_len=128, embed_dim=32, num_heads=4
         )
-        # shape = VarlenShape(
-        #     batch_size=2, max_seq_len=2048, embed_dim=1024, num_heads=16
-        # )
 
         attention_block = AttentionBlock(
             shape.embed_dim, shape.num_heads, device, dtype
@@ -377,14 +352,12 @@ class TestVarlenAttention(NNTestCase):
             varlen_seq = varlen_output[start_idx:end_idx]
             sdpa_seq = sdpa_output[i, :seq_len]
 
-            # print(f"varlen_seq: {varlen_seq}")
-            # print(f"sdpa_seq: {sdpa_seq}")
-
             torch.testing.assert_close(varlen_seq, sdpa_seq, **tolerances)
             start_idx = end_idx
 
         varlen_grad_out = torch.ones_like(varlen_output)
-        sdpa_grad_out = torch.zeros_like(sdpa_output)
+        sdpa_grad_out = torch.ones_like(sdpa_output)
+
         start_idx = 0
         for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
             end_idx = start_idx + seq_len

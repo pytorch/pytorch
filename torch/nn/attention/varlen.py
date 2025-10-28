@@ -43,7 +43,6 @@ def _varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-    attn_bias: torch.Tensor = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -85,7 +84,7 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
-        philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
+        philox_offset = torch.zeros((), dtype=torch.int64, device=query.device)
 
     rng_state_ = torch.zeros(
         (2,), dtype=torch.uint64, device=query.device
@@ -104,7 +103,6 @@ def _varlen_attn_fake(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-    attn_bias: torch.Tensor = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -131,8 +129,9 @@ def _varlen_attn_fake(
         )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
+    philox_offset = torch.zeros((), dtype=torch.int64, device=query.device)
 
-    return output, logsumexp, rng_state
+    return output, logsumexp, rng_state, philox_offset
 
 
 def varlen_attn(
@@ -206,7 +205,7 @@ def varlen_attn(
         ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
         ... )
     """
-    out, lse, _ = torch.ops.torch_attn._varlen_attn(
+    out, lse, _, _ = torch.ops.torch_attn._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
     if return_aux is not None and return_aux.lse:
@@ -215,7 +214,7 @@ def varlen_attn(
 
 
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
-    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, attn_bias = inputs
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
     out, lse, rng_state, philox_offset = output
     ctx.query = query
     ctx.key = key
@@ -225,7 +224,6 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.max_q = max_q
     ctx.max_k = max_k
     ctx.is_causal = is_causal
-    ctx.attn_bias = attn_bias
     ctx.output = out
     ctx.lse = lse
     ctx.rng_state = rng_state
@@ -266,14 +264,15 @@ def _varlen_attn_backward(
             logsumexp = lse,
             philox_seed = rng_state,
             philox_offset = philox_offset,
-            attn_bias = attn_bias,
+            attn_bias = None,
             cum_seq_q = cu_seq_q,
             cum_seq_k = cu_seq_k,
             max_q = max_q,
             max_k = max_k,
             dropout_p = 0.0,
             is_causal = is_causal,
-            scale=scale
+            # passing in scale doesn't change the value of the gradients
+            # scale=scale
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")
@@ -310,6 +309,7 @@ def _varlen_attn_backward_fake(
     max_k: int,
     is_causal: bool,
     rng_state: torch.Tensor,
+    philox_offset: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -323,7 +323,7 @@ def _varlen_attn_backward_fake(
 
 
 def _backward(
-    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
+    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor, grad_philox_offset: torch.Tensor
 ) -> tuple[Optional[torch.Tensor], ...]:
     query = ctx.query
     key = ctx.key
@@ -336,8 +336,7 @@ def _backward(
     out = ctx.output
     lse = ctx.lse
     rng_state = ctx.rng_state
-
-    # rng_state = torch.empty(2, device=query.device)
+    philox_offset = ctx.philox_offset
 
     dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,
@@ -352,6 +351,7 @@ def _backward(
         max_k,
         is_causal,
         rng_state,
+        philox_offset
     )
     return dq, dk, dv, None, None, None, None, None, None
 
