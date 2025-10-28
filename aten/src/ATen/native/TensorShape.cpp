@@ -1710,11 +1710,13 @@ Tensor narrow_symint(
       "], but got ",
       start,
       ")")
-  if (start < 0) {
-    start = start + cur_size;
-  }
+  // Bounds check without converting start:
+  // - If start < 0: need (start + cur_size) + length <= cur_size, i.e., start +
+  // length <= 0
+  // - If start >= 0: need start + length <= cur_size
   TORCH_SYM_CHECK(
-      start.sym_le(cur_size - length),
+      (start.sym_lt(0).sym_and((start + length).sym_le(0)))
+          .sym_or(start.sym_ge(0).sym_and((start + length).sym_le(cur_size))),
       "start (",
       start,
       ") + length (",
