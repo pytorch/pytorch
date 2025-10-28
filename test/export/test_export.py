@@ -6168,7 +6168,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y):
                 # y.item() is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+                if y.item() < 0:
+                    return (
+                        torch.stack(xs, 0).narrow(0, y.item() + xs.size(), 1).squeeze()
+                    )
+                else:
+                    return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
 
         with self.assertRaisesRegex(
             error_type,
@@ -6198,7 +6203,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, xs, y):
                 box = Box(y.item())
                 # box.content is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+                if box.content < 0:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
+                else:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
 
         with self.assertRaisesRegex(
             error_type,
