@@ -57,6 +57,7 @@ Tensor& random_mps_impl(Tensor& self,
   if (self.numel() == 0) {
     return self;
   }
+  at::assert_no_internal_overlap(self);
   // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
   const auto need_reshape = self.ndimension() > 4;
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
