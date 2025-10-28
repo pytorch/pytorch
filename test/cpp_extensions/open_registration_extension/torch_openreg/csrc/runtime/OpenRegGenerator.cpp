@@ -42,16 +42,4 @@ DeviceType device_type() {
   return DeviceType::PrivateUse1;
 }
 // LITERALINCLUDE END: OPENREG GENERATOR IMPL
-
-// LITERALINCLUDE START: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-void OpenRegGeneratorImpl::set_offset(uint64_t offset) {
-  TORCH_CHECK(false, "openreg generator does not support setting offset");
-}
-// LITERALINCLUDE END: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-
-uint64_t OpenRegGeneratorImpl::get_offset() const {
-  TORCH_CHECK(false, "openreg generator does not support getting offset");
-  return 0;
-}
-
 } // namespace c10::openreg

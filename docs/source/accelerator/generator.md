@@ -6,7 +6,7 @@ The RNG (generator) module exposes backend-specific random number generation via
 
 - A generator implementation inheriting from the appropriate `GeneratorImpl` (CPU-based backends commonly subclass `at::CPUGeneratorImpl`).
 - A way to create per-device default generators and return them to Python via a `_C` binding (e.g. `_get_default_generator`).
-- Python helpers that call into the C++ bindings for convenience (seed, state, manual seeding, offsets).
+- Python helpers that call into the C++ bindings for convenience (seed, state, manual seeding).
 
 This guide shows a minimal, low-risk integration pattern (examples taken from the OpenReg test extension included with this repo).
 
@@ -17,7 +17,6 @@ Key responsibilities for a backend RNG implementation:
 - Default generators: maintain one default generator per device and expose accessors.
 - Creation API: provide a `create<Backend>Generator` helper to construct new `at::Generator` instances for a given device.
 - Seed semantics: support `manual_seed`, `manual_seed_all`, `seed_all`, `initial_seed`, and ensure deterministic reproducibility when required.
-- Offset support (optional): for counter-based engines (Philox) provide `set_offset` / `get_offset` or clearly document that offsets are unsupported.
 
 The examples below demonstrate both Python and C++ side integration points.
 
@@ -30,7 +29,7 @@ Provide a small Python wrapper module that imports the compiled `_C` bindings an
 - Lazily initialize the backend device(s) when needed.
 - Convert `device` arguments `(int | str | torch.device)` into a device index.
 - Call into `_get_default_generator(idx)` to access per-device default generators.
-- Provide high-level functions: `get_rng_state`, `get_rng_state_all`, `set_rng_state`, `set_rng_state_all`, `manual_seed`, `manual_seed_all`, `seed`, `seed_all`, `initial_seed`, `set_offset`, `get_offset` (or raise a clear `RuntimeError` if function is unsupported).
+- Provide high-level functions: `get_rng_state`, `get_rng_state_all`, `set_rng_state`, `set_rng_state_all`, `manual_seed`, `manual_seed_all`, `seed`, `seed_all`, `initial_seed`.
 
 Example (OpenReg test extension) Python wrapper:
 
@@ -79,31 +78,6 @@ And the Python binding that exposes `_get_default_generator`:
     :linenos:
 ```
 
-### Unsupported Features
-
-If the backend does not support offsets (typical for CPU-simulated backends), provide clear behavior:
-
-- In C++ `GeneratorImpl`, implement `set_offset` / `get_offset` to `TORCH_CHECK(false, "<backend> generator does not support set_offset")` (or return an error), as shown in the examples.
-
-```{eval-rst}
-.. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGenerator.cpp
-    :language: c++
-    :start-after: LITERALINCLUDE START: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-    :end-before: LITERALINCLUDE END: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-    :linenos:
-```
-- In Python wrappers, catch and re-raise a clearer RuntimeError if desired.
-
-```{eval-rst}
-.. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/random.py
-    :language: python
-    :start-after: LITERALINCLUDE START: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-    :end-before: LITERALINCLUDE END: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-    :linenos:
-```
-
-Example: the OpenReg generator intentionally does not support offsets and documents/raises accordingly in `random.py` and `OpenRegGeneratorImpl`.
-
 ## Tests to Add
 
 Add focused tests under your backend's `tests/` folder (see the [OpenReg tests](https://github.com/pytorch/pytorch/blob/main/test/cpp_extensions/open_registration_extension/torch_openreg/tests) for examples):
@@ -111,7 +85,6 @@ Add focused tests under your backend's `tests/` folder (see the [OpenReg tests](
 - test_generator_creation: verify `torch.Generator(device="<backend>:0")` device type and index
 - test_seed_and_manual_seed: check `manual_seed`, `seed_all`, `initial_seed`
 - test_state_roundtrip: `state = get_rng_state(i); set_rng_state(state, i);` sequences match
-- test_offset_semantics: if offsets are supported, set offsets and verify reproducibility; if unsupported, verify the proper RuntimeError is raised
 
 Example tests excerpt (OpenReg):
 

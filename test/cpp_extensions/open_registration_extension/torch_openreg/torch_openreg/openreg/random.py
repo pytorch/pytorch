@@ -18,8 +18,6 @@ __all__ = [
     "seed",
     "seed_all",
     "initial_seed",
-    "set_offset",
-    "get_offset",
 ]
 
 
@@ -141,25 +139,3 @@ def manual_seed_all(seed: int) -> None:
     for idx in range(device_count()):
         default_generator = torch_openreg._C._get_default_generator(idx)
         default_generator.manual_seed(seed)
-
-
-# LITERALINCLUDE START: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-def set_offset(offset: int, device: int | str | torch.device = "openreg") -> None:
-    r"""Set the RNG offset for the specified device.
-
-    Note: OpenReg generator is simulated by CPU and does not support offsets.
-    This function will raise a RuntimeError explaining that offsets are unsupported.
-    """
-    raise RuntimeError("openreg generator does not support set_offset")
-
-
-# LITERALINCLUDE END: OPENREG GENERATOR UNSUPPORTED FEATURE EXAMPLE
-
-
-def get_offset(device: int | str | torch.device = "openreg") -> int:
-    r"""Get the RNG offset for the specified device.
-
-    Note: OpenReg generator is simulated by CPU and does not support offsets.
-    This function will raise a RuntimeError explaining that offsets are unsupported.
-    """
-    raise RuntimeError("openreg generator does not support get_offset")

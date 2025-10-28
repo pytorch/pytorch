@@ -14,9 +14,6 @@ class OPENREG_EXPORT OpenRegGeneratorImpl : public at::CPUGeneratorImpl {
     key_set_ = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
   }
   ~OpenRegGeneratorImpl() override = default;
-  void set_offset(uint64_t offset) override;
-  uint64_t get_offset() const override;
-  static DeviceType device_type();
 }; // class OpenRegGeneratorImpl
 
 OPENREG_EXPORT const at::Generator& getDefaultOpenRegGenerator(c10::DeviceIndex device_index = -1);
