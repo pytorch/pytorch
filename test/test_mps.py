@@ -7846,6 +7846,45 @@ class TestMPS(TestCaseMPS):
         y = torch.normal(torch.zeros(shape, device="mps"), torch.ones(shape, device="mps"))
         self.assertNotEqual(y[0], y[1])
 
+    def test_random_ops_noncontiguous(self):
+        """Test random in-place operations on non-contiguous tensors.
+
+        All random in-place operations should work on non-contiguous tensors.
+        See issues #165257 and #124029.
+        """
+        # Test each random in-place operation
+        ops = [
+            ("normal_", lambda t: t.normal_(0, 1)),
+            ("uniform_", lambda t: t.uniform_(0, 1)),
+            ("exponential_", lambda t: t.exponential_(1.0)),
+            ("bernoulli_", lambda t: t.bernoulli_(0.5)),
+            ("random_", lambda t: t.random_()),
+            ("random_with_to", lambda t: t.random_(10)),
+            ("random_with_range", lambda t: t.random_(0, 10)),
+        ]
+
+        for name, op_func in ops:
+            with self.subTest(operation=name):
+                # Create non-contiguous tensor via transpose
+                t_mps = torch.zeros(50, 50, device='mps').T.clone()
+                self.assertFalse(t_mps.is_contiguous(),
+                                 f"{name}: tensor should be non-contiguous")
+
+                # Apply operation
+                op_func(t_mps)
+
+                # Verify tensor was modified (not all zeros)
+                max_val = t_mps.max().item()
+                self.assertNotEqual(max_val, 0.0,
+                                    f"{name}: operation failed to modify non-contiguous tensor")
+
+        # Test rand_like specifically (issue #124029)
+        t = torch.ones((3, 2, 2), device='mps').permute(2, 0, 1)
+        self.assertFalse(t.is_contiguous(), "rand_like input should be non-contiguous")
+        result = torch.rand_like(t)
+        self.assertFalse(result.is_contiguous(), "rand_like result should be non-contiguous")
+        self.assertNotEqual(result.max().item(), 0.0, "rand_like should generate non-zero values")
+
     # Test exponential
     @unittest.skip("This does not test anything")
     def test_exponential(self):
