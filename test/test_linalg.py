@@ -2138,6 +2138,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_compare_backends(self, device, dtype):
+
         def run_test(shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
@@ -2151,10 +2152,27 @@ class TestLinalg(TestCase):
 
             complementary_device = 'cpu'
 
-            # compare with CPU
+            # compare eigenvalues with CPU
             expected = torch.linalg.eig(a.to(complementary_device))
             self.assertEqual(expected[0], actual[0])
-            self.assertEqual(expected[1], actual[1])
+
+
+            # set tolerance for correctness check
+            if dtype in [torch.float32, torch.complex64]:
+                atol = 1e-3  # CuSolver gives less accurate results for single precision (1-2 larger than OOM NumPy)
+            else:
+                atol = 1e-13  # Same OOM for NumPy
+
+            # check correctness using eigendecomposition identity
+            w, v = actual
+            a = a.to(v.dtype)
+
+            if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
+                pass
+            elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
+                raise RuntimeError("eig returned empty tensors unexpectedly")
+
+            self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
