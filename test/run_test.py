@@ -1826,13 +1826,13 @@ def run_test_module(
         test_name = test.name
 
         # Printing the date here can help diagnose which tests are slow
-        start = datetime.now()
-        print_to_stderr(f"Running {str(test)} ... [{start}]")
+        start = time.perf_counter()
+        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}][{start}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
-        end = datetime.now()
+        end = time.perf_counter()
         print_to_stderr(
-            f"Finished {str(test)} ... [{end}], took {(end - start).total_seconds() / 60:.2f}min"
+            f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
         )
         assert isinstance(return_code, int) and not isinstance(return_code, bool), (
             f"While running {str(test)} got non integer return code {return_code}"
