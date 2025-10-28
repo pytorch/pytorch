@@ -233,6 +233,8 @@ class CuteDSLTemplateKernel(Kernel):
             buf_name = input_node.get_name()
             self.args.input(buf_name)
 
+            # Template aliasing: converts template variables (e.g., "input_a") to function args (e.g., "arg_input_a")
+            # and generates rename statements so template code can use the original names
             if i < len(argnames):
                 template_name = argnames[i]
                 arg_name = f"arg_{template_name}"
