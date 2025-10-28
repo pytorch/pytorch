@@ -1399,6 +1399,13 @@ AOTITorchError aoti_torch__alloc_from_pool(
   });
 }
 
+AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    t->zero_();
+  });
+}
+
 AOTITorchError aoti_torch_library_init_impl(
     const char* ns,
     const char* k,
@@ -1458,13 +1465,6 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { delete reinterpret_cast<torch::Library*>(tlh); });
-}
-
-AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    t->zero_();
-  });
 }
 
 AOTITorchError aoti_torch_create_device_guard(
