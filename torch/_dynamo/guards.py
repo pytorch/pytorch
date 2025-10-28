@@ -2299,6 +2299,14 @@ class GuardBuilder(GuardBuilderBase):
                 ],
             )
 
+    def UNCLASSIFIED_ID_MATCH(self, guard: Guard) -> None:
+        """
+        Calls id_match guard but also helps with future debugging where we are
+        calling ID_MATCH on an object that we don't understand why. This will
+        show up in tlparse.
+        """
+        self.id_match_unchecked(guard)
+
     def CLASS_MATCH(self, guard: Guard) -> None:
         """Equals ID_MATCH on classes - better readability than directly calling ID_MATCH"""
         val = self.get(guard.name)
@@ -2325,7 +2333,7 @@ class GuardBuilder(GuardBuilderBase):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
             self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            assert False, guard
+            self.UNCLASSIFIED_ID_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
@@ -3716,6 +3724,7 @@ class CheckFunctionManager:
         "MODULE_MATCH",
         "CLOSURE_MATCH",
         "WEAKREF_ALIVE",
+        "UNCLASSIFIED_ID_MATCH",
     )
 
     def serialize_guards(
