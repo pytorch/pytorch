@@ -198,9 +198,8 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     tensors: tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), (
-            "Size mismatch between tensors"
-        )
+        if all(tensors[0].size(0) != tensor.size(0) for tensor in tensors):
+            raise AssertionError("Size mismatch between tensors")
         self.tensors = tensors
 
     def __getitem__(self, index):
@@ -321,11 +320,11 @@ class ConcatDataset(Dataset[_T_co]):
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = list(datasets)
-        assert len(self.datasets) > 0, "datasets should not be an empty iterable"
+        if len(self.datasets) == 0:
+            raise AssertionError("datasets should not be an empty iterable")
         for d in self.datasets:
-            assert not isinstance(d, IterableDataset), (
-                "ConcatDataset does not support IterableDataset"
-            )
+            if isinstance(d, IterableDataset):
+                raise AssertionError("ConcatDataset does not support IterableDataset")
         self.cumulative_sizes = self.cumsum(self.datasets)
 
     def __len__(self):
@@ -371,17 +370,15 @@ class ChainDataset(IterableDataset):
 
     def __iter__(self):
         for d in self.datasets:
-            assert isinstance(d, IterableDataset), (
-                "ChainDataset only supports IterableDataset"
-            )
+            if not isinstance(d, IterableDataset):
+                raise AssertionError("ChainDataset only supports IterableDataset")
             yield from d
 
     def __len__(self):
         total = 0
         for d in self.datasets:
-            assert isinstance(d, IterableDataset), (
-                "ChainDataset only supports IterableDataset"
-            )
+            if not isinstance(d, IterableDataset):
+                raise AssertionError("ChainDataset only supports IterableDataset")
             total += len(d)  # type: ignore[arg-type]
         return total
 
@@ -454,9 +451,7 @@ def random_split(
         for i, frac in enumerate(lengths):
             if frac < 0 or frac > 1:
                 raise ValueError(f"Fraction at index {i} is not between 0 and 1")
-            n_items_in_split = int(
-                math.floor(len(dataset) * frac)  # type: ignore[arg-type]
-            )
+            n_items_in_split = math.floor(len(dataset) * frac)  # type: ignore[arg-type]
             subset_lengths.append(n_items_in_split)
         remainder = len(dataset) - sum(subset_lengths)  # type: ignore[arg-type]
         # add 1 to all the lengths in round-robin fashion until the remainder is 0
@@ -468,7 +463,8 @@ def random_split(
             if length == 0:
                 warnings.warn(
                     f"Length of split at index {i} is 0. "
-                    f"This might result in an empty dataset."
+                    f"This might result in an empty dataset.",
+                    stacklevel=2,
                 )
 
     # Cannot verify that dataset is Sized

@@ -11,16 +11,7 @@ import functools
 import itertools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    NewType,
-    Optional,
-    Protocol,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -37,7 +28,7 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
@@ -205,6 +196,7 @@ class MemoryFormatMeta:
 
         if use_memory_format:
             return MemoryFormatMeta(
+                # pyrefly: ignore  # unbound-name
                 memory_format=torch._prims_common.suggest_memory_format(t),
             )
 
@@ -901,12 +893,15 @@ class GraphSignature:
         parameters_to_mutate = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
+                # pyrefly: ignore  # unsupported-operation
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
                 assert mutation_name in buffers or mutation_name in parameters
                 if mutation_name in buffers:
+                    # pyrefly: ignore  # unsupported-operation
                     buffers_to_mutate[output_name] = mutation_name
                 else:
+                    # pyrefly: ignore  # unsupported-operation
                     parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
@@ -978,6 +973,7 @@ class AOTConfig:
     # This config makes sure to check certain things like
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
+    disable_functionalization: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
@@ -1240,7 +1236,9 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         output_code_ty: type[TOutputCode],
         compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
     ):
+        # pyrefly: ignore  # invalid-type-var
         self.output_code_ty = output_code_ty
+        # pyrefly: ignore  # invalid-type-var
         self.compiler_fn = compiler_fn
 
     def __call__(

@@ -23,9 +23,6 @@ runs:
       run: |
         .github\scripts\kill_active_ssh_sessions.ps1
 
-    - name: Clean up leftover processes on non-ephemeral Windows runner
-      uses: pytorch/test-infra/.github/actions/cleanup-runner@main
-
     # Cleaning up Windows workspace sometimes fails flakily with device or resource busy
     # error, meaning one or more processes haven't stopped completely yet. So trying to
     # retry this step several time similar to how checkout-pytorch GHA does

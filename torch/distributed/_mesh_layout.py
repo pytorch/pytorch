@@ -7,7 +7,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import product
 
+import torch
 from torch.distributed._pycute import (
+    as_tuple,
     coalesce,
     complement,
     composition,
@@ -16,6 +18,7 @@ from torch.distributed._pycute import (
     is_int,
     is_tuple,
     Layout,
+    match_structure,
 )
 
 
@@ -36,7 +39,9 @@ class _MeshLayout(Layout):
     different from that of PyCute's.
     """
 
+    # pyrefly: ignore [bad-override]
     shape: IntTuple
+    # pyrefly: ignore [bad-override]
     stride: IntTuple
 
     def __post_init__(self) -> None:
@@ -44,14 +49,9 @@ class _MeshLayout(Layout):
             raise TypeError(f"shape must be a tuple or int, got {type(self.shape)}")
         if not is_tuple(self.stride) and not is_int(self.stride):
             raise TypeError(f"stride must be a tuple or int, got {type(self.stride)}")
-        if (
-            is_tuple(self.shape)
-            and is_tuple(self.stride)
-            and len(flatten(self.shape)) != len(flatten(self.stride))
-        ):
+        if not match_structure(self.shape, self.stride):
             raise ValueError(
-                f"sizes {len(flatten(self.shape))} and "
-                f"strides {len(flatten(self.stride))} must have the same length"
+                f"sizes {self.shape} and strides {self.stride} don't match"
             )
 
     @property
@@ -66,13 +66,25 @@ class _MeshLayout(Layout):
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
         return zip(flatten(self.shape), flatten(self.stride))
 
+    @property
+    def top_level_sizes(self) -> tuple[int, ...]:
+        return tuple(self[i].numel() for i in range(len(self)))
+
     def numel(self) -> int:
         return math.prod(flatten(self.shape))
 
     # # operator []    (get-i like tuples)
     def __getitem__(self, i: int) -> "_MeshLayout":
+        if i < -len(self) or i >= len(self):
+            raise IndexError(
+                f"Dim {i} is out of range for layout with {len(self)} dimensions. "
+                f"Expected dim to be in range [{-len(self)}, {len(self) - 1}]."
+            )
         layout = super().__getitem__(i)
         return _MeshLayout(layout.shape, layout.stride)
+
+    def nest(self) -> "_MeshLayout":
+        return _MeshLayout((self.shape,), (self.stride,))
 
     def coalesce(self) -> "_MeshLayout":
         """
@@ -144,6 +156,13 @@ class _MeshLayout(Layout):
         """
         layout = complement(self, world_size)
         return _MeshLayout(layout.shape, layout.stride)
+
+    def splice(self, start: int, end: int, layout: "_MeshLayout") -> "_MeshLayout":
+        sizes = list(as_tuple(self.sizes))
+        strides = list(as_tuple(self.strides))
+        sizes[start:end] = list(as_tuple(layout.sizes))
+        strides[start:end] = list(as_tuple(layout.strides))
+        return _MeshLayout(tuple(sizes), tuple(strides))
 
     def all_ranks_from_zero(self) -> list[int]:
         """
@@ -243,3 +262,48 @@ class _MeshLayout(Layout):
         """
         ranks = self.all_ranks_from_zero()
         return len(ranks) == len(set(ranks))
+
+    def remap_to_tensor(self, rank_map: torch.Tensor) -> torch.Tensor:
+        """
+        Leverage layout as an index for mesh tensor that re-maps the indexes after layout
+        transformation to actual device ranks.
+
+        With this method, the cute layout serves as the backend of indices bookkeeping for the
+        mesh tensor when it comes to flatten, unflatten and slicing operations. The actual mesh
+        tensor still represents the actual device assignment and ranks. We need this function
+        to specify device allocation and create backend for a mesh. Although any transform of mesh tensors
+        can be treated as a view or subset of mesh tensor, we do need to use the actual view or
+        sub-tensor for DeviceMesh and its backend creation.
+
+        The shape of the `rank_map` must be 1D and contiguous.
+
+        Examples:
+
+        Case 1 - Consecutive ranks, full world:
+            original_mesh_tensor = [[0,1],[2,3]]  # 2x2 mesh, ranks 0-3
+            world_size = 4
+            layout = Layout(2:2)
+            Return: [[0,2],[1,3]]
+
+        Case 2 - Non-consecutive ranks:
+            original_mesh_tensor = [[10,20],[30,40]]  # custom rank assignment
+            world_size = 4
+            layout = Layout(2:2)
+            Return: [[[10,30],[20,40]]]
+
+        Args:
+            rank_map: The concrete mesh tensor with actual device ranks
+
+        Returns:
+            torch.Tensor: A tensor representing the actual device allocation from rank_map
+        """
+        assert rank_map.ndim == 1
+        assert rank_map.is_contiguous()
+        assert rank_map.numel() >= self.cosize()
+
+        complement_layout = self.complement(rank_map.numel())
+
+        return rank_map.as_strided(
+            flatten(complement_layout.sizes) + flatten(self.sizes),
+            flatten(complement_layout.strides) + flatten(self.strides),
+        ).reshape(-1, *self.top_level_sizes)

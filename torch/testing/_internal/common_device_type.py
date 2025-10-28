@@ -9,10 +9,10 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
+from typing import Any, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     is_privateuse1_backend_available,
     IS_REMOTE_GPU,
+    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     NATIVE_DEVICES,
@@ -45,6 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_MPS,
     TEST_WITH_ASAN,
     TEST_WITH_MIOPEN_SUGGEST_NHWC,
+    TEST_WITH_MTIA,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_TSAN,
@@ -389,8 +391,8 @@ class DeviceTypeTestBase(TestCase):
         return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
     def _apply_precision_override_for_test(self, test, param_kwargs):
-        dtype = param_kwargs["dtype"] if "dtype" in param_kwargs else None
-        dtype = param_kwargs["dtypes"] if "dtypes" in param_kwargs else dtype
+        dtype = param_kwargs.get("dtype")
+        dtype = param_kwargs.get("dtypes", dtype)
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
@@ -702,8 +704,13 @@ def get_device_type_test_bases():
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
-            # Skip if sanitizer is enabled
-            if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
+            # Skip if sanitizer is enabled or we're on MTIA machines
+            if (
+                not TEST_WITH_ASAN
+                and not TEST_WITH_TSAN
+                and not TEST_WITH_UBSAN
+                and not TEST_WITH_MTIA
+            ):
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
@@ -1331,6 +1338,10 @@ def _has_sufficient_memory(device, size):
     else:
         effective_size = size
 
+    # don't try using all RAM on s390x, leave some for service processes
+    if IS_S390X:
+        effective_size = effective_size * 2
+
     if psutil.virtual_memory().available < effective_size:
         gc.collect()
     return psutil.virtual_memory().available >= effective_size
@@ -1375,8 +1386,9 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
 
 
 class expectedFailure:
-    def __init__(self, device_type):
+    def __init__(self, device_type, dtype=None):
         self.device_type = device_type
+        self.dtype = dtype
 
     def __call__(self, fn):
         @wraps(fn)
@@ -1390,7 +1402,13 @@ class expectedFailure:
             else:
                 target_device_type = slf.device_type
 
-            if self.device_type is None or self.device_type == target_device_type:
+            target_dtype = kwargs.get("dtype", getattr(slf, "dtype", None))
+            device_matches = (
+                self.device_type is None or self.device_type == target_device_type
+            )
+            dtype_matches = self.dtype is None or self.dtype == target_dtype
+
+            if device_matches and dtype_matches:
                 try:
                     fn(slf, *args, **kwargs)
                 except Exception:
@@ -1708,6 +1726,10 @@ def expectedFailureHPU(fn):
 
 def expectedFailureMPS(fn):
     return expectedFailure("mps")(fn)
+
+
+def expectedFailureMPSComplex(fn):
+    return expectedFailure("mps", torch.complex64)(fn)
 
 
 def expectedFailureMPSPre15(fn):

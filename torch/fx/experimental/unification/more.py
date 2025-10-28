@@ -87,6 +87,7 @@ def _reify_object_slots(o, s):
 @dispatch(slice, dict)
 def _reify(o, s):
     """Reify a Python ``slice`` object"""
+    # pyrefly: ignore [not-iterable]
     return slice(*reify((o.start, o.stop, o.step), s))
 
 
@@ -112,7 +113,7 @@ def unify_object(u, v, s):
     >>> unify_object(f, g, {})
     {~x: 2}
     """
-    if type(u) != type(v):
+    if type(u) is not type(v):
         return False
     if hasattr(u, "__slots__"):
         return unify(
