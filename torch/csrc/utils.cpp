@@ -84,7 +84,7 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject* arg) {
   TORCH_CHECK(THPUtils_checkIntTuple(arg), "Couldn't unpack int tuple");
   std::vector<int> values(PyTuple_GET_SIZE(arg));
   for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
-    values[i] = (int)THPUtils_unpackLong(PyTuple_GET_ITEM(arg, i));
+    values[i] = THPUtils_unpackInt(PyTuple_GET_ITEM(arg, i));
   }
   return values;
 }
@@ -354,7 +354,7 @@ std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
 
 namespace pybind11::detail {
 
-bool type_caster<at::Tensor>::load(handle src, bool) {
+bool type_caster<at::Tensor>::load(handle src, bool /*unused*/) {
   PyObject* obj = src.ptr();
   if (THPVariable_Check(obj)) {
     value = THPVariable_Unpack(obj);
@@ -370,7 +370,7 @@ handle type_caster<at::Tensor>::cast(
   return handle(THPVariable_Wrap(src));
 }
 
-bool type_caster<at::IntArrayRef>::load(handle src, bool) {
+bool type_caster<at::IntArrayRef>::load(handle src, bool /*unused*/) {
   PyObject* source = src.ptr();
   auto tuple = PyTuple_Check(source);
   if (tuple || PyList_Check(source)) {
@@ -403,7 +403,7 @@ handle type_caster<at::IntArrayRef>::cast(
   return handle(THPUtils_packInt64Array(src.size(), src.data()));
 }
 
-bool type_caster<at::SymIntArrayRef>::load(handle src, bool) {
+bool type_caster<at::SymIntArrayRef>::load(handle src, bool /*unused*/) {
   PyObject* source = src.ptr();
 
   auto tuple = PyTuple_Check(source);
@@ -444,7 +444,9 @@ handle type_caster<at::SymIntArrayRef>::cast(
   return t.release();
 }
 
-bool type_caster<at::ArrayRef<c10::SymNode>>::load(handle src, bool) {
+bool type_caster<at::ArrayRef<c10::SymNode>>::load(
+    handle src,
+    bool /*unused*/) {
   TORCH_INTERNAL_ASSERT(0, "NYI");
 }
 handle type_caster<at::ArrayRef<c10::SymNode>>::cast(

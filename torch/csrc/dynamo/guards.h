@@ -21,10 +21,7 @@ struct LocalState {
 
   at::DispatchKeySet apply(at::DispatchKeySet ks) const {
     if (override_dispatch_key_set.empty()) {
-      return (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_ -
-          c10::DispatchKeySet(
-                 {c10::DispatchKey::Python,
-                  c10::DispatchKey::PythonTLSSnapshot});
+      return (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
     } else {
       return override_dispatch_key_set;
     }
