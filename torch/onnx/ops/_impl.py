@@ -54,7 +54,7 @@ def _rotary_embedding_23_fake_impl(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
-    return x
+    return x.clone()
 
 
 @_onnx_op("RotaryEmbedding", 23, _rotary_embedding_23_fake_impl)
@@ -313,7 +313,8 @@ def _attention_23_fake_impl(
     else:
         # 4D input: (batch_size, num_heads, sequence_length, head_size)
         q_sequence_length = Q.shape[2]
-        output_shape = Q.shape  # Same shape as Q for 4D output
+        # Same shape as Q for 4D output
+        output_shape = Q.shape  # type: ignore[assignment]
 
         # Handle past key/value concatenation
         if past_key is not None:
@@ -324,7 +325,7 @@ def _attention_23_fake_impl(
                 K.shape[3],  # head_size
             )
         else:
-            present_key_shape = K.shape
+            present_key_shape = K.shape  # type: ignore[assignment]
         present_value_shape = present_key_shape  # Same shape as present_key
 
         # QK output shape
