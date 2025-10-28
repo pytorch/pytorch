@@ -44,7 +44,7 @@ torch.distributed.pipelining <distributed.pipelining>
 torch.distributed._symmetric_memory <symmetric_memory>
 torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
-user_guide/torch_compiler/torch.compiler <torch.compiler>
+user_guide/torch_compiler/torch.compiler
 torch.fft <fft>
 torch.func <func>
 futures
