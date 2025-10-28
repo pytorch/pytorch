@@ -33,7 +33,7 @@ class AuxRequest(NamedTuple):
     lse: bool = False
 
 
-@torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
+@torch.library.custom_op("torch_attn::_varlen_attn", mutates_args={})
 def _varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -195,7 +195,7 @@ def varlen_attn(
         ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
         ... )
     """
-    out, lse, _ = torch.ops.torch_nn_attention._varlen_attn(
+    out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
     if return_aux is not None and return_aux.lse:
@@ -219,7 +219,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.rng_state = rng_state
 
 
-@torch.library.custom_op("torch_nn_attention::_varlen_attn_backward", mutates_args={})
+@torch.library.custom_op("torch_attn::_varlen_attn_backward", mutates_args={})
 def _varlen_attn_backward(
     grad_out: torch.Tensor,
     query: torch.Tensor,
@@ -319,7 +319,7 @@ def _backward(
 
     # rng_state = torch.empty(2, device=query.device)
 
-    dq, dk, dv = torch.ops.torch_nn_attention._varlen_attn_backward(
+    dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,
         query,
         key,
