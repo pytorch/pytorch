@@ -17,4 +17,3 @@ void group_gemm_ck(
 } // namespace detail
 } // namespace hip
 } // namespace at
-
