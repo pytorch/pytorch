@@ -1,12 +1,15 @@
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch.fx import Proxy
 
 from .. import graph_break_hints
+from ..device_interface import get_interface_for_device
 from ..exc import TYPE_CHECKING, unimplemented_v2
 from .base import VariableTracker
 from .constant import ConstantVariable
+from .ctx_manager import ContextWrappingVariable
+from .misc import GetAttrVariable
 
 
 if TYPE_CHECKING:
@@ -60,7 +63,99 @@ def _(
     pass
 
 
+class StreamContextVariable(ContextWrappingVariable):
+    """This represents torch.cuda.StreamContext"""
+
+    @staticmethod
+    def create(
+        tx: "InstructionTranslator",
+        target_value: "StreamVariable",
+        **kwargs: dict[str, Any],
+    ) -> "StreamContextVariable":
+        return StreamContextVariable(
+            target_values=[target_value],
+            initial_values=[
+                StreamContextVariable._get_current_stream(target_value.device, tx)
+            ],
+            device=target_value.device,
+            **kwargs,
+        )
+
+    def __init__(
+        self,
+        target_values: list["StreamVariable"],
+        device: torch.device,
+        initial_values: Optional[list["StreamVariable"]] = None,
+        **kwargs: dict[str, Any],
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.device = device
+        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
+
+    def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
+        # to stream, from stream is the order of the arguments
+        # we are entering the target, and leaving the initial stream
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.fork.default,
+            self._target_stream_proxies() + self._initial_stream_proxies(),
+            {},
+        )
+        return ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args: tuple[Any]) -> "VariableTracker":
+        # to stream, from stream is the order of the arguments
+        # we are leaving the target, and entering the initial stream
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.join.default,
+            self._initial_stream_proxies() + self._target_stream_proxies(),
+            {},
+        )
+        return ConstantVariable.create(None)
+
+    def _initial_stream_proxies(self) -> tuple[Proxy, Proxy]:
+        assert self.initial_values, "No initial stream to move from"
+        return StreamContextVariable._extract_stream_properties(
+            self.initial_values[0].as_proxy()
+        )
+
+    def _target_stream_proxies(self) -> tuple[Proxy, Proxy]:
+        return StreamContextVariable._extract_stream_properties(
+            self.target_values[0].as_proxy()
+        )
+
+    @staticmethod
+    def _extract_stream_properties(stream_proxy: Proxy) -> tuple[Proxy, Proxy]:
+        stream_index = GetAttrVariable.create_getattr_proxy(stream_proxy, "stream_id")
+        stream_device = GetAttrVariable.create_getattr_proxy(stream_proxy, "device")
+        return stream_index, stream_device
+
+    @staticmethod
+    def _get_current_stream(
+        device: torch.device, tx: "InstructionTranslator"
+    ) -> "StreamVariable":
+        from .builder import wrap_fx_proxy_cls
+
+        current_stream_method = get_interface_for_device(device).current_stream
+        current_stream = wrap_fx_proxy_cls(
+            StreamVariable,
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                current_stream_method,
+                (None,),
+                {},
+            ),
+        )
+        return current_stream
+
+
 class StreamVariable(VariableTracker):
+    """Represents the device-agnostic torch.Stream class"""
+
     def __init__(
         self,
         proxy: Proxy,
