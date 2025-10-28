@@ -499,7 +499,7 @@ class TestCUDA(JitTestCase):
 
         # Record the CUDA event for operation torch.mm on the current stream
         # and then test if the elapsed time is greater than 0. This test is also
-        # an adaption from eager doe CUDA tests available at test/test_cuda.py
+        # an adaption from eager mode CUDA tests available at test/test_cuda.py
         @torch.jit.script
         def test_event():
             device_index = torch.cuda.current_device()
