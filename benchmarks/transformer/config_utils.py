@@ -1,6 +1,5 @@
 """Configuration utilities for parsing JSON and YAML config files."""
 
-import argparse
 import json
 import re
 
@@ -30,8 +29,9 @@ default_config = {
     "throughput": True,
     "save_path": None,
     "output_json_for_dashboard": None,
-    "benchmark_name": "PyTorch operator microbenchmark"
+    "benchmark_name": "PyTorch operator microbenchmark",
 }
+
 
 def load_config_file(config_path: str) -> dict:
     """Load configuration from JSON or YAML file.
@@ -48,7 +48,7 @@ def load_config_file(config_path: str) -> dict:
         FileNotFoundError: If config file doesn't exist
         ValueError: If config file format is invalid
     """
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         config_str = f.read()
 
     # Try to load as JSON first
@@ -60,7 +60,9 @@ def load_config_file(config_path: str) -> dict:
 
     # Apply automatic conversions for 'nh' field
     if "nh" in config and isinstance(config["nh"], list):
-        config["nh"] = [heads_input_type(h) if isinstance(h, str) else h for h in config["nh"]]
+        config["nh"] = [
+            heads_input_type(h) if isinstance(h, str) else h for h in config["nh"]
+        ]
 
     return config
 
@@ -85,25 +87,25 @@ def _parse_simple_yaml(yaml_str: str) -> dict:
     """
     config = {}
 
-    for line in yaml_str.split('\n'):
+    for line in yaml_str.split("\n"):
         # Remove comments
-        line = line.split('#')[0].strip()
+        line = line.split("#")[0].strip()
 
-        if not line or ':' not in line:
+        if not line or ":" not in line:
             continue
 
-        key, value = line.split(':', 1)
+        key, value = line.split(":", 1)
         key = key.strip()
         value = value.strip()
 
         # Parse value based on type
-        if value.lower() == 'true':
+        if value.lower() == "true":
             config[key] = True
-        elif value.lower() == 'false':
+        elif value.lower() == "false":
             config[key] = False
-        elif value.lower() in ('null', 'none', ''):
+        elif value.lower() in ("null", "none", ""):
             config[key] = None
-        elif value.startswith('[') and value.endswith(']'):
+        elif value.startswith("[") and value.endswith("]"):
             # Parse list - handle quoted strings properly
             pattern = r'"([^"]+)"|\'([^\']+)\'|([^,\[\]\s]+)'
             matches = re.findall(pattern, value[1:-1])  # Remove [ ]
@@ -118,8 +120,8 @@ def _parse_simple_yaml(yaml_str: str) -> dict:
                     except ValueError:
                         parsed_items.append(item)
             config[key] = parsed_items
-        elif value.startswith('"') or value.startswith("'"):
-            config[key] = value.strip('"\'')
+        elif value.startswith(('"', "'")):
+            config[key] = value.strip("\"'")
         else:
             # Try to parse as number
             try:
