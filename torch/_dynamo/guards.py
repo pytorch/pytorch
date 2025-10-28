@@ -2329,7 +2329,7 @@ class GuardBuilder(GuardBuilderBase):
         # Strictly only want user-defined functions
         if type(val) is types.FunctionType and hasattr(val, "__code__"):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
-            self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)  # type: ignore[arg-type]
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
             self.FUNCTION_MATCH(guard)
 
