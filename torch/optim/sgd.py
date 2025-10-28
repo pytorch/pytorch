@@ -332,7 +332,8 @@ def _single_tensor_sgd(
     maximize: bool,
     has_sparse_grad: bool,
 ):
-    assert grad_scale is None and found_inf is None
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -392,7 +393,8 @@ def _multi_tensor_sgd(
     maximize: bool,
     has_sparse_grad: bool,
 ):
-    assert grad_scale is None and found_inf is None
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if len(params) == 0:
         return

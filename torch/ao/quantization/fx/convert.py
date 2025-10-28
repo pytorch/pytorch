@@ -597,7 +597,8 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     else:
         warnings.warn(
-            f"Unsupported node type in recursive remove dequantize: {type(arg)}"
+            f"Unsupported node type in recursive remove dequantize: {type(arg)}",
+            stacklevel=2,
         )
 
 
@@ -1197,7 +1198,8 @@ def convert(
                     _maybe_recursive_remove_dequantize(output, return_node, model.graph)
             else:
                 warnings.warn(
-                    f"Unsupported node type for output_quantized_idxs: {type(output)}"
+                    f"Unsupported node type for output_quantized_idxs: {type(output)}",
+                    stacklevel=2,
                 )
         elif node.op == "call_module":
             mod = _get_module(node, modules)
