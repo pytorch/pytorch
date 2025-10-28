@@ -618,9 +618,11 @@ class DeviceCachingAllocator {
     }
     if ((*it)->expandable_segment) {
       if (AcceleratorAllocatorConfig::use_expandable_segments()) {
-        // if we are allocated to the part of the block that is expandable
-        // for the purposes of "best fit" we consider its size to be the size it
-        // can expand to, not the size it currently is.
+        // When expandable segments are enabled, consider both the current block
+        // and any immediately adjacent unmapped region as a single expandable
+        // area. For "best fit" allocation, we use the total expandable size
+        // instead of just the block's current size, so that blocks which can
+        // grow into a larger contiguous range are preferred.
         auto expandable_size = [](Block* b) {
           // b->next may belong to pool.unmapped (reserved but not mapped)
           return b->size + (b->next && !b->next->mapped ? b->next->size : 0);
@@ -634,11 +636,9 @@ class DeviceCachingAllocator {
           it = next++;
         }
       } else {
-        // Rarely expandable segments has been turned off after we have
-        // already allocated some blocks as expandable. For instance,
-        // since we cannot share expandable memory via IPC, someone might
-        // temporarily disable it. In this case we need to honor this request
-        // by only finding non-expandable blocks
+        // Expandable segments were previously enabled, but are now disabled
+        // (e.g. to avoid IPC issues). Skip any expandable blocks and only
+        // find from regular non-expandable segments.
         do {
           it++;
         } while (it != pool.blocks.end() && (*it)->expandable_segment &&
