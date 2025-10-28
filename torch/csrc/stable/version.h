@@ -25,3 +25,5 @@
 #else
 #define TORCH_FEATURE_VERSION TORCH_ABI_VERSION
 #endif
+
+#define TORCH_VERSION_2_10_0 (((0ULL + 2) << 56) | ((0ULL + 10) << 48))
