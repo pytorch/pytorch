@@ -2821,12 +2821,4 @@
       ]
     }
   ],
-  "GB0280": [
-    {
-      "Gb_type": "data_ptr comparison",
-      "Context": "Comparing data_ptr() when aliasing cannot be determined at compile time.",
-      "Explanation": null,
-      "Hints": []
-    }
-  ]
 }
