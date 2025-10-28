@@ -85,7 +85,9 @@ def _varlen_attn(
             return_debug_mask=False,
         )
 
-    rng_state_ = torch.zeros((2,), dtype=torch.uint64, device=query.device)  # hardcoded
+    rng_state_ = torch.zeros(
+        (2,), dtype=torch.uint64, device=query.device
+    )  # hardcoded since dropout is hardcoded to 0
     return output, softmax_lse, rng_state_
 
 
@@ -200,6 +202,7 @@ def varlen_attn(
         return out, lse
     return out
 
+
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
     out, lse, rng_state = output
@@ -215,6 +218,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.lse = lse
     ctx.rng_state = rng_state
 
+
 @torch.library.custom_op("torch_nn_attention::_varlen_attn_backward", mutates_args={})
 def _varlen_attn_backward(
     grad_out: torch.Tensor,
@@ -228,8 +232,8 @@ def _varlen_attn_backward(
     max_q: int,
     max_k: int,
     is_causal: bool,
+    rng_state: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    rng_state = torch.empty(2, device=query.device)
     unused = torch.empty(0, device=query.device)
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
@@ -285,6 +289,7 @@ def _varlen_attn_backward_fake(
     max_q: int,
     max_k: int,
     is_causal: bool,
+    rng_state: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -310,6 +315,9 @@ def _backward(
     is_causal = ctx.is_causal
     out = ctx.output
     lse = ctx.lse
+    rng_state = ctx.rng_state
+
+    # rng_state = torch.empty(2, device=query.device)
 
     dq, dk, dv = torch.ops.torch_nn_attention._varlen_attn_backward(
         grad_out,
@@ -323,6 +331,7 @@ def _backward(
         max_q,
         max_k,
         is_causal,
+        rng_state,
     )
     return dq, dk, dv, None, None, None, None, None, None
 

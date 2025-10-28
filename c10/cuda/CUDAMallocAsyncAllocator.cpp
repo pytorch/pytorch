@@ -4,7 +4,6 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
-#include <c10/util/irange.h>
 
 #include <unordered_set>
 #include <vector>
@@ -47,7 +46,7 @@ bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
 
 struct UsageStreamHash {
   size_t operator()(const UsageStream& us) const noexcept {
-    return std::hash<void*>{}(us.stream) + size_t(us.device);
+    return std::hash<void*>{}(us.stream) + static_cast<size_t>(us.device);
   }
 };
 
@@ -914,7 +913,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
   std::string name() override {
-    return "cudaMallocAsync";
+    // break up token to trick hipify
+    return "c"
+           "udaMallocAsync";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     C10_CUDA_CHECK(
