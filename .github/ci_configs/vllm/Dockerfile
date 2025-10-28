@@ -283,6 +283,9 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --pre apache-tvm-ffi==0.1.0b15
+
 # Install the vllm wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/vllm/*.whl --verbose
@@ -295,6 +298,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
+# TODO(elainewy): remove this once vllm commit is updated, and install flashinfer from pip
+# see https://github.com/pytorch/pytorch/pull/165274#issuecomment-3408531784
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
 ARG FLASHINFER_GIT_REF="v0.2.14.post1"
 

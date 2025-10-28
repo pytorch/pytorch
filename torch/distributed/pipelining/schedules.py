@@ -246,7 +246,7 @@ def _format_pipeline_order(
         pipeline_order.get(key, [""] * num_steps) for key in sorted(pipeline_order)
     ]
     # Transpose the list of lists (rows to columns)
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     transposed_actions = list(itertools.zip_longest(*rank_actions, fillvalue=""))
     # Generate column labels for ranks
     num_ranks = len(pipeline_order)

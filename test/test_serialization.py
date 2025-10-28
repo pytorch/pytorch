@@ -4802,6 +4802,18 @@ class TestSerialization(TestCase, SerializationMixin):
 
             assert x.dtype == y.dtype
 
+    @skipIfTorchDynamo("getrefcount does not work in dynamo")
+    def test_serializaion_no_storage_leak(self):
+        # Test https://github.com/pytorch/pytorch/issues/149846
+        t = torch.rand(10, 10)
+        state_dict = {'a': 1, 'b': 2, 'c': t}
+        storage = t.untyped_storage()
+        ref1 = sys.getrefcount(storage)
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            torch.save(state_dict, checkpoint)
+        ref2 = sys.getrefcount(storage)
+        self.assertEqual(ref1, ref2)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
