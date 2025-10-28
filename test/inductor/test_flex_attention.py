@@ -2,8 +2,11 @@
 # flake8: noqa: B950
 
 import functools
+import json
+import os
 import random
 import string
+import tempfile
 import unittest
 import warnings
 from collections import namedtuple
@@ -6909,6 +6912,120 @@ class TestLearnableBiases(InductorTestCase):
     @torch._inductor.config.patch("graph_partition", True)
     def test_flex_attention_with_dynamic_max_autotune_graph_partition(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
+
+    @skip_on_cpu
+    def test_flex_attention_logging(self, device):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = os.path.join(tmpdir, "flex_attention_configs")
+
+            with patch.dict(
+                os.environ, {"TORCHINDUCTOR_FLEX_ATTENTION_LOGGING_FILE": log_file}
+            ):
+                query = torch.randn(
+                    1,
+                    2,
+                    128,
+                    64,
+                    device=device,
+                    dtype=torch.float16,
+                    requires_grad=True,
+                )
+                key = torch.randn(
+                    1,
+                    2,
+                    128,
+                    64,
+                    device=device,
+                    dtype=torch.float16,
+                    requires_grad=True,
+                )
+                value = torch.randn(
+                    1,
+                    2,
+                    128,
+                    64,
+                    device=device,
+                    dtype=torch.float16,
+                    requires_grad=True,
+                )
+
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    return score * 2
+
+                def causal_mask(b, h, q_idx, kv_idx):
+                    return q_idx >= kv_idx
+
+                block_mask = torch.compile(create_block_mask)(
+                    causal_mask, 1, 1, 128, 128, device=device
+                )
+
+                compiled_flex = torch.compile(
+                    flex_attention, mode="max-autotune-no-cudagraphs"
+                )
+
+                out = compiled_flex(
+                    query=query,
+                    key=key,
+                    value=value,
+                    score_mod=score_mod,
+                    block_mask=block_mask,
+                )
+
+                out.sum().backward()
+
+                json_file = log_file + ".json"
+                self.assertTrue(
+                    os.path.exists(json_file), f"Log file {json_file} was not created"
+                )
+
+                with open(json_file) as f:
+                    log_data = json.load(f)
+
+                self.assertIsInstance(log_data, list)
+                self.assertEqual(len(log_data), 2)
+
+                keys_seen = [next(iter(entry.keys())) for entry in log_data]
+
+                expected_fwd_key = "('forward', 1, 2, 2, 128, 128, 64, 64)"
+                expected_bwd_key = "('backward', 1, 2, 2, 128, 128, 64, 64)"
+
+                self.assertIn(expected_fwd_key, keys_seen)
+                self.assertIn(expected_bwd_key, keys_seen)
+
+                for entry in log_data:
+                    self.assertIsInstance(entry, dict)
+                    self.assertEqual(len(entry), 1)
+
+                    dims_key = next(iter(entry.keys()))
+                    choices = entry[dims_key]
+
+                    kernel_type = eval(dims_key)[0]
+
+                    self.assertIsInstance(choices, list)
+                    self.assertGreater(len(choices), 0)
+
+                    for i, choice in enumerate(choices):
+                        self.assertIn("type", choice)
+                        self.assertIn("time", choice)
+
+                        if choice["type"] == "triton":
+                            self.assertIn("num_warps", choice)
+                            self.assertIn("num_stages", choice)
+
+                            if kernel_type == "forward":
+                                self.assertIn("BLOCK_M", choice)
+                                self.assertIn("BLOCK_N", choice)
+                                self.assertNotIn("BLOCK_M1", choice)
+                            elif kernel_type == "backward":
+                                self.assertIn("BLOCK_M1", choice)
+                                self.assertIn("BLOCK_N1", choice)
+                                self.assertIn("BLOCK_M2", choice)
+                                self.assertIn("BLOCK_N2", choice)
+                                self.assertNotIn("BLOCK_M", choice)
+                                self.assertNotIn("BLOCK_N", choice)
+
+                        if i > 0:
+                            self.assertLessEqual(choices[0]["time"], choice["time"])
 
     @skip_on_cpu
     def test_inspect_bug(self, device):
