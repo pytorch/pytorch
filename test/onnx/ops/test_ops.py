@@ -14,10 +14,6 @@ from torch.onnx.ops import _impl, _symbolic_impl
 from torch.testing._internal import common_utils
 
 
-def has_onnxruntime_opset_23() -> bool:
-    return version.parse(onnxruntime.__version__) >= version.parse("1.23")
-
-
 class SchemaTest(common_utils.TestCase):
     def test_symbolic_has_correct_schema(self):
         torch.library.opcheck(
@@ -431,6 +427,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             dynamo=True,
             fallback=False,
             verbose=False,
+            optimize=False,
             **options,
         )
         assert onnx_program is not None
@@ -532,11 +529,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
-        if has_onnxruntime_opset_23():
-            onnx_testing.assert_onnx_program(onnx_program)
-        else:
-            # Test with reference evaluator because ORT does not support the op as of version 1.22
-            onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_rotary_embedding_3d(self):
         num_heads = 2
@@ -570,11 +563,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
-        if has_onnxruntime_opset_23():
-            onnx_testing.assert_onnx_program(onnx_program)
-        else:
-            # Test with reference evaluator because ORT does not support the op as of version 1.22
-            onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_basic(self):
         """Test basic attention functionality."""
@@ -943,6 +932,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("Attention", onnx_program.model.graph.node(0).op_type)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_with_dynamic_shapes(self):
         """Test attention export with dynamic shapes."""
@@ -953,11 +943,14 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
+        attn_mask = torch.randint(
+            0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
+        )
 
         class AttentionModel(torch.nn.Module):
-            def forward(self, Q, K, V):
+            def forward(self, Q, K, V, attn_mask):
                 output, present_key, present_value, qk_output = (
-                    torch.onnx.ops.attention(Q, K, V)
+                    torch.onnx.ops.attention(Q, K, V, attn_mask=attn_mask)
                 )
                 return output
 
@@ -971,7 +964,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         onnx_program = self.export(
             model,
-            (Q, K, V),
+            (Q, K, V, attn_mask),
             dynamic_shapes=dynamic_shapes,
             opset_version=23,
         )
@@ -993,6 +986,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Verify default attributes (should be minimal)
         self.assertEqual(len(node.attributes), 0)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_3d_export(self):
         """Test attention export with 3D inputs."""
@@ -1021,6 +1015,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("Attention", onnx_program.model.graph.node(0).op_type)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_decomposition(self):
         """Test that attention can be decomposed to aten ops."""
@@ -1113,6 +1108,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             node.inputs[5].shape, [batch_size, kv_num_heads, past_seq_len, head_size]
         )
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_with_all_optional_inputs(self):
         """Test export with all optional inputs: mask, past_key, past_value."""
@@ -1171,6 +1167,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             node.inputs[5].shape, [batch_size, kv_num_heads, past_seq_len, head_size]
         )
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_3d_with_num_heads_attributes(self):
         """Test export with 3D inputs and explicit num_heads attributes."""
@@ -1212,6 +1209,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertIn("kv_num_heads", attrs)
         self.assertEqual(attrs["q_num_heads"].value, q_num_heads)
         self.assertEqual(attrs["kv_num_heads"].value, kv_num_heads)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_with_all_attributes(self):
         """Test export with all possible attributes set."""
@@ -1256,6 +1254,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertAlmostEqual(attrs["scale"].value, 0.25, places=6)
         self.assertAlmostEqual(attrs["softcap"].value, 30.0, places=6)
         self.assertEqual(attrs["softmax_precision"].value, 1)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_with_different_mask_shapes(self):
         """Test export with different attention mask shapes."""
@@ -1280,6 +1279,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         node_2d = onnx_program_2d.model.graph.node(0)
         self.assertEqual(node_2d.inputs[3].shape, [q_seq_len, kv_seq_len])
+        onnx_testing.assert_onnx_program(onnx_program_2d)
 
         # Test 3D mask
         mask_3d = torch.randint(
@@ -1298,6 +1298,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             node_3d.inputs[3].shape, [batch_size, 1, q_seq_len, kv_seq_len]
         )
+        onnx_testing.assert_onnx_program(onnx_program_3d)
 
         # Test 4D mask
         mask_4d = torch.randint(
@@ -1316,6 +1317,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             node_4d.inputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len]
         )
+        onnx_testing.assert_onnx_program(onnx_program_4d)
 
     def test_attention_export_with_float_mask(self):
         """Test export with float attention mask."""
@@ -1341,6 +1343,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(node.inputs[3].shape, [q_seq_len, kv_seq_len])
         # Verify the mask input has float dtype in the ONNX model
         self.assertEqual(node.inputs[3].dtype, ir.DataType.FLOAT)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_qk_output_modes(self):
         """Test export with different QK output modes."""
@@ -1379,6 +1382,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
             # Verify 4 outputs (output, present_key, present_value, qk_output)
             self.assertEqual(len(node.outputs), 4)
+            onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_mqa(self):
         """Test export with Multi-Query Attention (MQA)."""
@@ -1411,6 +1415,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             node.inputs[2].shape, [batch_size, kv_num_heads, kv_seq_len, head_size]
         )
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_with_softmax_precision(self):
         """Test export with different softmax precision values."""
@@ -1453,6 +1458,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             attrs = node.attributes
             self.assertIn("softmax_precision", attrs)
             self.assertEqual(attrs["softmax_precision"].value, precision_val)
+            onnx_testing.assert_onnx_program(onnx_program)
 
     def test_attention_export_gqa(self):
         """Test export and verify output tensor shapes."""
@@ -1497,6 +1503,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             outputs[3].shape, [batch_size, q_num_heads, q_seq_len, kv_seq_len]
         )
+        onnx_testing.assert_onnx_program(onnx_program)
 
 
 if __name__ == "__main__":
