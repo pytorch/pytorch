@@ -238,7 +238,7 @@ class FakeTensorUpdater:
                 symbol_to_path := compute_unbacked_bindings(shape_env, new_fake_tensor)
             ):
                 # Refresh the bindings to the new symbols
-                # pyrefly: ignore  # unbound-name
+
                 node.meta["unbacked_bindings"] = symbol_to_path
 
             existing_storages[get_node_storage(node)] += 1

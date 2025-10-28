@@ -942,6 +942,22 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         self.assertRaises(Unsupported, fn)
 
+    def test_stack_trace_from_observed_exception(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                # no attribute w on self.linear
+                weight = self.linear.w
+                return torch.nn.functional.linear(x, weight)
+
+        x = (torch.randn(4, 16, requires_grad=True),)
+
+        with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
+            torch._dynamo.functional_export._dynamo_graph_capture_for_export(Model())(x)
+
 
 instantiate_parametrized_tests(ExceptionTests)
 
