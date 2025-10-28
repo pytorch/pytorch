@@ -31,11 +31,10 @@ import logging
 import sys
 import traceback
 import types
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import FunctionType
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
-from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
@@ -69,7 +68,6 @@ from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
-    counters,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -713,8 +711,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
-            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-                return tracer.inline_call_()
+            return tracer.inline_call_()
         except ObservedException as e:
             tracer.generator_exhausted = True
             raise e
@@ -724,8 +721,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
-        finally:
-            counters["unimplemented"] |= counters["inline_call"]
 
     def call_obj_hasattr(self, tx, name):
         if name in self.python_type().__dict__:
@@ -1498,6 +1493,8 @@ class SkipFunctionVariable(VariableTracker):
                 )
 
             guard_on_source.make_guard(GuardBuilder.CLOSURE_MATCH)
+        elif inspect.isbuiltin(value):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip

@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -3204,6 +3205,9 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    @unittest.skipIf(
+        TEST_XPU, "Skipped on XPU"
+    )  # https://github.com/intel/torch-xpu-ops/issues/2169"
     @skipIfTorchDynamo("Attempt to trace generator")
     @torch.fx.experimental._config.patch("use_duck_shape", False)
     def test_size_comparison_no_recompile(self):
@@ -3658,7 +3662,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass a contiguous tensor. A recompilation will happen due to 0/1 speciialization on stride.
+        # Pass a contiguous tensor. A recompilation will happen due to 0/1 specialization on stride.
         log_stream, ctx = logs_to_string(
             "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )

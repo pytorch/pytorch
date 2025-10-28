@@ -8358,7 +8358,6 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
-
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -8457,10 +8456,10 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
-            size = child.size();  child = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u0 < s77)" = unbacked_symint < getitem;  unbacked_symint = getitem = None
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child, 0)
+
+            size = child.size();  child = size = None
+            lt: "Sym(u0 < s77)" = unbacked_symint < sym_size_int;  unbacked_symint = sym_size_int = None
             return lt
 
     class body_fn_0(torch.nn.Module):
@@ -8468,15 +8467,15 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child_1, 0)
+
             x_clone: "f32[s77, s27]" = child_1.clone()
 
             ge: "Sym(u1 >= 0)" = unbacked_symint_0 >= 0
             _check = torch._check(ge);  ge = _check = None
 
-            size = child_1.size();  child_1 = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u1 < s77)" = unbacked_symint_0 < getitem;  getitem = None
+            size = child_1.size();  child_1 = size = None
+            lt: "Sym(u1 < s77)" = unbacked_symint_0 < sym_size_int;  sym_size_int = None
             _check_1 = torch._check(lt);  lt = _check_1 = None
 
             select: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
@@ -8658,7 +8657,6 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
-
         sym_size_int_1: "Sym(s6)" = torch.ops.aten.sym_size.int(x, 0)
 
         sin: "f32[s6, 3]" = torch.ops.aten.sin.default(x);  x = None
@@ -8945,10 +8943,8 @@ class GraphModule(torch.nn.Module):
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
             mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
             mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-
             add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
             add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
-
             add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
             add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
@@ -9163,7 +9159,6 @@ class GraphModule(torch.nn.Module):
 
         x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
         _guards_fn = self._guards_fn(x, y, z);  _guards_fn = None
-
         sym_size_int_4: "Sym(s17)" = torch.ops.aten.sym_size.int(y, 0);  y = None
         sym_size_int_5: "Sym(s68)" = torch.ops.aten.sym_size.int(z, 0)
 
