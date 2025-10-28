@@ -72,6 +72,7 @@ from .triton_compat import (
     PTXASError,
     triton,
 )
+from .triton_helpers import get_constexprs
 
 
 class InductorConfig(Config):
@@ -691,7 +692,7 @@ class CachingAutotuner(KernelInterface):
                     compile_meta[k] = cfg_kwargs.pop(k)
         compile_meta["constants"].update(cfg_kwargs)
 
-        for i in self.fn.constexprs:
+        for i in get_constexprs(self.fn):
             arg_name = self.fn.arg_names[i]
             if arg_name not in compile_meta["constants"] and (
                 arg_name == "num_warps" or arg_name == "num_stages"
@@ -1393,7 +1394,7 @@ class CachingAutotuner(KernelInterface):
                         # trace user defined triton kernels when TRITON_INTERPRET=1
                         if x not in cfg.kwargs.keys():
                             new_signature.append(x)
-                    elif i not in self.fn.constexprs:
+                    elif i not in get_constexprs(self.fn):
                         # use constexprs rather than just configs since user
                         # defined triton kernels may not have any configs
                         new_signature.append(x)
@@ -1794,7 +1795,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         fn = binary.src.fn
         binary._init_handles()
         (call_args, def_args, none_args) = self._get_arg_lists(
-            fn.arg_names, fn.constexprs
+            fn.arg_names, get_constexprs(fn)
         )
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared

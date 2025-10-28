@@ -98,6 +98,7 @@ class OutputProp:
                 node.traced_result = result
 
             # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [unbound-name]
             env[node.name] = result
 
         return None
