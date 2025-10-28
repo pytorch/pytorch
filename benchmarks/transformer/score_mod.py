@@ -13,6 +13,7 @@ from functools import partial, wraps
 from typing import Callable, Literal, Optional, Union
 
 import numpy as np
+from config_utils import heads_input_type, load_config_file, print_default_config
 from tabulate import tabulate
 from tqdm import tqdm
 
@@ -26,8 +27,6 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
 )
-
-from config_utils import heads_input_type, load_config_file, print_default_config
 
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -68,12 +67,18 @@ def safe_backend(backend_name=None, return_dict=False):
             except RuntimeError as e:
                 error_msg = str(e)
                 if "out of resource" in error_msg or "OutOfMemoryError" in error_msg:
-                    print(f"[SKIP] Triton OOM for {backend_name or func.__name__} with shape {config.shape}")
+                    print(
+                        f"[SKIP] Triton OOM for {backend_name or func.__name__} with shape {config.shape}"
+                    )
                     cleanup_memory()
                 elif "No valid triton configs" in error_msg:
-                    print(f"[SKIP] No valid Triton config for {backend_name or func.__name__} with shape {config.shape}")
+                    print(
+                        f"[SKIP] No valid Triton config for {backend_name or func.__name__} with shape {config.shape}"
+                    )
                 else:
-                    print(f"[SKIP] Runtime error for {backend_name or func.__name__} with shape {config.shape}: {str(e)[:100]}")
+                    print(
+                        f"[SKIP] Runtime error for {backend_name or func.__name__} with shape {config.shape}: {str(e)[:100]}"
+                    )
             except Exception as e:
                 print(
                     f"[SKIP] Error for {backend_name or func.__name__} with shape {config.shape}: {str(e)[:100]}"
@@ -86,7 +91,7 @@ def safe_backend(backend_name=None, return_dict=False):
                     fwd_time=float("nan"),
                     bwd_time=float("nan") if config.calculate_bwd_time else None,
                 )
-                results = {backend: nan_result for backend in config.backends}
+                results = dict.fromkeys(config.backends, nan_result)
                 results["flex"] = ExperimentResults(
                     fwd_time=float("nan"),
                     bwd_time=float("nan") if config.calculate_bwd_time else None,
@@ -106,9 +111,7 @@ def safe_backend(backend_name=None, return_dict=False):
 
 
 # Type definitions
-Backend = Literal[
-    "math", "efficient", "cudnn", "fav2", "fav3", "fakv", "og-eager"
-]
+Backend = Literal["math", "efficient", "cudnn", "fav2", "fav3", "fakv", "og-eager"]
 AttentionType = Literal[
     "noop",
     "causal",
@@ -605,8 +608,7 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
 def get_average_speedups(results: list[Experiment], type: str, backend: str):
     # Calculate speedups
     speedups = [
-        calculate_speedup(r.results["flex"], r.results[backend], type)
-        for r in results
+        calculate_speedup(r.results["flex"], r.results[backend], type) for r in results
     ]
 
     # Find indices of max and min speedups
@@ -667,9 +669,7 @@ def print_results(results: list[Experiment], save_path: Optional[str] = None):
             for r in results
         ]
         table_data["fwd_mem_bw (TB/s)"] = fwd_bandwidth
-        fwd_tflops = [
-            calculate_tflops(r.config, r.results["flex"]) for r in results
-        ]
+        fwd_tflops = [calculate_tflops(r.config, r.results["flex"]) for r in results]
         table_data["TFlops/s"] = fwd_tflops
 
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
@@ -1236,6 +1236,7 @@ def _output_json_for_dashboard(
                 if device == "cpu"
                 else "unknown"
             )
+
             # Create dataclasses for JSON structure
             @dataclass
             class BenchmarkInfo:
@@ -1263,17 +1264,19 @@ def _output_json_for_dashboard(
                 benchmark: BenchmarkInfo
                 model: ModelInfo
                 metric: MetricInfo
-            
+
             # Benchmark extra info
-            benchmark_extra_info={
-                "input_config": input_config,
-                "device": device,
-                "arch": device_arch,
-                "operator_name": backend,
-                "attn_type": config.attn_type,
-                "shape": str(config.shape),
-                "max_autotune": config.max_autotune,
-            },
+            benchmark_extra_info = (
+                {
+                    "input_config": input_config,
+                    "device": device,
+                    "arch": device_arch,
+                    "operator_name": backend,
+                    "attn_type": config.attn_type,
+                    "shape": str(config.shape),
+                    "max_autotune": config.max_autotune,
+                },
+            )
             # Add record for forward latency
             record_fwd_latency = BenchmarkRecord(
                 benchmark=BenchmarkInfo(
@@ -1283,7 +1286,7 @@ def _output_json_for_dashboard(
                     extra_info=benchmark_extra_info,
                 ),
                 model=ModelInfo(
-                    name=test_name+str(config.shape),
+                    name=test_name + str(config.shape),
                     type="attention-benchmark",
                     origins=["pytorch"],
                     extra_info={
@@ -1310,8 +1313,12 @@ def _output_json_for_dashboard(
                         extra_info=benchmark_extra_info,
                     ),
                     model=ModelInfo(
-                        name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
-                        extra_info={"operator_name": backend,}
+                        name=test_name + str(config.shape),
+                        type="attention-benchmark",
+                        origins=["pytorch"],
+                        extra_info={
+                            "operator_name": backend,
+                        },
                     ),
                     metric=MetricInfo(
                         name="memory bandwidth",
@@ -1332,12 +1339,12 @@ def _output_json_for_dashboard(
                         extra_info=benchmark_extra_info,
                     ),
                     model=ModelInfo(
-                        name=test_name+str(config.shape),
+                        name=test_name + str(config.shape),
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
                             "operator_name": backend,
-                        }
+                        },
                     ),
                     metric=MetricInfo(
                         name="tflops",
@@ -1349,7 +1356,11 @@ def _output_json_for_dashboard(
                 records.append(asdict(record_fwd_tflops))
 
             # Add record for backward latency (if available and not NaN)
-            if config.calculate_bwd_time and results.bwd_time is not None and not math.isnan(results.bwd_time):
+            if (
+                config.calculate_bwd_time
+                and results.bwd_time is not None
+                and not math.isnan(results.bwd_time)
+            ):
                 record_bwd_latency = BenchmarkRecord(
                     benchmark=BenchmarkInfo(
                         name=benchmark_name,
@@ -1358,10 +1369,12 @@ def _output_json_for_dashboard(
                         extra_info=benchmark_extra_info,
                     ),
                     model=ModelInfo(
-                        name=test_name+str(config.shape), type="attention-benchmark", origins=["pytorch"],
+                        name=test_name + str(config.shape),
+                        type="attention-benchmark",
+                        origins=["pytorch"],
                         extra_info={
                             "operator_name": backend,
-                    },
+                        },
                     ),
                     metric=MetricInfo(
                         name="backward latency",
@@ -1400,7 +1413,7 @@ def main(
     Usage Examples:
         # Use a yml config file
         python score_mod.py --config basic_config.yaml
-        
+
         # Use a json config file
         python score_mod.py --config my_config.json
 
@@ -1440,7 +1453,7 @@ def main(
 
     # Always calculate throughput
     throughput = True
-    print('Backend: ', backend)
+    print("Backend: ", backend)
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -1481,9 +1494,7 @@ def main(
 
     # Output JSON for dashboard if requested
     if output_json_for_dashboard:
-        _output_json_for_dashboard(
-            results, output_json_for_dashboard, benchmark_name
-        )
+        _output_json_for_dashboard(results, output_json_for_dashboard, benchmark_name)
 
 
 if __name__ == "__main__":
@@ -1608,7 +1619,7 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
 
     # Remove config and print_config from args before passing to main
     args_dict = vars(args)
-    args_dict.pop('config', None)
-    args_dict.pop('print_config', None)
+    args_dict.pop("config", None)
+    args_dict.pop("print_config", None)
 
     main(**args_dict)
