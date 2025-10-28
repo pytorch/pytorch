@@ -138,7 +138,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 return tensor**self.norm_type
         return tensor
 
@@ -149,7 +149,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -290,6 +290,13 @@ def common_reduction_strategy(
                     # reduce(avg) is not linear for unevenly sharded tensors
                     reduction_linear = False
                     break
+
+        for p in op_spec.output_spec.placements:
+            # when the partial reduction op matches the global reduction op,
+            # we can delay redistribution (i.e max, max)
+            if isinstance(p, Partial) and p.reduce_op != reduction_op:
+                reduction_linear = False
+                break
 
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
@@ -432,11 +439,15 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    reduction_linear = all(
+        all(not p.is_partial() for p in op_spec.output_spec.placements)
+        for op_spec in input_strategy.strategies
+    )
     return common_reduction_strategy(
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_linear=True,
+        reduction_linear=reduction_linear,
         reduction_op=NormReduction(norm_type),
     )
 
@@ -459,10 +470,14 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         if not isinstance(op_strategy, OpStrategy):
             raise AssertionError(f"Expected OpStrategy, got {type(op_strategy)}")
         reduce_dims = list(range(op_strategy.ndim))
+        reduction_linear = all(
+            all(not p.is_partial() for p in op_spec.output_spec.placements)
+            for op_spec in op_strategy.strategies
+        )
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=True,
+            reduction_linear=reduction_linear,
             reduction_op=NormReduction(norm_type),
         )
         output_tuple_strategy_children.append(output_strategy)
