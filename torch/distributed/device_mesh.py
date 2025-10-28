@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import copy
 import logging
 import os
 import threading
@@ -142,6 +143,28 @@ else:
             self._backend_cache: dict[_MeshLayout, str] = {}
             self._lock = threading.Lock()
 
+        def __getstate__(self):
+            state = self.__dict__.copy()
+            state.pop(
+                "_lock"
+            )  # locks aren't picklable, so we will recreate during load.
+            return state
+
+        def __setstate__(self, state):
+            self._lock = threading.Lock()
+            self.__dict__.update(state)
+
+        def __deepcopy__(self, obj):
+            cls = self.__class__
+            new = cls.__new__(cls)
+            obj[id(self)] = new
+            for k, v in self.__dict__.items():
+                if k == "_lock":
+                    new._lock = threading.Lock()  # fresh lock
+                else:
+                    setattr(new, k, copy.deepcopy(v, obj))
+            return new
+
         def get_rank_map(self) -> torch.Tensor:
             with self._lock:
                 return self._rank_map
@@ -149,10 +172,6 @@ else:
         def get_root_mesh(self) -> Optional["DeviceMesh"]:
             with self._lock:
                 return self._root_mesh
-
-        def set_root_mesh(self, root_mesh: "DeviceMesh") -> None:
-            with self._lock:
-                self._root_mesh = root_mesh
 
         def update_backend_cache(self, layout: _MeshLayout, backend: str) -> None:
             with self._lock:
@@ -162,6 +181,8 @@ else:
         def get_backend_from_cache(self, layout: _MeshLayout) -> Optional[str]:
             with self._lock:
                 return self._backend_cache.get(layout, None)
+
+    torch.serialization.add_safe_globals([_SharedState])
 
     class DeviceMesh:
         """
@@ -212,10 +233,8 @@ else:
         """
 
         _device_type: str
-        _rank_map: torch.Tensor  # TODO: remove
         _mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
-        _root_mesh: Optional["DeviceMesh"] = None  # TODO: remove
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         _shared_state: _SharedState
@@ -246,14 +265,16 @@ else:
                 )
                 _layout = _MeshLayout(mesh_tensor.size(), mesh_tensor.stride())
                 rank_map = mesh_tensor.flatten()
+                self._shared_state = _SharedState(rank_map, self)
             else:
                 if _layout is None or _shared_state is None:
                     raise TypeError(
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
-                if _shared_state.get_root_mesh() is None:
-                    _shared_state.set_root_mesh(self)
                 rank_map = _shared_state.get_rank_map()
+                self._shared_state = _shared_state
+                if self._shared_state.get_root_mesh() is None:
+                    self._shared_state._root_mesh = self
 
             assert _layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
@@ -276,11 +297,6 @@ else:
                     f"backend_override should have the same length as the number of mesh dimensions, "
                     f"but got {len(backend_override)} and {len(self._layout)}."
                 )
-
-            if _shared_state is None:
-                self._shared_state = _SharedState(rank_map, self)
-            else:
-                self._shared_state = _shared_state
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -528,7 +544,8 @@ else:
             return dim_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
-            return not_none(self._shared_state.get_root_mesh())
+            root_mesh = self._shared_state.get_root_mesh()
+            return root_mesh if root_mesh is not None else self
 
         def __enter__(self) -> "DeviceMesh":
             # set this mesh as the current mesh in mesh env
