@@ -1858,7 +1858,7 @@ L['a'].size()[1] > L['a'].size()[0]
             show_guards(tensor),
             """\
 L['a'].size()[1] < L['a'].size()[0]
-L['a'].size()[0] <= 19
+3 <= L['a'].size()[0] and L['a'].size()[0] <= 19
 L['a'].size()[1] <= 18""")
 
     def test_sym_storage_offset(self):

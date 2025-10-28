@@ -140,7 +140,7 @@ def key_path_to_source(
         source: Source = LocalSource("args")
     else:
         source, kp = sourced_prefixes.get(kp)
-    # pyrefly: ignore  # bad-assignment
+
     for k in kp:
         if isinstance(k, SequenceKey):
             source = GetItemSource(source, k.idx)
