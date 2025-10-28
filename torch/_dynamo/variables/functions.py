@@ -31,9 +31,9 @@ import logging
 import sys
 import traceback
 import types
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import FunctionType
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 from weakref import WeakKeyDictionary

@@ -423,10 +423,8 @@ Also see {ref}`saved-tensors-hooks-doc`.
 
 ```{eval-rst}
 .. autofunction:: torch.autograd.graph.get_gradient_edge
-```
 
-```{eval-rst}
-.. autofunction:: torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch
+
 ```
 
 % This module needs to be documented. Adding here in the meantime

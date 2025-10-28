@@ -247,7 +247,7 @@ class TritonBenchmarker(Benchmarker):
 
     @may_distort_benchmarking_result
     @time_and_count
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def benchmark_gpu(
         self: Self,
         _callable: Callable[[], Any],
