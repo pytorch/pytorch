@@ -303,7 +303,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 log = logging.getLogger(__name__)
@@ -2616,7 +2616,7 @@ class VariableBuilder:
         fake_tensor_value = example_value
         assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
             f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-            "({self.tx.fake_mode}) from InstructionTranslator"
+            "({self.tx.fake_mode}) from InstructionTranslatorBase"
         )
 
         # There's something a bit incoherent about pass_arg_as_tensor,
@@ -2700,7 +2700,7 @@ class VariableBuilder:
             fake_tensor_value = example_value
             assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
                 f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-                "({self.tx.fake_mode}) from InstructionTranslator"
+                "({self.tx.fake_mode}) from InstructionTranslatorBase"
             )
 
             proxy.node.meta["grapharg"] = GraphArg(
@@ -3268,7 +3268,7 @@ def is_dynamic_source(source_name: str) -> bool:
 
 
 def record_automatic_dynamic(
-    tx: "InstructionTranslator", name: str, e: torch.Tensor
+    tx: "InstructionTranslatorBase", name: str, e: torch.Tensor
 ) -> FrameStateSizeEntry:
     # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
     ex_size = e.size()
@@ -3722,7 +3722,7 @@ class SourcelessBuilder:
         raise AssertionError("Use SourcelessBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value) -> VariableTracker:
         value_type = type(value)
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
         if fast_handler:
@@ -3868,7 +3868,7 @@ class SourcelessBuilder:
             )
         )
 
-        def passthrough(tx: "InstructionTranslator", value):
+        def passthrough(tx: "InstructionTranslatorBase", value):
             return value
 
         for cls in VariableTrackerMeta.all_subclasses:
@@ -3890,7 +3890,7 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
             return MutableMappingVariable(value, mutation_type=ValueMutationNew())

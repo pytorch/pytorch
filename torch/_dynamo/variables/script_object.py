@@ -106,7 +106,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     "Use method calls instead of attribute access.",
                 ],
             )
-
+        assert self.source is not None
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
             source=AttrSource(self.source, name),

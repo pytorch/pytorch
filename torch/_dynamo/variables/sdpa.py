@@ -1,5 +1,5 @@
 from inspect import getattr_static
-from typing import Any, Iterable, TYPE_CHECKING, TypeGuard
+from typing import Any, Sequence, TYPE_CHECKING, TypeGuard
 
 from torch._guards import Source
 from torch.backends.cuda import SDPAParams
@@ -43,7 +43,7 @@ class SDPAParamsVariable(VariableTracker):
         return TorchInGraphFunctionVariable(SDPAParams).call_function(tx, params, {})
 
     def __init__(
-        self, proxy: Proxy, param_vars: Iterable[VariableTracker], **kwargs: Any
+        self, proxy: Proxy, param_vars: Sequence[VariableTracker], **kwargs: Any
     ) -> None:
         self.proxy = proxy
         self.param_vars = param_vars

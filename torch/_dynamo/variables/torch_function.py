@@ -34,7 +34,6 @@ from typing import Any, Generator, Iterable, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
-from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._guards import Source
 from torch.overrides import (
     _get_overloaded_args,
@@ -68,6 +67,7 @@ from .user_defined import UserDefinedObjectVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 bin_ops = [
@@ -312,7 +312,7 @@ class SymbolicTorchFunctionState:
 
     def call_torch_function_mode(
         self,
-        tx: InstructionTranslator,
+        tx: "InstructionTranslator",
         fn: VariableTracker,
         types: TupleVariable,
         args: Iterable[Any],

@@ -22,10 +22,9 @@ optimizer-specific optimizations and safety guarantees.
 
 import logging
 import weakref
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, TYPE_CHECKING
 
 import torch
-from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.variables.tensor import TensorVariable
 from torch._guards import Source
 from torch._logging import getArtifactLogger
@@ -47,6 +46,10 @@ from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class ArgMappingException(Exception):
@@ -103,10 +106,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: InstructionTranslator,
+        tx: "InstructionTranslator",
         name: str,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
@@ -142,6 +145,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
         if name in ("_init_group", "step"):
+            assert self.source
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         if name == "param_groups":
@@ -236,7 +240,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if "step" in state and state["step"].is_cpu:
                 state["step"] = state["step"].to(p.device)
 
-    def map_sources_and_install_guards(self, tx: InstructionTranslator) -> None:
+    def map_sources_and_install_guards(self, tx: "InstructionTranslator") -> None:
         from ..decorators import mark_static_address
         from .lazy import LazyVariableTracker
 
@@ -256,12 +260,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
         )
 
         state_source = self.source and AttrSource(self.source, "state")
-
         state_vt = VariableTracker.build(tx, self.value.state, state_source)
 
         # We need to realize the top level state dict to populate
         # the guard locals
         state_vt.realize()
+        assert state_source is not None
         tx.output.guard_on_key_order.add(state_source)
 
         # Populate self.grad_to_source and self.tensor_to_source so that we can

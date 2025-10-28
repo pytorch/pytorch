@@ -123,10 +123,12 @@ class WorldMetaClassVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
+            assert self.source
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return ProcessGroupVariable(self.value.WORLD)
         elif name == "NON_GROUP_MEMBER":
+            assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return EnumVariable(self.value.NON_GROUP_MEMBER)
