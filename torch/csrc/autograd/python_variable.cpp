@@ -1154,6 +1154,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       }
       const auto mesh_dim_size = py::cast<int64_t>(mesh_size(idx));
       tensor_shape[shard_dim] *= mesh_dim_size;
+      // recover tensor stride by modifying the strides that are
+      // larger than the current stride on the shard_dim.
       for (const auto i : c10::irange(tensor_strides.size())) {
         if (static_cast<int64_t>(i) != shard_dim &&
             tensor_strides[i] >= tensor_strides[shard_dim]) {
