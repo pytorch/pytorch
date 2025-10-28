@@ -95,9 +95,3 @@ Example tests excerpt (OpenReg):
     :language: python
     :linenos:
 ```
-
-## Debugging Tips
-
-- If Python cannot import the `_C` module: check that the extension is built and that `PYTHONPATH` includes the build output.
-- If generator methods raise `TORCH_CHECK` or NotImplemented errors: the generator impl may contain placeholder stubs — implement the stubbed methods or provide clear runtime errors.
-- If you see mismatched device indices or unexpected `device.index is None` behavior, confirm that your wrapper correctly converts `int | str | torch.device` to a device index and that lazy device initialization is performed where necessary.
