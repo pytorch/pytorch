@@ -629,7 +629,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
                     source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
             (torch.__version__, lambda self, value: TorchVersionVariable()),
@@ -927,8 +927,10 @@ class VariableBuilder:
                     )
             elif inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)
+            elif inspect.isfunction(value):
+                self.install_guards(GuardBuilder.CLOSURE_MATCH)
             elif callable(value):
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+                self.install_guards(GuardBuilder.ID_MATCH)
             else:
                 self.install_guards(GuardBuilder.TYPE_MATCH)
             return NumpyVariable(value, source=self.source)
@@ -945,7 +947,7 @@ class VariableBuilder:
             return NumpyTypeInfoVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return CollectiveFunctionRewriteVariable.create(
                 self.tx,
                 value,
@@ -1371,7 +1373,7 @@ class VariableBuilder:
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
-            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
