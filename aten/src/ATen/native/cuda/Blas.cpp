@@ -329,10 +329,14 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
   #if defined(CUDA_VERSION) || defined(USE_ROCM)
   const auto scalar_type = mat1.scalar_type();
   return (beta.toComplexDouble() == 1.0
-    // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
-    // is to use lt interface only when self is bias.
-    && self.dim() == 1 && self.sizes()[0] == mat2_sizes[1] && self.is_contiguous()
     && result.dim() == 2 && result.is_contiguous()
+    // Conditions for bias to be fusable
+    && (
+      self.is_contiguous() &&
+      // NOTE: fine to have 1-len dims to the left from the leading one
+      (self.dim() == 1 || self.squeeze().dim() == 1) &&
+      self.sizes().back() == mat2_sizes[1]
+    )
     && ( // some dtype restrictions
       #ifndef USE_ROCM
       scalar_type == at::ScalarType::Double ||

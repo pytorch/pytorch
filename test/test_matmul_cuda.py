@@ -5,6 +5,7 @@ import time
 import unittest
 from itertools import product
 from functools import partial
+from typing import Callable
 
 import torch
 
@@ -88,14 +89,21 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_tf32 = True
         super().tearDown()
 
-    def cublas_addmm(self, size: int, dtype: torch.dtype, reduced_precision: bool = False, fp16_accumulate: bool = False):
+    def cublas_addmm(
+        self,
+        size: int,
+        dtype: torch.dtype,
+        reduced_precision: bool = False,
+        fp16_accumulate: bool = False,
+        bias_shape_modifier: Callable | None = None,
+    ):
         #
         # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
         # results from the CUDA invocation of torch.addmm and the CPU invocation
         # (which does not use CUDA backend).
         #
         # Get dims
-        n, m, p = (size + 1, size, size + 2)
+        m, k, n = (size + 1, size, size + 2)
         # Disable reduced precision reductions in BFloat16 to bypass some kernels
         # which fail the threshold check
         orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
@@ -107,10 +115,12 @@ class TestMatmulCuda(InductorTestCase):
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
         make_arg = partial(make_tensor, dtype=dtype, device="cpu")
+
+        bias_shape_modifier = (lambda shape: shape) if bias_shape_modifier is None else bias_shape_modifier
+        m_input = make_arg(bias_shape_modifier((m, n)))
+        m_1 = make_arg((m, k))
+        m_2 = make_arg((k, n))
         m_beta = make_arg(1)
-        m_input = make_arg((n, p))
-        m_1 = make_arg((n, m))
-        m_2 = make_arg((m, p))
         # scale to abate overflows in fp16 accum
         if fp16_accumulate:
             m_1 = m_1 / 100
@@ -176,6 +186,25 @@ class TestMatmulCuda(InductorTestCase):
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
             self.cublas_addmm(size, dtype, True)
+
+
+    @onlyCUDA
+    # imported 'tol' as 'xtol' to avoid aliasing in code above
+    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=1e-4),
+                        torch.bfloat16: xtol(atol=1e-3, rtol=1e-4),
+                        torch.float32: xtol(atol=1e-3, rtol=1e-4)})
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    @parametrize("size", [128])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_cublas_addmm_bias_shapes(self, size: int, dtype: torch.dtype, backend):
+        with blas_library_context(backend):
+            # 2D bias
+            self.cublas_addmm(size, dtype, bias_shape_modifier=lambda shape: shape)
+            # 1D bias which is row-broadcast to 2D
+            self.cublas_addmm(size, dtype, bias_shape_modifier=lambda shape: (1, shape[-1]))
+            # 1D bias which row-broadcasts
+            self.cublas_addmm(size, dtype, bias_shape_modifier=lambda shape: (shape[-1],))
+
 
     @onlyCUDA
     @dtypes(torch.float16)
