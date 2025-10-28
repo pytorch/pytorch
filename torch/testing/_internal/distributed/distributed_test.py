@@ -658,13 +658,13 @@ class DistributedTest:
             return (group, group_id, rank)
 
         def _init_full_group_test(self, **kwargs):
-            group = list(range(0, dist.get_world_size()))
+            group = list(range(dist.get_world_size()))
             group_id = dist.new_group(**kwargs)
             rank = dist.get_rank()
             return (group, group_id, rank)
 
         def _init_global_test(self):
-            group = list(range(0, dist.get_world_size()))
+            group = list(range(dist.get_world_size()))
             group_id = dist.group.WORLD
             rank = dist.get_rank()
             return (group, group_id, rank)
@@ -678,7 +678,7 @@ class DistributedTest:
             # Verify buffers across ranks.
             m1_buffers = list(m1.buffers())
             m2_buffers = list(m2.buffers())
-            for buf1, buf2 in zip(m1_buffers, m2_buffers):
+            for buf1, buf2 in zip(m1_buffers, m2_buffers, strict=True):
                 gathered_bufs = [
                     torch.empty_like(buf1) for _ in range(dist.get_world_size())
                 ]
@@ -725,7 +725,7 @@ class DistributedTest:
                 lines = out.getvalue().splitlines()
 
             def format_line(var):
-                return f"env:{var}={os.environ[var] if var in os.environ else 'N/A'}"
+                return f"env:{var}={os.environ.get(var, 'N/A')}"
 
             # Check relevant env vars
             vars = [
@@ -1114,7 +1114,7 @@ class DistributedTest:
                 averager = averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
                 )
-                for step in range(0, 20):
+                for step in range(20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
                     for params in model.parameters():
@@ -1143,7 +1143,7 @@ class DistributedTest:
                 averager = averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
                 )
-                for step in range(0, 20):
+                for step in range(20):
                     # Reset the parameters at every step.
                     for param_group in opt.param_groups:
                         for params in param_group["params"]:
@@ -1203,7 +1203,7 @@ class DistributedTest:
                 averager = averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
                 )
-                for step in range(0, 20):
+                for step in range(20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
                     for params in model.parameters():
@@ -1220,7 +1220,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
-        @require_world_size(4)
+        @require_exact_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_3_level_hierarchical_model_averager(self):
             rank = dist.get_rank()
@@ -1284,7 +1284,7 @@ class DistributedTest:
             expected_global_avg_tensor = (
                 torch.ones_like(param.data) * sum(range(world_size)) / world_size
             )
-            for step in range(0, 25):
+            for step in range(25):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
                 for params in model.parameters():
@@ -1390,7 +1390,7 @@ class DistributedTest:
 
             for val in ["1", "0"]:
                 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
-                for src in range(0, world_size):
+                for src in range(world_size):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id).fill_(
                         src
                     )
@@ -1409,7 +1409,7 @@ class DistributedTest:
                 for req in reqs:
                     req.wait()
 
-                for src in range(0, world_size):
+                for src in range(world_size):
                     self.assertEqual(recv_tensors[src], expected_tensors[src])
 
             self._barrier()
@@ -1505,7 +1505,7 @@ class DistributedTest:
             rank = dist.get_rank()
             p2p_op_list = []
 
-            for src in range(0, dist.get_world_size()):
+            for src in range(dist.get_world_size()):
                 if src == rank:
                     continue
                 send_tensor = _build_tensor(rank + 1)
@@ -1528,7 +1528,7 @@ class DistributedTest:
             rank = dist.get_rank()
             p2p_op_list = []
 
-            for src in range(0, dist.get_world_size()):
+            for src in range(dist.get_world_size()):
                 if src == rank:
                     continue
                 send_tensor = _build_tensor(rank + 1)
@@ -1602,10 +1602,10 @@ class DistributedTest:
             tensor = _build_tensor(rank + 1, device_id=device_id)
             profiler_cls = profiler_ctx if profiler_ctx is not None else nullcontext()
             with profiler_cls as prof:
-                for src in range(0, world_size):
+                for src in range(world_size):
                     if src == rank:
                         # Send mode
-                        for dst in range(0, world_size):
+                        for dst in range(world_size):
                             if dst == rank:
                                 continue
                             dist.send(tensor, dst)
@@ -1674,10 +1674,10 @@ class DistributedTest:
             tensor = _build_tensor(send_size)
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
-                for src in range(0, dist.get_world_size()):
+                for src in range(dist.get_world_size()):
                     if src == rank:
                         # Send mode
-                        for dst in range(0, dist.get_world_size()):
+                        for dst in range(dist.get_world_size()):
                             if dst == rank:
                                 continue
                             dist.send(tensor, dst)
@@ -1742,10 +1742,10 @@ class DistributedTest:
 
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
-                for dst in range(0, dist.get_world_size()):
+                for dst in range(dist.get_world_size()):
                     if dst == rank:
                         # Recv mode
-                        for dst in range(0, dist.get_world_size()):
+                        for dst in range(dist.get_world_size()):
                             if dst == rank:
                                 continue
 
@@ -1846,10 +1846,10 @@ class DistributedTest:
             tensor = _build_tensor(send_recv_size, value=rank)
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
-                for dst in range(0, world_size):
+                for dst in range(world_size):
                     if dst == rank:
                         # Recv mode
-                        for src in range(0, world_size):
+                        for src in range(world_size):
                             if src == rank:
                                 continue
                             output_tensor = _build_tensor(send_recv_size, value=-1)
@@ -3045,7 +3045,7 @@ class DistributedTest:
                 curr_values = master_values if rank == src else worker_values
                 tensors = [
                     _build_tensor(src + 1, val, dtype=dtype)
-                    for dtype, val in zip(dtypes, curr_values)
+                    for dtype, val in zip(dtypes, curr_values, strict=True)
                 ]
                 if cuda:
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
@@ -3066,7 +3066,9 @@ class DistributedTest:
                 )
                 expected_tensors = [
                     _build_tensor(src + 1, expected_value, dtype=dtype)
-                    for dtype, expected_value in zip(dtypes, expected_values)
+                    for dtype, expected_value in zip(
+                        dtypes, expected_values, strict=True
+                    )
                 ]
                 self.assertEqual(tensors, expected_tensors)
 
@@ -3338,7 +3340,7 @@ class DistributedTest:
                 )
                 if rank == dest:
                     expected_tensors = [_build_tensor(dest + 1, i) for i in group]
-                    for t1, t2 in zip(tensors, expected_tensors):
+                    for t1, t2 in zip(tensors, expected_tensors, strict=True):
                         self.assertEqual(t1, t2)
 
             self._barrier()
@@ -3440,7 +3442,7 @@ class DistributedTest:
                 expected_tensors = [
                     _build_tensor(dest + 1, i, dtype=dtype) for i in group
                 ]
-                for t1, t2 in zip(tensors, expected_tensors):
+                for t1, t2 in zip(tensors, expected_tensors, strict=True):
                     self.assertEqual(t1, t2)
 
             self._barrier()
@@ -3624,8 +3626,8 @@ class DistributedTest:
                 tensor_shapes=tensor_shapes,
             )
 
-            for l1, l2 in zip(output_tensor_lists, expected_tensors):
-                for t1, t2 in zip(l1, l2):
+            for l1, l2 in zip(output_tensor_lists, expected_tensors, strict=True):
+                for t1, t2 in zip(l1, l2, strict=True):
                     if not torch.equal(t1, t2):
                         return False
             return True
@@ -3824,7 +3826,7 @@ class DistributedTest:
                     ]
                     out_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
                 dist.all_to_all(out_tensors, in_tensors, group=group_id)
-                for t1, t2 in zip(out_tensors, expected_tensors):
+                for t1, t2 in zip(out_tensors, expected_tensors, strict=True):
                     self.assertEqual(t1, t2)
             self._barrier()
 
@@ -4203,7 +4205,7 @@ class DistributedTest:
 
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
-            for p_gpu, p_DDP in zip(param_gpu, param_DDP):
+            for p_gpu, p_DDP in zip(param_gpu, param_DDP, strict=True):
                 self.assertEqual(p_gpu, p_DDP)
 
         def _test_DDP_niter(
@@ -4618,6 +4620,7 @@ class DistributedTest:
                     for hook_param, allreduce_param in zip(
                         ddp_model_with_optimizer_hook.parameters(),
                         ddp_model_with_no_hook.parameters(),
+                        strict=True,
                     ):
                         self.assertEqual(hook_param, allreduce_param)
 
@@ -4649,6 +4652,7 @@ class DistributedTest:
                     for hook_param, allreduce_param in zip(
                         ddp_model_with_optimizer_hook.parameters(),
                         ddp_model_with_no_hook.parameters(),
+                        strict=True,
                     ):
                         self.assertEqual(hook_param, allreduce_param)
 
@@ -4825,7 +4829,9 @@ class DistributedTest:
                         optimizer_kwargs=optim_kwargs,
                     )
 
-                for p1, p2 in zip(model.parameters(), model_optim_in_bwd.parameters()):
+                for p1, p2 in zip(
+                    model.parameters(), model_optim_in_bwd.parameters(), strict=True
+                ):
                     self.assertEqual(p1, p2, "Parameters not initially equal!")
                 # Enable determinism in cudnn operators
                 with torch.backends.cudnn.flags(
@@ -4843,7 +4849,9 @@ class DistributedTest:
                             inp
                         ).sum().backward()  # runs optimizer as well
                         for p1, p2 in zip(
-                            model.parameters(), model_optim_in_bwd.parameters()
+                            model.parameters(),
+                            model_optim_in_bwd.parameters(),
+                            strict=True,
                         ):
                             self.assertEqual(
                                 p1, p2, f"Params not equal at iteration {i}"
@@ -5323,7 +5331,9 @@ class DistributedTest:
                     # sync grads
                     step_model(ddp_model, ddp_input, ddp_target)
 
-                for i, j in zip(model.parameters(), ddp_model.parameters()):
+                for i, j in zip(
+                    model.parameters(), ddp_model.parameters(), strict=True
+                ):
                     if not i.requires_grad:
                         continue
                     if iteration % 2 == 0:
@@ -5562,6 +5572,7 @@ class DistributedTest:
             for i, j in zip(
                 ddp_model_grad_not_view.parameters(),
                 ddp_model_grad_is_view.parameters(),
+                strict=True,
             ):
                 self.assertEqual(i, j)
 
@@ -5667,7 +5678,9 @@ class DistributedTest:
                     target,
                 )
                 for p1, p2 in zip(
-                    net.parameters(), net_using_post_localSGD_opt.parameters()
+                    net.parameters(),
+                    net_using_post_localSGD_opt.parameters(),
+                    strict=True,
                 ):
                     self.assertEqual(p1.data, p2.data)
 
@@ -6212,7 +6225,7 @@ class DistributedTest:
         )
         def test_ddp_logging_data_cpu(self):
             def parse_env(var):
-                return os.environ[var] if var in os.environ else "N/A"
+                return os.environ.get(var, "N/A")
 
             dist.set_debug_level(dist.DebugLevel.INFO)
             _, group_id, _ = self._init_global_test()
@@ -6743,6 +6756,7 @@ class DistributedTest:
         )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        @require_exact_world_size(4)
         def test_gather_object(self):
             return self._test_gather_object()
 
@@ -6751,6 +6765,7 @@ class DistributedTest:
         )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        @require_exact_world_size(4)
         def test_gather_object_subgroup(self):
             default = _get_default_group()
             backend = dist.get_backend(default)
@@ -6815,7 +6830,7 @@ class DistributedTest:
             # they are the same as new_model on rank_to_broadcast.
             if rank == rank_to_broadcast:
                 expected_states = new_model.state_dict().values()
-                for t, expected in zip(net_module_states, expected_states):
+                for t, expected in zip(net_module_states, expected_states, strict=True):
                     self.assertEqual(t, expected)
 
         @skip_if_lt_x_gpu(2)
@@ -7132,7 +7147,9 @@ class DistributedTest:
 
             # Validate model state dicts are equal
             for (_, local_tensor), (_, dist_tensor) in zip(
-                local_model.state_dict().items(), net.module.state_dict().items()
+                local_model.state_dict().items(),
+                net.module.state_dict().items(),
+                strict=True,
             ):
                 self.assertEqual(local_tensor, dist_tensor)
 
@@ -7463,7 +7480,7 @@ class DistributedTest:
                 for baseline_iter in baseline_num_iters:
                     for offset in iteration_offsets:
                         mapping = dict.fromkeys(
-                            range(0, num_early_join_ranks), baseline_iter
+                            range(num_early_join_ranks), baseline_iter
                         )
                         # if num_early_join_ranks > 1, ranks > 0 that will join early
                         # iterate offset//2 more times than rank 0, to test nodes
@@ -7720,13 +7737,17 @@ class DistributedTest:
                     # materialized param grad is not touched by DDP, so its grad should
                     # be the same as if running locally.
                     for materialized_param, local_param in zip(
-                        ddp.module.fc2.parameters(), local_model.fc2.parameters()
+                        ddp.module.fc2.parameters(),
+                        local_model.fc2.parameters(),
+                        strict=True,
                     ):
                         self.assertEqual(materialized_param.grad, local_param.grad)
 
                     # fc1 parameter grad should still be different, due to allreduce.
                     for synced_param, local_param in zip(
-                        ddp.module.fc1.parameters(), local_model.fc1.parameters()
+                        ddp.module.fc1.parameters(),
+                        local_model.fc1.parameters(),
+                        strict=True,
                     ):
                         self.assertFalse(synced_param.grad == local_param.grad)
 
@@ -8579,7 +8600,7 @@ class DistributedTest:
 
                 # Verify grads are the same
                 for local_param, dist_param in zip(
-                    local_net.parameters(), net.parameters()
+                    local_net.parameters(), net.parameters(), strict=True
                 ):
                     local_grad = local_param.grad
                     dist_grad = dist_param.grad
@@ -8629,7 +8650,7 @@ class DistributedTest:
             torch._C._functions.UndefinedGrad()(out).backward()
             torch._C._functions.UndefinedGrad()(local_out).backward()
             for (dist_param_name, dist_param), (local_param_name, local_param) in zip(
-                net.named_parameters(), local_net.named_parameters()
+                net.named_parameters(), local_net.named_parameters(), strict=True
             ):
                 dist_grad = dist_param.grad
                 local_grad = local_param.grad
@@ -8687,7 +8708,9 @@ class DistributedTest:
             self.assertTrue(
                 static_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
             )
-            for i, j in zip(base_model.parameters(), static_model.parameters()):
+            for i, j in zip(
+                base_model.parameters(), static_model.parameters(), strict=True
+            ):
                 self.assertEqual(i, j)
 
         @require_backend_is_available({"gloo"})
@@ -9295,7 +9318,7 @@ class DistributedTest:
                     loss_static.backward()
                     self._model_step(model_static_graph)
                     for p, p_static in zip(
-                        model.parameters(), model_static_graph.parameters()
+                        model.parameters(), model_static_graph.parameters(), strict=True
                     ):
                         self.assertEqual(p, p_static)
 
@@ -9972,7 +9995,7 @@ class DistributedTest:
                         p.grad.data = p.grad / iters
 
                     for p_ddp, p_local in zip(
-                        model.parameters(), local_model.parameters()
+                        model.parameters(), local_model.parameters(), strict=True
                     ):
                         self.assertTrue(
                             torch.allclose(p_ddp.grad, p_local.grad),
@@ -10189,7 +10212,9 @@ class DistributedTest:
             #  (refer to https://github.com/numpy/numpy/blob/266aad7478bc7fbcc55eea7f942a0d373b838396/numpy/random/mtrand.pyi)
             # To make sure random state was restored properly, all entries should equal the original
             for entry1, entry2 in zip(
-                hook_state.rng.get_state(), dummy_hook_state.rng.get_state()
+                hook_state.rng.get_state(),
+                dummy_hook_state.rng.get_state(),
+                strict=True,
             ):
                 np.testing.assert_array_equal(entry1, entry2)
 
@@ -10210,7 +10235,7 @@ class DistributedTest:
 
             # Check that gradients after 10 epochs are the same
             for orig_param, dummy_param in zip(
-                ddp_model.parameters(), dummy_ddp_model.parameters()
+                ddp_model.parameters(), dummy_ddp_model.parameters(), strict=True
             ):
                 self.assertEqual(orig_param.grad, dummy_param.grad)
 
@@ -10297,7 +10322,9 @@ class DistributedTest:
                 self.assertEqual(out_ddp, out_ddp_static)
                 out_ddp.backward()
                 out_ddp_static.backward()
-                for p1, p2 in zip(ddp.parameters(), ddp_static.parameters()):
+                for p1, p2 in zip(
+                    ddp.parameters(), ddp_static.parameters(), strict=True
+                ):
                     self.assertEqual(p1.grad, p2.grad)
 
         @skip_if_lt_x_gpu(2)
@@ -10390,7 +10417,9 @@ class DistributedTest:
                 test_model_1._get_ddp_logging_data().get("num_buckets_reduced"), 1
             )
 
-            for i, j in zip(base_model.parameters(), test_model_1.parameters()):
+            for i, j in zip(
+                base_model.parameters(), test_model_1.parameters(), strict=True
+            ):
                 self.assertEqual(i, j)
 
 
