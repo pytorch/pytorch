@@ -1989,7 +1989,7 @@ class CooperativeReductionWorkspaceCache:
         cached = self.ready_for_reuse.get(nbytes)
         if cached:
             return cached.popleft()
-        ws_name, ws_offset = self.args.workspace(nbytes, False)
+        ws_name, _, ws_offset = self.args.workspace(nbytes, False)
         self.current_loop.append((nbytes, ws_name, ws_offset))
         return (ws_name, ws_offset)
 
@@ -2232,6 +2232,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
+    block_ptr_options_cls: type[BlockPtrOptions] = BlockPtrOptions
+    tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
+        TensorDescriptorOptions
+    )
 
     def __init__(
         self,
@@ -2697,9 +2701,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.filter_masks(mask_vars)
 
                 options_class = (
-                    BlockPtrOptions
+                    self.block_ptr_options_cls
                     if config.triton.use_block_ptr
-                    else TensorDescriptorOptions
+                    else self.tensor_descriptor_options_cls
                 )
                 nonlocal tma_compatibility_checker
                 if config.triton.use_block_ptr:
@@ -2723,7 +2727,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift=can_lift,
                     transpose_contiguous=transpose_contiguous,
                 )
-                if options_class == TensorDescriptorOptions:
+                if isinstance(options_class, TensorDescriptorOptions):
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -3179,7 +3183,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # unwrapped bf16/fp16 0d tensors are passed in as float32 scalars
             # see triton_utils.py:signature_of
             if dtype in (torch.float16, torch.bfloat16):
-                dtype = torch.float32
+                if config.triton.codegen_upcast_to_fp32:
+                    dtype = torch.float32
+                else:
+                    line += f".to({triton_type(dtype)})"
             shape = ()
 
         else:
@@ -5208,7 +5215,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 call_args.append(expr)
                 arg_types.append(type(expr))
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None):
+    def call_kernel(
+        self, name: str, node: Optional[IRNode] = None, deallocate_ws: bool = True
+    ):
         wrapper = V.graph.wrapper_code
         wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
@@ -5225,8 +5234,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton_meta=self.triton_meta,
         )
 
-        for ws in reversed(self.args.workspace_args):
-            wrapper.generate_workspace_deallocation(ws)
+        if deallocate_ws:
+            self.deallocate_workspaces()
 
     def codegen_nan_check(self) -> None:
         wrapper = V.graph.wrapper_code
