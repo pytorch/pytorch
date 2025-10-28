@@ -4600,7 +4600,7 @@ class TestCudaMallocAsync(TestCase):
         if not TEST_CUDAMALLOCASYNC:
             self.assertEqual(div1_end_mem - div1_start_mem, power2_div(nbytes, 1))
             self.assertEqual(div1_end_requested - div1_start_requested, nbytes)
-        
+
         # Check power of 2 when rounding is greater than 1GB.
         torch.cuda.memory.empty_cache()
         div1_start_mem = torch.cuda.memory_stats()[key_allocated]
