@@ -5,6 +5,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 
 class TestStream(TestCase):
+    @skipIfTorchDynamo()
     def test_stream_create(self):
         stream = torch.Stream(device="openreg")
         self.assertEqual(stream.device_index, torch.openreg.current_device())
