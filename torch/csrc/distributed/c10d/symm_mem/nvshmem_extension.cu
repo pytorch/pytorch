@@ -986,6 +986,89 @@ void tile_reduce(
   });
 }
 
+/* Multi-tile Communication */
+
+void multi_root_tile_reduce(
+    at::ArrayRef<at::Tensor> in_tiles,
+    at::Tensor& out_tile,
+    at::ArrayRef<int64_t> roots,
+    std::string group_name,
+    std::string reduce_op) {
+  /* Perform multiple tile reductions concurrently, with each tile reduced to a separate root.
+   Args:
+     - `in_tiles` is a list of input tensors.
+     - `out_tile` is the output tensor.
+     - `roots` is a list of root ranks corresponding to each input tile, in the same order. A rank cannot be a root more than once.
+     - `group_name` is the name of the group to use for the collective operation.
+     - `reduce_op` is the reduction operation to perform. Currently only "sum" is supported.
+   */
+  TORCH_CHECK(reduce_op == "sum", "tile_reduce: only sum is supported for now");
+  TORCH_CHECK(out_tile.dim() == 2, "Only 2D tensors are supported");
+  TORCH_CHECK(roots.size() == in_tiles.size(), "Number of roots must match number of tiles");
+
+  // Get device and stream
+  auto device = out_tile.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // Rendezvous all tensors, and find the tile "I" need to reduce
+  auto hdl = c10d::symmetric_memory::rendezvous(out_tile, group_name);
+  int rank = hdl->get_rank();
+  int world_size = hdl->get_world_size();
+  int i = 0, my_tile_idx = 0, root = world_size;
+  // Note: if there is no tile for the current rank, my_tile_idx will remain
+  // initial value 0, and root will remain `world_size`. This is OK. In
+  // `nvshmemx::tile_sum_reduce_block`, this rank would skip the reduction
+  // operation, but would still participate in the barrier.
+  for (auto& in_tile : in_tiles) {
+    TORCH_CHECK(in_tile.dim() == 2, "Only 2D tensors are supported");
+    c10d::symmetric_memory::rendezvous(in_tile, group_name);
+    TORCH_CHECK(roots[i] < world_size && roots[i] >= 0, "Invalid root");
+    if (roots[i] == rank) {
+      TORCH_CHECK(root == world_size, "Each rank can only be a root once");
+      my_tile_idx = i;
+      root = rank;
+    }
+    i++;
+  }
+
+  // Ideally 16 bytes per thread
+  int nblocks = at::ceil_div(
+      out_tile.numel() * out_tile.element_size(),
+      (int64_t)THREADS_PER_BLOCK * 16);
+  nblocks = std::min(nblocks, 24);
+
+  // Need one team per block
+  auto& team_manager = TeamManager::get(device);
+  auto [teams, teams_dev] = team_manager.get_n_teams(
+      group_name, hdl->get_rank_to_global_rank(), nblocks);
+
+  // Prepare launch parameters
+  auto shape = nvshmemx::make_shape(out_tile.sizes()[0], out_tile.sizes()[1]);
+  auto stride = nvshmemx::make_stride(out_tile.strides()[0], out_tile.strides()[1]);
+  auto in_tile_ptr = in_tiles[my_tile_idx].const_data_ptr();
+  auto out_tile_ptr = out_tile.mutable_data_ptr();
+
+  void* args[] = {
+      &in_tile_ptr,
+      &out_tile_ptr,
+      &shape,
+      &stride,
+      &root,
+      &teams_dev};
+
+  AT_DISPATCH_NVSHMEM_FLOATS(out_tile.scalar_type(), "multi_root_tile_reduce", [&]() {
+    nvshmemx_collective_launch(
+        (const void*)tile_reduce_kernel<scalar_t>,
+        dim3(nblocks),
+        dim3(THREADS_PER_BLOCK),
+        args,
+        0,
+        stream);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -1000,4 +1083,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
   m.impl("tile_reduce", c10d::nvshmem_extension::tile_reduce);
+  m.impl("multi_root_tile_reduce", c10d::nvshmem_extension::multi_root_tile_reduce);
 }

@@ -193,12 +193,12 @@ vTensor pack_biases_quantized_weights(
         src_kw_sz = b_sizes[Layout::BatchMatrices::width];
         src_kh_sz = b_sizes[Layout::BatchMatrices::height];
       } else if (bias.sizes().size() == 2) {
-        // skip batch dim for boardcasting; index -1
+        // skip batch dim for broadcasting; index -1
         src_kb_sz = 1;
         src_kw_sz = b_sizes[Layout::BatchMatrices::height];
         src_kh_sz = b_sizes[Layout::BatchMatrices::batch];
       } else {
-        // skip batch & height dim for boardcasting; index -2
+        // skip batch & height dim for broadcasting; index -2
         src_kb_sz = 1;
         src_kw_sz = b_sizes[Layout::BatchMatrices::batch];
         src_kh_sz = 1;
@@ -327,13 +327,13 @@ bool available_check_with_batch(
              weight.size(Layout::BatchMatrices::batch) ||
          bias->size(Layout::BatchMatrices::batch) == 1);
   } else if (bias->ndimension() == 2) {
-    // skip batch dim for boardcasting; index -1
+    // skip batch dim for broadcasting; index -1
     bias_available &=
         (bias->size(Layout::BatchMatrices::height) ==
              weight.size(Layout::BatchMatrices::width) ||
          bias->size(Layout::BatchMatrices::height) == 1);
   } else {
-    // skip batch & height dim for boardcasting; index -2
+    // skip batch & height dim for broadcasting; index -2
     bias_available &=
         (bias->size(Layout::BatchMatrices::batch) ==
              weight.size(Layout::BatchMatrices::width) ||

@@ -22,7 +22,8 @@ from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, largeTensorTest)
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
+     expectedFailureMPSComplex, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -58,7 +59,7 @@ if TEST_SCIPY:
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -1420,7 +1421,6 @@ class TestSparse(TestSparseBase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_bmm(self, device, dtype, coalesced):
@@ -1632,7 +1632,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     @coalescedonoff
-    @expectedFailureMPS
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
     @dtypesIfMPS(torch.float32, torch.complex64, torch.bfloat16, torch.float16)
@@ -1713,17 +1712,16 @@ class TestSparse(TestSparseBase):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
 
-            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense(), masked=True)
+            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
             gradcheck(lambda x, y: (x * y).to_dense(), [a, b], eps=1e-4)
             # Issues with 0-dim indices/values
-            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, eps=1e-4)
+            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, eps=3e-4, atol=5e-5)
 
-        # TODO: Re-enable these
-        # test_shape(2, 3, [2, 3, 4, 5])
-        # test_shape(2, 3, [2, 2, 0])
+        test_shape(2, 3, [2, 3, 4, 5])
+        test_shape(2, 3, [2, 2, 0])
+        test_shape(2, 3, [4, 5])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_dsmm(self, device, dtype, coalesced):
@@ -1853,7 +1851,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
 
     @coalescedonoff
-    @expectedFailureMPS
+    @expectedFailureMPSComplex
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_norm(self, device, dtype, coalesced):
@@ -2098,7 +2096,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(self.safeToDense(y2), expected)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_sparse_mask(self, device, dtype, coalesced):
@@ -5300,7 +5297,7 @@ class TestSparseAny(TestCase):
             x_dense = torch.eye(dense_dim, dtype=dtype, device=device)
             for sparse_dim_in in range(1, dense_dim):
                 x_sparse = x_dense.to_sparse(sparse_dim_in)
-                for sparse_dim_out in range(0, dense_dim):
+                for sparse_dim_out in range(dense_dim):
                     if sparse_dim_out == sparse_dim_in:
                         self.assertTrue(x_sparse.to_sparse(sparse_dim_out).sparse_dim() == sparse_dim_out)
                     else:
