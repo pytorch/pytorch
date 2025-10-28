@@ -107,7 +107,7 @@ class SuperVariable(VariableTracker):
             unimplemented_v2(
                 gb_type="1-arg super not implemented",
                 context="",
-                explanation="Dynamo failed to trace attribute `{name}` accessed "
+                explanation=f"Dynamo failed to trace attribute `{name}` accessed "
                 f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
                 "because only one argument of super() is not yet supported.",
                 hints=[],
