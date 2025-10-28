@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import inspect
 import warnings
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, overload, Protocol, Union
+from typing import Any, cast, Optional, overload, Protocol, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -133,16 +134,13 @@ class TorchDispatchMode:
 
         # Check if the subclass defines its own __torch_dispatch__
         if "__torch_dispatch__" in cls.__dict__:
-            original_dispatch = cls.__torch_dispatch__
-            # Apply the recursive dynamo disable decorator
-            # Use recursive=True to disable dynamo for all nested calls
-            cls.__torch_dispatch__ = torch._disable_dynamo(
-                original_dispatch, recursive=True
-            )
+            raw = inspect.getattr_static(cls, "__torch_dispatch__")
+            # _disable doesn't work on classmethods. This later fails in runtime anyways
+            if not isinstance(raw, classmethod):
+                wrapped = torch._disable_dynamo(raw, recursive=True)
+                cast(Any, cls).__torch_dispatch__ = wrapped
 
-    # Apply recursive dynamo disable to ensure compilation is disabled
-    # within dispatch modes and any functions they call
-    @torch._disable_dynamo(recursive=True)
+    @torch._disable_dynamo
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
