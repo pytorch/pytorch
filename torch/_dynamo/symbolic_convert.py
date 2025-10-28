@@ -4217,6 +4217,7 @@ class InstructionTranslatorBase(
         self.f_builtins: dict[str, Any] = f_builtins
         self.code_options: dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
+        self.closure = closure
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
