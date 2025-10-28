@@ -314,7 +314,7 @@ class TestVarlenAttention(NNTestCase):
             )
 
             varlen_grad_out = torch.ones_like(output)
-            varlen_grad = torch.autograd.grad(
+            _ = torch.autograd.grad(
                 outputs=output,
                 inputs=x_packed,
                 grad_outputs=varlen_grad_out,

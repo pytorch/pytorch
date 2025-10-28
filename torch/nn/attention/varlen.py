@@ -85,16 +85,13 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
+        philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
 
     rng_state_ = torch.zeros(
         (2,), dtype=torch.uint64, device=query.device
     )  # hardcoded since dropout is hardcoded to 0
-    return output, softmax_lse, rng_state_
-        # philox_offset = None
-    # print(philox_offset, philox_offset.shape)
-    # print(torch.zeros_like(philox_offset))
-    philox_offset_ = torch.zeros((), dtype=torch.uint64, device=query.device)
-    return output, softmax_lse, rng_state_, philox_offset_
+
+    return output, softmax_lse, rng_state_, philox_offset
 
 
 @_varlen_attn.register_fake
@@ -134,9 +131,8 @@ def _varlen_attn_fake(
         )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
-    philox_offset = torch.empty((), dtype=torch.uint64, device=query.device)
 
-    return output, logsumexp, rng_state, philox_offset
+    return output, logsumexp, rng_state
 
 
 def varlen_attn(
@@ -250,6 +246,7 @@ def _varlen_attn_backward(
     max_k: int,
     is_causal: bool,
     rng_state: torch.Tensor,
+    philox_offset: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     unused = torch.empty(0, device=query.device)
 
@@ -257,16 +254,9 @@ def _varlen_attn_backward(
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
 
-        grad_out = grad_out.contiguous()
-        query = query.contiguous()
-        key = key.contiguous()
-        value = value.contiguous()
-        out = out.contiguous()
-        lse = lse.contiguous()
-
         head_dim = query.size(-1)
         scale = 1.0 / (head_dim ** 0.5)
-        print(f"scale: {scale}")
+
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
             grad_out = grad_out,
             query = query,
