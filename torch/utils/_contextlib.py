@@ -86,13 +86,14 @@ def context_decorator(ctx, func):
     be a multi-shot context manager that can be directly invoked multiple times)
     or a callable that produces a context manager.
     """
-    assert not (callable(ctx) and hasattr(ctx, "__enter__")), (
-        f"Passed in {ctx} is both callable and also a valid context manager "
-        "(has __enter__), making it ambiguous which interface to use.  If you "
-        "intended to pass a context manager factory, rewrite your call as "
-        "context_decorator(lambda: ctx()); if you intended to pass a context "
-        "manager directly, rewrite your call as context_decorator(lambda: ctx)"
-    )
+    if callable(ctx) and hasattr(ctx, "__enter__"):
+        raise AssertionError(
+            f"Passed in {ctx} is both callable and also a valid context manager "
+            "(has __enter__), making it ambiguous which interface to use.  If you "
+            "intended to pass a context manager factory, rewrite your call as "
+            "context_decorator(lambda: ctx()); if you intended to pass a context "
+            "manager directly, rewrite your call as context_decorator(lambda: ctx)"
+        )
 
     if not callable(ctx):
 
