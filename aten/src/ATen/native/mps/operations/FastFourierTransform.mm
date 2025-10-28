@@ -63,14 +63,14 @@ using namespace mps;
 Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided, Tensor& out) {
   TORCH_CHECK(self.scalar_type() == kFloat || self.scalar_type() == kHalf, "Only float and half dtypes are supported");
   TORCH_CHECK(out.scalar_type() == c10::toComplexType(self.scalar_type()));
-  auto input_sizes = self.sizes();
-  DimVector out_sizes(input_sizes.begin(), input_sizes.end());
+  const auto input_sizes = self.sym_sizes();
+  SymDimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
   auto last_dim_halfsize = (input_sizes[last_dim]) / 2 + 1;
   if (onesided) {
     out_sizes[last_dim] = last_dim_halfsize;
   }
-  at::native::resize_output(out, out_sizes);
+  at::native::resize_output_symint(out, out_sizes);
 
   auto key = __func__ + getTensorsStringKey({self, out}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(onesided);
@@ -114,10 +114,10 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
                          Tensor& out) {
   TORCH_CHECK(self.is_complex(), "Input must be complex");
   TORCH_CHECK(out.scalar_type() == c10::toRealValueType(self.scalar_type()), "Unexpected output type");
-  auto in_sizes = self.sizes();
-  DimVector out_sizes(in_sizes.begin(), in_sizes.end());
+  const auto in_sizes = self.sym_sizes();
+  SymDimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
-  at::native::resize_output(out, out_sizes);
+  at::native::resize_output_symint(out, out_sizes);
   auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(last_dim_size);
   @autoreleasepool {
