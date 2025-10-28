@@ -889,7 +889,7 @@ void ImagingResampleHorizontalConvolution8u(
             _mm_loadu_si128((__m128i *) (lineIn_min + stride * i))),
             _mm_loadu_si128((__m128i *) (lineIn_min + stride * (i + 4))), 1);
 
-        // Extract lower part of each lane, cast to epi16 and reoder RGBARGBA -> RRGGBBAA
+        // Extract lower part of each lane, cast to epi16 and reorder RGBARGBA -> RRGGBBAA
         // RGBA: pix1 = [
         //   r0 0 r1 0  g0 0 g1 0  b0 0 b1 0  a0 0 a1 0
         //   r4 0 r5 0  g4 0 g5 0  b4 0 b5 0  a4 0 a5 0

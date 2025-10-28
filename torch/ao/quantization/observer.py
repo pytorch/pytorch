@@ -281,12 +281,12 @@ class UniformQuantizationObserverBase(ObserverBase):
         )
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             validate_qmin_qmax(quant_min, quant_max)
         self.quant_min, self.quant_max = calculate_qmin_qmax(
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             quant_min,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             quant_max,
             self.has_customized_qrange,
             self.dtype,
