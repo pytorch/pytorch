@@ -423,18 +423,11 @@ def attention_23(
 
     if can_use_sdpa:
         # Use PyTorch's optimized scaled_dot_product_attention
-
-        # Prepare attention mask for SDPA
-        sdpa_attn_mask = None
-        if attn_mask is not None:
-            # Convert boolean mask: True means participate, SDPA expects True to mask out
-            sdpa_attn_mask = ~attn_mask if attn_mask.dtype == torch.bool else attn_mask
-
         output = torch.nn.functional.scaled_dot_product_attention(
             Q,
             K,
             V,
-            attn_mask=sdpa_attn_mask,
+            attn_mask=attn_mask,
             dropout_p=0.0,
             is_causal=is_causal,
             scale=scale,
