@@ -499,7 +499,7 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
 
     @property
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def training(self) -> bool:
         return self._orig_mod.training
 
@@ -918,7 +918,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    # pyrefly: ignore  # invalid-inheritance
+                    # pyrefly: ignore [invalid-inheritance]
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -1048,7 +1048,7 @@ class OptimizeContext(_TorchDynamoContext):
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
                     compiler_fn,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     dynamic=_dynamic,
                     ignore_active_disable_ctx=False,
                 )
@@ -1113,7 +1113,7 @@ class DisableContext(_TorchDynamoContext):
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
                 # NN module variable tracker directly inlines the _call_impl. Disable it.
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -2018,7 +2018,7 @@ def export(
                         path: KeyPath, t: Union[torch.Tensor, _IntWrapper, Any]
                     ) -> Any:
                         if isinstance(t, torch.Tensor):
-                            # pyrefly: ignore  # missing-attribute
+                            # pyrefly: ignore [missing-attribute]
                             return ambient_fake_mode.from_tensor(t, static_shapes=True)
                         elif isinstance(t, _IntWrapper):
                             if (

@@ -8,6 +8,7 @@ import inspect
 import keyword
 import math
 import os
+import pprint
 import re
 import typing
 import warnings
@@ -454,6 +455,7 @@ class CodeGen:
         include_device = include_device or (
             os.environ.get("FX_GRAPH_SHOW_DEVICE", "0") == "1"
         )
+        include_meta = os.environ.get("FX_GRAPH_SHOW_META", "0") == "1"
 
         def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
@@ -688,6 +690,17 @@ class CodeGen:
                 if desc is not None and node.op == "placeholder":
                     maybe_comment += f"  # {desc}"
                 # output is handled specially
+
+            if include_meta and hasattr(node, "meta") and node.meta:
+                body.append('"""\n')
+                for k, v in node.meta.items():
+                    # use str over repr since repr is susceptible to sympy
+                    # errors such as "cannot determine truth value of Relational"
+                    # Pretty print the high-level dict with str() for values
+                    body.append(
+                        f"{k}: {pprint.pformat(str(v), width=80, compact=True)}\n"
+                    )
+                body.append('"""\n')
 
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
