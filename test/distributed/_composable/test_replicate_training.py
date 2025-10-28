@@ -410,7 +410,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
         )
         fully_shard_fn = functools.partial(
             replicate,
-            device_mesh=mesh,
+            mesh=mesh,
             reshard_after_forward=reshard_after_forward,
             offload_policy=offload_policy,
         )
@@ -745,7 +745,7 @@ class TestReplicateTrainingCompose(FSDPTest):
         )
         fsdp_kwargs = {
             "reshard_after_forward": reshard_after_forward,
-            "device_mesh": device_mesh,
+            "mesh": device_mesh,
         }
         if module_grouping == "mem_eff":
             assert model_args.n_layers == 3
@@ -928,7 +928,7 @@ class TestReplicateGradientAccumulation(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate_fn = functools.partial(
             replicate,
-            device_mesh=mesh,
+            mesh=mesh,
             reshard_after_forward=reshard_after_forward,
             offload_policy=offload_policy,
         )
@@ -1197,8 +1197,8 @@ class TestReplicateTPTraining(FSDPTest):
                 continue
             if use_activation_checkpointing:
                 checkpoint(module)
-            replicate(module, device_mesh=dp_mesh)
-        replicate(model, device_mesh=dp_mesh)
+            replicate(module, mesh=dp_mesh)
+        replicate(model, mesh=dp_mesh)
 
         # Checking parameters match orig model is critical to validate .full_tensor correctly replicates the
         # strided-sharded layers.
