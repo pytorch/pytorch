@@ -5,8 +5,8 @@ Learn the basics of `torch.compile` and how to integrate it into your PyTorch wo
 ```{toctree}
 :maxdepth: 1
 
-../../torch.compiler.md
-../../torch.compiler_get_started.md
+torch.compiler
+torch.compiler_get_started
 ../../export.md
 ../../torch.compiler_aot_inductor.md
 ```
