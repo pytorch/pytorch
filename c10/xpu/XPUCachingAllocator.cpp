@@ -506,7 +506,7 @@ class DeviceCachingAllocator {
          it != pool->unmapped.end() && (*it)->queue == queue;
          ++it) {
       Block* c = *it;
-      // Why? The unmapped block might have a free mapped block right before it.
+      // The unmapped block might have a free mapped block right before it.
       // By starting from the previous block, we can use both:
       // [Free Mapped Block] + [Unmapped Block] = More contiguous space
       if (allocatable(c->prev)) {
@@ -532,7 +532,7 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size);
     auto mapped_range =
         to_map->expandable_segment->map(SegmentRange{to_map->ptr, size});
-    // failed to map the memory
+    // Failed to map the memory
     if (mapped_range.size == 0) {
       return false;
     }
@@ -563,7 +563,6 @@ class DeviceCachingAllocator {
 
     pool.blocks.insert(to_map);
 
-    // update statistics
     StatTypes stat_types = get_stat_types_for_pool(*to_map->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(mapped_range.size);
@@ -577,29 +576,36 @@ class DeviceCachingAllocator {
       sycl::queue* queue,
       BlockPool* pool,
       size_t size) {
+    // Candidate points to the start of a chain of contiguous blocks with
+    // sufficient virtual address space (>= size). The chain may consist of:
+    // Case 1: [Unmapped Block] -> null
+    // Case 2: [Unmapped Block] -> [Free Mapped Block]
+    // Case 3: [Free Mapped Block] -> [Unmapped Block]
     Block* candidate = find_expandable_block(device, queue, pool, size);
-    // Candidate is now a list free/unmapped blocks with at least size room:
-    // unmapped -> null
-    // unmapped -> free -> *
-    // free -> unmapped -> *
 
+    // Map first block if unmapped (Case 1 & 2), use std::min to avoid
+    // over-mapping.
     if (!candidate->mapped &&
         !map_block(candidate, std::min(candidate->size, size))) {
       return nullptr;
     }
     TORCH_INTERNAL_ASSERT(candidate->mapped);
 
+    // Map additional blocks until we have enough continuous space (Case 3).
+    // Each map_block() call merges newly mapped blocks with adjacent free
+    // blocks
     while (candidate->size < size) {
-      // invariant: free -> unmapped -> *
-      // map_block will map some of unmapped and merge with free
       auto remaining = size - candidate->size;
       auto new_candidate = candidate->next;
-      if (!map_block(
-              new_candidate, std::min(remaining, candidate->next->size))) {
+      // Map only what we need from the `new_candidate` block.
+      if (!map_block(new_candidate, std::min(remaining, new_candidate->size))) {
         return nullptr;
       }
       candidate = new_candidate;
     }
+
+    // Remove from free pool; block will be marked as allocated in
+    // alloc_found_block()
     pool->blocks.erase(candidate);
     return candidate;
   }
