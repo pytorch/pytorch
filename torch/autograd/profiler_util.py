@@ -385,6 +385,11 @@ class EventList(list):
         return total_stat
 
     def _print_tree(self, attributes=None, max_depth=None, indent="  "):
+        """Pretty-prints profiled events in a hierarchical tree format.
+
+        attributes: annotates events with corresponding FunctionEvent attributes.
+        max_depth: tree depth to truncate logs; e.g. max_depth=0 only prints top-level events.
+        """
         if not self._tree_built:
             self._build_tree()
 
