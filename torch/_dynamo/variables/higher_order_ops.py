@@ -3711,6 +3711,23 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
                 make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
             )
 
+        if inputs_none_placements > 0:
+            expected_input_nodes = [
+                arg.as_proxy().node for arg in user_args[:-inputs_none_placements]
+            ]
+        else:
+            expected_input_nodes = [arg.as_proxy().node for arg in user_args]
+        actual_input_nodes = [proxy.node for proxy in p_args]
+        assert actual_input_nodes[0].op == "get_attr"
+        assert "subgraph" in actual_input_nodes[0].target
+        assert len(expected_input_nodes) == len(actual_input_nodes) - 1
+        for expected_order, actual_order in zip(
+            expected_input_nodes, actual_input_nodes[1:]
+        ):
+            assert expected_order == actual_order, (
+                "Dynamo changed the order of inputs to the local_map function, please adjust "
+                f"the order of inputs and input_placements from {expected_input_nodes}, to: {actual_input_nodes[1:]}"
+            )
         assert len(p_kwargs) == 0
 
         flat_example_value = pytree.tree_map_only(
@@ -3751,6 +3768,8 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             vt.as_proxy().node.meta["example_value"] = global_tensor
             vt.synchronize_attributes(tx)
+
+        # TODO: Figure out how to handle output order diverging from eager
 
         # Treat as const, so we don't have to deal with Placement types in fx IR
         # Guarded with EQUALS_MATCH on local_map call's arguments
