@@ -604,7 +604,7 @@ class DeviceCachingAllocator {
       candidate = new_candidate;
     }
 
-    // Remove from free pool; block will be marked as allocated in
+    // Remove from the free pool; block will be marked as `allocated` in
     // alloc_found_block()
     pool->blocks.erase(candidate);
     return candidate;
@@ -744,7 +744,9 @@ class DeviceCachingAllocator {
 
     ptrdiff_t before_size = unmapped.ptr - static_cast<char*>(block->ptr);
     if (before_size > 0) {
-      // prev? -> before_free -> block
+      // If the actual unmapped region starts after block->ptr due to alignment,
+      // the region before unmapped.ptr is still mapped.
+      // [Prev Block?] -> [Before Block] -> [Unmapped Block]
       Block* before_free = new Block(
           block->device, block->queue, before_size, block->pool, block->ptr);
       before_free->expandable_segment = block->expandable_segment;
@@ -754,7 +756,9 @@ class DeviceCachingAllocator {
 
     auto after_size = block->size - (before_size + unmapped.size);
     if (after_size > 0) {
-      // block -> after_free -> next?
+      // If the actual unmapped region ends before block->ptr + block->size,
+      // the region after (unmapped.ptr + unmapped.size) is still mapped.
+      // [Unmapped Block] -> [After Block] -> [Next Block?]
       Block* after_free = new Block(
           block->device,
           block->queue,
@@ -766,6 +770,7 @@ class DeviceCachingAllocator {
       block->pool->blocks.insert(after_free);
     }
 
+    // [Before Mapped Block?] -> [Unmapped Block] -> [After Mapped Block?]
     block->ptr = unmapped.ptr;
     block->size = unmapped.size;
     block->mapped = false;
@@ -788,8 +793,8 @@ class DeviceCachingAllocator {
       Block* block = *it;
       ++it;
       if (block->expandable_segment) {
-        // Unmapping modifies the free pool, so collect items to free first to
-        // avoid iterator invalidation.
+        // unmap_block() modifies the free pool, so collect items to free first
+        // to avoid iterator invalidation.
         to_unmap.push_back(block);
       } else if (!block->prev && !block->next) {
         release_block(block);
@@ -797,8 +802,8 @@ class DeviceCachingAllocator {
     }
     for (Block* block : to_unmap) {
       unmap_block(block);
-      // After unmapping, expandable segment blocks with no neighbors are also
-      // released.
+      // After unmap_block(), expandable segment blocks with no neighbors are
+      // also released.
       if (!block->prev && !block->next) {
         release_expandable_segment(block);
       }
