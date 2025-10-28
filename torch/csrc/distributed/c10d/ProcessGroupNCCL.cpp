@@ -349,8 +349,7 @@ static void cacheAllocatorDeregisterHook(
 }
 
 static void attachAllocatorHooks() {
-  static c10::once_flag flag;
-  c10::call_once(flag, [] {
+  static auto flag [[maybe_unused]] = [] {
     // Attaching hooks fails if CUDACachingAllocator is not initialized, so
     // Init for CUDA is called (and is a no-op if CUDA is already
     // initialized).
@@ -359,7 +358,7 @@ static void attachAllocatorHooks() {
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorDeregisterHook);
-  });
+  }();
 }
 
 static std::
