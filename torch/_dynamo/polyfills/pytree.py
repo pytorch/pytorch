@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -17,7 +17,7 @@ from ..decorators import substitute_in_graph
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from typing_extensions import Self
 
 
@@ -194,7 +194,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
                     or optree.is_namedtuple_class(treespec.type)
                     or optree.is_structseq_class(treespec.type)
                 ):
-                    # pyrefly: ignore  # bad-return
+                    # pyrefly: ignore [bad-return]
                     return treespec._unflatten_func(
                         treespec._metadata,
                         children_representations,
