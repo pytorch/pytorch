@@ -9,16 +9,22 @@ std::array<
     static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
     device_guard_impl_registry;
 
-DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
+void registerDeviceGuard(
     DeviceType type,
     const DeviceGuardImplInterface* impl) {
   device_guard_impl_registry[static_cast<size_t>(type)].store(impl);
 }
 
+DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
+    DeviceType type,
+    const DeviceGuardImplInterface* impl) {
+  registerDeviceGuard(type, impl);
+}
+
 namespace {
 thread_local std::unique_ptr<DeviceGuardImplInterface> tls_fake_device_guard =
     nullptr;
-}
+} // namespace
 
 void ensureCUDADeviceGuardSet() {
   constexpr auto cuda_idx = static_cast<std::size_t>(DeviceType::CUDA);

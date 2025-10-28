@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -18,6 +18,10 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @exposed_in("torch")

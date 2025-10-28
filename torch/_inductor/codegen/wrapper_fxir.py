@@ -23,16 +23,13 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import (
-    convert_shape_to_symint,
-    convert_to_symint,
-    sympy_product,
-)
+from torch._inductor.utils import convert_shape_to_symint, convert_to_symint
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
+    ConvertIntKey,
     DivideByKey,
     free_unbacked_symbols,
 )
@@ -58,6 +55,7 @@ from .wrapper import (
     CommBufferFreeLine,
     CommentLine,
     ConditionalLine,
+    DynamicScalarLine,
     EnterDeviceContextManagerLine,
     EnterSubgraphLine,
     ExitDeviceContextManagerLine,
@@ -126,30 +124,20 @@ def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
     def replace(expr: sympy.Expr) -> sympy.Expr:
         expr = sympy.together(expr)
 
-        # Find division operations in the sympy.floor expression
-        # Div is either represented as Mul with:
-        # Rational denominator or Pow with negative exponent
-        if not isinstance(expr, sympy.core.mul.Mul):
-            return sympy.floor(expr)
-
-        if isinstance(expr.args[0], sympy.Rational):
-            frac = expr.args[0]
-            numerator = sympy_product(expr.args[1:]) * frac.numerator
-            denominator = frac.denominator
-
-            return FloorDiv(numerator, denominator)
-        elif isinstance(expr.args[0], sympy.Pow):
-            base = expr.args[0].base
-            exp = expr.args[0].exp
-            numerator = sympy_product(expr.args[1:])
-            if exp < 0:
-                denominator = base ** (-exp)
+        # Division is represented as a Mul with a Rational factor or a Pow with negative
+        # exponent. We convert floor(Mul(...)) to FloorDiv(numerator, denominator) by
+        # partitioning factors into the numerator and denominator.
+        (numerator, denominator) = (sympy.S.One,) * 2
+        for arg in sympy.Mul.make_args(expr):
+            if isinstance(arg, sympy.Rational):
+                numerator *= arg.numerator
+                denominator *= arg.denominator
+            elif isinstance(arg, sympy.Pow) and arg.exp.is_negative:
+                denominator *= arg.base**-arg.exp
             else:
-                numerator = numerator * (base**exp)
-                denominator = 1
-            return FloorDiv(numerator, denominator)
-        else:
-            return sympy.floor(expr)
+                numerator *= arg
+
+        return FloorDiv(numerator, denominator)
 
     return expr.replace(sympy.floor, replace)
 
@@ -200,6 +188,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
+        # pyrefly: ignore [missing-argument]
         if V.aot_compilation and not self.is_subgraph:
             # AOT graphs must match the signature of the input module.
             return {
@@ -224,6 +213,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             graph_inputs=self.get_fx_graph_inputs(),
             graph_outputs=self.get_graph_outputs(),
             subgms=self.subgms,
+            # pyrefly: ignore [missing-argument]
             is_subgraph=self.is_subgraph,
         ).generate()
 
@@ -750,6 +740,39 @@ class FxConverter:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
 
+    def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
+        assert isinstance(line, DynamicScalarLine)
+
+        ir_node = line.node
+        (input_ir_node,) = ir_node.inputs
+        assert isinstance(input_ir_node, ir.IRNode)
+        input_fx_node = self._generate_buffer(input_ir_node)
+        keypath = ir_node.keypath
+        graph = self.gm.graph
+
+        def generate_item(x: Optional[torch.fx.Node]) -> torch.fx.Node:
+            assert x is not None
+            return graph.call_function(
+                aten.item.default,
+                args=(x,),
+            )
+
+        if len(keypath) == 0:
+            result_fx_node = generate_item(input_fx_node)
+        elif len(keypath) == 1 and isinstance(keypath[0], ConvertIntKey):
+            where_fx_node = graph.call_function(
+                aten.where.Scalar,
+                args=(input_fx_node, 1, 0),
+            )
+            result_fx_node = generate_item(where_fx_node)
+        else:
+            raise NotImplementedError(f"Unsupported keypath: {keypath}")
+
+        result_symbol = ir_node.sym
+        result_buffer = SymbolBuffer(result_symbol)
+        self._record_allocation(result_buffer, result_fx_node)
+        self._generate_size_proxy(result_fx_node, result_symbol)
+
     def _generate_enter_device_context_manager(self, line: WrapperLine) -> None:
         assert isinstance(line, EnterDeviceContextManagerLine)
         # We ignore the device context in FX IR.
@@ -936,10 +959,6 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
-        # Use python_slow mode instead of python mode to avoid
-        # the round to neginf behaviour, which is not the convention
-        # in other languages.
-        tuner.grid_mode = "python_slow"
 
         class UnbackedSymintsError(Exception):
             pass
@@ -970,6 +989,7 @@ class FxConverter:
                 return torch.empty_strided(
                     to_size_hint(fake.shape),
                     to_size_hint(fake.stride()),
+                    dtype=fake.dtype,
                     device=device,
                 ).zero_()
 
@@ -1009,13 +1029,17 @@ class FxConverter:
             call_kwargs = {
                 key: val
                 for key, val in zip(signature, call_args)
+                # pyrefly: ignore [missing-attribute]
                 if key not in constants and key not in cfg.kwargs
             }
 
             # Add constants stored as Triton metadata, in signature order.
             call_kwargs |= constants
             new_call_args = [
-                call_kwargs[key] for key in signature if key not in cfg.kwargs
+                call_kwargs[key]
+                for key in signature
+                # pyrefly: ignore [missing-attribute]
+                if key not in cfg.kwargs
             ]
 
             # Add Inductor's extra launcher args to the end.
@@ -1027,16 +1051,18 @@ class FxConverter:
             return tuple(new_call_args)
 
         kernel_config = tuner.compile_results[0].config
+        extra_options = getattr(kernel_config, "extra_options", None)
         call_args = add_constants_to_call_args(call_args, kernel_config)
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(signature, call_args))
+        # pyrefly: ignore [missing-attribute]
         assert not any(kwarg in kernel_config.kwargs for kwarg in call_kwargs), (
             f"kwargs overlap config: {call_kwargs}"
         )
+        # pyrefly: ignore [missing-attribute]
         call_kwargs.update(kernel_config.kwargs)
 
-        # Replace all sympy.floor with FloorDiv
-        # _generate_sym_node does not support sympy.floor
+        # Replace sympy.floor with FloorDiv, to make the expression traceable.
         grid = [replace_floor_div(x) if isinstance(x, sympy.Expr) else x for x in grid]
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
         call_kwargs = {
@@ -1049,7 +1075,7 @@ class FxConverter:
             constant_args_idx,
         ) = tracing_triton_hopifier_singleton.store_non_graphable_args(call_kwargs)
 
-        self.gm.graph.call_function(
+        triton_node = self.gm.graph.call_function(
             triton_kernel_wrapper_mutation,
             kwargs={
                 "kernel_idx": kernel.wrapped.kernel_idx,
@@ -1059,6 +1085,8 @@ class FxConverter:
                 "kwargs": call_kwargs,
             },
         )
+        if extra_options:
+            triton_node.meta["extra_options"] = extra_options
 
     def _generate_extern_kernel_alloc(self, line: WrapperLine) -> None:
         assert isinstance(line, ExternKernelAllocLine)

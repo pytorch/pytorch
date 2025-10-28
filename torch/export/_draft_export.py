@@ -5,10 +5,10 @@ import os
 import re
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._logging._internal
@@ -295,6 +295,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 
         self.logger.addHandler(self)
         self.prev_get_dtrace = torch._logging._internal.GET_DTRACE_STRUCTURED
+        # pyrefly: ignore  # bad-assignment
         torch._logging._internal.GET_DTRACE_STRUCTURED = True
         return self
 
@@ -302,6 +303,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
         self.log_record = LogRecord()
         self.expression_created_logs = {}
         self.logger.removeHandler(self)
+        # pyrefly: ignore  # bad-assignment
         torch._logging._internal.GET_DTRACE_STRUCTURED = self.prev_get_dtrace
         self.prev_get_dtrace = False
 

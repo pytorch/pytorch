@@ -14,16 +14,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch.utils import _pytree as pytree
@@ -36,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Callable, Generator, Iterator
     from types import CodeType
 
     import sympy
@@ -72,8 +63,7 @@ CA_COMPILE_ID_PATTERN = re.compile(
 # 3. Compact: The string form is directly displayed by some tools. Special symbols are okay.
 
 
-# TODO: mark as kw_only=True once we drop support for <Python 3.10
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True, slots=True)
 class CompileId:
     frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this
@@ -1148,11 +1138,13 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
+            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((m, "active fake mode", i))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
+            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[Union[torch.Tensor, int, torch.SymInt]] = []
@@ -1161,6 +1153,7 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
                 x for x in out if isinstance(x, FakeTensor)
             ]
             fake_modes.extend(
+                # pyrefly: ignore [bad-argument-type]
                 [
                     (tensor.fake_mode, f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
@@ -1172,9 +1165,12 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
         for m, desc2, i2 in fake_modes[1:]:
             assert fake_mode is m, (
                 f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                # pyrefly: ignore [missing-attribute]
                 f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                # pyrefly: ignore [missing-attribute]
                 f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
             )
+        # pyrefly: ignore [bad-return]
         return fake_mode
     else:
         return None

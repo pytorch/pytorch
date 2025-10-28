@@ -119,7 +119,7 @@ PIP_PATTERNS = [
 
 def run(command):
     """Return (return-code, stdout, stderr)."""
-    shell = True if type(command) is str else False
+    shell = type(command) is str
     p = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=shell
     )

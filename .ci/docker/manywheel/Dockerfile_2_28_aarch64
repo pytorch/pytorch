@@ -79,3 +79,5 @@ RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
 COPY --from=arm_compute /acl /acl
 ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:/acl/build/:$LD_LIBRARY_PATH
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh

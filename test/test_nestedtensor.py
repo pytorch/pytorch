@@ -857,6 +857,22 @@ class TestNestedTensor(NestedTensorTestCase):
         ):
             torch.cat([x, y], dim=-1)
 
+    # https://github.com/pytorch/pytorch/issues/161812
+    def test_jagged_with_dim_error(self):
+        x = torch.nested.nested_tensor(
+            [torch.ones(3, 2, 3), torch.ones(4, 2, 3)], layout=torch.jagged
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.cat([x, x])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.stack([x, x])
+
     def test_nested_view_from_buffer_overflow_errors(self):
         buffer = torch.tensor([1])
         sizes = torch.tensor([[2**63 - 1], [2**63 - 1], [3]], dtype=torch.int64)
@@ -1088,6 +1104,138 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
                 self.assertEqual(emb(inp), ys[i])
 
         check(inputs, y)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_max_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_max = x.max(dim=1)
+        expected_max = torch.tensor([9, 19, 29], dtype=dtype, device=device)
+
+        self.assertEqual(result_max.values, expected_max)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_min_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_min = x.min(dim=1)
+        expected_min = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+
+        self.assertEqual(result_min.values, expected_min)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_amax_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_amax = x.amax(dim=1)
+        expected_amax = torch.tensor([9, 19, 29], dtype=dtype, device=device)
+
+        self.assertEqual(result_amax, expected_amax)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_amin_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_amin = x.amin(dim=1)
+        expected_amin = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+
+        self.assertEqual(result_amin, expected_amin)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_argmax_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_argmax = x.argmax(dim=1)
+        expected_argmax = torch.tensor([9, 19, 29], dtype=torch.long, device=device)
+
+        self.assertEqual(result_argmax, expected_argmax)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_argmin_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_argmin = x.argmin(dim=1)
+        expected_argmin = torch.tensor([0, 0, 0], dtype=torch.long, device=device)
+
+        self.assertEqual(result_argmin, expected_argmin)
 
     @skipMeta
     @torch.inference_mode()
@@ -7233,6 +7381,10 @@ torch.cuda.synchronize()
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
     @skipCPUIf(True, "SPDA Math NT fallback causes failure: see issue #133644")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_dummy_mha_with_nt(self, device, use_legacy_api):
         bs = 3
         d1 = 2
@@ -7783,9 +7935,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7834,9 +7990,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -8581,7 +8741,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # min() / max(): weird bug
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
@@ -8598,7 +8758,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_compile_backward",

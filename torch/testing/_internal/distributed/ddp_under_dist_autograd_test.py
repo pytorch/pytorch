@@ -192,7 +192,7 @@ class Trainer:
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            self.trainer_group if ddp_mode in (DdpMode.INSIDE,) else None,
+            self.trainer_group if ddp_mode == DdpMode.INSIDE else None,
         )
         self.ddp_params, self.non_ddp_params = (
             self.hybrid_module.ddp_params,
@@ -238,7 +238,9 @@ class Trainer:
             sparse_microbatch = torch.split(sparse_features, 2)
             values_microbatch = torch.split(values, 2)
             batches = []
-            for d, s, v in zip(dense_microbatch, sparse_microbatch, values_microbatch):
+            for d, s, v in zip(
+                dense_microbatch, sparse_microbatch, values_microbatch, strict=True
+            ):
                 feature_set = FeatureSet(dense_features=d, sparse_features=s, values=v)
                 batches.append(feature_set)
 

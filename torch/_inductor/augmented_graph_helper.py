@@ -1,4 +1,5 @@
 from collections import defaultdict
+from typing import Optional
 
 import torch
 import torch.fx as fx
@@ -14,13 +15,20 @@ class AugmentedGraphHelper:
     graphcycles.cc
     """
 
-    def __init__(self, graph: fx.Graph):
+    def __init__(
+        self,
+        graph: fx.Graph,
+        node_ancestors: Optional[dict[fx.Node, OrderedSet[fx.Node]]] = None,
+    ):
         # Each node starts in its own singleton set
         self.graph = graph
         self.merge_sets = {node: OrderedSet([node]) for node in graph.nodes}
 
         # Extra dependencies: node depends on dep (dep must come before node)
         self.extra_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        # Note: only reflect original ancestors, not maintained through additional deps
+        # or merge sets
+        self.node_ancestors = node_ancestors
 
     def add_extra_dep(self, *, n: fx.Node, dep: fx.Node) -> None:
         """Add extra dependency: node depends on dep."""
@@ -90,14 +98,28 @@ class AugmentedGraphHelper:
         while queue:
             current = queue.pop()
 
-            # Get all dependencies
             for dep in self.get_merged_deps(current):
                 # Check if we reached source or its equivalent
                 if dep in self.merge_sets[source]:
                     return True
 
-                if dep not in visited:
-                    visited.add(dep)
-                    queue.append(dep)
+                if dep in visited:
+                    continue
+
+                # We are searching from target, so this node is necessarily an ancestor
+                # of target.
+                # If dep is an ancestor of source, any path through dep to source would imply a cycle
+                if self.node_ancestors:
+                    source_set = self.merge_sets[source]
+                    is_ancestor_of_source = any(
+                        dep in self.node_ancestors[s] for s in source_set
+                    )
+                    # Add to visited to avoid recomputing this check if we see dep again
+                    if is_ancestor_of_source:
+                        visited.add(dep)
+                        continue
+
+                visited.add(dep)
+                queue.append(dep)
 
         return False
