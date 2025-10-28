@@ -272,6 +272,17 @@ class CompatInterval:
         return result
 
 
+class CompatSet:
+    def __init__(self, values: set[int]):
+        self.values = values
+
+    def __contains__(self, x):
+        return x in self.values
+
+    def __str__(self):
+        return "{" + ", ".join(f"{v // 10}.{v % 10}" for v in self.values) + "}"
+
+
 # (code SM)->(device SM required to execute the code)
 #
 # Developer Notes:
@@ -281,23 +292,23 @@ class CompatInterval:
 # - The keys in dict correspond to known sm versions but the values
 #   are merely rules based on sm compatibility guarantees for NVIDIA
 #   devices while accounting for incompatibility of iGPU and dGPU.
-DEVICE_REQUIREMENT: dict[int, Union[set[int], CompatInterval]] = {
+DEVICE_REQUIREMENT: dict[int, Union[CompatSet, CompatInterval]] = {
     50: CompatInterval(start=50, exclude={53}),
     52: CompatInterval(start=52, exclude={53}),
-    53: {53},
+    53: CompatSet({53}),
     60: CompatInterval(start=60, exclude={62}),
     61: CompatInterval(start=61, exclude={62}),
-    62: {62},
+    62: CompatSet({62}),
     70: CompatInterval(start=70, exclude={72}),
-    72: {72},
+    72: CompatSet({72}),
     75: CompatInterval(start=75),
     80: CompatInterval(start=80, exclude={87}),
     86: CompatInterval(start=86, exclude={87}),
-    87: {87},
+    87: CompatSet({87}),
     89: CompatInterval(start=89),
     90: CompatInterval(start=90),
     100: CompatInterval(start=100, exclude={101}),
-    101: {101, 110},
+    101: CompatSet({101, 110}),
     103: CompatInterval(start=103),
     110: CompatInterval(start=110),
     120: CompatInterval(start=120),
@@ -317,7 +328,7 @@ def _code_compatible_with_device(device_cc: int, code_cc: int):
         warnings.warn(
             f"PyTorch was compiled with an unknown compute capability {code_cc // 10}.{code_cc % 10}. "
             + " Please create an issue on Github if this is a valid compute capability.",
-            stacklevel=3
+            stacklevel=2,
         )
         return device_cc in CompatInterval(start=code_cc)
     return device_cc in DEVICE_REQUIREMENT[code_cc]
@@ -333,7 +344,7 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
 
     lines = [
         f"Found GPU{device_index} {name} which is of compute capability (CC) {device_cc // 10}.{device_cc % 10}.",
-        "The following list shows the CC this version of PyTorch was built for and the hardware CC it supports:",
+        "The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:",
     ] + [
         f"- {cc // 10}.{cc % 10} which supports hardware CC {DEVICE_REQUIREMENT[cc]}"
         for cc in code_ccs
@@ -346,7 +357,7 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
             + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
         )
 
-    warnings.warn("\n".join(lines), stacklevel=3)
+    warnings.warn("\n".join(lines), stacklevel=2)
 
 
 def _check_capability():
