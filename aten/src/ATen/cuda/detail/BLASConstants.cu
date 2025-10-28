@@ -2,8 +2,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/cuda/Exceptions.h>
 
-#include <mutex>
-
 namespace at {
 namespace cuda {
 namespace detail {
