@@ -23,6 +23,7 @@ restoring state changes.
 import inspect
 import sys
 import warnings
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Union
 
 import torch._C
@@ -511,19 +512,17 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         batch_size, randomness = self.target_values
         if isinstance(batch_size, variables.SymNodeVariable):
             batch_size_value = batch_size.sym_num
-            batch_size_node = batch_size.as_proxy().node
         else:
             batch_size_value = batch_size.as_python_constant()
-            batch_size_node = batch_size.as_python_constant()
         randomness = randomness.as_python_constant()
         vmap_level = torch._C._functorch._vmap_increment_nesting(
             batch_size_value, randomness
         )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
-        self.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_proxy(
             "call_function",
             torch._functorch.predispatch._vmap_increment_nesting,
-            (batch_size_node, randomness),
+            (batch_size.as_proxy(), randomness),
             {},
         )
         return variables.ConstantVariable.create(vmap_level)
@@ -1213,9 +1212,13 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx, *args):
-        cm = torch.fx.traceback.annotate(self.target_values)
-        cm.__enter__()
-        self.set_cleanup_hook(tx, lambda: cm.__exit__(None, None, None))
+        # Run the annotation ctx manager in eager. Also ensure that
+        # preserve_node_meta context manager is setup. This is important to pass
+        # on the metadata to the create_proxy nodes.
+        stack = ExitStack()
+        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        stack.enter_context(torch.fx.traceback.preserve_node_meta())
+        self.set_cleanup_hook(tx, lambda: stack.close())
         return variables.ConstantVariable.create(None)
 
     def module_name(self):
@@ -1223,6 +1226,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "annotate"
+
+    def reconstruct_type(self, codegen: "PyCodegen"):
+        unimplemented_v2(
+            gb_type="torch.fx.traceback.annotate escaped from compiled region",
+            context=str(self),
+            explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 class DynamoConfigPatchVariable(ContextWrappingVariable):

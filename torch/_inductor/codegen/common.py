@@ -59,7 +59,15 @@ from ..utils import (
     triton_type,
     unique,
 )
-from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
+from ..virtualized import (
+    NullHandler,
+    ops,
+    OpsHandler,
+    OpsValue,
+    ReductionType,
+    StoreMode,
+    V,
+)
 
 
 if TYPE_CHECKING:
@@ -482,15 +490,11 @@ def get_wrapper_codegen_for_device(
 
 
 def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModulePass]:
-    return custom_backend_passes[device] if device in custom_backend_passes else None
+    return custom_backend_passes.get(device)
 
 
 def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
-    return (
-        custom_backend_codegen_configs[device]
-        if device in custom_backend_codegen_configs
-        else None
-    )
+    return custom_backend_codegen_configs.get(device)
 
 
 @functools.cache
@@ -954,6 +958,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             or _all_in_parens(string)
         ):
             # don't put extra parens for strings that are already wrapped in parens
+            # pyrefly: ignore [bad-return]
             return string
         return f"({string})"
 
@@ -1090,6 +1095,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: halide_clamp only implemented for Halide backend"
+        )
+
+    def dot(self, x: OpVarT, y: OpVarT) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: dot only implemented for Triton backend"
         )
 
     def inline_asm_elementwise(
@@ -1554,9 +1564,11 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> tuple[str, int]:
+    def workspace(
+        self, nelem: sympy.Expr, zero_fill: bool, dtype: torch.dtype = torch.uint8
+    ) -> tuple[str, str, int]:
         """
-        Allocate or extend a workspace buffer of nbytes bytes.
+        Allocate or extend a workspace buffer of nelem elements.
 
         This function manages the allocation of a workspace buffer. It either creates
         a new WorkspaceArg or extends an existing one.
@@ -1569,31 +1581,35 @@ class KernelArgs:
         - A new argument "ws_ptr" will be present in the generated code.
 
         Args:
-            nbytes (sympy.Expr): The number of bytes to allocate.
+            nelem (sympy.Expr): The number of elements to allocate.
             zero_fill (bool): Whether to initialize the buffer to zero.
+            dtype (torch.dtype): the dtype of the workspace tensor
 
         Returns:
-            Tuple[str, int]: A tuple containing:
+            Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - offset: An integer representing the byte offset in the workspace.
+                - "workspace_{i}": agraph level unique identifier for
+                    the workspace tensor.
+                - offset: An integer representing the item offset in the workspace.
         """
         arg = WorkspaceArg(
-            count=nbytes,
+            count=nelem,
             zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
             device=V.graph.get_current_device_or_throw(),
             outer_name=WorkspaceArg.unique_name(),
+            dtype=dtype,
         )
         for i, existing_arg in enumerate(self.workspace_args):
             if WorkspaceArg.can_join(existing_arg, arg):
                 offset = existing_arg.count
                 self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
-                return existing_arg.inner_name, offset
+                return existing_arg.inner_name, existing_arg.outer_name, offset
             assert (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
             ), existing_arg
         self.workspace_args.append(arg)
-        return arg.inner_name, 0
+        return arg.inner_name, arg.outer_name, 0
 
     def semaphores(self, min_size: sympy.Expr) -> str:
         """
@@ -1735,7 +1751,9 @@ class KernelArgs:
                 )
             )
         for outer, inner in chain(
-            self.input_buffers.items(), self.output_buffers.items()
+            self.input_buffers.items(),
+            # pyrefly: ignore [bad-argument-type]
+            self.output_buffers.items(),
         ):
             if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
@@ -2046,6 +2064,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         super().__init__()
         if increase_kernel_count:
+            # pyrefly: ignore [bad-assignment]
             metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
@@ -2112,6 +2131,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             self.compute = compute
             self.stores = stores
             self.cse = cse
+            # pyrefly: ignore [unbound-name]
             if disallow_stores:
                 assert not sb, "unexpected store inside swap_buffers"
 
@@ -2148,6 +2168,14 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        raise NotImplementedError
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: CSEVariable,
+    ) -> None:
         raise NotImplementedError
 
     def scan(
@@ -2383,6 +2411,7 @@ class KernelTemplate:
             class DetailedTemplateSyntaxError(TemplateSyntaxError):
                 def __init__(self, original_error: TemplateSyntaxError) -> None:
                     super().__init__(
+                        # pyrefly: ignore [bad-argument-type]
                         original_error.message,
                         original_error.lineno,
                         original_error.name,
@@ -2394,6 +2423,7 @@ class KernelTemplate:
                     error_info = f"Error in template at line {self.lineno}\n"
                     error_info += f"Error message: {self.message}\n"
                     if hasattr(self.original_error, "source"):
+                        # pyrefly: ignore [missing-attribute]
                         lines = self.original_error.source.split("\n")
                         error_info += "Context:\n"
                         start = max(0, self.lineno - 2)
@@ -2484,7 +2514,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2610,6 +2640,9 @@ class CSEProxy(DefaultHandler):
             return ValueRanges.unknown()
 
         if isinstance(V.kernel, CUDATemplateKernel):
+            return ValueRanges.unknown()
+
+        if isinstance(V.interpreter, NullHandler):
             return ValueRanges.unknown()
 
         fx_node = V.interpreter.current_node
@@ -2738,6 +2771,9 @@ class CSEProxy(DefaultHandler):
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
+
+    def partial_accumulate(self, *args: Any) -> None:
+        self.kernel.partial_accumulate(*args)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
