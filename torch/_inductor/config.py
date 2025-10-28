@@ -92,6 +92,7 @@ precompilation_timeout_seconds: int = 60 * 60
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
+    env_name_default="TORCHINDUCTOR_FX_GRAPH_CACHE_DEFAULT",
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
@@ -407,7 +408,7 @@ reorder_iterative_debug_limit_to_reorder: Optional[int] = (
     else int(env_str)
 )
 sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
@@ -705,7 +706,7 @@ conv_1x1_as_mm = False
 #   split_reductions: uses multiple kernels to gain more parallelism
 #   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
 # enabling both of these will implicitly disable split_reductions
-split_reductions = True
+split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
@@ -745,6 +746,8 @@ combo_kernels_autotune = 1
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
 combo_kernel_foreach_dynamic_shapes = True
+# Maximum number of arguments (read/write buffers) allowed in a combo kernel
+combo_kernel_max_num_args = 250
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -852,6 +855,31 @@ _micro_pipeline_tp: bool = False
 class _collective:
     auto_select: bool = False
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024
+
+
+class aten_distributed_optimizations:
+    """Configuration for distributed optimization passes on ATen FX graphs."""
+
+    # Enable overlap scheduling pass
+    enable_overlap_scheduling: bool = False
+
+    # Enable overlap-preserving collective bucketing
+    collective_bucketing: Optional[bool] = None
+
+    # Insert ordering dependencies to preserve overlap relationships. This should only be used if
+    # compiling with inductor, or for subsequent passes before removing the ops prior to execution
+    insert_overlap_deps: Optional[bool] = None
+
+    # Maximum compute node prefetch distance for overlap scheduling
+    max_compute_pre_fetch: Optional[int] = None
+
+    # Custom runtime estimation function for ops
+    # For user-defined estimation function, pass in the function handle
+    # None means use default estimations
+    # TODO - need estimated and profile based version
+    custom_runtime_estimation: Optional[Callable[[torch.fx.Node], Optional[float]]] = (
+        None
+    )
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1444,7 +1472,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 16
+    spill_threshold: int = 32 if torch.version.hip else 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
@@ -1504,6 +1532,10 @@ class triton:
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
     enable_pdl = False
+
+    mix_order_reduction = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
+    )
 
 
 class aot_inductor:
@@ -1670,7 +1702,7 @@ class aot_inductor:
 
     # If link_libtorch is False and cross_target_platform is windows,
     # a library needs to be provided to provide the shim implementations.
-    aoti_shim_library: Optional[str] = None
+    aoti_shim_library: Optional[str | list[str]] = None
     aoti_shim_library_path: Optional[str] = None
 
 
@@ -2048,6 +2080,17 @@ write_are_deterministic_algorithms_enabled = (
 )
 
 
+class lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False, no
+    # hash checking is performed.
+    check_src_hash: bool = True
+
+
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
@@ -2070,25 +2113,8 @@ class test_configs:
     # for unit testing
     use_libtorch = False
 
-    # to be migrated when ready for use
-    aten_fx_overlap_scheduling = False
-
-    # insert ordering deps for overlap
-    aten_fx_overlap_insert_overlap_deps = True
-
-    # to be migrated when ready for use
-    aten_fx_overlap_preserving_bucketing = False
-
-    # mostly disabled testing
-    assume_bucketing_reduces_latency = True
-
-    # to be migrated when ready for use
-    # runtime estimation function for ops
-    # for user-defined estimation function, pass in the function handle
-    # TODO - need estimated and profile based version
-    estimate_aten_runtime: Union[
-        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
-    ] = "default"
+    # Assume bucketing reduces latency (mostly for testing)
+    assume_bucketing_reduces_latency: bool = True
 
     # A test config to ease the test for perf of reduction config filtering
     force_filter_reduction_configs = (

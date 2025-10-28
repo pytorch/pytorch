@@ -58,6 +58,7 @@ from ..utils import (
     istype,
     list_methods,
     proxy_args_kwargs,
+    raise_args_mismatch,
     tuple_methods,
 )
 from .base import raise_type_error_exc, VariableTracker
@@ -587,20 +588,25 @@ class ComptimeVariable(VariableTracker):
         from ..comptime import ComptimeContext
 
         # TODO: support an expression form as well
-
-        assert not kwargs
         # Second argument is runtime lambda, ignored
-        assert len(args) <= 2
+        if kwargs or len(args) > 2:
+            raise_args_mismatch(
+                tx,
+                "comptime()",
+                "at most 2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
             fn.get_function()(ComptimeContext(tx))
         elif isinstance(fn, NestedUserFunctionVariable):
             # We have to manually bind the freevars ourselves
             code = fn.get_code()
-            assert not fn.closure, (
-                "comptime function must not have free variables, "
-                f"but these variables were free: {code.co_freevars}"
-            )
+            if fn.closure:
+                raise_type_error_exc(
+                    tx,
+                    f"comptime function must not have free variables, but these variables were free: {code.co_freevars}",
+                )
             func = types.FunctionType(
                 code,
                 fn.f_globals,
@@ -750,10 +756,10 @@ class AutogradFunctionVariable(VariableTracker):
             # functions, so we have to add guards manually.
             if self.source:
                 fwd_src = AttrSource(self.source, "forward")
-                install_guard(fwd_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                install_guard(fwd_src.make_guard(GuardBuilder.CLOSURE_MATCH))
                 if is_setup_ctx_defined:
                     setup_ctx_src = AttrSource(self.source, "setup_context")
-                    install_guard(setup_ctx_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                    install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
 
@@ -942,7 +948,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
         elif name == "mark_non_differentiable":
-            assert len(kwargs) == 0
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
 
@@ -970,7 +977,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             )
 
         if not self.inference:
-            assert self.source and not kwargs
+            if kwargs or not self.source:
+                raise_type_error_exc(
+                    tx, "save_for_backward() requires a source and no keyword arguments"
+                )
             tx.output.side_effects.track_save_for_backward(self, args)
 
         # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
