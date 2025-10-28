@@ -24,7 +24,6 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
     compiled_autograd_enabled,
-    DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
