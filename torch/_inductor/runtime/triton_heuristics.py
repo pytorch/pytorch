@@ -2621,6 +2621,12 @@ def pointwise(
                             num_stages=2,
                             waves_per_eu=1,  # 20% improvement
                         ),
+                        triton_config_with_settings(
+                            size_hints,
+                            64,
+                            num_warps=1,
+                            num_stages=1,  # 250% improvement
+                        ),
                     ]
                 )
     if len(size_hints) == 2:
