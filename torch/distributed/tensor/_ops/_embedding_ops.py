@@ -84,6 +84,22 @@ class _MaskPartial(Partial):
     offset_shape: Optional[torch.Size] = None
     offset_dim: int = 0
 
+    def __init__(
+        self,
+        reduce_op=None,
+        mask_buffer=None,
+        offset_shape=None,
+        offset_dim=0,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(reduce_op)
+        if mask_buffer is None:
+            mask_buffer = MaskBuffer()
+        object.__setattr__(self, "mask_buffer", mask_buffer)
+        object.__setattr__(self, "offset_shape", offset_shape)
+        object.__setattr__(self, "offset_dim", offset_dim)
+
     @staticmethod
     @maybe_run_for_local_tensor
     def _mask_tensor(
