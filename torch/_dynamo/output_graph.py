@@ -2067,10 +2067,10 @@ class OutputGraph(OutputGraphCommon):
             )
             # Get device count, with fallback for platforms where it might return 0 (e.g., ROCm)
             num_devices = torch.accelerator.device_count()
-            if num_devices == 0:
-                # If device_count returns 0, use the world size as approximation
-                # This can happen on some platforms (e.g., ROCm) in certain contexts
-                num_devices = compile_pg.size()
+            # if num_devices == 0:
+            #     # If device_count returns 0, use the world size as approximation
+            #     # This can happen on some platforms (e.g., ROCm) in certain contexts
+            #     num_devices = compile_pg.size()
             device_type = device_types.pop()
             device_interface = get_interface_for_device(device_type)
             with (
