@@ -1551,7 +1551,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             step_str = f"{sym}_en_cl - {sym}_st_cl"
         else:
             step_str = (
-                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} + 1) / {step_cpp_str}"
+                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} - 1) / {step_cpp_str}"
             )
         self.writeline(f"int64_t {sym}_with_step = {step_str};")
         self.writeline(f"int64_t {sym} = {sym}_with_step < 0 ? 0 : {sym}_with_step;")
