@@ -2360,11 +2360,6 @@ static PyObject* THPVariable_NewWithVar(
 ///
 
 static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
-  PyTypeObject* type = Py_TYPE(self);
-  TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
-
-  Py_VISIT(type);
-
   THPVariable* var = reinterpret_cast<THPVariable*>(self);
   Py_VISIT(var->backward_hooks);
   Py_VISIT(var->post_accumulate_grad_hooks);
