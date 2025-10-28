@@ -6898,11 +6898,8 @@ class ShapeEnv:
             for arg in expr.args:
                 self._maybe_guard_rel(arg)
             return
-        elif not isinstance(expr, sympy.Rel):
-            log.warning(
-                "_maybe_guard_rel() was called on non-relation expression %s", expr
-            )
-            return
+
+        assert isinstance(expr, sympy.Rel)
 
         # A good example of what goes wrong if you don't do this is
         # python test/functorch/test_aotdispatch.py -k
@@ -7691,7 +7688,8 @@ class ShapeEnv:
                 # implement this is to have maybe_guard_rel return a bool
                 # saying if it "subsumed" the guard (and therefore the guard
                 # is no longer necessary)
-                self._maybe_guard_rel(g)
+                if isinstance(g, (sympy.Rel, sympy.And)):
+                    self._maybe_guard_rel(g)
 
                 if (
                     torch.compiler.is_exporting()
@@ -7809,7 +7807,8 @@ class ShapeEnv:
                 log.debug("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
             # eliminate symbols on equality tests / refine ranges
-            self._maybe_guard_rel(expr)
+            if isinstance(expr, (sympy.Rel, sympy.And)):
+                self._maybe_guard_rel(expr)
 
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr
