@@ -320,26 +320,25 @@ class OpDispatcher:
                 assert isinstance(output_spec, DTensorSpec)
                 assert isinstance(args[0], dtensor.DTensor)
 
-                # Inplace operations that require redistribution are not supported
-                # because they break aliasing semantics. If there are views into
-                # the tensor, simply overwriting _local_tensor won't update the views.
-                if output_sharding.needs_redistribute:
+                # Inplace operations that change placement are not supported because
+                # they would require redistribution, which breaks aliasing semantics.
+                # If there are views into the tensor, the views would not be updated.
+                if args[0]._spec.placements != output_spec.placements:
                     raise RuntimeError(
-                        f"{op_call}: in-place operations that require redistribution "
+                        f"{op_call}: in-place operations that require placement changes "
                         f"are not supported. The operation would change placement from "
                         f"{args[0]._spec.placements} to {output_spec.placements}, "
                         f"which requires redistribution and breaks aliasing semantics. "
                         f"Please use the out-of-place version of this operation instead."
                     )
 
-                # update the spec for all inplace ops to handle placement changes
-                # that don't require redistribution
-                args[0]._spec = output_spec
                 # NOTE: aten.squeeze_.dim is an inplace op but it also may change
                 # the inplace argument's tensor meta. Here we choose to special case
                 # this op because as far as I know this is the only inplace op that
                 # has such as behavior. We can extend this special case if necessary.
                 if op_call == aten.squeeze_.dim:
+                    # update the spec to handle tensor meta changes
+                    args[0]._spec = output_spec
                     # use return_and_correct_aliasing to match the outer and the inner
                     # aliasing. See https://github.com/pytorch/pytorch/pull/158954
                     return return_and_correct_aliasing(op_call, args, kwargs, args[0])
