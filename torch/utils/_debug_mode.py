@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import traceback
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
@@ -12,6 +13,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map
+from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
@@ -19,6 +21,7 @@ if TYPE_CHECKING:
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
+
 
 REDISTRIBUTE_FUNC = "redistribute_input"
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
@@ -105,6 +108,17 @@ def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
     return out
 
 
+def _get_stack_trace(cpp=False) -> str:
+    from torch.fx.experimental.symbolic_shapes import uninteresting_files
+
+    summary = CapturedTraceback.extract(cpp=cpp).summary()
+    summary = [
+        frame for frame in summary if frame.filename not in uninteresting_files()
+    ]
+    summary = traceback.StackSummary.from_list(summary)
+    return ",".join(summary.format())
+
+
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
 
@@ -124,7 +138,9 @@ class _DebugCall:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
         """
-        raise NotImplementedError("Subclasses must implement stringify_args(), even if no-op")
+        raise NotImplementedError(
+            "Subclasses must implement stringify_args(), even if no-op"
+        )
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
@@ -499,6 +515,16 @@ class DebugMode(TorchDispatchMode):
             return {"hash": out}
 
         with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
+            yield
+
+    @staticmethod
+    @contextlib.contextmanager
+    def stack_traces(cpp=False):
+        def _stack_trace_hook(func, types, args, kwargs, result):
+            with torch._C._DisablePythonDispatcher():
+                return {"stack_trace": _get_stack_trace(cpp=cpp)}
+
+        with DebugMode.dispatch_hooks(record_hook=_stack_trace_hook):
             yield
 
 

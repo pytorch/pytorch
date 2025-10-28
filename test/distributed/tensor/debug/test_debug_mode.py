@@ -120,7 +120,8 @@ class TestDTensorDebugMode(TestCase):
 
         with DebugMode(record_torchfunction=True) as debug_mode:
             z = x_dtensor + y_dtensor
-            z.sum().backward()
+            with DebugMode.stack_traces():
+                z.sum().backward()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
@@ -149,6 +150,11 @@ class TestDTensorDebugMode(TestCase):
         aten::clone(t: f32[1, 8])
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
+        )
+
+        # check stack trace
+        self.assertTrue(
+            "z.sum().backward()" in debug_mode.operators[-1].record["stack_trace"]
         )
 
     def test_debug_mode_densor_redistribution_trace(self):
