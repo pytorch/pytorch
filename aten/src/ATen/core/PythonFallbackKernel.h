@@ -32,4 +32,5 @@ private:
   bool value_set_;
 };
 
+void TORCH_API pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack);
 } // namespace at::impl

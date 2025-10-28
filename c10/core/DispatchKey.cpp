@@ -109,6 +109,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Python:
       return "Python";
 
+    case DispatchKey::DTensor:
+      return "DTensor";
+
     case DispatchKey::Fake:
       return "Fake";
     case DispatchKey::FuncTorchDynamicLayerBackMode:
@@ -176,8 +179,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::FuncTorchGradWrapper:
       return "FuncTorchGradWrapper";
 
-    case DispatchKey::DeferredInit:
-      return "DeferredInit";
     case DispatchKey::PythonTLSSnapshot:
       return "PythonTLSSnapshot";
 
@@ -287,6 +288,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseCsr", c10::DispatchKey::SparseCsr},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
+      {"DTensor", c10::DispatchKey::DTensor},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
       {"Fake", c10::DispatchKey::Fake},
       {"Named", c10::DispatchKey::Named},
@@ -316,7 +318,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
       {"Batched", c10::DispatchKey::Batched},
       {"VmapMode", c10::DispatchKey::VmapMode},
-      {"DeferredInit", c10::DispatchKey::DeferredInit},
       {"FuncTorchGradWrapper", c10::DispatchKey::FuncTorchGradWrapper},
       {"FuncTorchDynamicLayerFrontMode",
        c10::DispatchKey::FuncTorchDynamicLayerFrontMode},

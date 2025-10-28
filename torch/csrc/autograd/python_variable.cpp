@@ -1054,7 +1054,7 @@ static PyObject* THPVariable_dtensor_new(
                            .device(local_tensor.device())
                            .layout(local_tensor.layout());
 
-  DispatchKeySet extra_dispatch_keys;
+  DispatchKeySet extra_dispatch_keys(c10::DispatchKey::DTensor);
   const auto tensor_keys = local_tensor.key_set();
   if (tensor_keys.has(c10::DispatchKey::Conjugate)) {
     extra_dispatch_keys = extra_dispatch_keys.add(c10::DispatchKey::Conjugate);
