@@ -11,7 +11,6 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/dummy.h>
 
-using namespace torch::aot_inductor;
 
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
