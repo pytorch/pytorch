@@ -901,6 +901,23 @@ class ConvTranspose1d(_ConvTransposeNd):
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
 
+    Examples::
+
+        >>> # With square kernels and equal stride
+        >>> m = nn.ConvTranspose1d(16, 33, 3, stride=2)
+        >>> input = torch.randn(20, 16, 50)
+        >>> output = m(input)
+        >>> # exact output size can be also specified as an argument
+        >>> input = torch.randn(1, 16, 12)
+        >>> downsample = nn.Conv1d(16, 16, 3, stride=2, padding=1)
+        >>> upsample = nn.ConvTranspose1d(16, 16, 3, stride=2, padding=1)
+        >>> h = downsample(input)
+        >>> h.size()
+        torch.Size([1, 16, 6])
+        >>> output = upsample(h, output_size=input.size())
+        >>> output.size()
+        torch.Size([1, 16, 12])
+
     .. _`here`:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
 
