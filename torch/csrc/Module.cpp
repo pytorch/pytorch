@@ -167,7 +167,7 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   for (Py_ssize_t i = 0; i < num_classes; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
-    PyTypeObject* type = (PyTypeObject*)obj;
+    PyTypeObject* type = reinterpret_cast<PyTypeObject*>(obj);
 
     THPObjectPtr module_name(PyObject_GetAttrString(obj, "__module__"));
     if (!module_name)
@@ -242,7 +242,7 @@ static PyObject* THPModule_initExtension(
   END_HANDLE_TH_ERRORS
 }
 
-// The idea behind these two functions is to make it easy to test if we are
+// The idea behind these functions is to make it easy to test if we are
 // built with ASAN: they're designed not to crash if ASAN is not enabled, but
 // to trigger ASAN if it is enabled.  This lets us run a "canary" tests which
 // checks if our build environment is misconfigured.
@@ -269,7 +269,7 @@ static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
       THPUtils_typename(arg));
   int32_t x = THPUtils_unpackInt(arg);
   double y = 1.0 / x;
-  return THPUtils_packInt32((int)y);
+  return THPUtils_packInt32(static_cast<int>(y));
   END_HANDLE_TH_ERRORS
 }
 
@@ -335,7 +335,7 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
       THPUtils_checkLong(arg),
       "set_num_threads expects an int, but got ",
       THPUtils_typename(arg));
-  int nthreads = (int)THPUtils_unpackLong(arg);
+  int nthreads = THPUtils_unpackInt(arg);
   TORCH_CHECK(nthreads > 0, "set_num_threads expects a positive integer");
   at::set_num_threads(nthreads);
   Py_RETURN_NONE;
@@ -357,7 +357,7 @@ static PyObject* THPModule_setNumInteropThreads(
       "set_num_interop_threads expects an int, "
       "but got ",
       THPUtils_typename(arg));
-  int nthreads = (int)THPUtils_unpackLong(arg);
+  int nthreads = THPUtils_unpackInt(arg);
   TORCH_CHECK(
       nthreads > 0, "set_num_interop_threads expects a positive integer");
   at::set_num_interop_threads(nthreads);
@@ -449,7 +449,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
   }
 
   if (Py_TYPE(obj) == &PyCFunction_Type) {
-    PyCFunctionObject* f = (PyCFunctionObject*)obj;
+    PyCFunctionObject* f = reinterpret_cast<PyCFunctionObject*>(obj);
     if (f->m_ml->ml_doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -458,7 +458,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     f->m_ml->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "method_descriptor") == 0) {
-    PyMethodDescrObject* m = (PyMethodDescrObject*)obj;
+    PyMethodDescrObject* m = reinterpret_cast<PyMethodDescrObject*>(obj);
     if (m->d_method->ml_doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -467,8 +467,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     m->d_method->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "getset_descriptor") == 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
-    PyGetSetDescrObject* m = (PyGetSetDescrObject*)obj;
+    PyGetSetDescrObject* m = reinterpret_cast<PyGetSetDescrObject*>(obj);
     if (m->d_getset->doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -477,7 +476,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     m->d_getset->doc = doc_str;
   } else if (Py_TYPE(obj) == &PyType_Type) {
-    PyTypeObject* t = (PyTypeObject*)obj;
+    PyTypeObject* t = reinterpret_cast<PyTypeObject*>(obj);
     if (t->tp_doc) {
       return PyErr_Format(
           PyExc_RuntimeError, "Type '%s' already has a docstring", t->tp_name);
@@ -1473,10 +1472,11 @@ static PyObject* THPModule_willEngineExecuteNode(
   torch::autograd::Node* node = nullptr;
   std::shared_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
-    node_sp = ((THPFunction*)arg)->cdata.lock();
+    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
     node = node_sp.get();
   } else {
-    node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
+    node =
+        (reinterpret_cast<torch::autograd::THPCppFunction*>(arg))->cdata.get();
   }
   const auto nodes_in_graph =
       torch::autograd::get_current_graph_task_nodes_in_graph();
@@ -1906,7 +1906,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_O,
      nullptr},
     {"_has_torch_function_variadic",
-     (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
+     reinterpret_cast<PyCFunction>(
+         reinterpret_cast<void (*)()>(THPModule_has_torch_function_variadic)),
      METH_FASTCALL,
      nullptr},
     {"_ensureCUDADeviceGuardSet",
@@ -1923,6 +1924,7 @@ void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
 void THCPMemPool_init(PyObject* module);
+void THCPGreenContext_init(PyObject* module);
 PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
@@ -2150,6 +2152,7 @@ PyObject* initModule() {
   THCPEvent_init(module);
   THCPGraph_init(module);
   THCPMemPool_init(module);
+  THCPGreenContext_init(module);
 #endif
 
 #ifdef USE_XPU
@@ -2613,7 +2616,7 @@ Call this whenever a new thread is created in order to propagate values from
           .getAcceleratorHooksInterface(device_type)
           .deviceCount();
     }
-    return c10::DeviceIndex(-1);
+    return static_cast<c10::DeviceIndex>(-1);
   });
 
   py_module.def(
@@ -2634,7 +2637,7 @@ Call this whenever a new thread is created in order to propagate values from
           .getAcceleratorHooksInterface(device_type)
           .getCurrentDevice();
     }
-    return c10::DeviceIndex(-1);
+    return static_cast<c10::DeviceIndex>(-1);
   });
 
   py_module.def(
@@ -2645,7 +2648,7 @@ Call this whenever a new thread is created in order to propagate values from
               .getAcceleratorHooksInterface(device_type)
               .exchangeDevice(device_index);
         }
-        return c10::DeviceIndex(-1);
+        return static_cast<c10::DeviceIndex>(-1);
       });
 
   py_module.def(
@@ -2657,7 +2660,7 @@ Call this whenever a new thread is created in order to propagate values from
               .getAcceleratorHooksInterface(device_type)
               .maybeExchangeDevice(device_index);
         }
-        return c10::DeviceIndex(-1);
+        return static_cast<c10::DeviceIndex>(-1);
       });
 
   py_module.def(
@@ -2702,6 +2705,8 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_has_xpu", has_xpu));
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
+  ASSERT_TRUE(set_module_attr(
+      "_has_mkldnn_acl", AT_MKLDNN_ACL_ENABLED() ? Py_True : Py_False));
 
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
 
@@ -2819,8 +2824,8 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("eps"));
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
-  THPDefaultCPUGenerator =
-      (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
+  THPDefaultCPUGenerator = reinterpret_cast<THPGenerator*>(
+      THPGenerator_initDefaultGenerator(defaultGenerator));
   // This reference is meant to be given away, so no need to incref here.
   ASSERT_TRUE(set_module_attr(
       "default_generator",

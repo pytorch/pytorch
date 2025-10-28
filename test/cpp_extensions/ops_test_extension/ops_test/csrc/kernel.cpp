@@ -28,8 +28,8 @@ void boxed_test_op_with_dummy(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  Tensor res = test_op_with_dummy(to<Tensor>(stack[0]));
-  stack[0] = from(res);
+  Tensor res = test_op_with_dummy(torch::stable::detail::to<Tensor>(stack[0]));
+  stack[0] = torch::stable::detail::from(res);
 }
 
 // Register the functions in the library

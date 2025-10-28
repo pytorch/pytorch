@@ -18,7 +18,6 @@
 #include <ATen/ops/_test_optional_filled_intlist_native.h>
 #include <ATen/ops/_test_optional_floatlist_native.h>
 #include <ATen/ops/_test_optional_intlist_native.h>
-#include <ATen/ops/_test_schema_upgrader_native.h>
 #include <ATen/ops/_test_string_default_native.h>
 #include <ATen/ops/_test_warn_in_autograd_native.h>
 #include <ATen/ops/_test_versioning_native.h>
@@ -131,15 +130,6 @@ Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool
   return self;
 }
 
-Tensor _test_schema_upgrader(
-    const Tensor& self,
-    bool a,
-    int64_t b) {
-  Tensor output = at::empty_like(self);
-  int64_t fill_value = a ? b : -b;
-  output.fill_(fill_value);
-  return output;
-}
 
 Tensor _test_versioning(
     const Tensor& self,

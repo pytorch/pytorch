@@ -44,7 +44,8 @@ def _apply_docstring_templates(func: Callable[_P, _T]) -> Callable[_P, _T]:
         warnings.warn(
             f"No documentation string available for {func.__name__}."
             " PyTorch team should run `python tools/update_masked_docs.py`"
-            " to generate the missing docstrings."
+            " to generate the missing docstrings.",
+            stacklevel=2,
         )
     else:
         func.__doc__ = doc_string
@@ -642,7 +643,6 @@ def _sparse_coo_scatter_reduction_helper(
 
     # promote dtype if specified
     if values.dtype != output_dtype:
-        # pyrefly: ignore  # no-matching-overload
         values = values.to(output_dtype)
 
     if keepdim:
@@ -767,7 +767,6 @@ def _sparse_csr_segment_reduction_helper(
 
     # promote dtype if specified
     if values.dtype != output_dtype:
-        # pyrefly: ignore  # no-matching-overload
         values = values.to(output_dtype)
 
     if len(dims) == 0:
