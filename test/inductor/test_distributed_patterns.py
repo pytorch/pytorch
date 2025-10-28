@@ -3,7 +3,6 @@ import dataclasses
 import functools
 
 import torch
-import torch.distributed.fsdp
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
@@ -503,4 +502,7 @@ class DistributedPatternTests(TestCase):
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS:
+        # We use torch.ops.fsdp above.
+        import torch.distributed.fsdp
+
         run_tests(needs="filelock")
