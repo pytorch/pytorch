@@ -4,6 +4,7 @@ from typing import Any
 from typing_extensions import Unpack
 
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
+from .triton_helpers import get_constexprs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -48,7 +49,7 @@ class StaticallyLaunchedCudaKernel:
         # Const exprs that are declared by the triton kernel directly
         # Used to generate the kernel launcher's def args
         # pyrefly: ignore [missing-attribute]
-        self.declared_constexprs = kernel.src.fn.constexprs
+        self.declared_constexprs = get_constexprs(kernel.src.fn)
 
         # pyrefly: ignore [missing-attribute]
         self.hash = kernel.hash
