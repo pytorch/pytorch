@@ -8,7 +8,6 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
-using namespace torch::aot_inductor;
 
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
