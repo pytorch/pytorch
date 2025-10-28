@@ -27,6 +27,7 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
+    get_report_dir,
     get_report_path,
     IS_CI,
     IS_MACOS,
@@ -528,6 +529,12 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    xml_report_dir = get_report_dir(test_file, None, options.pytest)
+    if is_cpp_test:
+        unittest_args.append(f"--junit-xml-reruns={get_report_path(xml_report_dir, test_file)}")
+    else:
+        unittest_args.append(f"--save-xml={xml_report_dir}")
 
     if options.showlocals:
         if options.pytest:
@@ -1225,12 +1232,6 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
-
-        if TEST_SAVE_XML:
-            # Add the option to generate XML test report here as C++ tests
-            # won't go into common_utils
-            test_report_path = get_report_path(pytest=True)
-            pytest_args.extend(["--junit-xml-reruns", test_report_path])
 
     if options.pytest_k_expr:
         pytest_args.extend(["-k", options.pytest_k_expr])

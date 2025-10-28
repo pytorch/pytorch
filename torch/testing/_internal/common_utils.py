@@ -950,13 +950,6 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
 torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
-def _get_test_report_path():
-    # allow users to override the test file location. We need this
-    # because the distributed tests run the same test file multiple
-    # times with different configurations.
-    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
-    test_source = override if override is not None else 'python-unittest'
-    return os.path.join('test-reports', test_source)
 
 def parse_cmd_line_args():
     global CI_FUNCTORCH_ROOT
@@ -987,9 +980,7 @@ def parse_cmd_line_args():
     parser.add_argument('--repeat', type=int, default=1)
     parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
     parser.add_argument('--use-pytest', action='store_true')
-    parser.add_argument('--save-xml', nargs='?', type=str,
-                        const=_get_test_report_path(),
-                        default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--save-xml', type=str)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
@@ -1018,6 +1009,9 @@ def parse_cmd_line_args():
     else:
         # infer flags based on the default settings
         GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
+
+    if args.save_xml is None and IS_CI:
+        args.xml_dir = get_report_dir(sys.argv[0], args.log_suffix, args.use_pytest)
 
     RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 
@@ -1191,19 +1185,37 @@ def lint_test_case_extension(suite):
     return succeed
 
 
-def get_report_path(argv=None, pytest=False):
-    if argv is None:
-        argv = UNITTEST_ARGS
-    test_filename = sanitize_test_filename(argv[0])
-    test_report_path = TEST_SAVE_XML + LOG_SUFFIX
-    test_report_path = os.path.join(test_report_path, test_filename)
-    if pytest:
-        test_report_path = test_report_path.replace('python-unittest', 'python-pytest')
-        os.makedirs(test_report_path, exist_ok=True)
-        test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
-        return test_report_path
-    os.makedirs(test_report_path, exist_ok=True)
-    return test_report_path
+def get_report_dir(test_name: str, log_suffix: Optional[str], is_pytest: bool) -> str:
+    """Generates a test report directory path. Test name does not need to be
+    sanitized."""
+    # total path = test-reports/test_source+log_suffix/test_filename
+    # Base path
+    test_source = "python-unittest"
+    if is_pytest:
+        test_source = "python-pytest"
+    # allow users to override the test file location. We need this
+    # because the distributed tests run the same test file multiple
+    # times with different configurations.
+    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
+    if override is not None:
+        test_source = override
+
+    # Add log suffix to if provided
+    if log_suffix and log_suffix != "":
+        test_source = test_source + log_suffix
+
+    test_report_dir = os.path.join('test-reports', test_source)
+
+    # Add test file name to path
+    test_filename = sanitize_test_filename(test_name)
+    test_report_dir = os.path.join(test_report_dir, test_filename)
+
+    os.makedirs(test_report_dir, exist_ok=True)
+    return test_report_dir
+
+
+def get_report_path(report_dir: str, test_filename: str) -> str:
+    return os.path.join(report_dir, f"{sanitize_test_filename(test_filename)}-{os.urandom(8).hex()}.xml")
 
 
 def sanitize_pytest_xml(xml_file: str):
@@ -1346,7 +1358,7 @@ def run_tests(argv=None):
         pytest_args = argv + ["--use-main-module"]
         test_report_path = ""
         if TEST_SAVE_XML:
-            test_report_path = get_report_path(pytest=True)
+            test_report_path = get_report_path(TEST_SAVE_XML, argv[0])
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
         if PYTEST_SINGLE_TEST:
@@ -1390,7 +1402,7 @@ def run_tests(argv=None):
             def printErrors(self) -> None:
                 super().printErrors()
                 self.printErrorList("XPASS", self.unexpectedSuccesses)
-        test_report_path = get_report_path()
+        test_report_path = get_report_path(TEST_SAVE_XML, argv[0])
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
