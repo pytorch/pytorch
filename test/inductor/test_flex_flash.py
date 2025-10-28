@@ -122,8 +122,17 @@ def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
     result["found"] = any(kernel_pattern in name for name in kernel_names)
 
 
-def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=5e-3, atol=5e-3):
+def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
     compiled_fn = torch.compile(flex_attention)
+
+    out_ref_fp32 = flex_attention(
+        q.to(torch.float32),
+        k.to(torch.float32),
+        v.to(torch.float32),
+        score_mod=score_mod,
+        block_mask=block_mask,
+    ).to(q.dtype)
+
     out_flash = compiled_fn(
         q,
         k,
@@ -132,7 +141,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=5e-3, atol=5e
         block_mask=block_mask,
         kernel_options={"force_flash": True},
     )
-    out_no_flash = compiled_fn(
+    out_triton = compiled_fn(
         q,
         k,
         v,
@@ -140,8 +149,25 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=5e-3, atol=5e
         block_mask=block_mask,
         kernel_options={"force_flash": False},
     )
-    torch.testing.assert_close(out_flash, out_no_flash, rtol=rtol, atol=atol)
-    return out_flash, out_no_flash
+
+    assert out_flash.shape == out_ref_fp32.shape == out_triton.shape
+    assert not torch.isnan(out_flash).any()
+    assert not torch.isnan(out_triton).any()
+    assert not torch.isnan(out_ref_fp32).any()
+    assert torch.isfinite(out_flash).all()
+    assert torch.isfinite(out_triton).all()
+    assert torch.isfinite(out_ref_fp32).all()
+
+    fwd_atol = 2 * (out_ref_fp32 + 0.3 - 0.3 - out_ref_fp32).abs().max().item()
+
+    triton_error = (out_triton - out_ref_fp32).abs().max().item()
+    flash_error = (out_flash - out_ref_fp32).abs().max().item()
+
+    assert flash_error <= rtol * triton_error + fwd_atol, (
+        f"Flash error {flash_error:.2e} exceeds {rtol}x Triton error {triton_error:.2e} + {fwd_atol:.2e}"
+    )
+
+    return out_flash, out_triton, out_ref_fp32
 
 
 def name_fn(score_mod):
