@@ -878,20 +878,11 @@ class MaskPartial(Partial):
         object.__setattr__(self, "offset_shape", offset_shape)
         object.__setattr__(self, "offset_dim", offset_dim)
 
-    def _partition_value(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
-    ) -> torch.Tensor:
-        # override parent logic to perform partial mask for embedding
-        num_chunks = mesh.size(mesh_dim)
-        # get local shard size and offset on the embedding_dim
-        assert self.offset_shape is not None, (
-            "offset_shape needs to be set for MaskPartial"
-        )
-        local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
-            self.offset_shape[self.offset_dim],
-            num_chunks,
-            mesh.get_local_rank(mesh_dim),
-        )
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _mask_tensor(
+        tensor: torch.Tensor, local_offset_on_dim: int, local_shard_size: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Build the input mask and save it for the current partial placement
         # this is so that the output of embedding op can reuse the same partial
         # placement saved mask to perform mask + reduction
@@ -901,6 +892,27 @@ class MaskPartial(Partial):
         # mask the input tensor
         masked_tensor = tensor.clone() - local_offset_on_dim
         masked_tensor[mask] = 0
+        return mask, masked_tensor
+
+    def _partition_value(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        my_coordinate = mesh.get_coordinate()
+        assert my_coordinate is not None, "my_coordinate should not be None"
+        # override parent logic to perform partial mask for embedding
+        num_chunks = mesh.size(mesh_dim)
+        # get local shard size and offset on the embedding_dim
+        assert self.offset_shape is not None, (
+            "offset_shape needs to be set for MaskPartial"
+        )
+        local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
+            self.offset_shape[self.offset_dim],
+            num_chunks,
+            my_coordinate[mesh_dim],
+        )
+        mask, masked_tensor = MaskPartial._mask_tensor(
+            tensor, local_offset_on_dim, local_shard_size
+        )
         # materialize the mask buffer to be used for reduction
         self.mask_buffer.materialize_mask(mask)
         return masked_tensor
