@@ -1556,9 +1556,11 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> tuple[str, int]:
+    def workspace(
+        self, nelem: sympy.Expr, zero_fill: bool, dtype: torch.dtype = torch.uint8
+    ) -> tuple[str, str, int]:
         """
-        Allocate or extend a workspace buffer of nbytes bytes.
+        Allocate or extend a workspace buffer of nelem elements.
 
         This function manages the allocation of a workspace buffer. It either creates
         a new WorkspaceArg or extends an existing one.
@@ -1571,31 +1573,35 @@ class KernelArgs:
         - A new argument "ws_ptr" will be present in the generated code.
 
         Args:
-            nbytes (sympy.Expr): The number of bytes to allocate.
+            nelem (sympy.Expr): The number of elements to allocate.
             zero_fill (bool): Whether to initialize the buffer to zero.
+            dtype (torch.dtype): the dtype of the workspace tensor
 
         Returns:
-            Tuple[str, int]: A tuple containing:
+            Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - offset: An integer representing the byte offset in the workspace.
+                - "workspace_{i}": agraph level unique identifier for
+                    the workspace tensor.
+                - offset: An integer representing the item offset in the workspace.
         """
         arg = WorkspaceArg(
-            count=nbytes,
+            count=nelem,
             zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
             device=V.graph.get_current_device_or_throw(),
             outer_name=WorkspaceArg.unique_name(),
+            dtype=dtype,
         )
         for i, existing_arg in enumerate(self.workspace_args):
             if WorkspaceArg.can_join(existing_arg, arg):
                 offset = existing_arg.count
                 self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
-                return existing_arg.inner_name, offset
+                return existing_arg.inner_name, existing_arg.outer_name, offset
             assert (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
             ), existing_arg
         self.workspace_args.append(arg)
-        return arg.inner_name, 0
+        return arg.inner_name, arg.outer_name, 0
 
     def semaphores(self, min_size: sympy.Expr) -> str:
         """
