@@ -68,6 +68,8 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
+    # This needs to belong here because it defines the first non-inline virtual
+    # function, which matters for AutogradMetaInterface's vtable.
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
@@ -853,6 +855,7 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Stream.cpp",
     "torch/csrc/cuda/Graph.cpp",
     "torch/csrc/cuda/MemPool.cpp",
+    "torch/csrc/cuda/GreenContext.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
@@ -1071,6 +1074,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/MAIAHooksInterface.cpp",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
+    "aten/src/ATen/detail/XLAHooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/detail/MTIAHooksInterface.cpp",
     "aten/src/ATen/detail/IPUHooksInterface.cpp",
@@ -1089,6 +1093,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/HPUHooksInterface.h",
     "aten/src/ATen/detail/MAIAHooksInterface.h",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
+    "aten/src/ATen/detail/XLAHooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
     "aten/src/ATen/detail/MTIAHooksInterface.h",
     "aten/src/ATen/detail/IPUHooksInterface.h",

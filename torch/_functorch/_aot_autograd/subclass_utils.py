@@ -232,7 +232,6 @@ def unwrap_tensor_subclasses(
 
         attrs, _ = t.__tensor_flatten__()
 
-        # pyrefly: ignore  # bad-assignment
         for attr in attrs:
             inner_tensor = getattr(t, attr)
             n_desc: Any = (
@@ -314,7 +313,6 @@ def runtime_unwrap_tensor_subclasses(
 
     for idx, x in enumerate(wrapped_args):
         if not is_traceable_wrapper_subclass(x):
-            # pyrefly: ignore  # bad-argument-type
             xs_inner.append(x)
             continue
 

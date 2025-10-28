@@ -328,5 +328,36 @@ struct pair {
   T2 second;
 };
 
+template <typename T>
+inline T conj(T a) {
+  return a;
+}
+
+template <>
+inline half2 conj(half2 a) {
+  return half2(a.x, -a.y);
+}
+
+template <>
+inline float2 conj(float2 a) {
+  return float2(a.x, -a.y);
+}
+
+#define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
+  MACRO(float);                          \
+  MACRO(half);                           \
+  MACRO(bfloat);                         \
+  MACRO(float2);                         \
+  MACRO(long);                           \
+  MACRO(char);                           \
+  MACRO(uchar);                          \
+  MACRO(short);                          \
+  MACRO(int);
+
+#define INSTANTIATE_FOR_FLOAT_TYPES(MACRO) \
+  MACRO(float);                            \
+  MACRO(half);                             \
+  MACRO(bfloat);
+
 } // namespace metal
 } // namespace c10
