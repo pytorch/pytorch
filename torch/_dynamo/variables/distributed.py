@@ -217,7 +217,7 @@ class PlacementVariable(DistributedVariable):
                         explanation="Dynamo does not support Placement types with custom __getattr__ methods",
                         hints=[
                             "Use Placement types without custom __getattr__ methods",
-                            "Or move the Placement usage outside the compiled region",
+                            "Move the Placement usage outside the compiled region",
                         ],
                     )
                 method = inspect.getattr_static(value_type, name)
