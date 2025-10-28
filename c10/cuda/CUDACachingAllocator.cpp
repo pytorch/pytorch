@@ -2500,6 +2500,9 @@ class DeviceCachingAllocator {
           AcceleratorAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
+      } else if (divisions == 1) {
+        constexpr auto gib = 1024 * 1024 * 1024;
+        return std::min(llvm::PowerOf2Ceil(size), size + gib);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
       }

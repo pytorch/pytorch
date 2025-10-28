@@ -4522,6 +4522,10 @@ class TestCudaMallocAsync(TestCase):
         nelems_big = 100 * 1024 * 1024
         nbytes_big = 4 * nelems_big  # floats are 4 bytes
 
+        gib_buffer = 1073741824  # 1GB
+        nelems_large = gib_buffer * 5
+        nbytes_large = 4 * nelems_large
+
         start_mem = torch.cuda.memory_stats()[key_allocated]
         torch.cuda.memory._set_allocator_settings("")
         x = torch.rand(nelems, device="cuda")
@@ -4581,6 +4585,32 @@ class TestCudaMallocAsync(TestCase):
         w = torch.rand(nelems, device="cuda")
         reg_mem = torch.cuda.memory_stats()[key_allocated]
         self.assertEqual(reg_mem - start_mem, nbytes)
+
+        # Check power of 2 when rounding is less than 1GB buffer.
+        torch.cuda.memory.empty_cache()
+        div1_start_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_start_requested = torch.cuda.memory_stats()[key_requested]
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:1")
+        torch.rand(nelems, device="cuda")
+        div1_end_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_end_requested = torch.cuda.memory_stats()[key_requested]
+
+        self.assertEqual(div1_start_mem - start_mem, nbytes)
+
+        if not TEST_CUDAMALLOCASYNC:
+            self.assertEqual(div1_end_mem - div1_start_mem, power2_div(nbytes, 1))
+            self.assertEqual(div1_end_requested - div1_start_requested, nbytes)
+        
+        # Check power of 2 when rounding is greater than 1GB.
+        torch.cuda.memory.empty_cache()
+        div1_start_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_start_requested = torch.cuda.memory_stats()[key_requested]
+        torch.rand(nelems_large, device="cuda")
+        div1_end_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_end_requested = torch.cuda.memory_stats()[key_requested]
+        if not TEST_CUDAMALLOCASYNC:
+            self.assertEqual(div1_end_mem - div1_start_mem, nbytes_large + gib_buffer)
+            self.assertEqual(div1_end_requested - div1_start_requested, nbytes_large)
 
         with self.assertRaises(ValueError):
             torch._C._accelerator_setAllocatorSettings("foo:1,bar:2")
