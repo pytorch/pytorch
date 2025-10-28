@@ -1755,11 +1755,11 @@ def _aot_stage2b_bw_compile(
                 )
 
                 # Inductor can choose different strdies for activations than
-                # what backward graph has. if we cant statically tell that
+                # what backward graph has. if we can't statically tell that
                 # strides are the same, we assume they are not.
                 with suppress_ctx:
                     for k in range(len(ph_arg.stride())):
-                        # real_stride cant be symbolic.
+                        # real_stride can't be symbolic.
                         if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
                             stride_different = True
                             break
