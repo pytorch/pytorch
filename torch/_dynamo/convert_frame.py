@@ -29,6 +29,7 @@ import cProfile
 import dis
 import functools
 import gc
+import inspect
 import itertools
 import logging
 import os
@@ -45,7 +46,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -116,6 +117,7 @@ from .exc import (
     unimplemented_v2,
     Unsupported,
 )
+from .graph_bytecode_inputs import reset_user_object_tracking
 from .guards import (
     CheckFunctionManager,
     get_and_maybe_log_recompilation_reasons,
@@ -174,6 +176,10 @@ except ModuleNotFoundError:
 
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.utils.weak import WeakIdKeyDictionary
+
     from .backends.registry import CompilerFn
     from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
@@ -314,6 +320,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
             exit_stack.enter_context(torch_function_mode_stack_state_mgr)
+            reset_user_object_tracking()
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -468,7 +475,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         try:
             prof.enable()
             start_ts = time.time()
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
             prof.disable()
@@ -881,6 +888,7 @@ class DynamoOutput:
         return GraphCaptureOutput(
             OutputGraphCommon(
                 output_graph.dump_guards_state(),
+                output_graph.import_sources,
                 output_graph.shape_env,
                 output_graph.export_metadata,
                 output_graph.tracked_fakes_id_to_source,
@@ -906,6 +914,7 @@ class BackendInput:
     graph_module: torch.fx.GraphModule
     example_inputs: Any
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    tensor_to_context: WeakIdKeyDictionary
 
 
 @dataclass
@@ -954,6 +963,27 @@ class CaptureOutput:
     # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
     backend_input: Optional[BackendInput]
 
+    def forward_callable(self) -> Callable[..., Any]:
+        import importlib
+
+        # TODO code sharing
+        import_sources = self.graph_capture_output.output_graph.import_sources
+        assert self.backend_input is not None
+        backend_id = self.backend_input.backend_id
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in import_sources.items()
+        }
+        f_globals = {
+            **import_sources,
+            backend_id: self.backend_input.graph_module,
+        }
+        return types.FunctionType(
+            self.graph_capture_output.bytecode,
+            f_globals,
+            closure=(),
+        )
+
 
 def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     """
@@ -965,12 +995,16 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     if isinstance(mod, torch.nn.Module):
         mod = mod.forward
     if hasattr(mod, "__self__"):
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return mod.__func__, mod.__self__
     elif inspect.isfunction(mod):
         return mod, None
     else:
         raise RuntimeError(f"Unsupported model code type {mod}")
+
+
+def _get_signature(fn: Any) -> inspect.Signature:
+    return inspect.signature(fn, follow_wrapped=False)
 
 
 def _get_frame(
@@ -982,7 +1016,6 @@ def _get_frame(
     Create a frame to trace, given a model, args, and optional kwargs.
     """
     import builtins
-    import inspect
 
     fn, self_opt = get_traced_fn(mod)
     if self_opt is not None:
@@ -990,7 +1023,7 @@ def _get_frame(
     if kwargs is None:
         kwargs = {}
 
-    signature = inspect.signature(fn)
+    signature = _get_signature(fn)
     bound_arguments = signature.bind(*args, **kwargs)
     bound_arguments.apply_defaults()
     f_locals = bound_arguments.arguments
@@ -1074,11 +1107,13 @@ def _fullgraph_capture_frame(
         gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> torch.fx.GraphModule:
         nonlocal backend_input
-        fake_mode = TracingContext.get().fake_mode
+        tracing_context = TracingContext.get()
+        fake_mode = tracing_context.fake_mode
+        tensor_to_context = tracing_context.tensor_to_context
         assert fake_mode is not None
         assert isinstance(gm.meta["backend_id"], str)
         backend_input = BackendInput(
-            gm.meta["backend_id"], gm, example_inputs, fake_mode
+            gm.meta["backend_id"], gm, example_inputs, fake_mode, tensor_to_context
         )
         return gm
 
@@ -1105,7 +1140,7 @@ def _fullgraph_capture_frame(
         while cur_exn.__cause__ is not None:
             cur_exn.__cause__.with_traceback(None)
             cur_exn = cur_exn.__cause__
-        # pyrefly: ignore  # invalid-inheritance
+        # pyrefly: ignore [invalid-inheritance]
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
     return CaptureOutput(
@@ -1129,7 +1164,7 @@ def compile_frame(  # type: ignore[return]
     frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
 ) -> DynamoOutput:
     """
     A helper function taking a frame and backend, then return the generated bytecode
@@ -1204,7 +1239,7 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
-            log.debug(
+            log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
                 e,
