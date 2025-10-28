@@ -216,9 +216,7 @@ def replicate(
     module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
     device_mesh = kwargs.get("device_mesh")
     if device_mesh is not None:
-        from torch.distributed.device_mesh import _mesh_resources
-
-        root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+        root_mesh = device_mesh._get_root_mesh()
         # if a root mesh is not the same as device_mesh,
         # meaning the device_mesh is sliced out from the root mesh.
         if root_mesh != device_mesh:

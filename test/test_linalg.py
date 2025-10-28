@@ -2138,6 +2138,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_compare_backends(self, device, dtype):
+
         def run_test(shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
@@ -2151,10 +2152,27 @@ class TestLinalg(TestCase):
 
             complementary_device = 'cpu'
 
-            # compare with CPU
+            # compare eigenvalues with CPU
             expected = torch.linalg.eig(a.to(complementary_device))
             self.assertEqual(expected[0], actual[0])
-            self.assertEqual(expected[1], actual[1])
+
+
+            # set tolerance for correctness check
+            if dtype in [torch.float32, torch.complex64]:
+                atol = 1e-3  # CuSolver gives less accurate results for single precision (1-2 larger than OOM NumPy)
+            else:
+                atol = 1e-13  # Same OOM for NumPy
+
+            # check correctness using eigendecomposition identity
+            w, v = actual
+            a = a.to(v.dtype)
+
+            if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
+                pass
+            elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
+                raise RuntimeError("eig returned empty tensors unexpectedly")
+
+            self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
@@ -5661,7 +5679,7 @@ class TestLinalg(TestCase):
 
             # TunableOp is running in a subprocess
             # online tuning needs filename set through API
-            # offline tuning needs filename set through environment variableq
+            # offline tuning needs filename set through environment variable
             result_filename = torch.cuda.tunable.get_filename()
             untuned_filename = get_tunableop_untuned_filename()
 
@@ -5903,8 +5921,8 @@ class TestLinalg(TestCase):
             self.assertGreater(initial_count, 0)  # we seeded 1 result line
 
             # Perform ONE simple matmul
-            A = torch.randn(37, 53, device=device, dtype=dtype)
-            B = torch.randn(53, 29, device=device, dtype=dtype)
+            A = torch.randn(27, 43, device=device, dtype=dtype)
+            B = torch.randn(43, 39, device=device, dtype=dtype)
             _ = torch.matmul(A, B)
 
             # Verify that new results were appended to the same file
@@ -9930,6 +9948,28 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         B = torch.rand(n, dtype=dtype, device=device)
         C = torch.matmul(A, B)
         self.assertEqual(C, B.sum().expand(B.shape))
+
+    @onlyCUDA
+    @largeTensorTest("40GB")
+    def test_triu_tril_large_matrix_64bit(self, device):
+        """
+        Test triu/tril with large matrices requiring 64-bit indexing.
+        Regression test for https://github.com/pytorch/pytorch/issues/136611
+        """
+        # 100k x 100k matrix with 10B elements requires 64-bit indexing
+        q_len = 100000
+        causal_mask = torch.full((q_len, q_len), float('-inf'), device=device, dtype=torch.float32)
+        causal_mask.triu_(1)
+
+        # Verify row 42950 is correct (previously failed due to int32 overflow at row*col)
+        row_42950 = causal_mask[42950]
+        num_zeros = (row_42950 == 0.0).sum().item()
+        expected_zeros = 42951
+        self.assertEqual(num_zeros, expected_zeros)
+
+        # Verify last row is correct
+        last_row = causal_mask[-1]
+        self.assertTrue((last_row == 0.0).all())
 
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_triu_tril_extreme_k_values(self, device, dtype):
