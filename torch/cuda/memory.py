@@ -23,6 +23,7 @@ from . import (
     is_initialized,
 )
 from ._memory_viz import memory as _memory, segments as _segments
+from ._utils import _augment_memory_snapshot_stack_traces
 
 
 if TYPE_CHECKING:
@@ -964,7 +965,7 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _snapshot(device: "Device" = None):
+def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.
@@ -1012,6 +1013,11 @@ def _snapshot(device: "Device" = None):
             filename: str
             line: int
             name: str
+            # Optional FX debug fields (present when augment_with_fx_traces=True
+            # and the frame corresponds to FX-generated code)
+            fx_node_op: str  # FX node operation type (e.g., 'call_function', 'output')
+            fx_node_name: str  # FX node name (e.g., 'linear', 'relu_1')
+            fx_original_trace: str  # Original model source code stack trace
 
 
         class TraceEntry(TypedDict):
@@ -1041,13 +1047,23 @@ def _snapshot(device: "Device" = None):
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
 
+    Args:
+        device: Device to capture snapshot for. If None, captures for current device.
+        augment_with_fx_traces: If True, augment stack trace frames with FX debug information
+                                that maps generated FX code back to original model source code.
+                                This adds fx_node_op, fx_node_name, fx_original_trace, and
+                                fx_node_info fields to Frame objects. Default: False.
+
     Returns:
         The Snapshot dictionary object
     """
-    return _C._cuda_memorySnapshot(None)
+    s = _C._cuda_memorySnapshot(None)
+    if augment_with_fx_traces:
+        s = _augment_memory_snapshot_stack_traces(s)
+    return s
 
 
-def _dump_snapshot(filename="dump_snapshot.pickle"):
+def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False):
     """
     Save a pickled version of the `torch.memory._snapshot()` dictionary to a file.
 
@@ -1059,8 +1075,14 @@ def _dump_snapshot(filename="dump_snapshot.pickle"):
 
     Args:
         filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
+        augment_with_fx_traces (bool, optional): If True, augment the snapshot with FX debug information
+                                                  before dumping. This maps generated FX code stack traces
+                                                  back to original model source code. Defaults to False.
+        verbose (bool, optional): If True and augment_with_fx_traces is True, print verbose debug output
+                                  during augmentation. Defaults to False.
     """
-    s = _snapshot()
+    s = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
+
     with open(filename, "wb") as f:
         pickle.dump(s, f)
 

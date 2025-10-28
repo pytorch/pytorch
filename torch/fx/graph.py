@@ -226,8 +226,10 @@ class PythonCode:
     # Values in global scope during execution of `src_def`.
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
-    # node index.
+    # node index. Line number starts at the prologue (i.e. forward()).
     _lineno_map: Optional[dict[int, Optional[int]]]
+    # The line number of prologue in fn_code
+    _prologue_start: int = 0
 
 
 def _format_target(base: str, target: str) -> str:
@@ -854,7 +856,13 @@ class CodeGen:
 
 {prologue}
 {code}"""
-        return PythonCode(fn_code, globals_, _lineno_map=lineno_map)
+        prologue_start = wrap_stmts.count("\n") + 4
+        return PythonCode(
+            fn_code,
+            globals_,
+            _lineno_map=lineno_map,
+            _prologue_start=prologue_start,
+        )
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen

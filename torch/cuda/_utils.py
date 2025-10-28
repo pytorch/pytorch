@@ -1,4 +1,7 @@
 import ctypes
+import os
+import pickle
+import re
 import sys
 from typing import Any, Optional, Union
 
@@ -527,3 +530,121 @@ def _get_device_index(
         if isinstance(device, torch.cuda.device):
             return device.idx
     return _torch_get_device_index(device, optional, allow_cpu)
+
+
+# =============================================================================
+# Memory Profiler Utilities
+# =============================================================================
+# Utility functions for augmenting CUDA memory profiler snapshots with FX graph metadata.
+
+
+def _augment_frames(frames: list[dict[str, Any]]) -> int:
+    """
+    Augment a list of frames with FX debug information.
+
+    Args:
+        frames: List of frame dictionaries to augment
+
+    Returns:
+        The count of frames that were augmented.
+    """
+    from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
+
+    # Regex pattern to match FX generated files
+    _FX_GENERATED_PATTERN = re.compile(
+        rf"{re.escape(FX_GRAPH_MODULE_FILE_PREFIX)}.*\.py$"
+    )
+
+    count = 0
+    if not frames:
+        return count
+
+    for frame in frames:
+        if isinstance(frame, dict) and "filename" in frame and "line" in frame:
+            filename = frame["filename"]
+            lineno = frame["line"]
+
+            # Check if this looks like an FX generated file
+            if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
+                continue
+
+            # Look up metadata from the global registry
+            from torch.fx.traceback import _FX_METADATA_REGISTRY
+
+            metadata = _FX_METADATA_REGISTRY.get(filename)
+            if metadata is None:
+                continue
+
+            lineno_map = metadata.get("lineno_map", {})
+            node_metadata = metadata.get("node_metadata", {})
+            prologue_start = metadata.get("prologue_start", 0)
+
+            # Get the node index for this line
+            node_idx = lineno_map.get(lineno - prologue_start)
+
+            if node_idx is not None and node_idx in node_metadata:
+                node_info = node_metadata[node_idx]
+                original_trace = node_info.get("stack_trace")
+                node_op = node_info.get("op")
+                node_name = node_info.get("name")
+                node_target = node_info.get("target")
+
+                # Always add node metadata
+                frame["fx_node_op"] = node_op
+                frame["fx_node_name"] = node_name
+                frame["fx_node_target"] = str(node_target)
+
+                # Add original trace if available
+                if original_trace:
+                    frame["fx_original_trace"] = original_trace
+
+                count += 1
+
+    return count
+
+
+def _augment_memory_snapshot_stack_traces(
+    snapshot: str | dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Augment a memory snapshot with original source stack traces from FX metadata.
+
+    IMPORTANT: This function reads from a global in-memory registry (_FX_METADATA_REGISTRY)
+    that is populated during graph module compilation. It must be called in the same
+    Python process where the FX graphs were compiled. It cannot be used to augment
+    snapshots loaded from disk in a different process.
+
+    Args:
+        snapshot: Either a memory snapshot dict or path to a snapshot pickle file
+
+    Returns:
+        The augmented snapshot dictionary with fx_node_op, fx_node_name,
+        fx_original_trace, and fx_node_info fields added to frames
+    """
+
+    if isinstance(snapshot, str):
+        # Load the memory snapshot
+        with open(snapshot, "rb") as f:
+            snapshot = pickle.load(f)
+
+    assert isinstance(snapshot, dict)
+
+    # Process stack traces in the snapshot
+    augmented_count = 0
+
+    # Process blocks in segments (for regular allocations)
+    if "segments" in snapshot:
+        for segment in snapshot["segments"]:
+            if "blocks" in segment:
+                for block in segment["blocks"]:
+                    if "frames" in block:
+                        augmented_count += _augment_frames(block["frames"])
+
+    # Process device traces (for memory history)
+    if "device_traces" in snapshot:
+        for trace_list in snapshot["device_traces"]:
+            for trace_entry in trace_list:
+                if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                    augmented_count += _augment_frames(trace_entry["frames"])
+
+    return snapshot
