@@ -29,6 +29,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
 from torch._utils_internal import find_compile_subproc_binary
+from torch._inductor.compile_worker.timer import Timer
 
 
 log = logging.getLogger(__name__)
@@ -130,6 +131,7 @@ class SubprocPool:
         nprocs: int,
         pickler: Optional[SubprocPickler] = None,
         kind: SubprocKind = SubprocKind.FORK,
+        quiesce = False,
     ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
@@ -197,6 +199,11 @@ class SubprocPool:
 
         self.running = True
 
+        if quiesce:
+            self.timer = Timer(60, self.quiesce)
+        else:
+            self.timer = None
+
         # Start thread last to ensure all member variables are initialized
         # before any access.
         self.read_thread.start()
@@ -255,6 +262,8 @@ class SubprocPool:
             with self.futures_lock:
                 if not self.running:
                     return
+                if self.timer:
+                    timer.record_call()
                 if isinstance(result, _SubprocExceptionInfo):
                     # An exception occurred in the submitted job
                     self.pending_futures[job_id].set_exception(
