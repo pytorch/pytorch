@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch._inductor.analysis.device_info import DeviceSpec, lookup_device_info
+from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info
 from torch._inductor.utils import tabulate_2d, zip_dicts
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
@@ -49,6 +49,7 @@ def register_adapter(
     AdapterType,
 ]:
     def decorator(func: AdapterType) -> AdapterType:
+        # pyrefly: ignore [unknown-name]
         global _adapters_map
 
         if isinstance(aten, str):
@@ -381,7 +382,7 @@ KernelNameMap = defaultdict[str, OrderedSet[KernelStats]]
 class Device:
     name: str
     index: int
-    info: Optional[DeviceSpec]
+    info: Optional[DeviceInfo]
     stats: KernelNameMap
 
     def __repr__(self) -> str:
@@ -412,12 +413,11 @@ class JsonProfile:
         if dtype is None:
             self.dtype = None
         elif isinstance(dtype, torch.dtype):
+            # pyrefly: ignore [bad-assignment]
             self.dtype = dtype
         else:
-            if dtype in _dtype_map:
-                self.dtype = _dtype_map[dtype]
-            else:
-                self.dtype = None
+            # pyrefly: ignore [bad-assignment]
+            self.dtype = _dtype_map.get(dtype)
         self._create_devices()
 
     def convert_dtype(self, event: dict[str, Any]) -> Optional[torch.dtype]:
@@ -653,6 +653,7 @@ class JsonProfile:
                     t1, self_name, t2, other_name
                 )
                 tab_string = create_ret(table_headers, table_rows)
+                # pyrefly: ignore [bad-argument-type]
                 ret.append(f"{self._devices[device_idx]}:\n{tab_string}")
             return "\n".join(ret)
         self._compute_stats()
@@ -663,6 +664,7 @@ class JsonProfile:
         for idx, table in self_tables.items():
             table_headers, table_rows = table
             tab_string = create_ret(table_headers, table_rows)
+            # pyrefly: ignore [bad-argument-type]
             ret.append(f"{self._devices[idx]}:\n{tab_string}")
         return "\n".join(ret)
 

@@ -1088,7 +1088,7 @@ class Vectorized8 : public Vectorizedi {
     // Because loadu(const void* ptr, T count) requires zero initialization for
     // upper 384 bits. However, by using _mm512_castsi128_si512, the upper 384
     // bits of the result are undefined.
-    // TODO<leslie> We can use _mm512_zextsi128_si512 in the furture,
+    // TODO<leslie> We can use _mm512_zextsi128_si512 in the future,
     // since gcc 9.3 doesn't support it now.
     __m128i input_128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
     return _mm512_castsi128_si512(input_128);
@@ -1852,7 +1852,7 @@ Vectorized<T> inline shift_512_8(
 
   // Control masks for shuffle operation, treating 512 bits as an
   // array of 8-bit elements, and considering pairs of neighboring
-  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // elements.  Specifically, a mask named "ctl_M_N" (M,N in [0,1], and
   // M!=N) is set so that shuffle will move element with index M from
   // input pair into element with index N in output pair, and element
   // with index M in output pair will be set to all 0s.
@@ -2022,7 +2022,7 @@ Vectorized<T> inline shift_512_8(
     c0 = _mm512_srlv_epi16(a0, b0);
   c0 = _mm512_shuffle_epi8(c0, ctl_1_0);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%2==1.
   __m512i a1 = _mm512_and_si512(a, keep_1);
   __m512i b1 = _mm512_shuffle_epi8(b, ctl_1_0);

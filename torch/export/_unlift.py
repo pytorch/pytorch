@@ -51,7 +51,11 @@ def eq_spec(self: pytree.TreeSpec, other: pytree.TreeSpec) -> bool:
             return True
         if _normalize_type(a.type) != _normalize_type(b.type):
             return False
-        if a.context != b.context:
+        if a.type is dict and b.type is dict:
+            # in the case of dict, the context is list of keys and we allow the keys to be in any order
+            if set(a.context) != set(b.context):
+                return False
+        elif a.context != b.context:
             return False
         if len(a.children_specs) != len(b.children_specs):
             return False
@@ -237,8 +241,11 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
         _check_inputs_match(args, kwargs, self._in_spec)
         return
 
-    # NOTE: this call is Dynamo disabled, as it used to be
-    _check_input_constraints_for_module(self, args, kwargs)
+    # NOTE: for some reason, Dynamo is tracing into this, we should see why and
+    # put compile at the right place. Until then, we can skip the input
+    # constraint checks.
+    if not torch.compiler.is_dynamo_compiling():
+        _check_input_constraints_for_module(self, args, kwargs)
 
 
 def _unlift_inputs_as_getattr(
@@ -319,8 +326,7 @@ def _insert_copy_for_mutations(
             return_nodes_to_copy[return_node] = copy_node
 
     output_args = tuple(
-        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
-        for node in user_output_nodes
+        return_nodes_to_copy.get(node, node) for node in user_output_nodes
     )
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
@@ -349,10 +355,10 @@ def _get_codegen(
     if forward_arg_names:
         names = forward_arg_names
     elif (
-        in_spec.type == tuple
+        in_spec.type is tuple
         and in_spec.num_children == 2
-        and in_spec.children_specs[0].type == tuple
-        and in_spec.children_specs[1].type == dict
+        and in_spec.children_specs[0].type is tuple
+        and in_spec.children_specs[1].type is dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
         names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
@@ -524,7 +530,8 @@ def _create_stateful_graph_module(
                 f"A model attribute `{constant_fqn}` requires gradient. "
                 f"but it's not properly registered as a parameter. "
                 f"torch.export will detach it and treat it as a constant tensor "
-                f"but please register it as parameter instead."
+                f"but please register it as parameter instead.",
+                stacklevel=2,
             )
             detached_buffer = buffer.detach()
             original_tensor_to_detached_tensor[buffer] = detached_buffer
@@ -543,7 +550,8 @@ def _create_stateful_graph_module(
                         f"A model attribute `{const_name}` requires gradient "
                         f"but it's not properly registered as a parameter. "
                         f"torch.export will detach it and treat it as a constant tensor "
-                        f"but please register it as parameter instead."
+                        f"but please register it as parameter instead.",
+                        stacklevel=2,
                     )
                     if value in original_tensor_to_detached_tensor:
                         value = original_tensor_to_detached_tensor[value]
@@ -582,9 +590,26 @@ def _get_input_paths(example_inputs, signature):
     """
 
     args, kwargs = example_inputs
-    ctx = signature.bind(*args, **kwargs).arguments
+    binded = signature.bind(*args, **kwargs)
+    binded.apply_defaults()
+    ctx = binded.arguments
     flat_example_inputs_with_paths = pytree.tree_leaves_with_path(ctx)
     return [path for path, _ in flat_example_inputs_with_paths]
+
+
+def _replace_sources(result_str: str, flat_input_paths: list[Any]):
+    """
+    Given user specified input paths, maybe fix up the guard string
+    to reflect user path instead of tracer path.
+    """
+    name_mapping = {}
+    for idx, path in enumerate(flat_input_paths):
+        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
+    replace = result_str
+    for key, val in name_mapping.items():
+        replace = replace.replace(key, val)
+    return replace
 
 
 def _get_input_guards_for_graph(
@@ -798,14 +823,31 @@ def _unlift_exported_program_lifted_states(
     graph = unlift_gm.graph
     placeholders = graph.find_nodes(op="placeholder")
     if check_guards and placeholders and ep.example_inputs:
-        gm_sig = inspect.signature(unlift_gm.forward)
-        input_paths = _get_input_paths(ep.example_inputs, gm_sig)
+        sig = inspect.signature(unlift_gm.forward)
+        input_paths = _get_input_paths(
+            ep.example_inputs,
+            sig,
+        )
+
+        # TODO (tmanlaibaatar)
+        # This is band-aid solution to export new tracer replacing
+        # shape env sources to flat_args. The real fix should be replacing
+        # shape env sources to original user sources but this is quite
+        # involved because you need to carefully construct new sources using
+        # dynamo and replace all instances of it inside shape env. But it is
+        # lot easier to manipulate after we turn them into strings and only
+        # time we use these guards is during retracing or running exported program,
+        # so it is probably ok to have "not useful" guards on ep for now.
+        ep_guards = []
+        for guard in ep._guards_code:
+            ep_guards.append(_replace_sources(guard, input_paths))
+
         guards_code = _get_input_guards_for_graph(
             placeholders, ep.range_constraints, input_paths
         )
 
         ep_guards_code = _force_ep_signature_match(ep._guards_code, input_paths)
-        ep_guards_code = _force_gm_signature_match(ep_guards_code, gm_sig)
+        ep_guards_code = _force_gm_signature_match(ep_guards_code, sig)
         guards_code.extend(ep_guards_code)
         unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)
 

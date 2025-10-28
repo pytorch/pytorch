@@ -660,6 +660,8 @@ for_each_ops = [
     aten._foreach_mul_.ScalarList,
     aten._foreach_mul_.Tensor,
     aten._foreach_mul_.List,
+    aten._foreach_pow.List,
+    aten._foreach_pow.ScalarList,
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,

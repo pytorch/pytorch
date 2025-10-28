@@ -46,9 +46,10 @@ if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
   set(__AOTRITON_Z "gz")
   # Set the default __AOTRITON_LIB path
-  set(__AOTRITON_LIB "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so")
-  if(WIN32)
-    set(__AOTRITON_LIB "${__AOTRITON_INSTALL_DIR}/lib/aotriton_v2.lib")
+  if(NOT WIN32)
+    set(__AOTRITON_LIB "lib/libaotriton_v2.so")
+  else()
+    set(__AOTRITON_LIB "lib/aotriton_v2.lib")
   endif()
 
   function(aotriton_build_windows_dependencies dlfcn-win32_external xz_external dlfcn-win32_DIR liblzma_DIR)
@@ -143,8 +144,7 @@ if(NOT __AOTRITON_INCLUDED)
       -DHIP_PLATFORM=amd
       $<$<BOOL:${WIN32}>:-Ddlfcn-win32_DIR=${dlfcn-win32_DIR}>
       $<$<BOOL:${WIN32}>:-Dliblzma_DIR=${liblzma_DIR}>
-      BUILD_BYPRODUCTS
-        "${__AOTRITON_LIB}"
+      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}"
       USES_TERMINAL_DOWNLOAD TRUE
       USES_TERMINAL_CONFIGURE TRUE
       USES_TERMINAL_BUILD TRUE
@@ -177,7 +177,7 @@ if(NOT __AOTRITON_INCLUDED)
       INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_BINARY_DIR}/aotriton_runtime"
       "${__AOTRITON_INSTALL_DIR}"
-      BUILD_BYPRODUCTS "${__AOTRITON_LIB}"
+      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}"
     )
     message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
     Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
@@ -244,7 +244,8 @@ if(NOT __AOTRITON_INCLUDED)
   else()
     set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_SYSTEM_ROCM}" __AOTRITON_RUNTIME_INDEX)
-    if(${__AOTRITON_RUNTIME_INDEX} LESS 0)
+    # Always build aotriton runtime from source on Windows due to lack of pre-built binaries
+    if(${__AOTRITON_RUNTIME_INDEX} LESS 0 OR WIN32)
       message(STATUS "Cannot find AOTriton runtime for ROCM ${__AOTRITON_SYSTEM_ROCM}. \
       Build runtime from source")
       aotriton_build_from_source(ON aotriton_runtime)
@@ -267,7 +268,7 @@ if(NOT __AOTRITON_INCLUDED)
       endforeach()
     endforeach()
   endif()
-  target_link_libraries(__caffe2_aotriton INTERFACE ${__AOTRITON_LIB})
+  target_link_libraries(__caffe2_aotriton INTERFACE "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}")
   target_include_directories(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/include)
   set(AOTRITON_FOUND TRUE)
 endif() # __AOTRITON_INCLUDED

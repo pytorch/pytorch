@@ -8,8 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
-// For MTLLanguageVersion_3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -204,6 +202,10 @@ static void igammac_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "igammac");
 }
 
+static void hypot_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "hypot");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -231,4 +233,5 @@ REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
+REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 } // namespace at::native

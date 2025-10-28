@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial, reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims_common as utils
@@ -145,7 +145,6 @@ __all__ = [
     "conj",
     "expand_dims",
     "slice",
-    "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
     "squeeze",
     "transpose",
@@ -353,12 +352,14 @@ def _make_prim(
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
-    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments) or str(
-        _prim
-    ) in [
-        # See https://github.com/pytorch/pytorch/issues/103532
-        "prims.device_put.default"
-    ]:
+    if (
+        not any(contains_tensor_types(a.type) for a in _prim._schema.arguments)
+        or str(
+            _prim
+            # See https://github.com/pytorch/pytorch/issues/103532
+        )
+        == "prims.device_put.default"
+    ):
         prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):
@@ -426,6 +427,7 @@ def _prim_elementwise_meta(
     # Acquires the device (if it exists) or number
     device = None
     number = None
+    # pyrefly: ignore  # bad-assignment
     for arg in args_:
         if isinstance(arg, TensorLike):
             if utils.is_cpu_scalar_tensor(arg):
@@ -445,9 +447,7 @@ def _prim_elementwise_meta(
     # (but getting it wrong will cause too many casts to be inserted in traces!)
     if device is not None:
         assert dtype is not None
-        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT:
-            dtype = dtype
-        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
             if utils.is_integer_dtype(dtype) or utils.is_boolean_dtype(dtype):
@@ -455,8 +455,6 @@ def _prim_elementwise_meta(
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
             if utils.is_complex_dtype(dtype):
                 dtype = utils.corresponding_real_dtype(dtype)
-            else:
-                dtype = dtype
 
         assert shape is not None
         return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
@@ -692,16 +690,22 @@ def _clone_meta(
             device=input.device,
             memory_format=memory_format,
         )
+    else:
+        # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
+        # If not, eager clone creates contiguous strides
+        computed_stride = None
+        if utils.is_non_overlapping_and_dense(input):
+            computed_stride = input.stride()
+        else:
+            computed_stride = utils.compute_elementwise_output_strides(input)
 
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(input)
-    return torch.empty_strided(
-        input.shape,
-        strides,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
+        return torch.empty_strided(
+            input.shape,
+            computed_stride,
+            dtype=input.dtype,
+            layout=input.layout,
+            device=input.device,
+        )
 
 
 clone = _make_prim(
@@ -1008,8 +1012,10 @@ def _div_aten(a, b):
     )
 
     if is_integral:
+        # pyrefly: ignore  # bad-argument-type
         return torch.div(a, b, rounding_mode="trunc")
     else:
+        # pyrefly: ignore  # bad-argument-type
         return torch.true_divide(a, b)
 
 

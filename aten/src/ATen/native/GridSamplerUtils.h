@@ -93,6 +93,12 @@ inline bool cond_cudnn_grid_sampler(
   const TensorBase& input,
   const TensorBase& grid
 ) {
+  auto st = input.scalar_type();
+  if (!(st == kDouble || st == kFloat || st == kHalf))
+    return false;
+  st = grid.scalar_type();
+  if (!(st == kDouble || st == kFloat || st == kHalf))
+    return false;
   return (
     at::native::cudnn_is_acceptable(input) &&
     at::native::cudnn_is_acceptable(grid) &&
