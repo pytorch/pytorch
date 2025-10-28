@@ -86,9 +86,7 @@ def _arg_to_str(arg, attributes) -> str:
 
 def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
     """
-    from Observer (genai/llama4x/tools/hash/observer.py)
-
-    Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
+    from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
     This is used to generate a deterministic summary value for tensor comparison.
     """
