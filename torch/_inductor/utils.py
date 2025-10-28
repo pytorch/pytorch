@@ -603,13 +603,14 @@ def has_uses(
 def has_uses_tagged_as(
     target: Node,
     use_tags: Collection[torch.Tag],
+    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
 ) -> bool:
     """
-    Is there a use with tages from the `use_tags` collection?
+    Is there a use with the given tags?
     """
 
     use_tag_selector = lambda use: any(use_tag in use_tags for use_tag in use.tags)
-    return has_uses(target, use_tag_selector)
+    return has_uses(target, use_tag_selector, use_aggregate_type)
 
 
 def gen_gm_and_inputs(
