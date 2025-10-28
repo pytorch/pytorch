@@ -872,9 +872,6 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def fn(self):
         return self.value
 
-    def python_type(self):
-        return self.value
-
 
 class NO_SUCH_SUBOBJ:
     pass
@@ -1236,7 +1233,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif callable(self.value):
             if self.source:
                 source = AttrSource(self.cls_source, "__call__")
-                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
