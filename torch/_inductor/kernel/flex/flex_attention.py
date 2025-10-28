@@ -193,24 +193,6 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-    if _use_flex_flash_attention(
-        subgraph,
-        mask_graph,
-        kernel_options,
-        num_score_mod_placeholders=len(placeholder_inps),
-    ):
-        return create_flex_flash_attention_kernel(
-            query,
-            key,
-            value,
-            block_mask,
-            scale,
-            kernel_options,
-            subgraph_buffer,
-            mask_graph_buffer,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
 
     (
         query,
@@ -239,6 +221,30 @@ def flex_attention(
             full_q_indices,
         ]
     )
+
+    if _use_flex_flash_attention(
+        subgraph,
+        mask_graph,
+        kernel_options,
+        num_score_mod_placeholders=len(placeholder_inps),
+    ):
+        return create_flex_flash_attention_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            kernel_options,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            mask_graph=mask_graph,
+        )
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)

@@ -11,7 +11,15 @@ from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import CuteDSLBenchmarkRequest, TensorMeta
-from ...ir import Buffer, ChoiceCaller, CuteDSLTemplateBuffer, IRNode, Layout, TensorBox
+from ...ir import (
+    Buffer,
+    ChoiceCaller,
+    CuteDSLTemplateBuffer,
+    IRNode,
+    Layout,
+    NoneAsConstantBuffer,
+    TensorBox,
+)
 from ..common import KernelTemplate
 from .cutedsl_kernel import CuteDSLTemplateKernel
 
@@ -54,6 +62,7 @@ class CuteDSLTemplate(KernelTemplate):
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
         """
+        choices.append(self.generate(**kwargs))
         try:
             choices.append(self.generate(**kwargs))
             return None

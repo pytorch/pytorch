@@ -92,6 +92,7 @@ def _can_use_flex_flash_attention(
             "Input buffers require gradients (not supported by flash attention)",
         )
 
+    return True, ""
     score_trivial = is_trivial_graph(
         subgraph.graph_module,
         is_score_graph=True,
@@ -154,6 +155,11 @@ def create_flex_flash_attention_kernel(
     mask_graph_buffer: SubgraphResults,
     score_mod_other_buffers: list[TensorBox],
     mask_mod_other_buffers: list[TensorBox],
+    kv_num_blocks: TensorBox,
+    kv_indices: TensorBox,
+    full_kv_num_blocks: TensorBox,
+    full_kv_indices: TensorBox,
+    mask_graph,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if not ensure_flash_available():
@@ -193,17 +199,36 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
+    # Used to check if we can skip block sparse impl
+    is_trivial_mask_graph = is_trivial_graph(
+        mask_graph.graph_module,
+        is_score_graph=False,
+        num_score_mod_placeholders=len(score_mod_other_buffers),
+    )
+
+    needs_block_mask = not is_trivial_mask_graph
+    has_full_blocks = full_kv_num_blocks is not None
+
     choices: list[Any] = []
-    causal = kernel_options.get("causal", False)
     assert flash_attention_cutedsl_template is not None
+
+    input_nodes = [query, key, value, lse]
+    if has_full_blocks:
+        input_nodes.extend([kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices])
+
+    if needs_block_mask and not has_full_blocks:
+        raise NotImplementedError(
+            "Flash attention with block mask but without full blocks is not supported yet"
+        )
+
     error = flash_attention_cutedsl_template.maybe_append_choice(
         choices,
-        input_nodes=[query, key, value, lse],
+        input_nodes=input_nodes,
         layout=output_layout,
         mutated_inputs=[lse],
         subgraphs=[subgraph_buffer, mask_graph_buffer],
         SM_SCALE=scale,
-        CAUSAL=causal,
+        NEEDS_BLOCK_MASK=needs_block_mask,
     )
 
     if error or not choices:

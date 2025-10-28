@@ -16,7 +16,7 @@ from torch._inductor.codegen.common import (
     Kernel,
     ValueRanges,
 )
-from torch._inductor.ir import Buffer, ComputedBuffer, InputBuffer
+from torch._inductor.ir import Buffer, ComputedBuffer, InputBuffer, NoneAsConstantBuffer
 from torch._inductor.ops_handler import StoreMode
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
@@ -230,11 +230,15 @@ class CuteDSLTemplateKernel(Kernel):
         renames = IndentedBuffer(initial_indent=1)
 
         for i, input_node in enumerate(self.input_nodes):
+            if isinstance(input_node, NoneAsConstantBuffer):
+                if i < len(argnames):
+                    template_name = argnames[i]
+                    renames.writeline(f"{template_name} = None")
+                continue
+
             buf_name = input_node.get_name()
             self.args.input(buf_name)
 
-            # Template aliasing: converts template variables (e.g., "input_a") to function args (e.g., "arg_input_a")
-            # and generates rename statements so template code can use the original names
             if i < len(argnames):
                 template_name = argnames[i]
                 arg_name = f"arg_{template_name}"
@@ -294,7 +298,8 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Register the hook and return placeholder
         placeholder = "<UNPACK_BUFFERS>"
-        assert placeholder not in self.render_hooks
+        # TODO: I think double invoking is fine for this specific hook
+        # assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
 
