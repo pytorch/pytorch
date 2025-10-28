@@ -421,7 +421,6 @@ class ComposabilityTest(MultiProcessTestCase):
                 replicate(
                     partial_model[layer_id],
                     **replicate_config,
-                    reshard_after_forward=False,
                 )
             dp_model = replicate(partial_model, **replicate_config)
             return dp_model
@@ -648,7 +647,6 @@ class ComposabilityTest(MultiProcessTestCase):
                 replicate(
                     partial_model[layer_id],
                     mesh=dp_mesh,
-                    reshard_after_forward=False,
                 )
             dp_model = replicate(partial_model, mesh=dp_mesh)
             return dp_model
