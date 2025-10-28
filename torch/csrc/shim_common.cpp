@@ -8,6 +8,8 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#include <torch/csrc/stable/c/shim.h>
+
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
     const c10::IValue& ivalue) {
@@ -203,6 +205,158 @@ AOTITorchError aoti_torch_call_dispatcher(
       auto stable_ivalue = stack[idx];
       auto arg_type = schema.arguments()[idx].type();
       torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue));
+    }
+
+    op.callBoxed(ivalue_stack);
+
+    // there should then be num_returns IValues on the stack, which
+    // we will convert to StableIValue and repopulate user input stack
+    for (const auto idx : c10::irange(num_returns)) {
+      const auto stack_idx = num_returns - idx - 1;
+      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      stack[stack_idx] = from_ivalue(ret_type, torch::jit::pop(ivalue_stack));
+    }
+  });
+}
+
+// Schema Adapter Infrastructure
+// SchemaAdapterRegistry contains the adapters registered via
+// register_schema_adapter that define how to convert the StableIValue argument
+// stack to an IValue stack when changes are made to the schema of an ATen
+// function. This should only be relevant in the context of calling
+// torch_call_dispatcher.
+
+// Currently this only adapts the argument stack.
+// C++ default argument resolution will happen at compile time in the
+// torch/csrc/stable/ops.h header, so extensions always pass complete argument
+// lists for the version they build against's schema. As such, this is only
+// needed if a new argument is added to the schema
+//
+// This is not declared in the stable shim.h,
+// so we **do not make any guarantees that the signature of this will not
+// change**. If there is a need to define similar infrastructure for the returns
+// of an aten function we can update this.
+
+namespace {
+using SchemaAdapterFn = std::function<torch::jit::Stack(
+    const c10::FunctionSchema& current_schema,
+    const StableIValue* extension_stack,
+    uint64_t extension_build_version)>;
+
+// Global registry for schema adapters
+class SchemaAdapterRegistry {
+ private:
+  std::unordered_map<
+      std::string,
+      std::vector<std::pair<uint64_t, SchemaAdapterFn>>>
+      adapters_;
+
+ public:
+  static SchemaAdapterRegistry& instance() {
+    static SchemaAdapterRegistry registry;
+    return registry;
+  }
+
+  void register_adapter(
+      const std::string& op_name,
+      uint64_t
+          applies_to_versions_below, // versions below this need the adapter
+      SchemaAdapterFn adapter) {
+    adapters_[op_name].emplace_back(applies_to_versions_below, adapter);
+    // Sort by version ascending - this allows us to find the first (most
+    // specific) match
+    std::sort(
+        adapters_[op_name].begin(),
+        adapters_[op_name].end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+  }
+
+  std::optional<SchemaAdapterFn> get_adapter(
+      const std::string& op_name,
+      uint64_t extension_version) {
+    auto it = adapters_.find(op_name);
+    if (it == adapters_.end())
+      return std::nullopt;
+
+    // Find the first adapter that applies (most specific due to ascending sort)
+    for (const auto& [applies_to_versions_below, adapter] : it->second) {
+      if (extension_version < applies_to_versions_below) {
+        return adapter;
+      }
+    }
+    return std::nullopt;
+  }
+};
+
+// Internal API for registering adapters that define how to convert the
+// StableIValue  **argument** stack to an IValue stack when changes are
+// made to the schema of a function. adapter_fn will be used if
+// extension_build_version < applies_to_versions_below.
+[[maybe_unused]] AOTITorchError register_schema_adapter(
+    const char* op_name,
+    uint64_t applies_to_versions_below,
+    SchemaAdapterFn adapter_fn) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto& registry = SchemaAdapterRegistry::instance();
+    registry.register_adapter(
+        std::string(op_name), applies_to_versions_below, std::move(adapter_fn));
+  });
+}
+
+} // namespace
+
+// Function to register test schema adapters for _test_schema_upgrader
+// This demonstrates the adapter registration pattern (internal use only)
+static AOTITorchError _register_adapters() {
+  // ** Schema adapters should be registered here**
+  // Refer to https://github.com/pytorch/pytorch/pull/165284/ for an example.
+  //
+  // if (auto err = register_schema_adapter(
+  //         "aten::your_op",
+  //         VERSION_FOO, // applies to versions < VERSION_FOO
+  //         adapt_v1_to_vfoo)) {
+  //   return err;
+  // }
+  return AOTI_TORCH_SUCCESS;
+}
+
+// Static initialization to automatically register test adapters
+static struct AdapterInitializer {
+  AdapterInitializer() {
+    // Register the test adapters when the library loads
+    _register_adapters();
+  }
+} adapter_initializer;
+
+AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack,
+    // version of stable headers used to build the extension: necessary for
+    // applying schema adapters
+    uint64_t extension_build_version) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto op =
+        c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+    const auto num_arguments = schema.arguments().size();
+
+    torch::jit::Stack ivalue_stack;
+    auto& registry = SchemaAdapterRegistry::instance();
+
+    // Check if we need an adapter for this operation
+    if (auto adapter = registry.get_adapter(opName, extension_build_version)) {
+      // Use adapter to create IValue stack
+      ivalue_stack = (*adapter)(schema, stack, extension_build_version);
+    } else {
+      // No adapter needed - implementation matches aoti_torch_call_dispatcher
+      ivalue_stack.reserve(std::max(num_arguments, num_returns));
+      for (const auto idx : c10::irange(num_arguments)) {
+        auto stable_ivalue = stack[idx];
+        auto arg_type = schema.arguments()[idx].type();
+        torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue));
+      }
     }
 
     op.callBoxed(ivalue_stack);

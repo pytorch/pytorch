@@ -8,6 +8,8 @@
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <torch/csrc/stable/c/shim.h>
+#include <torch/csrc/stable/version.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 
@@ -25,8 +27,13 @@ inline torch::stable::Tensor empty_like(const torch::stable::Tensor& self) {
       torch::stable::detail::from(std::nullopt),
       torch::stable::detail::from(std::nullopt),
       torch::stable::detail::from(std::nullopt)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::empty_like", "", stack.data(), TORCH_ABI_VERSION));
+#else
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::empty_like", "", stack.data()));
+#endif
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -201,8 +208,13 @@ inline torch::stable::Tensor transpose(
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim0),
       torch::stable::detail::from(dim1)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::transpose", "int", stack.data(), TORCH_ABI_VERSION));
+#else
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::transpose", "int", stack.data()));
+#endif
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -212,8 +224,13 @@ inline torch::stable::Tensor transpose(
 inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
   const auto num_args = 1;
   std::array<StableIValue, num_args> stack{torch::stable::detail::from(self)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::zero_", "", stack.data(), TORCH_ABI_VERSION));
+#else
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
+#endif
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -228,8 +245,13 @@ inline torch::stable::Tensor copy_(
       torch::stable::detail::from(self),
       torch::stable::detail::from(src),
       torch::stable::detail::from(non_blocking.value_or(false))};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::copy_", "", stack.data(), TORCH_ABI_VERSION));
+#else
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
+#endif
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -240,8 +262,13 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(std::nullopt)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::clone", "", stack.data(), TORCH_ABI_VERSION));
+#else
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::clone", "", stack.data()));
+#endif
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
