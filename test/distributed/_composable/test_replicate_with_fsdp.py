@@ -200,7 +200,7 @@ class ReplicateTest(MultiProcessTestCase):
         replicate_mesh = global_mesh["replicate"]
 
         for layer in layers:
-            replicate(layer, device_mesh=replicate_mesh)
+            replicate(layer, mesh=replicate_mesh)
 
             for parameter in layer.parameters():
                 self.assertEqual(parameter.device_mesh.shape, (2,))
@@ -285,7 +285,7 @@ class ReplicateTest(MultiProcessTestCase):
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
-        replicate(ref_model, device_mesh=replicate_mesh)
+        replicate(ref_model, mesh=replicate_mesh)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
             tp_mesh,
