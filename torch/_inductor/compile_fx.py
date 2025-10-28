@@ -1327,6 +1327,19 @@ class _InProcessFxCompile(FxCompile):
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
+                fd = io.StringIO()
+                torch._dynamo.repro.after_aot.save_graph_repro(
+                    fd, gm, example_inputs, "inductor", save_dir=None
+                )
+                runnable_graph_str = fd.getvalue()
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "after_post_grad_fx_graph_runnable",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: runnable_graph_str,
+                )
                 if config.trace.provenance_tracking_level != 0:
                     provenance_tracking_json = (
                         torch.fx.traceback.get_graph_provenance_json(gm.graph)
