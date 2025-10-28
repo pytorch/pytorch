@@ -79,7 +79,8 @@ def export_compat(
             warnings.warn(
                 "Exporting a model while it is in training mode. "
                 "Please ensure that this is intended, as it may lead to "
-                "different behavior during inference.",
+                "different behavior during inference. "
+                "Calling model.eval() before export is recommended.",
                 UserWarning,
                 stacklevel=2,
             )
