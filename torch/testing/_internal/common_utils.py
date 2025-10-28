@@ -114,8 +114,6 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 # Set by parse_cmd_line_args() if called
-CI_FUNCTORCH_ROOT = ""
-CI_PT_ROOT = ""
 CI_TEST_PREFIX = ""
 DISABLED_TESTS_FILE = ""
 GRAPH_EXECUTOR : Optional[ProfilingMode] = None
@@ -959,8 +957,6 @@ def _get_test_report_path():
     return os.path.join('test-reports', test_source)
 
 def parse_cmd_line_args():
-    global CI_FUNCTORCH_ROOT
-    global CI_PT_ROOT
     global CI_TEST_PREFIX
     global DISABLED_TESTS_FILE
     global GRAPH_EXECUTOR
@@ -1039,10 +1035,8 @@ def parse_cmd_line_args():
 
     set_rng_seed()
 
-# CI Prefix path used only on CI environment
+    # CI Prefix path used only on CI environment
     CI_TEST_PREFIX = str(Path(os.getcwd()))
-    CI_PT_ROOT = str(Path(os.getcwd()).parent)
-    CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
 def wait_for_process(p, timeout=None):
     try:
