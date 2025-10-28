@@ -145,7 +145,7 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            not mode.export
+            torch._export.config.enable_auto_functionalized_v2_for_export
             and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
@@ -449,12 +449,18 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
+            import torch._export.config as export_config
             import torch._inductor.config as inductor_config
 
-            if self.export or not inductor_config.enable_auto_functionalized_v2:
+            if torch.compiler.is_exporting():
+                if export_config.enable_auto_functionalized_v2_for_export:
+                    return do_auto_functionalize_v2(self, func, args, kwargs)
+
                 return do_auto_functionalize(self, func, args, kwargs)
-            else:
+
+            if inductor_config.enable_auto_functionalized_v2:
                 return do_auto_functionalize_v2(self, func, args, kwargs)
+            return do_auto_functionalize(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 

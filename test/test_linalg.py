@@ -5661,7 +5661,7 @@ class TestLinalg(TestCase):
 
             # TunableOp is running in a subprocess
             # online tuning needs filename set through API
-            # offline tuning needs filename set through environment variableq
+            # offline tuning needs filename set through environment variable
             result_filename = torch.cuda.tunable.get_filename()
             untuned_filename = get_tunableop_untuned_filename()
 
@@ -5903,8 +5903,8 @@ class TestLinalg(TestCase):
             self.assertGreater(initial_count, 0)  # we seeded 1 result line
 
             # Perform ONE simple matmul
-            A = torch.randn(37, 53, device=device, dtype=dtype)
-            B = torch.randn(53, 29, device=device, dtype=dtype)
+            A = torch.randn(27, 43, device=device, dtype=dtype)
+            B = torch.randn(43, 39, device=device, dtype=dtype)
             _ = torch.matmul(A, B)
 
             # Verify that new results were appended to the same file

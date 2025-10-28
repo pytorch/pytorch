@@ -666,9 +666,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("N", [8192])
     @parametrize("K", [16640])
     @parametrize("format", ["mxfp8"] + (["nvfp4"] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True])  # Note: NVFP4 only supported through torch.nn.functional.scaled_grouped_mm
-    #                                        so disable torch._scaled_grouped_mm test use.
-    def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, wrap_v2):
+    def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format):
         torch.manual_seed(42)
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
@@ -731,8 +729,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("N", [8192])
     @parametrize("K", [4096])
     @parametrize("format", ["mxfp8"] + (["nvfp4"] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True, False])
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, wrap_v2):
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
         torch.manual_seed(42)
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
@@ -841,7 +838,7 @@ class TestFP8Matmul(TestCase):
             assert x_global_scales.numel() == w_global_scales.numel()
             assert x_global_scales.numel() == G
 
-        # Compute mxfp8 grouped gemm.
+        # Compute low-precision grouped gemm.
         y_lp = scaled_grouped_mm_wrap(
             xq,
             wq.transpose(-2, -1),

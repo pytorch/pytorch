@@ -233,6 +233,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       "global_scale_a must be Float, got: ", global_scale_a.scalar_type());
   TORCH_CHECK_VALUE(global_scale_b.scalar_type() == at::kFloat,
       "global_scale_b must be Float, got: ", global_scale_b.scalar_type());
+
   auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
       mat_a,
       mat_b,
@@ -324,7 +325,7 @@ void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim
     };
 
     // TODO: this is for 3d tensor in 2d-3d case specifically.
-    // We'll need to support 3d-3d and 3d-2d cases once mxfp8 grouped gemm supports them.
+    // We'll need to support 3d-3d and 3d-2d cases once mxfp8/nvfp4 grouped gemm supports them.
     int64_t G = mat.size(0);
     int64_t K = mat.size(1);
     if (is_fp4) {
@@ -345,18 +346,18 @@ void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim
     );
     TORCH_CHECK(
       scale.size(0) == G && scale.size(1) == blocked_scale_K * blocked_scale_N,
-      "for mxfp8, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ") for arg ", arg_idx,
-      ", got: ", scale.size(0), ", ", scale.size(1)
+      "for block-scaled grouped GEMM, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ")",
+      " for arg ", arg_idx, ", got: ", scale.size(0), ", ", scale.size(1)
     );
   }
 }
 
 void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
   bool using_fp8_rowwise = scale.scalar_type() == kFloat;
-  bool using_mxfp8 = scale.scalar_type() == at::kFloat8_e8m0fnu;
+  bool using_mx = scale.scalar_type() == at::kFloat8_e8m0fnu;
   if (using_fp8_rowwise) {
     _check_scales_fp8_rowwise(mat, scale, dim, arg_idx, scale_multiplier);
-  } else if (using_mxfp8) {
+  } else if (using_mx) {
     _check_scales_blocked(mat, scale, dim, arg_idx);
   } else {
     TORCH_CHECK(false, "scale must be float32 or float8_e8m0fnu, but got ", scale.dtype());
