@@ -111,20 +111,13 @@ class RingAttentionTest(DTensorTestBase):
     def test_ring_attention_sdpa(self) -> None:
         self.run_subtests(
             {
-                # "is_causal": [True, False],
-                # "compiled": [True, False],
-                # "backend": backends,
-                # "load_balance": [True, False],
-                # "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
-                # "test_forward_only": [True, False],
-                # "use_context": [True, False],
-                "is_causal": [True],
-                "compiled": [False],
-                "backend": [SDPBackend.FLASH_ATTENTION],
-                "load_balance": [False],
-                "rotater": [_RotateMethod.ALL_GATHER],
-                "test_forward_only": [True],
-                "use_context": [True],
+                "is_causal": [True, False],
+                "compiled": [True, False],
+                "backend": backends,
+                "load_balance": [True, False],
+                "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
+                "test_forward_only": [True, False],
+                "use_context": [True, False],
             },
             self._test_ring_attention_sdpa,
         )
@@ -823,13 +816,16 @@ class TestSharding(DTensorTestBase):
 RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
     RingAttentionTest,
     skipped_tests=[
-        # "test_ring_attention_sdpa",
+        # Need to make attention implementation local tensor friendly, e.g.
+        # rewrite "rank local" logic
+        "test_ring_attention_sdpa",
     ],
 )
 
 CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
     CPFlexAttentionTest,
     skipped_tests=[
+        # Missing support for batched tensors
         "test_cp_flex_attention_causal_mask",
         "test_cp_flex_attention_document_mask",
     ],
@@ -838,6 +834,7 @@ CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
 TestCPCustomOpsWithLocalTensor = create_local_tensor_test_class(
     TestCPCustomOps,
     skipped_tests=[
+        # Missing support for fake tensors
         "test_flex_cp_custom_op",
     ],
 )

@@ -86,9 +86,6 @@ from . import _c10d
 
 
 def _is_inplace_op(op: OpOverload | Callable[..., Any]) -> bool:
-    # simple analysis of function schema to determine
-    # if this is an inplace variant, it might not
-    # be entirely correct, but it's good enough for now.
     return (
         isinstance(op, OpOverload)
         # Not precise heuristic to detect inplace operation
@@ -284,9 +281,10 @@ def _for_each_rank_run_func(
 
     if _is_inplace_op(func):
         alias = False
+        # For the in-place ops return self
         ret = args[0]
+        # Ensure that wrapper tensor size is synchronized with its local tensors
         ret._sync_meta()
-        # breakpoint()
     else:
         ret = _combine_rank_results(flat_rank_rets, default_value)
 
@@ -472,7 +470,7 @@ def _compute_local_tensor_meta(
     DispatchKeySet,
 ]:
     """
-    Computes the meta information for a LocalTensor from the local tensors.
+    Computes the meta information for a LocalTensor from its local tensors.
     """
     it = iter(local_tensors.values())
     first_local_tensor = next(it)
