@@ -549,8 +549,8 @@ namespace {
       TensorInfo<const scalar_t, index_t> input,
       TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> grad_input,
-      TensorInfo<scalar_t, index_t> grad_grid) {
-
+      TensorInfo<scalar_t, index_t> grad_grid,
+      const index_t grad_input_memory_span) {
     // Typically `float` even if `scalar_t` is `half` or `bflaot16` to ensure
     // all intermediate calculations (like accumulations in LDS) are done in full precision.
     using opmath_t = at::opmath_type<scalar_t>;
@@ -562,9 +562,14 @@ namespace {
     // 1-pixel halo for Bilinear interpolation.
     // Bilinear interpolation for an output pixel at (y, x) needs to write gradients to input pixels at (y_in, x_in), (y_in+1, x_in), (y_in, x_in+1), and (y_in+1, x_in+1).
     // This ensures the LDS tile can accommodate contributions for pixels just outside the tile.
-    // TODO: Bicubic interpolation samples from a 4x4 area will need more halo.
-    //constexpr int HALO = (INTERP_MODE == GridSamplerInterpolation::Bicubic) ? 2 : 1;
-    constexpr int HALO = 1;
+    // Bicubic interpolation samples from a 4x4 area will need more halo.
+    constexpr int HALO = []() {
+      if constexpr (INTERP_MODE == GridSamplerInterpolation::Bicubic) {
+        return 2;
+      } else {  // Bilinear or Nearest
+        return 1;
+      }
+    }();
     // Full dimensions of the LDS tile, including the halo.
     constexpr int SMEM_H = TILE_H + 2 * HALO;
     constexpr int SMEM_W = TILE_W + 2 * HALO;
@@ -711,7 +716,7 @@ namespace {
                 // Atomics to global memory, whose number is reduced from
                 // 4*TILE_W*TILE_H to just SMEM_H*SMEM_W per channel chunk.
                 safe_add_2d(grad_input.data, h_in, w_in, grad_input.strides[2], grad_input.strides[3],
-                            inp_H, inp_W, static_cast<scalar_t>(val), NC_offset, grad_input.numel());
+                            inp_H, inp_W, static_cast<scalar_t>(val), NC_offset, grad_input_memory_span);
               }
             }
           }
@@ -728,6 +733,8 @@ namespace {
       const TensorBase &grid, GridSamplerInterpolation interpolation_mode,
       GridSamplerPadding padding_mode, bool align_corners,
       bool input_requires_grad) {
+    auto stream = at::cuda::getCurrentCUDAStream();
+    const auto grad_input_memory_span = input_requires_grad ? static_cast<index_t>(grad_input.numel()) : 0;
     if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
       constexpr int TILE_W = 16;
       constexpr int TILE_H = 16;
@@ -736,15 +743,12 @@ namespace {
           ceil_div(grid.size(2), (long)TILE_W),
           ceil_div(grid.size(1), (long)TILE_H),
           grid.size(0));  // Launch per-N
-      auto stream = at::cuda::getCurrentCUDAStream();
 
       // TODO
       // Calculate dynamic shared memory size
       //index_t C = input.sizes(1);
       // constexpr int CCHUNK = C < 64 ? 8 : 4;
       constexpr int CCHUNK = 4;
-      // FIXME: runtime argument "interpolation_mode".
-      //constexpr int HALO = interpolation_mode == GridSamplerInterpolation::Bicubic ? 2 : 1;
       constexpr int HALO = 1;
       constexpr int SMEM_H = TILE_H + 2 * HALO;
       constexpr int SMEM_W = TILE_W + 2 * HALO;
@@ -758,44 +762,43 @@ namespace {
             grid_sampler_2d_backward_kernel_optimized<scalar_t, index_t, GridSamplerInterpolation::Bilinear, GridSamplerPadding::Zeros, true, true>
               <<<blocks, threads, smem_bytes, stream>>>(
                 getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input), getTensorInfo<const scalar_t, index_t>(grid),
-                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid));
-          } else {
+                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid), grad_input_memory_span);
+          } else {  // !input_requires_grad
             grid_sampler_2d_backward_kernel_optimized<scalar_t, index_t, GridSamplerInterpolation::Bilinear, GridSamplerPadding::Zeros, true, false>
               <<<blocks, threads, smem_bytes, stream>>>(
                 getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input), getTensorInfo<const scalar_t, index_t>(grid),
-                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid));
+                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid), grad_input_memory_span);
           }
-	      } else {
+	      } else {  // !align_corners
           if (input_requires_grad) {
             grid_sampler_2d_backward_kernel_optimized<scalar_t, index_t, GridSamplerInterpolation::Bilinear, GridSamplerPadding::Zeros, false, true>
               <<<blocks, threads, smem_bytes, stream>>>(
                 getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input), getTensorInfo<const scalar_t, index_t>(grid),
-                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid));
-          } else {
+                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid), grad_input_memory_span);
+          } else {  // !input_requires_grad
             grid_sampler_2d_backward_kernel_optimized<scalar_t, index_t, GridSamplerInterpolation::Bilinear, GridSamplerPadding::Zeros, false, false>
               <<<blocks, threads, smem_bytes, stream>>>(
                 getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input), getTensorInfo<const scalar_t, index_t>(grid),
-                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid));
+                getTensorInfo<scalar_t, index_t>(grad_input), getTensorInfo<scalar_t, index_t>(grad_grid), grad_input_memory_span);
           }
 	      }
       } else {
         // Fallback for other padding modes to the original kernel
         const auto count = grid.size(0) * grid.size(1) * grid.size(2);
-        grid_sampler_2d_backward_kernel<scalar_t><<<GET_BLOCKS(count, 256), 256, 0, stream>>>(
-            count, getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input),
+        grid_sampler_2d_backward_kernel<scalar_t, index_t><<<GET_BLOCKS(count, 256), 256, 0, stream>>>(
+            static_cast<index_t>(count), getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input),
             getTensorInfo<const scalar_t, index_t>(grid), input_requires_grad ? getTensorInfo<scalar_t, index_t>(grad_input) : TensorInfo<scalar_t, index_t>(),
             getTensorInfo<scalar_t, index_t>(grad_grid), interpolation_mode, padding_mode, align_corners,
-            input_requires_grad ? grad_input.numel() : 0, input_requires_grad);
+            grad_input_memory_span, input_requires_grad);
       }
     } else {
       // Fallback for Nearest and Bicubic modes to the original kernel
       const auto count = grid.size(0) * grid.size(1) * grid.size(2);
-      auto stream = at::cuda::getCurrentCUDAStream();
-      grid_sampler_2d_backward_kernel<scalar_t><<<GET_BLOCKS(count, 256), 256, 0, stream>>>(
-          count, getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input),
+      grid_sampler_2d_backward_kernel<scalar_t, index_t><<<GET_BLOCKS(count, 256), 256, 0, stream>>>(
+          static_cast<index_t>(count), getTensorInfo<const scalar_t, index_t>(grad_output), getTensorInfo<const scalar_t, index_t>(input),
           getTensorInfo<const scalar_t, index_t>(grid), input_requires_grad ? getTensorInfo<scalar_t, index_t>(grad_input) : TensorInfo<scalar_t, index_t>(),
           getTensorInfo<scalar_t, index_t>(grad_grid), interpolation_mode, padding_mode, align_corners,
-          input_requires_grad ? grad_input.numel() : 0, input_requires_grad);
+          grad_input_memory_span, input_requires_grad);
     }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
