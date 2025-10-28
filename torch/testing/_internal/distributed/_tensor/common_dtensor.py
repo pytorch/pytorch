@@ -17,9 +17,11 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._local_tensor import (
+    local_tensor_mode,
     LocalIntNode,
     LocalTensor,
     LocalTensorMode,
+    maybe_disable_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
 from torch.distributed.tensor import (
@@ -362,6 +364,10 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
 
 class DTensorTestBase(MultiProcessTestCase):
     @property
+    def is_local_tensor_enabled(self) -> bool:
+        return False
+
+    @property
     def world_size(self) -> int:
         return NUM_DEVICES
 
@@ -380,6 +386,9 @@ class DTensorTestBase(MultiProcessTestCase):
     def backend(self) -> str:
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(self.rank)
 
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
@@ -418,7 +427,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
-        # for form subgroup to avoid unnecesssary overhead.
+        # for form subgroup to avoid unnecessary overhead.
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
@@ -698,8 +707,18 @@ class DTensorConverter:
 
 
 class LocalDTensorTestBase(DTensorTestBase):
+    @property
+    def is_local_tensor_enabled(self) -> bool:
+        return True
+
+    def _handle_test_skip(self, msg: str) -> None:
+        self.skipTest(msg)
+
     def _get_local_tensor_mode(self):
-        return LocalTensorMode(frozenset(range(0, self.world_size)))
+        lm = local_tensor_mode()
+        if lm is not None:
+            breakpoint()
+        return LocalTensorMode(frozenset(range(self.world_size)))
 
     def setUp(self) -> None:
         super().setUp()
@@ -724,6 +743,10 @@ class LocalDTensorTestBase(DTensorTestBase):
 
         return types.MethodType(wrapper, self)
 
+    def build_device_mesh(self) -> DeviceMesh:
+        with maybe_disable_local_tensor_mode():
+            return super().build_device_mesh()
+
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
@@ -734,6 +757,12 @@ class LocalDTensorTestBase(DTensorTestBase):
 
     def _spawn_processes(self) -> None:
         pass
+
+    def run_test(self, test_name: str, parent_pipe) -> None:
+        getattr(self, test_name)()
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(0)
 
 
 def make_wrapped(fn, ctxs):
@@ -746,8 +775,10 @@ def make_wrapped(fn, ctxs):
                 stack.enter_context(ctx(self))
             else:
                 stack.enter_context(ctx)
-        out = fn(self)
-        stack.close()
+        try:
+            out = fn(self)
+        finally:
+            stack.close()
         return out
 
     return wrapped
@@ -782,3 +813,8 @@ def create_local_tensor_test_class(orig_cls, skipped_tests=None):
 @maybe_run_for_local_tensor
 def map_local_tensor_for_rank(tensor, rank, func):
     return func(tensor, rank)
+
+
+@maybe_run_for_local_tensor
+def map_local_for_rank(rank, func):
+    return func(rank)

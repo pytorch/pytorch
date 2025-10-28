@@ -42,6 +42,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    CDNA2OrLater,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
@@ -2339,6 +2340,39 @@ class AOTInductorTestsTemplate:
             inputs,
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_cond_symint_input_disable_one_pass(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b * z
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        input1 = (
+            torch.ones(3, 3, device=self.device),
+            torch.ones(5, device=self.device),
+            torch.ones(3, 3, device=self.device),
+        )
+        input2 = (
+            torch.ones(10, 3, device=self.device),
+            torch.ones(6, device=self.device),
+            torch.ones(10, 3, device=self.device),
+        )
+        inputs = (input1, input2)
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        with torch._inductor.config.patch({"triton.autotune_at_compile_time": False}):
+            self.check_model_with_multiple_inputs(
+                M(),
+                inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
 
     def test_while_loop_simple(self):
         inputs = (
@@ -5338,7 +5372,7 @@ class AOTInductorTestsTemplate:
                 record_shapes=True,
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
+                    getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
                 ],
             ) as prof,
         ):
@@ -6679,6 +6713,10 @@ class AOTInductorTestsTemplate:
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
 
+        if TEST_WITH_ROCM:
+            if not CDNA2OrLater():
+                self.skipTest("_int4_mm is supported only for CDNA2 or later")
+
         class Model(torch.nn.Module):
             def __init__(self, weight, scale_and_zeros) -> None:
                 super().__init__()
@@ -6711,6 +6749,10 @@ class AOTInductorTestsTemplate:
     def test__weight_int4pack_mm_with_scales_and_zeros(self, m, n, q_group, num_groups):
         if "xpu" not in self.device:
             raise unittest.SkipTest("requires Intel GPU")
+
+        if TEST_WITH_ROCM:
+            if not CDNA2OrLater():
+                self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
         class Model(torch.nn.Module):
             def __init__(self, weight, scale, zeros) -> None:

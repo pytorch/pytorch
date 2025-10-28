@@ -110,6 +110,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 
     pytree_modules["cxx"] = cxx_pytree
+    pytree_modules["native_optree"] = cxx_pytree.optree
 else:
     cxx_pytree = None
 
@@ -241,6 +242,57 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
+
+    def test_dynamo_inside_custom_op(self):
+        cnt = torch._dynamo.testing.InductorAndRecordGraphs()
+        cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x) -> Tensor")
+
+            def inner(x):
+                return x.sin().cos()
+
+            def foo_impl(x):
+                return torch.compile(inner, fullgraph=True, dynamic=True, backend=cnt)(
+                    x
+                )
+
+            m.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+            @torch.compile(fullgraph=True, dynamic=True, backend=cnt1)
+            def f(x):
+                return torch.ops.mylib.foo.default(x)
+
+            x = torch.randn(3)
+            res = f(x)
+            res1 = f(x)
+            res2 = f(x)
+            expected = x.sin().cos()
+            self.assertEqual(res, expected)
+            self.assertEqual(res1, expected)
+            self.assertEqual(res2, expected)
+            self.assertTrue(len(cnt.inductor_graphs), 1)
+            self.assertTrue(len(cnt1.inductor_graphs), 1)
+            self.assertExpectedInline(
+                str(cnt.inductor_graphs[0].graph).strip(),
+                """\
+graph():
+    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg1_1,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%sin,), kwargs = {})
+    return (cos,)""",
+            )
+            self.assertExpectedInline(
+                str(cnt1.inductor_graphs[0].graph).strip(),
+                """\
+graph():
+    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg1_1,), kwargs = {})
+    return (foo,)""",
+            )
 
     @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
@@ -605,6 +657,31 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         fn = torch.compile(f, backend="eager", dynamic=True, fullgraph=True)
         fn(torch.tensor([5]), 5)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cond_runtime_assert_generation(self):
+        def fn(x):
+            y = x.nonzero()  # unbacked binding u0
+            torch._check(y.shape[0] % 4 == 0)
+
+            return torch.randn(y.shape[0])
+
+        @torch.compile(dynamic=True, backend="aot_eager")
+        def foo(x):
+            b = torch.cond(
+                pred=(x.shape[0] % 4 == 0),
+                true_fn=lambda: fn(x),
+                false_fn=lambda: fn(x),
+            )
+
+            return b
+
+        foo(torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            RuntimeError, "Runtime assertion failed for expression Eq(Mod(u1, 4), 0)*"
+        ):
+            foo(torch.randn(5, 5))
 
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
@@ -7702,6 +7779,19 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
 
+    def test_sparse_output_inductor_should_break(self) -> None:
+        # See https://github.com/pytorch/pytorch/issues/164823
+        # We want consistent semantics here
+        def forward(x: torch.Tensor) -> torch.Tensor:
+            x_sparse = x.to_sparse()
+            return x_sparse * 2
+
+        test_tensor = torch.randn(10, 10)
+        pt = forward(test_tensor)
+        aot_eager = torch.compile(forward, backend="aot_eager")(test_tensor)
+        self.assertEqual(pt, aot_eager)
+        inductor = torch.compile(forward, backend="inductor")(test_tensor)
+
     def test_nested_sequential_try_with(self):
         def fn(x):
             with torch.set_grad_enabled(True):
@@ -12798,6 +12888,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12812,6 +12905,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12829,6 +12925,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12846,6 +12945,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12867,6 +12969,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12968,7 +13073,13 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 torch.ones(3, 2),
                 1,
             ]
-            new_tree = pytree.tree_unflatten(new_leaves, treespec)
+            if pytree.__name__ == "optree":
+                # `None` is a internal node rather than leaf in default OpTree / JAX PyTree
+                new_leaves.pop()
+                # The treespec argument comes first in OpTree / JAX PyTree
+                new_tree = pytree.tree_unflatten(treespec, new_leaves)
+            else:
+                new_tree = pytree.tree_unflatten(new_leaves, treespec)
             return leaves, new_tree
 
         x = torch.randn(3, 2)
@@ -13023,6 +13134,10 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
     @parametrize_pytree_module
     def test_pytree_tree_map_only(self, pytree):
+        if not callable(getattr(pytree, "tree_map_only", None)):
+            # OpTree and JAX PyTree do not have `tree_map_only`
+            return
+
         def fn(xs):
             def mapper(x):
                 return x.clone()
