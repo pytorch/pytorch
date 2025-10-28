@@ -1137,29 +1137,35 @@ CUDA, MSVC, and PyTorch versions are interdependent; please install matching ver
 
 Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
-## Pre-commit tidy/linting hook
+## Code Linting and Formatting
 
-We use clang-tidy to perform additional
-formatting and semantic checking of code. We provide a pre-commit git hook for
-performing these checks, before a commit is created:
+We use lintrunner to enforce code formatting and perform static analysis. You can install and run it locally with:
 
-  ```bash
-  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
-  ```
+```bash
+pip install lintrunner
+lintrunner init  # Only needed once
+lintrunner
+```
 
-If you have already committed files and
-CI reports `flake8` errors, you can run the check locally in your PR branch with:
+This will run all our linters (including clang-tidy, flake8, mypy and more) on the files you've modified.
 
-  ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point main))
-  ```
+You can also run linting on specific files with:
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
+```bash
+lintrunner path/to/file.py path/to/other/file.cpp
+```
 
-Fix the code so that no errors are reported when you re-run the above check again,
-and then commit the fix.
+Learn more about the linter system on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner).
+
+Many linting issues can be fixed automatically by running:
+
+```bash
+lintrunner --fix
+```
+
+Fix any remaining issues manually until `lintrunner` reports no more errors.
+
+For information about configuring your editor for real-time linting and code formatting, see [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type).
 
 ## Building PyTorch with ASAN
 
