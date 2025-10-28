@@ -10,7 +10,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
-
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
@@ -82,7 +81,11 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
 // Return a dummy value to satisfy linker.
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
-  return static_cast<hipDataType>(500);
+  #if ROCM_VERSION >= 70000
+    return HIP_R_8F_UE8M0;
+  #else
+    return static_cast<hipDataType>(500);
+  #endif
 }
 
 template <>
@@ -520,6 +523,20 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
         hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
         hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
+
+        bool is_mx_fp8 = false;
+#if ROCM_VERSION >= 70000
+        if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<CT>>) {
+          auto* scaled_params = static_cast<const ScaledGemmParams<CT>*>(params);
+          
+          if(scaled_params->a_scale_dtype == c10::ScalarType::Float8_e8m0fnu && scaled_params->b_scale_dtype == c10::ScalarType::Float8_e8m0fnu) {
+            is_mx_fp8 = true;
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+          }
+        }
+#endif
+        if(!is_mx_fp8) {
         if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
 #if defined(HIPBLASLT_OUTER_VEC)
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
@@ -534,6 +551,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
           b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
 #endif
         }
+      }
         matmul.setAttribute(a_scale_ptr_desc, mat1_scale_ptr);
         matmul.setAttribute(b_scale_ptr_desc, mat2_scale_ptr);
       }
@@ -637,16 +655,18 @@ auto GetHipBlasLtTypeStringAndOps() {
 
   hipblasLtHandle_t handle;
   TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
+
   TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
-        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
-        transa_outer,
-        transb_outer,
-        a_datatype,
-        b_datatype,
-        in_out_datatype,
-        in_out_datatype,
-        computeType,
-        heuristic_result));
+      hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+      transa_outer,
+      transb_outer,
+      a_datatype,
+      b_datatype,
+      in_out_datatype,
+      in_out_datatype,
+      computeType,
+      heuristic_result));
+
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
   int returned_algo_count = heuristic_result.size();
@@ -681,6 +701,94 @@ template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
 auto GetHipBlasLtScaledGemmTypeStringAndOps() {
   return GetHipBlasLtTypeStringAndOps<AT, BT, CT, ALayout, BLayout, ScaledGemmParams<CT>>();
 }
+
+#if ROCM_VERSION >= 70000
+template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
+auto GetHipBlasLtScaledGemmMxFp8TypeStringAndOps() {
+  using ParamsT = ScaledGemmParams<CT>;
+  hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
+  hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
+  auto a_datatype = HipDataTypeFor<AT>();
+  auto b_datatype = HipDataTypeFor<BT>();
+  auto in_out_datatype = HipDataTypeFor<CT>();
+
+  hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+  if (at::globalContext().allowTF32CuBLAS()) {
+    computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
+  }
+
+  hipblasLtHandle_t handle;
+  TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
+
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;
+  std::vector<int64_t> representative_sizes = {128, 256, 384, 512, 768, 1024, 2048};
+
+  for (auto size : representative_sizes) {
+    int64_t dummy_m = size;
+    int64_t dummy_n = size;
+    int64_t dummy_k = size;
+
+    HipBlasLtMatmulDescriptor matmul_desc(computeType, HIP_R_32F);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, transa_outer);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, transb_outer);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+    matmul_desc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+
+    hipblasLtMatrixLayout_t mat_a, mat_b, mat_c;
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_a, a_datatype,
+        transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k,
+        transa_outer == HIPBLAS_OP_N ? dummy_k : dummy_m,
+        transa_outer == HIPBLAS_OP_N ? dummy_m : dummy_k));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_b, b_datatype,
+        transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n,
+        transb_outer == HIPBLAS_OP_N ? dummy_n : dummy_k,
+        transb_outer == HIPBLAS_OP_N ? dummy_k : dummy_n));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_c, in_out_datatype, dummy_m, dummy_n, dummy_m));
+
+    hipblasLtMatmulPreference_t pref;
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceCreate(&pref));
+    size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceSetAttribute(
+        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_size, sizeof(workspace_size)));
+
+    int returned_algo_count = 0;
+    std::vector<hipblasLtMatmulHeuristicResult_t> size_results(100);
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulAlgoGetHeuristic(
+        handle,
+        matmul_desc.descriptor(),
+        mat_a,
+        mat_b,
+        mat_c,
+        mat_c,
+        pref,
+        static_cast<int>(size_results.size()),
+        size_results.data(),
+        &returned_algo_count));
+
+    for (int i = 0; i < returned_algo_count; ++i) {
+      auto algo = size_results[i].algo;
+      int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
+      auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
+      std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%d_mxfp8", algo_index);
+      ret.emplace_back(std::move(type_string), std::move(callable));
+    }
+
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatmulPreferenceDestroy(pref));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
+    TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
+  }
+
+  TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
+  return ret;
+}
+#else
+template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
+auto GetHipBlasLtScaledGemmMxFp8TypeStringAndOps() {
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<ScaledGemmParams<CT>>>>> ret;
+  return ret;
+}
+#endif
 
 #undef TORCH_HIPBLASLT_CHECK
 
