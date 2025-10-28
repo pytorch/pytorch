@@ -290,7 +290,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             else:
                 placeholder.node.meta["val"] = self.flat_inputs[i]
 
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             self.new_input_nodes[i] = placeholder
 
     def _create_placeholder_mapping(self) -> None:
@@ -365,18 +365,18 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Copy module metadata like the original implementation
         if hasattr(self.module, "meta"):
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     "dynamo_flat_name_to_original_fqn"
                 ]
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     "dynamo_compile_id"
                 ]
 
