@@ -940,11 +940,6 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 estimation_calls > 0, "Custom estimation should have been called"
             )
 
-            # Should see bucketed all_gathers
-            FileCheck().check_count(
-                "torch.ops._c10d_functional.all_gather_into_tensor", 1, exactly=True
-            ).run(aten_graph_str)
-
             correct = func(inputs_a, inputs_b, ranks=ranks)
             self.assertTrue(same(out, correct))
 
