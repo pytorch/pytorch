@@ -384,7 +384,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         self.dispatch_table: dict
         self.dispatch_table.update(
             {
