@@ -762,7 +762,7 @@ class TestFP8Matmul(TestCase):
                     w_scale, wq = to_mxfp(W[i], format="mxfp8")
                     wh, wq, w_scale, w_global_scale = _convert_to_nvfp4_with_hp_ref(W[i])
                     w_global_scale_list.append(w_global_scale)
-                if format == "mxfp4":
+                elif format == "mxfp4":
                     wh, wq, w_scale = _convert_to_mxfp4_with_hp_ref(W[i])
                 else:
                     raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
@@ -804,7 +804,7 @@ class TestFP8Matmul(TestCase):
                     elif format == "nvfp4":
                         xh, xq, x_scale, x_global_scale = _convert_to_nvfp4_with_hp_ref(x_slice)
                         x_global_scale_list.append(x_global_scale)
-                    if format == "mxfp4":
+                    elif format == "mxfp4":
                         xh, xq, x_scale = _convert_to_mxfp4_with_hp_ref(x_slice)
                     else:
                         raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
