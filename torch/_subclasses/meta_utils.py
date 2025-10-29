@@ -1861,6 +1861,7 @@ class MetaConverter(Generic[_TensorT]):
                 )
 
             # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [unbound-name]
             self.set_tensor_memo(t, r)
 
         return self._checked_get_tensor_memo(t)
