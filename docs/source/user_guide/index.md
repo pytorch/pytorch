@@ -34,6 +34,13 @@ torch_compiler/torch.compiler.md
 
 ```{toctree}
 :maxdepth: 1
+:caption: Torch Export
+
+torch_compiler/export_concepts.md
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Beyond the Basics
 
 ```
