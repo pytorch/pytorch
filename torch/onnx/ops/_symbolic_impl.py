@@ -78,7 +78,7 @@ class EncodedAttrs:
             attr_floats=[],
             attr_strs=[],
         )
-        for k, v in attrs.items():
+        for i, (k, v) in enumerate(attrs.items()):
             encoded.attr_keys.append(k)
             if isinstance(v, int):
                 start_pos = len(encoded.attr_ints)
