@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional
 
 import torch.fx as fx
 
+
 log = logging.getLogger(__name__)
 bucket_log = logging.getLogger(f"{__name__}.bucketing")
 
@@ -64,14 +65,26 @@ def is_collective_or_wait(n: fx.Node) -> bool:
 
 
 @dataclass
-class Event:
-    """Represents a point in the timeline with a representative operation."""
+class PGEvent:
+    """
+    Represents an important event in a process group timeline. Either
+    a collective start, wait, or hiding compute. Each node is linked
+    to its prev and next and these dependencies are reflected
+    in the augmented graph.
 
-    node: fx.Node  # Single representative node
+    We want to enforce a sequential ordering of collective starts and waits
+    because NCCL collectives on the same process group execute on the same CUDA
+    stream, creating implicit dependencies between all operations on that PG.
+
+    A wait of a particular collective will implicitly force realization of all collectives
+    enqueued prior to that collective.
+    """
+
+    node: fx.Node
     event_type: Literal["compute", "starts", "waits"]
     position: int
-    prev: Optional["Event"] = None
-    next: Optional["Event"] = None
+    prev: Optional["PGEvent"] = None
+    next: Optional["PGEvent"] = None
 
     @property
     def is_start(self) -> bool:
@@ -85,7 +98,7 @@ class Event:
     def is_compute(self) -> bool:
         return self.event_type == "compute"
 
-    def unlink(self) -> tuple[Optional["Event"], Optional["Event"]]:
+    def unlink(self) -> tuple[Optional["PGEvent"], Optional["PGEvent"]]:
         """Remove this event from the linked list, return (prev, next)."""
         prev_event, next_event = self.prev, self.next
         if self.prev:
@@ -97,7 +110,7 @@ class Event:
         return prev_event, next_event
 
     def insert_between(
-        self, prev_event: Optional["Event"], next_event: Optional["Event"]
+        self, prev_event: Optional["PGEvent"], next_event: Optional["PGEvent"]
     ) -> None:
         """Insert this event between prev_event and next_event in the linked list."""
         if prev_event:
@@ -134,24 +147,34 @@ class OverlapPreservingBucketer:
         self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
-        self.node_to_event: dict[fx.Node, Event] = {}
-        self.pg_to_timeline: dict[str, Optional[Event]] = self.build_timelines()
+        self.node_to_event: dict[fx.Node, PGEvent] = {}
+        self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
 
         self._add_hiding_interval_constraints()
 
-    def build_timelines(self) -> dict[str, Optional[Event]]:
+    def build_timelines(self) -> dict[str, Optional[PGEvent]]:
+        "Construct each process groups ordered series of event"
         all_pgs: OrderedSet[str] = OrderedSet()
         for start in self.collective_info:
             pg = get_group_name(start)
             all_pgs.add(pg)
 
-        pg_timeline: dict[str, Optional[Event]] = {}
+        pg_timeline: dict[str, Optional[PGEvent]] = {}
         for pg in all_pgs:
             pg_timeline[pg] = self.build_timeline(pg)
 
         return pg_timeline
 
-    def build_timeline(self, pg: str) -> Optional[Event]:
+    def build_timeline(self, pg: str) -> Optional[PGEvent]:
+        """
+        Build a timeline of important events (starts, waits, hiding compute) for this process group
+        and constrain this ordering in the augmented graph.
+
+        Sequential dependencies are added between all events because NCCL collectives on the same
+        process group execute on the same CUDA stream, enforcing LIFO semantics where later-issued
+        collectives must complete before earlier ones can finish.
+        """
+
         head = None
         prev_event = None
         position = 0
@@ -172,9 +195,8 @@ class OverlapPreservingBucketer:
             if node_type is None:
                 continue
 
-            event = Event(node=node, event_type=node_type, position=position)  # type: ignore[arg-type]
+            event = PGEvent(node=node, event_type=node_type, position=position)  # type: ignore[arg-type]
 
-            # Link to previous event using insert_between
             event.insert_between(prev_event, None)
 
             # Add sequential dependency to augmented graph
@@ -191,7 +213,7 @@ class OverlapPreservingBucketer:
     def _populate_node_to_event(self, pg: str) -> None:
         """Populate node_to_event mapping for a specific PG's timeline."""
         self.node_to_event.clear()
-        head = self.pg_to_timeline[pg]
+        head = self.pg_to_timeline_head[pg]
         curr = head
         while curr is not None:
             self.node_to_event[curr.node] = curr
@@ -337,7 +359,7 @@ class OverlapPreservingBucketer:
         return n1 in self.node_ancestors[n2] or n2 in self.node_ancestors[n1]
 
     def _get_intervals(
-        self, event: Event
+        self, event: PGEvent
     ) -> tuple[Optional[tuple[int, int]], Optional[tuple[int, int]]]:
         """Get (execution_interval, hiding_interval) for a collective event.
 
@@ -496,7 +518,7 @@ class OverlapPreservingBucketer:
 
     def remove_from_event(
         self, node: fx.Node
-    ) -> tuple[Optional[Event], Optional[Event]]:
+    ) -> tuple[Optional[PGEvent], Optional[PGEvent]]:
         """Remove node from timeline and return (prev_event, next_event)."""
         event = self.node_to_event[node]
         assert not event.is_compute, "Cannot remove compute events from timeline"
@@ -516,7 +538,10 @@ class OverlapPreservingBucketer:
         return prev_event, next_event
 
     def restore_to_event(
-        self, node: fx.Node, prev_event: Optional[Event], next_event: Optional[Event]
+        self,
+        node: fx.Node,
+        prev_event: Optional[PGEvent],
+        next_event: Optional[PGEvent],
     ) -> None:
         """Restore node to timeline after failed merge attempt."""
         event = self.node_to_event[node]
@@ -532,7 +557,7 @@ class OverlapPreservingBucketer:
         if prev_event and next_event:
             self.aug_graph.remove_extra_dep(n=next_event.node, dep=prev_event.node)
 
-    def _try_rail_position(
+    def _try_timeline_position(
         self,
         bucket_info: CollBucket,
         candidate: fx.Node,
@@ -541,11 +566,10 @@ class OverlapPreservingBucketer:
         why: WhyNoBucket,
     ) -> bool:
         """
-        Try a specific rail position for the candidate.
+        Try a specific timeline position for the candidate.
         Returns True if valid and merges are successful.
         """
         candidate_info = self.collective_info[candidate]
-        candidate_start = candidate
         candidate_wait = candidate_info.wait_node
 
         # Quick check: does this violate hiding intervals?
@@ -654,8 +678,16 @@ class OverlapPreservingBucketer:
         candidate: fx.Node,
     ) -> bool:
         """
-        Check if candidate can be added to bucket without interfering
-        with comm/compute overlap.
+        Check if candidate can be added to bucket without breaking comm/compute overlap.
+
+        Strategy: Try all timeline positions - combinations of [existing_start, candidate_start]
+        x [existing_wait, candidate_wait]. For each position, verify:
+        1. Hiding intervals preserved - for any (start, hiding_compute, wait) interval, no other
+           collective's (start, wait) pair falls between start and hiding_compute, which would
+           force realization and break overlap due to LIFO semantics
+        2. Topologically valid (no dependency cycles)
+
+        Return True if any timeline position satisfies both constraints.
         """
         existing_coll = bucket_info.collectives[0]
         why = WhyNoBucket(existing_coll, candidate)
@@ -692,9 +724,11 @@ class OverlapPreservingBucketer:
         ]
 
         for i, (start_pos, wait_pos) in enumerate(combinations):
-            if self._try_rail_position(bucket_info, candidate, start_pos, wait_pos, why):
+            if self._try_timeline_position(
+                bucket_info, candidate, start_pos, wait_pos, why
+            ):
                 bucket_log.debug(
-                    "bucketed %s with %s using rail position %d: (start=%s, wait=%s)",
+                    "bucketed %s with %s using timeline position %d: (start=%s, wait=%s)",
                     candidate.name,
                     existing_coll.name,
                     i + 1,
@@ -703,7 +737,7 @@ class OverlapPreservingBucketer:
                 )
                 return True
 
-        why("all rail positions failed")
+        why("all timeline positions failed")
         return False
 
     def _apply_bucket(self, bucket_info: CollBucket) -> None:
