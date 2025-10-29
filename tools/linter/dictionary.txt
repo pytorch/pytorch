@@ -28,9 +28,9 @@ inp
 inps
 inpt
 inpts
-matA
-matB
-matC
+mata
+matb
+matc
 nd
 nin
 NotIn

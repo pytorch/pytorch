@@ -515,6 +515,11 @@ class TestPixelShuffle(TestCaseMPS):
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
+        def test_pixel_shuffle_large_upscale_factor():
+            with self.assertRaises(ValueError):
+                ps = nn.PixelShuffle(545460846592)
+                ps(torch.randn(2, 16, 9, 3))
+
         def test_pixel_shuffle_unshuffle_1D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
@@ -530,6 +535,7 @@ class TestPixelShuffle(TestCaseMPS):
         def test_pixel_shuffle_unshuffle_5D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
 
+        test_pixel_shuffle_large_upscale_factor()
         test_pixel_shuffle_unshuffle_1D()
         test_pixel_shuffle_unshuffle_2D()
         test_pixel_shuffle_unshuffle_3D()
@@ -628,10 +634,11 @@ class MatmulTest(TestCaseMPS):
     def test_batched_matrix_x_broadcasted_matrix(self):
         self._helper((10, 3, 4), (4, 5))
 
+    @serialTest()
     def test_large_matmul(self):
         # Issue: #141909
-        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half)
-        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half)
+        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half, device="mps")
+        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half, device="mps")
         matmul_mps = torch.matmul(tensor1_mps, tensor2_mps)
 
         tensor1_cpu = tensor1_mps.to("cpu")
@@ -1936,6 +1943,13 @@ class TestMPS(TestCaseMPS):
         run_lu_factor_ex_test(32, 2, 2, 10, 10, check_errors=True)
         # big matrix check with batch size > 1
         run_lu_factor_ex_test(256, 2, check_errors=False, atol=3e-5, rtol=5e-6)
+
+    def test_linalg_lu_factor_singular(self):
+        # Explicit singular matrix
+        A = torch.tensor([[1.0, 2.0], [2.0, 4.0]], device="mps")
+
+        with self.assertRaisesRegex(RuntimeError, "result in a division by zero"):
+            torch.linalg.lu_factor(A)
 
     def test_linalg_solve(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
@@ -7828,9 +7842,48 @@ class TestMPS(TestCaseMPS):
         shape = (2, 3, 4, 5, 6)
         x = torch.rand(shape, device="mps")
         self.assertNotEqual(x[0], x[1])
-        # Check that normal distributino is not affected by the same
+        # Check that normal distributions is not affected by the same
         y = torch.normal(torch.zeros(shape, device="mps"), torch.ones(shape, device="mps"))
         self.assertNotEqual(y[0], y[1])
+
+    def test_random_ops_noncontiguous(self):
+        """Test random in-place operations on non-contiguous tensors.
+
+        All random in-place operations should work on non-contiguous tensors.
+        See issues #165257 and #124029.
+        """
+        # Test each random in-place operation
+        ops = [
+            ("normal_", lambda t: t.normal_(0, 1)),
+            ("uniform_", lambda t: t.uniform_(0, 1)),
+            ("exponential_", lambda t: t.exponential_(1.0)),
+            ("bernoulli_", lambda t: t.bernoulli_(0.5)),
+            ("random_", lambda t: t.random_()),
+            ("random_with_to", lambda t: t.random_(10)),
+            ("random_with_range", lambda t: t.random_(0, 10)),
+        ]
+
+        for name, op_func in ops:
+            with self.subTest(operation=name):
+                # Create non-contiguous tensor via transpose
+                t_mps = torch.zeros(50, 50, device='mps').T.clone()
+                self.assertFalse(t_mps.is_contiguous(),
+                                 f"{name}: tensor should be non-contiguous")
+
+                # Apply operation
+                op_func(t_mps)
+
+                # Verify tensor was modified (not all zeros)
+                max_val = t_mps.max().item()
+                self.assertNotEqual(max_val, 0.0,
+                                    f"{name}: operation failed to modify non-contiguous tensor")
+
+        # Test rand_like specifically (issue #124029)
+        t = torch.ones((3, 2, 2), device='mps').permute(2, 0, 1)
+        self.assertFalse(t.is_contiguous(), "rand_like input should be non-contiguous")
+        result = torch.rand_like(t)
+        self.assertFalse(result.is_contiguous(), "rand_like result should be non-contiguous")
+        self.assertNotEqual(result.max().item(), 0.0, "rand_like should generate non-zero values")
 
     # Test exponential
     @unittest.skip("This does not test anything")
@@ -10138,7 +10191,7 @@ class TestViewOpsMPS(TestCaseMPS):
         assert_is_nonview(t, nv)
 
         # flatten returns the original object if start_dim=end_dim
-        t = t = torch.ones(2, 2, device=device)
+        t = torch.ones(2, 2, device=device)
         nv = t.flatten(1, 1)
         self.assertIs(t, nv)
 
@@ -12591,7 +12644,7 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(out_mps, out_cpu)
 
     def test_fmax_mixed_dtypes(self, device):
-        # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
+        # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented
         # with the assumption that both args have the same dtype
         x = torch.rand((3, 3), device=device, dtype=torch.float32)

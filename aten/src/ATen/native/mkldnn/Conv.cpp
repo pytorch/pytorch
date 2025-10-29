@@ -723,7 +723,7 @@ Tensor _mkldnn_convolution_transpose(
   ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   if (!weight.is_mkldnn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
-    // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
+    // while PyTorch has IOHW or IODHW, `._transpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
   }
 
