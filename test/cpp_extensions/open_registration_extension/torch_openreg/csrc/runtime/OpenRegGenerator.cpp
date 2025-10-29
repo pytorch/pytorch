@@ -39,7 +39,7 @@ at::Generator createOpenRegGenerator(DeviceIndex device_index) {
   return gen;
 }
 
-DeviceType device_type() {
+DeviceType OpenRegGeneratorImpl::device_type() {
   return DeviceType::PrivateUse1;
 }
 // LITERALINCLUDE END: OPENREG GENERATOR IMPL
