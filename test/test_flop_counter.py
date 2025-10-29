@@ -238,14 +238,18 @@ class TestFlopCounter(TestCase):
             (2, 4, 2),
             (4, 2, 2),
         ]:
-            x = torch.rand(1, in_channels, 4, 4, requires_grad=True)
+            x = torch.rand(1, in_channels * groups, 4, 4, requires_grad=True)
             weight = torch.randn(out_channels, in_channels, 2, 2, requires_grad=True)
-            assert_equivalence(lambda: F.conv2d(x, weight).sum().backward())
+            assert_equivalence(
+                lambda: F.conv2d(x, weight, groups=groups).sum().backward()
+            )
             transposed_weight = torch.randn(
                 in_channels, out_channels, 2, 2, requires_grad=True
             )
             assert_equivalence(
-                lambda: F.conv_transpose2d(x, transposed_weight).sum().backward()
+                lambda: F.conv_transpose2d(x, transposed_weight, groups=groups)
+                .sum()
+                .backward()
             )
 
     @skipIfNoTorchVision
