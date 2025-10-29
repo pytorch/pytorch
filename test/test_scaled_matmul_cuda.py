@@ -156,18 +156,9 @@ def infer_scale_swizzle(mat, scale):
     ):
         return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
-    # MXFP4
-    # if (
-    #     (scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
-    #         or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0])
-    #     and mat.dtype == torch.float4_e2m1fn_x2
-    #     and scale.dtype == torch.float8_e8m0fnu
-    # ):
-    #     swizzle = SwizzleType.SWIZZLE_32_4_4 if torch.version.cuda else SwizzleType.NO_SWIZZLE
-    #     return ScalingType.BlockWise1x32, swizzle
-
+    # MX formats
     if not torch.version.hip:
-        # MXFP8 w/ swizzle
+        # MX w/swizzle (NVIDIA)
         if (
             (scale.numel()
                 == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 32), 4)
@@ -178,7 +169,7 @@ def infer_scale_swizzle(mat, scale):
             return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
 
     else:
-        # MXFP8 w/o swizzle
+        # MX w/o swizzle (AMD)
         if (
             (scale.numel() == math.ceil(mat.shape[0] // 32) * K_multiplier * mat.shape[1]
                 or scale.numel() == math.ceil(K_multiplier * mat.shape[1] // 32) * mat.shape[0])
