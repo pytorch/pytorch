@@ -34,11 +34,12 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu, skipIfXpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
     map_local_tensor_for_rank,
+    NUM_DEVICES,
     with_comms,
 )
 
@@ -648,7 +649,7 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 class DTensorMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(NUM_DEVICES, 8)
 
     def sub_mesh_assert_equal(self, mesh, exp_in_mesh, exp_out_of_mesh, tensor):
         if self.rank in mesh:
@@ -656,6 +657,7 @@ class DTensorMeshTest(DTensorTestBase):
         else:
             self.assertEqual(tensor, exp_out_of_mesh)
 
+    @skipIfXpu
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
         # construct a cuda device mesh
@@ -669,6 +671,7 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.device.type, self.device_type)
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
 
+    @skipIfXpu
     @with_comms
     def test_dtensor_api_device_mesh_context_manager(self):
         with self.build_device_mesh() as mesh:
@@ -708,9 +711,20 @@ class DTensorMeshTest(DTensorTestBase):
             sharded_after_2d = distribute_tensor(global_tensor, placements=placements)
             self.assertEqual(sharded_after_2d.to_local().shape, torch.Size([3, 3]))
 
+    @skipIfXpu
     @with_comms
     def test_dtensor_2d_mesh(self):
-        mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
+        # Support world sizes 2, 4, and 8 with appropriate 2D mesh shapes
+        mesh_shapes = {2: (2, 1), 4: (2, 2), 8: (2, 4)}
+        if self.world_size not in mesh_shapes:
+            raise RuntimeError(
+                f"test_dtensor_2d_mesh requires world_size to be one of {list(mesh_shapes.keys())}, "
+                f"got {self.world_size}"
+            )
+
+        mesh_tensor = torch.arange(self.world_size).reshape(
+            mesh_shapes[self.world_size]
+        )
         # construct a cuda device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
@@ -734,13 +748,26 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_device_mesh_nd(self):
         # construct a cuda device mesh
-        mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
+        mesh_shapes = {2: (2, 1, 1), 4: (2, 2, 1), 8: (2, 2, 2)}
+        if self.world_size not in mesh_shapes:
+            raise RuntimeError(
+                f"test_dtensor_mesh_nd requires world_size to be one of {list(mesh_shapes.keys())}, "
+                f"got {self.world_size}"
+            )
+
+        mesh_tensor = torch.arange(self.world_size).reshape(
+            mesh_shapes[self.world_size]
+        )
+
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
         placements = [Shard(0), Shard(1), Shard(2)]
         local_tensor = torch.randn(3, 3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
-        self.assertEqual(dist_tensor.size(), torch.Size([6, 6, 6]))
+        expected_size = torch.Size(
+            [3 * mesh.size(0), 3 * mesh.size(1), 3 * mesh.size(2)]
+        )
+        self.assertEqual(dist_tensor.size(), expected_size)
         self.assertEqual(dist_tensor.device.type, self.device_type)
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
 
@@ -748,10 +775,14 @@ class DTensorMeshTest(DTensorTestBase):
         placements = [Shard(0), Shard(0), Shard(2)]
         local_tensor = torch.randn(3, 3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
-        self.assertEqual(dist_tensor.size(), torch.Size([12, 3, 6]))
+        expected_size = torch.Size(
+            [3 * mesh.size(0) * mesh.size(1), 3, 3 * mesh.size(2)]
+        )
+        self.assertEqual(dist_tensor.size(), expected_size)
         self.assertEqual(dist_tensor.device.type, self.device_type)
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
 
+    @skipIfXpu
     @with_comms
     def test_dtensor_spec_local_shard_offset(self):
         device_mesh = DeviceMesh(
@@ -791,6 +822,7 @@ class DTensorMeshTest(DTensorTestBase):
             )
             self.assertEqual(expected_shard_offsets, offset)
 
+    @skipIfXpu
     @with_comms
     def test_from_local_sub_mesh(self):
         mesh = DeviceMesh(self.device_type, [0, 2])
@@ -818,6 +850,7 @@ class DTensorMeshTest(DTensorTestBase):
             dtensor.to_local(),
         )
 
+    @skipIfXpu
     @with_comms
     def test_default_value_sub_mesh(self):
         mesh = DeviceMesh(self.device_type, [0, 2])
@@ -856,6 +889,7 @@ class DTensorMeshTest(DTensorTestBase):
             [dt.to_local() for dt in dtensor_list],
         )
 
+    @skipIfXpu
     @with_comms
     def test_redistribute_sub_mesh(self):
         mesh = DeviceMesh(self.device_type, [0, 2])
@@ -872,6 +906,7 @@ class DTensorMeshTest(DTensorTestBase):
             mesh.mesh, torch.ones(4, 3), torch.tensor([]), sharded_again.to_local()
         )
 
+    @skipIfXpu
     @with_comms
     def test_implicit_replication(self):
         mesh = self.build_device_mesh()
@@ -888,6 +923,7 @@ class DTensorMeshTest(DTensorTestBase):
             self.assertEqual(local_shard.shape, (4, 3))
             self.assertEqual(local_shard, torch.ones(4, 3) + torch.ones(3))
 
+    @skipIfXpu
     @with_comms
     def test_vmap_embedding(self):
         mesh = self.build_device_mesh()
@@ -912,6 +948,7 @@ class DTensorMeshTest(DTensorTestBase):
         local_expected = expected.to_local()
         self.assertEqual(local_result, local_expected)
 
+    @skipIfXpu
     @unittest.expectedFailure
     @with_comms
     def test_inplace_on_local_tensor_view(self):
@@ -925,6 +962,7 @@ class DTensorMeshTest(DTensorTestBase):
         logits_max = torch.randn(seq, device=self.device_type)
         vocab_parallel_logits -= logits_max.unsqueeze(dim=1)
 
+    @skipIfXpu
     @with_comms
     def test_auto_implicit_replication(self):
         mesh = self.build_device_mesh()
@@ -951,6 +989,7 @@ class DTensorMeshTest(DTensorTestBase):
             (numel_1_tensor + sharded_dtensor).to_local(), numel_1_tensor + local_tensor
         )
 
+    @skipIfXpu
     @unittest.expectedFailure
     @with_comms
     def test_dtensor_cond(self):
@@ -972,6 +1011,7 @@ class DTensorMeshTest(DTensorTestBase):
             lambda: torch.zeros_like(x),
         )
 
+    @skipIfXpu
     @with_comms
     def test_metadata_consistency_check(self):
         device_mesh = self.build_device_mesh()
