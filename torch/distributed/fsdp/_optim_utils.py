@@ -1001,6 +1001,7 @@ def _get_param_id_to_param_from_optim_input(
         return dict(enumerate(model.parameters()))
     try:
         # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [redundant-cast]
         params = cast(list[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(

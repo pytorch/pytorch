@@ -307,7 +307,7 @@ class TestPromotion(TestCase):
     )
     def test_permutations_do_not_influence_result(self, dtypes, expected):
         # Tests that most permutations do not influence the result.  In the
-        # above some uint and int combintations promote to a larger integer
+        # above some uint and int combinations promote to a larger integer
         # type, which would then promote to a larger than necessary float.
         for perm in permutations(dtypes):
             assert np.result_type(*perm) == expected
