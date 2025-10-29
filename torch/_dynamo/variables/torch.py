@@ -1293,26 +1293,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             message_graph_proxy = None
             if len(args) >= 2:
                 message_vt = args[1]
-                if message_vt.has_closure():
+                if message_vt.has_closure() or not isinstance(
+                    message_vt, NestedUserFunctionVariable
+                ):
                     unimplemented_v2(
-                        gb_type="Message in torch._check cannot have a closure",
-                        context="Message VT has a closure",
-                        explanation=(
-                            "Trying to build a proxy of torch._check() message, but failed to"
-                            ", because it has a closure, which are unsupported for now."
-                            "If possible, remove any variables from message and try again."
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-                if not isinstance(message_vt, NestedUserFunctionVariable):
-                    unimplemented_v2(
-                        gb_type="Can't extract message from torch._check",
-                        context="torch._check() has a second argument, which is expected to be a message",
-                        explanation=(
-                            "Trying to build a proxy of torch._check() message, but failed to"
-                            ", because message variable tracker is not NestedUserFunctionVariable"
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                        gb_type="Can't extract message from torch._check()",
+                        context=str(message_vt),
+                        explanation="The second argument of torch._check() must be a function defined within the torch.compile region that does not reference a non-local variable.",
+                        hints=[
+                            "Make sure the message function is defined in the torch.compile region.",
+                            "Remove any non-local variables, e.g. remove references to `x` in `lambda: f'{x} failed check'`",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
                     )
                 message_eager = message_vt.get_function()
                 attr_prefix = f"_check_msg_{tx.output.graph.nodes.__len__()}"
