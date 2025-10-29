@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
@@ -139,7 +140,7 @@ C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
     0.00925546218271273,
     0.00833056343336287
   };
-  if (k <= sizeof(kTailValues)/sizeof(scalar_t)) {
+  if (k < std::size(kTailValues)) {
     return kTailValues[static_cast<size_t>(k)];
   }
   scalar_t kp1sq = (k + 1) * (k + 1);

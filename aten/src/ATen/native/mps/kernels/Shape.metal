@@ -16,7 +16,6 @@ kernel void cat(
   auto ndim = shared_params.ndim;
   auto cat_dim = shared_params.cat_dim;
   constant auto& output_strides = shared_params.output_strides;
-  constant auto& output_sizes = shared_params.output_sizes;
 
   auto cat_dim_offset = input_params.cat_dim_offset;
   auto input_element_offset = input_params.input_element_offset;
