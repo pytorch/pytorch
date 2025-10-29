@@ -2390,8 +2390,7 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
     }
     if (autograd_meta) {
       for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (auto pyhook =
-                dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
           Py_VISIT(pyhook->dict);
         }
       }
