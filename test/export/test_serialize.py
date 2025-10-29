@@ -82,7 +82,7 @@ class TestSerialize(TestCase):
                 return 0
 
             def __eq__(self, other):
-                return type(other) == type(self)
+                return type(other) is type(self)
 
             def __call__(self, *args, **kwargs):
                 return torch.ops.aten.add.Tensor(*args, **kwargs)
@@ -2000,7 +2000,7 @@ class TestSaveLoad(TestCase):
 
     def test_save_load_with_multiple_empty_tensors(self) -> None:
         # Test scenario where models have multiple empty tensors
-        # but with differnt data types.
+        # but with different data types.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
