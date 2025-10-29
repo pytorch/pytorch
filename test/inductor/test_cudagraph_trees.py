@@ -2905,6 +2905,22 @@ if HAS_CUDA_AND_TRITON:
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        def test_graph_partition_view_fallback(self):
+            def f(x):
+                y = x + 1
+                z = torch.ops.aten.view.dtype(y, torch.float8_e4m3fn)
+                z_cpu = z.cpu()
+                u_cuda = z_cpu.cuda()
+                return u_cuda
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            for _ in range(3):
+                x = torch.ones(2, dtype=torch.int32, device="cuda")
+                eager_out = f(x)
+                compiled_out = compiled_f(x)
+                self.assertEqual(eager_out, compiled_out)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):
             def foo(x, y):

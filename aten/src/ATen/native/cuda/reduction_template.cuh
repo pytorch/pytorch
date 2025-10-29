@@ -466,7 +466,7 @@ struct ReduceJitOp {
 
     __syncthreads();
 
-    #ifdef USE_ROCM
+    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
     for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
