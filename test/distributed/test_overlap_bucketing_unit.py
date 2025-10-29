@@ -225,9 +225,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
         # Verify: should have 1 bucketed collective (all_gather_into_tensor_out)
         graph_str = str(traced.graph)
-        FileCheck().check_count(
-            "all_gather_into_tensor_out", 1, exactly=False
-        ).run(graph_str)
+        FileCheck().check_count("all_gather_into_tensor_out", 1, exactly=False).run(
+            graph_str
+        )
 
     def test_cant_bucket_nested_hiding_intervals(self):
         """
@@ -314,9 +314,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         # Verify: nested hiding intervals should prevent bucketing
         # Should have 2 separate all_gathers, not 1 bucketed one
         graph_str = str(traced.graph)
-        FileCheck().check_count(
-            "all_gather_into_tensor", 2, exactly=False
-        ).run(graph_str)
+        FileCheck().check_count("all_gather_into_tensor", 2, exactly=False).run(
+            graph_str
+        )
 
     @parametrize("final_mm_hidden", (True, False))
     def test_cant_bucket_ag_with_rs_hiding_interval_between(self, final_mm_hidden):
