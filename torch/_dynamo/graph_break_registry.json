@@ -2496,6 +2496,14 @@
   ],
   "GB0249": [
     {
+      "Gb_type": "bad device argument to torch.accelerator.current_stream",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    },
+    {
       "Gb_type": "bad device argument to torch.get_device_module",
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
@@ -2803,6 +2811,34 @@
   ],
   "GB0278": [
     {
+      "Gb_type": "unsupported arguments to torch.accelerator.current_stream",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "torch.accelerator.current_stream accepts one optional argument `device`",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0279": [
+    {
+      "Gb_type": "bad device argument to torch.get_device_module",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0280": [
+    {
+      "Gb_type": "Failed to make weakref to graph-created external object",
+      "Context": "user_object: {example_value}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    }
+  ],
+  "GB0281": [
+    {
       "Gb_type": "Unsupported dict type for fromkeys()",
       "Context": "{user_cls.__name__}.fromkeys(): {args} {kwargs}",
       "Explanation": "Failed to call {user_cls.__name__}.fromkeys() because {user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
@@ -2811,7 +2847,7 @@
       ]
     }
   ],
-  "GB0279": [
+  "GB0282": [
     {
       "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
       "Context": "str(self)",
