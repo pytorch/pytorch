@@ -771,10 +771,7 @@ static Tensor make_tensor_for_subclass_helper(
   Storage storage{
       Storage::use_byte_size_t{},
       size_bytes,
-      // REVIEW: without the device change here,
-      // test_dtensor_save_load breaks. I'm not at all sure why it was
-      // OK before.
-      at::DataPtr{nullptr, c10::kMeta},
+      at::DataPtr{nullptr, options.device()},
       /*allocator=*/c10::GetAllocator(c10::kMeta),
       /*resizable=*/true};
 
