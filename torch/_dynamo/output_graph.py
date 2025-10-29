@@ -1303,6 +1303,7 @@ class OutputGraph(OutputGraphCommon):
 
                 # A small codegen optimization because we might have different
                 # VariableTrackers that share the same source.
+                assert x.source is not None
                 list_idx = x.source.index  # type: ignore[attr-defined]
                 if list_idx not in visited:
                     alias_name = self.new_var(
@@ -1321,6 +1322,7 @@ class OutputGraph(OutputGraphCommon):
                     )
 
                 # operate on alias, handled by suffix codegen
+                assert x.source is not None
                 old_source = x.source
                 overridden_sources[old_source] = LocalSource(visited[list_idx])
 
@@ -1864,7 +1866,6 @@ class OutputGraph(OutputGraphCommon):
                             and isinstance(var.value, _ExportModuleSpecTrackerDict)
                         ):
                             potential_side_effects.append(var)
-
             side_effect_refs = [
                 _get_source_debug_name(var.source) for var in potential_side_effects
             ]
