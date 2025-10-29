@@ -1061,7 +1061,6 @@ class VariableBuilder:
             var = StreamVariable(
                 stream_proxy,
                 value,
-                value.device,
                 source=self.source,
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
@@ -3057,7 +3056,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return StreamVariable(proxy, example_value, example_value.device, **options)
+        return StreamVariable(proxy, example_value, **options)
     elif (
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, torch.Event)
