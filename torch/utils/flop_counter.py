@@ -136,8 +136,7 @@ def conv_flop_count(
 ) -> int:
     """Count flops for convolution.
 
-    Note only multiplication is
-    counted. Computation for bias are ignored.
+    Counts as 2 FLOPs per multiply-add (the * 2 factor); bias add is ignored.
     Flops for a transposed convolution are calculated as
     flops = (x_shape[2:] * prod(w_shape) * batch_size).
     Args:
@@ -150,21 +149,8 @@ def conv_flop_count(
     """
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
-    c_out, c_in, *filter_size = w_shape
-
-    """
-    General idea here is that for a regular conv, for each point in the output
-    spatial dimension we convolve the filter with something (hence
-    `prod(conv_shape) * prod(filter_size)` ops). Then, this gets multiplied by
-    1. batch_size, 2. the cross product of input and weight channels.
-
-    For the transpose, it's not each point in the *output* spatial dimension but
-    each point in the *input* spatial dimension.
-    """
-    # NB(chilli): I don't think this properly accounts for padding :think:
     # NB(chilli): Should be 2 * c_in - 1 technically for FLOPs.
-    flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
-    return flop
+    return prod(conv_shape) * prod(w_shape) * batch_size * 2
 
 @register_flop_formula([aten.convolution,
                         aten._convolution,
@@ -261,8 +247,11 @@ def conv_backward_flop(
     {AD + BE + CF, AE + BF + CG} [out (grad_weight)]
 
     For the full backwards formula, there are also some details involving
-    transpose of the batch/channel dimensions and groups, but I skip those for
-    the sake of brevity (and they're pretty similar to matmul backwards)
+    transpose of the batch/channel dimensions, similar to matmul backwards.
+    Groups need an explicit correction in grad_weight (see below): the t()-
+    transposed shapes put N in the c_in slot, so the per-group division that
+    w_shape[1] = C_in/groups normally provides is lost, and we divide by
+    groups to compensate.
 
     Check [conv backwards decomposition as conv forwards]
     """
@@ -273,12 +262,13 @@ def conv_backward_flop(
 
     if output_mask[1]:
         grad_weight_shape = get_shape(out_shape[1])
+        # Per-group conv; the transposed shapes lose the group division.
         if transposed:
             # grad_weight of transposed conv as conv(grad_out, inp)
-            flop_count += conv_flop_count(t(grad_out_shape), t(x_shape), t(grad_weight_shape), transposed=False)
+            flop_count += conv_flop_count(t(grad_out_shape), t(x_shape), t(grad_weight_shape), transposed=False) // _groups
         else:
             # grad_weight as conv(inp, grad_out)
-            flop_count += conv_flop_count(t(x_shape), t(grad_out_shape), t(grad_weight_shape), transposed=False)
+            flop_count += conv_flop_count(t(x_shape), t(grad_out_shape), t(grad_weight_shape), transposed=False) // _groups
 
     return flop_count
 
