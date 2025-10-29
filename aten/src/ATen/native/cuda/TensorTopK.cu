@@ -663,11 +663,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 #ifdef USE_ROCM
 
 
-// ============================================================================
-// Fused kernel for ROCm: combines radixFindKthValues + computeBlockwiseWithinKCounts
-// Eliminates 1 kernel launch per radix pass and all intermediate global counts writes.
-// ============================================================================
 
+//fused radix pass
 template <typename T, typename IndexType, typename Bitwise, int Dim>
 C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
 __attribute__((amdgpu_flat_work_group_size(64, 1024)))
@@ -696,9 +693,7 @@ __global__ void fusedRadixPassKernel(
   const uint32_t blk_idx_in_slice = block_idx % blocks_per_slice;
   if (slice_idx >= num_slices) return;
 
-  // -------------------------------------------------------------------------
-  // PHASE 1: Compute digit histogram (all blocks)
-  // -------------------------------------------------------------------------
+  //phase 1
   const Bitwise desired = desires_in[slice_idx];
   const IndexType slice_start_index =
       at::cuda::detail::IndexToOffset<const T, IndexType, Dim>::get(slice_idx, input);
@@ -760,9 +755,7 @@ __global__ void fusedRadixPassKernel(
           #endif
         ]);
 
-  // -------------------------------------------------------------------------
-  // PHASE 2: Determine kth bin (only first block per slice)
-  // -------------------------------------------------------------------------
+  //phase 2
   if (blk_idx_in_slice == 0) {
     __syncthreads();
     
@@ -807,11 +800,7 @@ __global__ void fusedRadixPassKernel(
   }
 
 
-  // -------------------------------------------------------------------------
-  // PHASE 3: Compute per-block withinKCount (all blocks)
-  // -------------------------------------------------------------------------
-  // Read the updated desire (written by block 0)
-  // This is safe because desires_out was written to global memory
+  //phase 3
   const Bitwise slice_desired = desires_out[slice_idx];
   const Bitwise desired_digit =
       at::cuda::Bitfield<Bitwise>::getBitfield(slice_desired, current_bit, RADIX_BITS);
