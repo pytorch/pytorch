@@ -12,7 +12,7 @@
 
 namespace c10 {
 
-class SymInt; // Forward declaration
+class SymInt;
 
 class C10_API SymBool {
  public:

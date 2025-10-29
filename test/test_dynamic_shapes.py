@@ -4329,10 +4329,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         self.assertEqual(compiled(a, b), func(a, b))
 
+    @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_narrow_unbacked_start(self):
-        """Test narrow with unbacked start"""
-
         def func(x, start, length):
             # unbacked start
             u0 = start.item()
@@ -4374,6 +4373,13 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
                 # Compare results
                 self.assertEqual(result_compiled, result_eager)
                 self.assertEqual(result_compiled, expected)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_unbacked_narrow_unbacked_start_cpp_wrapper(self):
+        """Test narrow with unbacked start with cpp_wrapper"""
+        self.test_unbacked_narrow_unbacked_start()
 
 
 instantiate_parametrized_tests(TestUnbacked)
