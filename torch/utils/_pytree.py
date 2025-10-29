@@ -471,12 +471,13 @@ class ConstantNode:
 
 def _is_constant_holder(spec: "TreeSpec") -> bool:
     """Checks if the spec is from a pytree registered with register_constant"""
-    return isinstance(spec.context, ConstantNode)
+    return isinstance(spec._context, ConstantNode)
 
 
 def _retrieve_constant(spec: "TreeSpec") -> Any:
     """Given a spec from a pytree registered with register_constant, retrieves the constant"""
-    assert _is_constant_holder(spec)
+    if not _is_constant_holder(spec):
+        raise AssertionError("spec does not correspond to a registered constant pytree")
     return tree_unflatten([], spec)
 
 
@@ -602,6 +603,7 @@ def _private_register_pytree_node(
             warnings.warn(
                 f"{cls} is already registered as pytree node. "
                 "Overwriting the previous registration.",
+                stacklevel=2,
             )
 
         node_def = NodeDef(cls, flatten_fn, unflatten_fn, flatten_with_keys_fn)
@@ -708,7 +710,7 @@ class structseq(tuple[_T_co, ...]):
     def __new__(
         cls: type[Self],
         sequence: Iterable[_T_co],
-        # pyrefly: ignore  # bad-function-definition
+        # pyrefly: ignore [bad-function-definition]
         dict: dict[str, Any] = ...,
     ) -> Self:
         raise NotImplementedError
@@ -755,7 +757,7 @@ def _tuple_flatten_with_keys(
     d: tuple[T, ...],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -769,7 +771,7 @@ def _list_flatten(d: list[T]) -> tuple[list[T], Context]:
 
 def _list_flatten_with_keys(d: list[T]) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _list_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -785,7 +787,7 @@ def _dict_flatten_with_keys(
     d: dict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
@@ -801,7 +803,7 @@ def _namedtuple_flatten_with_keys(
     d: NamedTuple,
 ) -> tuple[list[tuple[KeyEntry, Any]], Context]:
     values, context = _namedtuple_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return (
         [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
         context,
@@ -851,7 +853,7 @@ def _ordereddict_flatten_with_keys(
     d: OrderedDict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
@@ -876,7 +878,7 @@ def _defaultdict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
 
 
@@ -899,17 +901,25 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
 
 
 def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
-    assert isinstance(dumpable_context, dict)
-    assert set(dumpable_context) == {
+    if not isinstance(dumpable_context, dict):
+        raise AssertionError("dumpable_context must be a dict")
+
+    expected_keys = {
         "default_factory_module",
         "default_factory_name",
         "dict_context",
     }
+    if set(dumpable_context) != expected_keys:
+        raise AssertionError(
+            f"dumpable_context keys must be {expected_keys}, got {set(dumpable_context)}"
+        )
 
     default_factory_module = dumpable_context["default_factory_module"]
     default_factory_name = dumpable_context["default_factory_name"]
-    assert isinstance(default_factory_module, str)
-    assert isinstance(default_factory_name, str)
+    if not isinstance(default_factory_module, str):
+        raise AssertionError("default_factory_module must be a string")
+    if not isinstance(default_factory_name, str):
+        raise AssertionError("default_factory_name must be a string")
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
@@ -925,7 +935,7 @@ def _deque_flatten_with_keys(
     d: deque[T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _deque_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -1249,14 +1259,14 @@ class TreeSpec:
     def __hash__(self) -> int:
         node_type = self.type
         if node_type is defaultdict:
-            default_factory, dict_context = self.context
+            default_factory, dict_context = self._context
             hashable_context = (default_factory, tuple(dict_context))
         elif node_type in (dict, OrderedDict):
-            hashable_context = tuple(self.context)
+            hashable_context = tuple(self._context)
         elif node_type is None or node_type in BUILTIN_TYPES:
-            hashable_context = self.context
-        elif isinstance(self.context, ConstantNode):
-            hashable_context = self.context.value
+            hashable_context = self._context
+        elif isinstance(self._context, ConstantNode):
+            hashable_context = self._context.value
         else:
             # The context for user-defined node types might not be hashable.
             # Ignore it for hashing.
@@ -1264,7 +1274,7 @@ class TreeSpec:
             # same hash. This might increase the hash collision rate, but we
             # don't care about that.
             hashable_context = None
-        return hash((node_type, hashable_context, tuple(self.children_specs)))
+        return hash((node_type, hashable_context, tuple(self._children)))
 
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
@@ -1614,7 +1624,6 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1675,7 +1684,6 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1792,7 +1800,8 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert isinstance(treespec, TreeSpec)
+    if not isinstance(treespec, TreeSpec):
+        raise AssertionError("treespec must be a TreeSpec")
 
     if tree_is_leaf(tree, is_leaf=is_leaf):
         return [tree] * treespec.num_leaves
@@ -1888,7 +1897,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         return enum_cls[obj["name"]]
     return obj
 

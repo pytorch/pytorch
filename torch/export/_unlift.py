@@ -326,8 +326,7 @@ def _insert_copy_for_mutations(
             return_nodes_to_copy[return_node] = copy_node
 
     output_args = tuple(
-        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
-        for node in user_output_nodes
+        return_nodes_to_copy.get(node, node) for node in user_output_nodes
     )
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
@@ -531,7 +530,8 @@ def _create_stateful_graph_module(
                 f"A model attribute `{constant_fqn}` requires gradient. "
                 f"but it's not properly registered as a parameter. "
                 f"torch.export will detach it and treat it as a constant tensor "
-                f"but please register it as parameter instead."
+                f"but please register it as parameter instead.",
+                stacklevel=2,
             )
             detached_buffer = buffer.detach()
             original_tensor_to_detached_tensor[buffer] = detached_buffer
@@ -550,7 +550,8 @@ def _create_stateful_graph_module(
                         f"A model attribute `{const_name}` requires gradient "
                         f"but it's not properly registered as a parameter. "
                         f"torch.export will detach it and treat it as a constant tensor "
-                        f"but please register it as parameter instead."
+                        f"but please register it as parameter instead.",
+                        stacklevel=2,
                     )
                     if value in original_tensor_to_detached_tensor:
                         value = original_tensor_to_detached_tensor[value]

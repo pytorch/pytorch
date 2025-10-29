@@ -522,7 +522,7 @@ class TestCUDA(JitTestCase):
         self.assertGreater(test_event(), 0)
 
         # Check for stream synchronization , when a large tensor multiplication is
-        # computed on the stream. The stream.query should be true once the synchroniztion is done
+        # computed on the stream. The stream.query should be true once the synchronization is done
         @torch.jit.script
         def test_stream_synchronize() -> float:
             device_index = torch.cuda.current_device()
