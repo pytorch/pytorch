@@ -6909,7 +6909,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @config.patch(
         force_disable_caches=True,
         # Test expects a single (fused) kernel to be generated
-        max_autotune_gemm_backend="ATEN",
+        max_autotune_gemm_backends="ATEN",
     )
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
