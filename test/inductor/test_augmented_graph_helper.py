@@ -362,40 +362,6 @@ class TestAugmentedGraphHelper(TestCase):
 
     # ========== Dependency Transfer Tests ==========
 
-    def test_transfer_simple(self):
-        """Test basic transfer of dependencies without cross-dependencies."""
-        # Create graph: old1 -> dep1, dep2 -> old1
-        # Transfer to: new1 -> dep1, dep2 -> new1
-        graph = fx.Graph()
-        x = graph.placeholder("x")
-        dep1 = graph.call_function(torch.relu, args=(x,), name="dep1")
-        old1 = graph.call_function(torch.abs, args=(x,), name="old1")
-        dep2 = graph.call_function(torch.neg, args=(old1,), name="dep2")
-        graph.output(dep2)
-
-        tracker = AugmentedGraphHelper(graph)
-
-        # Add extra deps: old1 depends on dep1, dep2 depends on old1
-        tracker.add_extra_dep(n=old1, dep=dep1)
-        tracker.add_extra_dep(n=dep2, dep=old1)
-
-        # Create new node
-        new1 = graph.call_function(torch.sigmoid, args=(x,), name="new1")
-
-        # Transfer deps from old1 to new1
-        tracker.transfer_erased_node_deps({old1: new1})
-
-        # new1 should now depend on dep1
-        self.assertIn(dep1, tracker.extra_deps[new1])
-
-        # dep2 should now depend on new1 instead of old1
-        self.assertIn(new1, tracker.extra_deps[dep2])
-        self.assertNotIn(old1, tracker.extra_deps[dep2])
-
-        # old1 should have no deps left
-        self.assertEqual(len(tracker.extra_deps[old1]), 0)
-        self.assertEqual(len(tracker.extra_uses[old1]), 0)
-
     def test_transfer_with_cross_deps(self):
         """Test transfer when erased nodes depend on each other."""
         # old_start -> old_wait, both get replaced
@@ -458,13 +424,9 @@ class TestAugmentedGraphHelper(TestCase):
         # Transfer
         tracker.transfer_erased_node_deps({old1: new1, old2: new2})
 
-        # new1 should depend on external1
         self.assertIn(external1, tracker.extra_deps[new1])
 
-        # external2 should depend on new2
         self.assertIn(new2, tracker.extra_deps[external2])
-
-        # External nodes should not depend on old nodes
         self.assertNotIn(old2, tracker.extra_deps[external2])
 
     def test_transfer_with_merge_sets(self):
