@@ -12,7 +12,9 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, script_class_name: str, x: torch.ScriptObject):
+    def __init__(
+        self, wrapped_obj: Any, script_class_name: str, x: Optional[torch.ScriptObject]
+    ):
         # Use object.__setattr__ to bypass our custom __setattr__ during initialization
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
