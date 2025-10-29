@@ -3353,7 +3353,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
     @onlyCUDA
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -3385,7 +3385,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
 
     @onlyCUDA
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
