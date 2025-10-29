@@ -2457,7 +2457,7 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
         def _vec_from_dtype(dt: torch.dtype) -> int:
             if dt in (torch.float16, torch.bfloat16): return 8
             if dt is torch.float64: return 2
-            return 4 
+            return 4
         vec = _vec_from_dtype(align_dtype)
 
         def inner_fn(index):

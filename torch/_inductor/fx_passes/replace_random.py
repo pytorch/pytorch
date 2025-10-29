@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
-from torch.library import custom_op, register_fake
+from torch.library import custom_op
 
 # ---- host helpers ----
 def _compute_grid_x(nelem: int, block: int, device_index: int) -> int:
@@ -43,12 +43,11 @@ def _shape_to_offset(size, device: torch.device) -> int:
     used_offset = rounds_per_thread * UNROLL
     return used_offset
 
-#@torch._dynamo.disable
-def _reserve_offset(device: torch.device, used_offset: int) -> int:    
+def _reserve_offset(device: torch.device, used_offset: int) -> int:
     dev_index = device.index if isinstance(device, torch.device) else int(device)
     gen = torch.cuda.default_generators[dev_index]
     old_off = int(gen.get_offset())
-    gen.set_offset(old_off + used_offset) 
+    gen.set_offset(old_off + used_offset)
     return old_off // 4
 
 @custom_op("custom_op::rand_eager_offset", mutates_args={})

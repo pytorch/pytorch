@@ -1,3 +1,5 @@
+# Owner(s): ["module: inductor"]
+
 import struct
 import time
 import pytest
@@ -6,20 +8,20 @@ import torch
 # ───────────────────────────────────────────────────────────────
 # Global config
 # ───────────────────────────────────────────────────────────────
-BASE_SEED  = 42
-DROPOUT_P  = 0.2
-FFN_DIM    = 4096
+BASE_SEED = 42
+DROPOUT_P = 0.2
+FFN_DIM = 4096
 HIDDEN_DIM = 1024
-BATCH      = 3
-SEQ_LEN    = 2048
+BATCH = 3
+SEQ_LEN = 2048
 
 # Torch-Inductor knobs
 torch._inductor.config.triton.unique_kernel_names = True
-torch._inductor.config.coordinate_descent_tuning  = True
-torch._inductor.config.freezing                   = True
-torch._inductor.config.align_random_eager         = True
-# torch._inductor.config.fallback_random          = True
-# torch._inductor.config.max_autotune_pointwise   = True  # enable if desired
+torch._inductor.config.coordinate_descent_tuning = True
+torch._inductor.config.freezing = True
+torch._inductor.config.align_random_eager = True
+# torch._inductor.config.fallback_random = True
+# torch._inductor.config.max_autotune_pointwise = True
 
 # ───────────────────────────────────────────────────────────────
 # Model under test
@@ -201,11 +203,15 @@ def test_perf_smoke_cuda(input_tensor):
     eager.eval(); compiled.eval()
 
     # warm up
-    _timed_run(eager,    x, backward=False)
+    _timed_run(eager, x, backward=False)
     _timed_run(compiled, x, backward=False)
 
-    t_eager, _ = _timed_run(eager,    x, backward=False)
-    t_comp,  _ = _timed_run(compiled, x, backward=False)
+    t_eager, _ = _timed_run(eager, x, backward=False)
+    t_comp, _ = _timed_run(compiled, x, backward=False)
 
     assert t_comp > 0 and t_eager > 0
 
+if __name__ == "__main__":
+    from torch._inductor.test_case import run_tests
+
+    run_tests()
