@@ -1052,9 +1052,9 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     if (std::find(
-            devices_with_peer_access_.begin(),
-            devices_with_peer_access_.end(),
-            dev_to_access) != devices_with_peer_access_.end()) {
+            devices_with_peer_access.begin(),
+            devices_with_peer_access.end(),
+            dev_to_access) != devices_with_peer_access.end()) {
       return;
     }
     devices_with_peer_access_.push_back(dev_to_access);
