@@ -628,7 +628,7 @@ class CodeGen:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
 
-                summary_str = f"\n{dim(f'#{annotation_str} {stack_trace_str}')}\n"
+                summary_str = f"\n {dim(f'#{annotation_str} {stack_trace_str}')}\n"
 
                 if summary_str != prev_summary_str:
                     prev_summary_str = summary_str
