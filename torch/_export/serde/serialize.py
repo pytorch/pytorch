@@ -383,7 +383,7 @@ def _reconstruct_fake_tensor(
     fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
     if is_parameter:
         fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return fake_tensor
 
 
@@ -739,11 +739,7 @@ class GraphModuleSerializer(metaclass=Final):
                 output_keys = meta_val.keys()
                 output_indices = []
 
-                constexpr_keys = set()
-                for p in kernel.params:
-                    if p.is_constexpr:
-                        constexpr_keys.add(p.name)
-
+                constexpr_keys = {p.name for p in kernel.params if p.is_constexpr}
                 found_constexpr = False
                 args_new = ()
                 i = 0
@@ -773,6 +769,10 @@ class GraphModuleSerializer(metaclass=Final):
                     "output_indices": output_indices,
                     "num_warps": kernel_cache_metadata.num_warps,
                 }
+                if hasattr(kernel_cache_metadata, "num_cpu_threads"):
+                    kwargs_new["num_cpu_threads"] = (
+                        kernel_cache_metadata.num_cpu_threads
+                    )
 
                 if hasattr(kernel_cache_metadata, "shared"):
                     kwargs_new["shared_memory_bytes"] = kernel_cache_metadata.shared
@@ -1463,10 +1463,10 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             raise AssertionError("TODO")
 
-    def serialize_treespec(self, treespec):
+    def serialize_treespec(self, treespec: pytree.TreeSpec) -> str:
         # We want to additionally save all the field names of the namedtuples in
         # case users want to check that the treespec types are equivalent
-        def store_namedtuple_fields(ts):
+        def store_namedtuple_fields(ts: pytree.TreeSpec) -> None:
             if ts.type is None:
                 return
             if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
@@ -1488,7 +1488,7 @@ class GraphModuleSerializer(metaclass=Final):
                         NamedTupleDef(field_names=ts.context._fields)
                     )
 
-            for child in ts.children_specs:
+            for child in ts.children():
                 store_namedtuple_fields(child)
 
         serialized_treespec = treespec_dumps(treespec, TREESPEC_VERSION)
@@ -2183,7 +2183,6 @@ class GraphModuleDeserializer(metaclass=Final):
                     simplify=True,
                 )
             ):
-                # pyrefly: ignore  # unbound-name
                 node.meta["unbacked_bindings"] = unbacked_bindings
 
         assert len(self.unbacked_symbols) == 0
@@ -2742,7 +2741,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     serialized_node.metadata
                 )
                 assert arg is not None
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
                 self.serialized_name_to_node[fx_node.name] = fx_node
@@ -3168,7 +3167,7 @@ def _dict_to_dataclass(cls, data):
         _value = next(iter(data.values()))
         assert isinstance(_type, str)
         field_type = cls.__annotations__[_type]
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
         fields = {}
@@ -3475,23 +3474,23 @@ def _canonicalize_graph(
         n.metadata.clear()
 
     # Stage 4: Aggregate values.
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_tensor_values = dict(
         sorted(graph.tensor_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_sym_int_values = dict(
         sorted(graph.sym_int_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_sym_float_values = dict(
         sorted(graph.sym_float_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_sym_bool_values = dict(
         sorted(graph.sym_bool_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_custom_obj_values = dict(
         sorted(graph.custom_obj_values.items(), key=operator.itemgetter(0))
     )
@@ -3548,7 +3547,7 @@ def canonicalize(
         ExportedProgram: The canonicalized exported program.
     """
     ep = copy.deepcopy(ep)
-    # pyrefly: ignore  # annotation-mismatch
+    # pyrefly: ignore [annotation-mismatch]
     constants: set[str] = constants or set()
 
     opset_version = dict(sorted(ep.opset_version.items(), key=operator.itemgetter(0)))

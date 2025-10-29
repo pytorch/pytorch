@@ -138,7 +138,7 @@ class TestObserver(QuantizationTestCase):
             # Calculate Qparams should return with a warning for observers with no data
             qparams = myobs.calculate_qparams()
             input_scale = 2**16 if qdtype is torch.qint32 else 1
-            if type(myobs) == MinMaxObserver:
+            if type(myobs) is MinMaxObserver:
                 x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
                 y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0]) * input_scale
             else:
@@ -201,7 +201,7 @@ class TestObserver(QuantizationTestCase):
                     [[[-4.0, -3.0], [5.0, 5.0]], [[6.0, 3.0], [7.0, 8.0]]],
                 ]
             )
-            if type(myobs) == MovingAveragePerChannelMinMaxObserver:
+            if type(myobs) is MovingAveragePerChannelMinMaxObserver:
                 # Scaling the input tensor to model change in min/max values
                 # across batches
                 result = myobs(0.5 * x)
@@ -1028,7 +1028,7 @@ class TestDistributed(QuantizationTestCase):
         for observer_type in observer_types:
             observer = observer_type()
             buffer_ids_before = _get_buffer_ids(observer)
-            for _i in range(5):
+            for _ in range(5):
                 inputs = torch.rand((4, 4, 4))
                 observer(inputs)
             buffer_ids_after = _get_buffer_ids(observer)
@@ -1046,7 +1046,7 @@ class TestDistributed(QuantizationTestCase):
         """
         model = torch.ao.quantization.FakeQuantize()
         buffer_ids_before = _get_buffer_ids(model)
-        for _i in range(5):
+        for _ in range(5):
             inputs = torch.rand((4, 4, 4))
             model(inputs)
         model.apply(torch.ao.quantization.enable_fake_quant)
@@ -1309,7 +1309,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         torch.ao.quantization.enable_observer(mod_ref)
         mod_ref.to(device)
 
-        for i in range(10):
+        for _ in range(10):
             x = torch.randn(5, 5, device=device)
             out = mod(x)
             out_ref = mod_ref(x)
@@ -1445,7 +1445,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
                 count_fake_quant = 0
                 count_activation_postproc = 0
-                for name, mod in quant_model.named_modules():
+                for name, _mod in quant_model.named_modules():
                     if name.endswith('weight_fake_quant'):
                         count_fake_quant += 1
                     if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:
