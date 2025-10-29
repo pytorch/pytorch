@@ -2590,7 +2590,7 @@ def pointwise(
 
     configs = None
     if len(size_hints) == 1:
-        if not inductor_meta.get("autotune_pointwise", True) and not (
+        if not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
@@ -2626,13 +2626,10 @@ def pointwise(
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
-        if (
-            not inductor_meta.get("autotune_pointwise", True)
-            or (torch.version.hip is None and tile_hint == TileHint.SQUARE)
-        ) and not (
+        if not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
-        ):
+        ) or (torch.version.hip is None and tile_hint == TileHint.SQUARE):
             configs = [triton_config_with_settings(size_hints, 32, 32)]
         else:
             configs = [
@@ -2663,7 +2660,10 @@ def pointwise(
                     ]
                 )
     if len(size_hints) == 3:
-        if not inductor_meta.get("autotune_pointwise", True):
+        if not (
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
+        ):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
