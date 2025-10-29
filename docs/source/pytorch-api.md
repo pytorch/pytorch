@@ -31,7 +31,7 @@ mtia
 mtia.memory
 meta
 torch.backends <backends>
-user_guide/torch_compiler/torch.export <export>
+user_guide/torch_compiler/export <export>
 torch.distributed <distributed>
 torch.distributed.tensor <distributed.tensor>
 torch.distributed.algorithms.join <distributed.algorithms.join>
