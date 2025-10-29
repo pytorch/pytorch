@@ -41,6 +41,8 @@ import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    IS_MACOS,
+    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
@@ -776,11 +778,15 @@ class TestTensorBoardFigure(BaseTestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        self.assertTrue(all(plt.fignum_exists(figure.number) is True for figure in figures))  # noqa: F812
+        self.assertTrue(
+            all(plt.fignum_exists(figure.number) is True for figure in figures)
+        )  # noqa: F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != "3.3.0":
-            self.assertTrue(all(plt.fignum_exists(figure.number) is False for figure in figures))  # noqa: F812
+            self.assertTrue(
+                all(plt.fignum_exists(figure.number) is False for figure in figures)
+            )  # noqa: F812
         else:
             print(
                 "Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163"
@@ -797,8 +803,9 @@ class TestTensorBoardNumpy(BaseTestCase):
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
         res = make_np(np.float16(1.00000087))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
-        res = make_np(np.float128(1.00008 + 9))
-        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+        if not IS_MACOS and not IS_WINDOWS:
+            res = make_np(np.float128(1.00008 + 9))
+            self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
         res = make_np(np.int64(100000000000))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
