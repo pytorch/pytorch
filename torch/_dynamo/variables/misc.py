@@ -103,7 +103,17 @@ class SuperVariable(VariableTracker):
             codegen.extend_output(create_call_function(1, False))
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
-        assert self.objvar, "1-arg super not implemented"
+        if not self.objvar:
+            unimplemented_v2(
+                gb_type="1-arg super not implemented",
+                context="",
+                explanation=f"Dynamo failed to trace attribute `{name}` accessed "
+                f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
+                "because one-argument of super() is not supported.",
+                hints=[
+                    "Use two-argument super(type, object_or_type).",
+                ],
+            )
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
@@ -1032,10 +1042,10 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                 assert tx.one_graph or tx.error_on_graph_break, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
+                # queue_callback is a method-wrapper, no need to insert a guard.
                 fn_vt = VariableTracker.build(
                     tx,
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
-                    source=self.source,
                 )
                 return fn_vt.call_function(
                     tx,

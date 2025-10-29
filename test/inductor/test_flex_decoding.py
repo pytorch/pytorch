@@ -1188,7 +1188,7 @@ class TestFlexDecoding(InductorTestCase):
             requires_grad=True,
         )
         query, key, value = make_q(), make_kv(), make_kv()
-        # floor_div is not decomposed in decompostion_table is empty
+        # floor_div is not decomposed in decomposition_table is empty
         attention = functools.partial(flex_attention, score_mod=score_mod_func)
         gm = make_fx(attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
