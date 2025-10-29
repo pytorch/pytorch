@@ -761,6 +761,43 @@ class FxirTestCase(InductorTestCase):
         args = [torch.rand([4, 4, 4, 4], device=self.device)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
+    def test_fallback_tuple_constant_arg(self):
+        """
+        Test a fallback op with tuple constant argument.
+        Check that tuple arguments are not flattened during codegen.
+        """
+
+        def foo(x):
+            # permute with a tuple argument
+            return torch.permute(x, (0, 2, 1))
+
+        # Use complex64 to force permute to become a fallback op
+        args = [torch.randn(2, 3, 4, dtype=torch.complex64, device=self.device)]
+
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+        # Check for the fallback kernel with permute
+        num_fallback = self._count_ops(gm, torch.ops.aten.permute.default)
+        self.assertEqual(num_fallback, 1)
+
+        # Verify the permute node has the correct tuple argument
+        permute_node = next(
+            iter(
+                gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.permute.default
+                )
+            )
+        )
+
+        # The second argument should be the permutation (0, 2, 1)
+        # Check that it's not flattened
+        perm_arg = permute_node.args[1]
+        self.assertIsInstance(
+            perm_arg, list, "Permutation argument should not be flattened"
+        )
+        self.assertEqual(len(perm_arg), 3)
+        self.assertEqual(tuple(perm_arg), (0, 2, 1))
+
 
 @instantiate_parametrized_tests
 class AOTFxirTestCase(InductorTestCase):
@@ -1033,6 +1070,22 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         x = torch.randn(7, device=self.device)
         self.check(M(), (x,), dynamic_shapes=({0: Dim.DYNAMIC},))
+
+    @parametrize("dynamic", (False, True))
+    @parametrize("input_", (1.5, 2, False))
+    def test_item(self, input_, dynamic: bool):
+        """
+        Test calling Tensor.item.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x[1].item()
+
+        x = torch.tensor((input_,) * 10)
+        d = Dim("s0", min=1)
+        dynamic_shapes = ({0: 2 * d},) if dynamic else None
+        self.check(M(), (x,), dynamic_shapes=dynamic_shapes)
 
     @parametrize("pred", (False, True))
     def test_mismatched_branch_dynamic(self, pred: bool):

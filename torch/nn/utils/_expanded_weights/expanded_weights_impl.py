@@ -100,7 +100,7 @@ def implements_per_sample_grads(torch_function):
 # This is a __torch_function__ object but it could have also been a Tensor Extension
 # with a dispatch key.
 #
-# Needs to be a tensor subclass to allow reparamaterization
+# Needs to be a tensor subclass to allow reparameterization
 class ExpandedWeight(torch.Tensor):
     def __init__(self, orig_weight, batch_size, loss_reduction):
         self.batch_size = batch_size
@@ -131,7 +131,7 @@ class ExpandedWeight(torch.Tensor):
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
             use_input_variant = isinstance(
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 args[2],
                 list,
             )  # data variant uses a list here

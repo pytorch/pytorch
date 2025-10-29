@@ -8,8 +8,8 @@
     v_transposed = V.transpose(1, 2)
 
     @cute.jit
-    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, buffers):
-        {{unpack_buffers()}}
+    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+        {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=0,
             output_name="tSrS_ssa",
@@ -46,5 +46,5 @@
         score_mod=score_mod,
         out=output_transposed,
         lse=LOGSUMEXP,
-        buffers=buffers
+        aux_tensors=buffers
     )
