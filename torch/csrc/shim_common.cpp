@@ -37,8 +37,10 @@ static StableIValue from_ivalue(
           ivalue.toScalarType(), extension_build_version);
     }
     case c10::TypeKind::DeviceObjType: {
-      return torch::stable::detail::_from(
-          ivalue.toDevice(), extension_build_version);
+      const c10::Device& device = ivalue.toDevice();
+      c10::Device* new_device = new c10::Device(device);
+      DeviceHandle dh = reinterpret_cast<DeviceHandle>(new_device);
+      return torch::stable::detail::_from(dh, extension_build_version);
     }
     case c10::TypeKind::LayoutType: {
       return torch::stable::detail::_from(
@@ -109,8 +111,12 @@ static c10::IValue to_ivalue(
           stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::DeviceObjType: {
-      return c10::IValue(torch::stable::detail::_to<c10::Device>(
-          stable_ivalue, extension_build_version));
+      auto deleter = [](DeviceOpaque* device) { torch_delete_device(device); };
+      auto device_raii = std::unique_ptr<DeviceOpaque, decltype(deleter)>(
+          torch::stable::detail::_to<DeviceHandle>(
+              stable_ivalue, extension_build_version),
+          deleter);
+      return c10::IValue(*reinterpret_cast<c10::Device*>(device_raii.get()));
     }
     case c10::TypeKind::LayoutType: {
       return c10::IValue(torch::stable::detail::_to<c10::Layout>(
@@ -222,6 +228,65 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
         torch::CppFunction::makeFromBoxedFunctor(
             std::make_unique<StableIValueBoxedKernel>(
                 fn, extension_build_version)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_create_device(
+    int32_t device_type,
+    int32_t device_index,
+    DeviceHandle* ret_device) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Device* device = new c10::Device(
+        static_cast<c10::DeviceType>(device_type),
+        static_cast<c10::DeviceIndex>(device_index));
+    *ret_device = reinterpret_cast<DeviceHandle>(device);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_create_device_from_string(
+    const char* device_string,
+    DeviceHandle* ret_device) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Device* device = new c10::Device(std::string(device_string));
+    *ret_device = reinterpret_cast<DeviceHandle>(device);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_device_handle(DeviceHandle orig_handle, DeviceHandle* new_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const c10::Device* src_device = reinterpret_cast<c10::Device*>(orig_handle);
+    c10::Device* new_device = new c10::Device(*src_device);
+    *new_handle = reinterpret_cast<DeviceHandle>(new_device);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_device(DeviceHandle device) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<c10::Device*>(device); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_device_type(DeviceHandle device, int32_t* ret_device_type) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_device_type =
+        static_cast<int32_t>(reinterpret_cast<c10::Device*>(device)->type());
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_device_index(DeviceHandle device, int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_device_index =
+        static_cast<int32_t>(reinterpret_cast<c10::Device*>(device)->index());
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_device_set_index(DeviceHandle device, int32_t device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<c10::Device*>(device)->set_index(
+        static_cast<c10::DeviceIndex>(device_index));
   });
 }
 

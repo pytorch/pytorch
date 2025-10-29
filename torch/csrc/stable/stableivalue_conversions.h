@@ -2,7 +2,9 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/tensor_struct.h>
+#include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
@@ -128,6 +130,39 @@ struct FromImpl<ScalarType> {
   }
 };
 
+// Specialization for torch::headeronly::DeviceType => StableIValue
+// Note that we call into the shim to translate between the user's
+// DeviceType and libtorch's DeviceType, which can be different!
+using torch::headeronly::DeviceType;
+template <>
+struct FromImpl<DeviceType> {
+  static StableIValue call(
+      DeviceType val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
+    switch (val) {
+      case DeviceType::CPU:
+        return from(aoti_torch_device_type_cpu());
+      case DeviceType::CUDA:
+        return from(aoti_torch_device_type_cuda());
+      case DeviceType::Meta:
+        return from(aoti_torch_device_type_meta());
+      case DeviceType::XPU:
+        return from(aoti_torch_device_type_xpu());
+      case DeviceType::MPS:
+        return from(aoti_torch_device_type_mps());
+      case DeviceType::PrivateUse1:
+        return from(aoti_torch_device_type_privateuse1());
+      default:
+        TORCH_CHECK(
+            false,
+            "Not yet supported DeviceType, please file an issue describing your use case.");
+    }
+  }
+};
+
 // Specialization for std::nullopt_t => StableIValue
 template <>
 struct FromImpl<std::nullopt_t> {
@@ -197,6 +232,22 @@ struct FromImpl<torch::stable::Tensor> {
     AtenTensorHandle new_ath;
     TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(val.get(), &new_ath));
     return from(new_ath);
+  }
+};
+
+// Specialization for torch::stable::Device => StableIValue
+// Returns a new owning reference of the underlying Device.
+template <>
+struct FromImpl<torch::stable::Device> {
+  static StableIValue call(
+      const torch::stable::Device& val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
+    DeviceHandle new_dh;
+    TORCH_ERROR_CODE_CHECK(torch_new_device_handle(val.get(), &new_dh));
+    return from(new_dh);
   }
 };
 
@@ -304,6 +355,38 @@ struct ToImpl<ScalarType> {
   }
 };
 
+// Specialization for StableIValue => torch::headeronly::DeviceType
+template <>
+struct ToImpl<DeviceType> {
+  static DeviceType call(
+      StableIValue val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
+    int32_t shim_devicetype = to<int32_t>(val);
+    if (shim_devicetype == aoti_torch_device_type_cpu()) {
+      return DeviceType::CPU;
+    } else if (shim_devicetype == aoti_torch_device_type_cuda()) {
+      return DeviceType::CUDA;
+    } else if (shim_devicetype == aoti_torch_device_type_meta()) {
+      return DeviceType::Meta;
+    } else if (shim_devicetype == aoti_torch_device_type_xpu()) {
+      return DeviceType::XPU;
+    } else if (shim_devicetype == aoti_torch_device_type_mps()) {
+      return DeviceType::MPS;
+    } else if (shim_devicetype == aoti_torch_device_type_privateuse1()) {
+      return DeviceType::PrivateUse1;
+    } else {
+      TORCH_CHECK(
+          false,
+          "Not yet supported DeviceType ",
+          std::to_string(shim_devicetype),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
 // Specialization for StableIValue => std::nullopt_t
 template <>
 struct ToImpl<std::nullopt_t> {
@@ -355,6 +438,21 @@ struct ToImpl<torch::stable::Tensor> {
     (void)extension_build_version; // Unused parameter
     (void)is_internal; // Unused parameter
     return torch::stable::Tensor(to<AtenTensorHandle>(val));
+  }
+};
+
+// Specialization for StableIValue => torch::stable::Device
+// The resulting stable::Device steals ownership of the input's
+// underlying DeviceHandle.
+template <>
+struct ToImpl<torch::stable::Device> {
+  static torch::stable::Device call(
+      StableIValue val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
+    return torch::stable::Device(to<DeviceHandle>(val));
   }
 };
 

@@ -333,3 +333,78 @@ def my_new_zeros_dtype_variant(t) -> Tensor:
     Returns: New zeros tensor
     """
     return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)
+
+
+def test_device_cpu() -> bool:
+    """
+    Tests creating a Device from DeviceType and checking CPU properties.
+
+    Returns: bool - True if the device is properly created and is a CPU device
+    """
+    return torch.ops.libtorch_agnostic.test_device_cpu.default()
+
+
+def test_device_cuda() -> bool:
+    """
+    Tests creating a Device from string "cuda:0" and checking CUDA properties.
+
+    Returns: bool - True if the device is properly created and is a CUDA device with index 0
+    """
+    return torch.ops.libtorch_agnostic.test_device_cuda.default()
+
+
+def test_device_equality() -> bool:
+    """
+    Tests Device equality operator by comparing CPU devices created in different ways.
+
+    Returns: bool - True if Device(DeviceType::CPU) == Device("cpu")
+    """
+    return torch.ops.libtorch_agnostic.test_device_equality.default()
+
+
+def test_device_set_index() -> int:
+    """
+    Tests Device set_index() method by creating a cuda:0 device, setting index to 1.
+
+    Returns: int - The new device index (should be 1)
+    """
+    return torch.ops.libtorch_agnostic.test_device_set_index.default()
+
+
+def test_device_has_index() -> bool:
+    """
+    Tests Device has_index() method on CPU and CUDA devices.
+
+    Returns: bool - True if CPU device has no index and CUDA device has index
+    """
+    return torch.ops.libtorch_agnostic.test_device_has_index.default()
+
+
+def test_device_type() -> bool:
+    """
+    Tests Device type() method on CPU and CUDA devices.
+
+    Returns: bool - True if CPU device type is CPU and CUDA device type is CUDA
+    """
+    return torch.ops.libtorch_agnostic.test_device_type.default()
+
+
+def test_device_argument(device) -> bool:
+    """
+    Tests passing a Device as an argument to a function.
+
+    Args:
+        device: Device object to check
+
+    Returns: bool - True if device is CUDA with index 1
+    """
+    return torch.ops.libtorch_agnostic.test_device_argument.default(device)
+
+
+def test_device_return():
+    """
+    Tests returning a Device from a function.
+
+    Returns: Device - A CUDA device with index 1
+    """
+    return torch.ops.libtorch_agnostic.test_device_return.default()
