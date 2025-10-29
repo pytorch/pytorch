@@ -502,7 +502,4 @@ class DistributedPatternTests(TestCase):
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS:
-        # We use torch.ops.fsdp above.
-        import torch.distributed.fsdp
-
         run_tests(needs="filelock")
