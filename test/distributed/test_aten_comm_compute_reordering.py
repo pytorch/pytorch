@@ -935,7 +935,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             ar1 = _functional_collectives.all_reduce(a, "sum", "0")
             ar2 = _functional_collectives.all_reduce(b, "sum", "0")
             ar3 = _functional_collectives.all_reduce(c, "sum", "0")
-            
+
             return ar1.sum() + ar2.sum() + ar3.sum()
 
         with _dynamo_dist_per_rank_init(
