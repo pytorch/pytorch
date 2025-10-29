@@ -1536,19 +1536,19 @@ class SIMDScheduling(BaseScheduling):
         return reductions, epilogues
 
     def _codegen_mix_order_reduction(self, node1, node2):
-        nrow, ncol = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
         if not V.graph.sizevars.statically_known_gt(
-            nrow,
-            ncol,
+            numel,
+            rnumel,
         ):
             return self._codegen_mix_order_reduction(node2, node1)
 
         metrics.codegen_mix_order_reduction += 1
 
         assert V.graph.sizevars.statically_known_gt(
-            nrow,
-            ncol,
+            numel,
+            rnumel,
         )
 
         # split epilogue out of node2
@@ -1556,22 +1556,8 @@ class SIMDScheduling(BaseScheduling):
             node2
         )
 
-
-        # split_reduction_names: OrderedSet[str] = OrderedSet()
-
-
-        # the split size is decided by split reduction
-        # if force_split_size is not None:
-        #     split_size = force_split_size
-        #     for subnode in node2_reductions:
-        #         split_reduction_names.add(subnode.get_name())
-        # else:
-            # TODO need add heuristics. But this is not really important
-            # ATM since the common code path goes thru split reduction.
         split_size = config.triton.mix_order_reduction_split_size
-
-        nsplit = (nrow + split_size - 1) // split_size
-        numel, rnumel = node1.group[1]
+        nsplit = (numel + split_size - 1) // split_size
 
         converted_nodes = []
         for subnode in node2_reductions:
@@ -1582,7 +1568,7 @@ class SIMDScheduling(BaseScheduling):
         node_schedule = self.generate_node_schedule(
             node1.get_nodes() + converted_nodes, numel, rnumel
         )
-        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel, None)
+        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
         kernel = self.create_kernel_choices(
             kernel_features,
             [{"x": numel, "r0_": rnumel}],
@@ -1598,23 +1584,31 @@ class SIMDScheduling(BaseScheduling):
         kernel.rsplit_size = split_size
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        force_split_size = node2_reductions[0].node._split_size
+        is_split_reduction = bool(node2_reductions[0].node._split_size)
+
+        # rename intermediate reduction output to final reduction
+        # output
         rename = {}
-        if force_split_size is not None:
-            # rename intermediate tensor to the final reduction
+        if is_split_reduction:
             for subnode in node2_reductions:
                 bufname = subnode.get_outputs()[0].node.get_name()
-                username = subnode.get_outputs()[0].users[0].node.get_outputs()[0].node.get_name()
+                username = (
+                    subnode.get_outputs()[0]
+                    .users[0]
+                    .node.get_outputs()[0]
+                    .node.get_name()
+                )
                 rename[bufname] = username
-                self.scheduler.removed_ops.add(subnode.get_outputs()[0].users[0].node.get_name()) # TODO fused node?
+                assert self.scheduler
+                self.scheduler.removed_ops.add(
+                    subnode.get_outputs()[0].users[0].node.get_name()
+                )
                 V.graph.removed_buffers.add(bufname)
 
             for partial_accum in kernel.saved_partial_accumulate:
                 partial_accum.buffer_name = rename.get(
-                    partial_accum.buffer_name, partial_accum.buffer_name)
-        force_split_size = None
-        # breakpoint()
-
+                    partial_accum.buffer_name, partial_accum.buffer_name
+                )
 
         # allocate workspace for this kernel
         _, ws_name, ws_off = kernel.args.workspace(
@@ -1638,7 +1632,6 @@ class SIMDScheduling(BaseScheduling):
                 # No need to allocate buffer for split reduction
                 # since we are gonna to allocate workspace to store the
                 # intermediate reduction reduction
-                # if node.get_name() not in split_reduction_names: # TODO
                 if node.get_outputs()[0].node.get_name() not in rename:
                     node.mark_run()
 
@@ -1649,10 +1642,7 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
-        for idx, (buffer_name, partial_accum) in enumerate(
-            zip(node2.get_buffer_names(), kernel.saved_partial_accumulate)
-        ):
-            # assert buffer_name == partial_accum.buffer_name
+        for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
             stride_str = f"{nsplit} * {rnumel}"
@@ -1666,14 +1656,11 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
-            if force_split_size is not None:
-                V.graph.wrapper_code.writeline(
-                    f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel})",
-                )
-            else:
-                V.graph.wrapper_code.writeline(
-                    f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
-                )
+            V.graph.wrapper_code.writeline(
+                f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
+            )
+            # mark the buffer as allocated, so we don't try to allocate
+            # it again when it's later used
             V.graph.wrapper_code.allocated.add(buffer_name)
 
         kernel.deallocate_workspaces()
@@ -1688,9 +1675,12 @@ class SIMDScheduling(BaseScheduling):
         nodes: Sequence[scheduler.SchedulerNode],
         coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
     ):
-        nodes = list(node for node in nodes if node.get_name() not in self.scheduler.removed_ops)
+        assert self.scheduler
+        nodes = [
+            node for node in nodes if node.get_name() not in self.scheduler.removed_ops
+        ]
         if not nodes:
-            return 
+            return
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -1706,15 +1696,24 @@ class SIMDScheduling(BaseScheduling):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
+        assert self.scheduler
+        nodes = [
+            node
+            for node in node.get_nodes()
+            if node.get_name() not in self.scheduler.removed_ops
+        ]
+        if len(nodes) == 0:
+            return
 
         if torch._inductor.config.triton.coalesce_tiling_analysis:
-            # coalesce_analysis = analyze_memory_coalescing(node)
-            coalesce_analysis = None
+            if len(nodes) != len(node.get_nodes()):
+                assert self.scheduler
+                node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
+            coalesce_analysis = analyze_memory_coalescing(node)
         else:
             coalesce_analysis = None
 
-        nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
-        return self._codegen_nodes(nodes, coalesce_analysis)
+        return self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
 
     @staticmethod
     def can_use_32bit_indexing(

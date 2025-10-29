@@ -2723,7 +2723,9 @@ class Scheduler:
             }
         )
 
-        self.removed_ops = set()
+        # Unlike V.graph.removed_buffers, the op recorded here is removed but
+        # we still need the buffer (generated in alternative ways)
+        self.removed_ops: OrderedSet[str] = OrderedSet()
 
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
