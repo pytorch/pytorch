@@ -3805,6 +3805,74 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_slice_with_tensor_indices(self):
+        for d in [True, False]:
+            # Test slicing with tensor start/stop/step on RHS (reading)
+
+            # Test 1: Basic slice with tensor start and stop
+            def f1(x, start_t, stop_t):
+                return x[start_t:stop_t]
+
+            x = torch.randn(20)
+            start_t = torch.tensor(5)
+            stop_t = torch.tensor(15)
+            fn1 = torch.compile(f1, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(
+                torch.allclose(fn1(x, start_t, stop_t), f1(x, start_t, stop_t))
+            )
+
+            # Test 2: Slice with tensor step
+            def f2(x, start_t, stop_t, step_t):
+                return x[start_t:stop_t:step_t]
+
+            step_t = torch.tensor(2)
+            fn2 = torch.compile(f2, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(
+                torch.allclose(
+                    fn2(x, start_t, stop_t, step_t), f2(x, start_t, stop_t, step_t)
+                )
+            )
+
+            # Test 3: Slice with only tensor start
+            def f3(x, start_t):
+                return x[start_t:]
+
+            fn3 = torch.compile(f3, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(torch.allclose(fn3(x, start_t), f3(x, start_t)))
+
+            # Test 4: Slice with only tensor stop
+            def f4(x, stop_t):
+                return x[:stop_t]
+
+            fn4 = torch.compile(f4, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(torch.allclose(fn4(x, stop_t), f4(x, stop_t)))
+
+            # Test 5: Negative indices with tensors
+            def f5(x, start_t):
+                return x[start_t:-1]
+
+            start_t_neg = torch.tensor(-10)
+            fn5 = torch.compile(f5, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(torch.allclose(fn5(x, start_t_neg), f5(x, start_t_neg)))
+
+            # Test 6: Multidimensional slice with tensor indices
+            def f6(x, start_t, stop_t):
+                return x[:, start_t:stop_t]
+
+            x_2d = torch.randn(10, 20)
+            fn6 = torch.compile(f6, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(
+                torch.allclose(fn6(x_2d, start_t, stop_t), f6(x_2d, start_t, stop_t))
+            )
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_slice_with_tensor_indices_cpp_wrapper(self):
+        self.test_slice_with_tensor_indices()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_tensor_split(self):
         def f1(x, xs):
             xs = torch.tensor(xs.tolist())

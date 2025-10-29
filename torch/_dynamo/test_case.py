@@ -119,10 +119,12 @@ class TestCaseWithNestedGraphBreaks(TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
+        # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.nested_graph_breaks = True
 
     def tearDown(self) -> None:
         super().tearDown()
+        # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
 
 
