@@ -126,7 +126,7 @@ Running the `tlparse` command in the terminal will generate a
 [tlparse](https://github.com/pytorch/tlparse)
 HTML report. Here is an example of the `tlparse` report:
 
-```{image} ../_static/img/export/draft_export_report.png
+```{image} ../../../_static/img/export/draft_export_report.png
 ```
 
 Clicking into the Data Dependent Error, we will see the following page which
@@ -136,7 +136,7 @@ contains information to help debug this error. Specifically, it contains:
 - A list of local variables and their shapes
 - Information for how this guard was created
 
-```{image} ../_static/img/export/draft_export_report_dde.png
+```{image} ../../../_static/img/export/draft_export_report_dde.png
 ```
 
 ## The returned Exported Program
