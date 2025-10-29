@@ -329,17 +329,17 @@ struct pair {
 };
 
 template <typename T>
-static T conj(T a) {
+inline T conj(T a) {
   return a;
 }
 
 template <>
-half2 conj(half2 a) {
+inline half2 conj(half2 a) {
   return half2(a.x, -a.y);
 }
 
 template <>
-float2 conj(float2 a) {
+inline float2 conj(float2 a) {
   return float2(a.x, -a.y);
 }
 

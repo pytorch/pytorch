@@ -246,7 +246,6 @@ def save_op_profiles(op_profiles: dict[str, set[OpProfile]], f: FileLike) -> Non
     yaml_str = generate_yaml_from_profiles(op_profiles)
 
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
         with open(f, "w") as file:
@@ -312,7 +311,6 @@ def load_op_profiles(f: FileLike) -> dict[str, set[OpProfile]]:
     Loads the saved operator profiles from `save_op_profiles`.
     """
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
         with open(f) as file:

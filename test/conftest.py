@@ -238,7 +238,7 @@ def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_report_teststatus(report, config):
-    # Add the test time to the verbose output, unforunately I don't think this
+    # Add the test time to the verbose output, unfortunately I don't think this
     # includes setup or teardown
     pluggy_result = yield
     if not isinstance(report, pytest.TestReport):
