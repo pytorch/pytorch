@@ -400,8 +400,9 @@ class ZipVariable(IteratorVariable):
             else:
                 return it.next_variable(tx)
 
+        idx: int | None = None
         try:
-            for idx, it in enumerate(self.iterables):
+            for idx, it in enumerate(self.iterables):  # noqa:B007
                 args.append(get_item(it))
         except ObservedUserStopIteration:
             if self.strict:

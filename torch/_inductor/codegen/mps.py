@@ -895,7 +895,7 @@ class MetalKernel(SIMDKernel):
                     else:
                         dtype_str = self.dtype_to_str(dtype)
                     code.writeline(f"constant {dtype_str}* {inner},")
-                for outer, inner in self.args.sizevars.items():
+                for inner in self.args.sizevars.values():
                     code.writeline(f"constant long& {inner},")
 
                 # Write dynamic values as inputs
