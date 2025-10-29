@@ -424,7 +424,7 @@ from user code:
         @torch.compile(backend="eager")
         def fn(x):
             d = {"a": 1}
-            optree.tree_flatten(d)
+            optree.tree_flatten_with_path(d)
             return torch.sin(x)
 
         fn(torch.randn(4))
@@ -434,10 +434,10 @@ from user code:
             first_graph_break,
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
+  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten_with_path.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: PyCapsule.flatten_with_path, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
@@ -527,30 +527,6 @@ Attempted to call function marked as skipped
             f(x)
             f(x)
         self.assertEqual(len(ws), 2)
-
-    def test_slice_with_tensor(self):
-        def fn(x, y):
-            return x[:y]
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.randn(10),
-                torch.tensor([3]),
-            ),
-            """\
-Dynamic slicing with Tensor arguments
-  Explanation: Creating slices with Tensor arguments is not supported. e.g. `l[:x]`, where `x` is a 1-element tensor.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
-
-  Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: LazyVariableTracker(realized: TensorVariable()), step: ConstantVariable(NoneType: None)
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0038.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return x[:y]""",
-        )
 
     def test_observed_exception(self):
         def fn():

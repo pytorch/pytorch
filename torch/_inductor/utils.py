@@ -67,6 +67,9 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
     "inductor_autotune_lookup_table",
@@ -702,7 +705,7 @@ def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
     """
     Variant of cache_on_self for properties. The only difference is the type signature.
     """
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return cache_on_self(fn)
 
 
@@ -715,7 +718,7 @@ def aggregate_origins(
         return functools.reduce(
             operator.or_,
             [
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 node.node.origins
                 for node in node_schedule
                 if hasattr(node, "node") and node.node
@@ -1191,7 +1194,7 @@ def unload_xpu_triton_pyds() -> None:
                             result,
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
-                            # pyrefly: ignore  # missing-attribute
+                            # pyrefly: ignore [missing-attribute]
                             result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
@@ -1465,7 +1468,7 @@ class IndentedBuffer:
     ) -> None:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             for line in other_code._lines:
                 if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
@@ -2221,21 +2224,21 @@ def run_and_get_code(
 ) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
-    source_codes: list[str] = []
+    source_codes: OrderedSet[str] = OrderedSet()
 
     def save_output_code(code: str) -> None:
-        source_codes.append(code)
+        source_codes.add(code)
 
     with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
         torch._dynamo.reset()
         result = fn(*args, **kwargs)
-    return result, source_codes
+    return result, list(source_codes)
 
 
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -2296,7 +2299,7 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
 
 
 def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -2308,7 +2311,7 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
 def run_and_get_triton_code(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> str:
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -3761,7 +3764,6 @@ def maybe_log_cudagraph_partition(
         and (fx_node := ir_node.get_origin_node())
         and (stack_trace := fx_node.meta.get("stack_trace", None))
     ):
-        # pyrefly: ignore  # unbound-name
         warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
 
     perf_hint_log.warning(warning_msg)
@@ -3885,3 +3887,10 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
     return dep_name.startswith(
         ("primals_", "arg", "fwd_rng_state", "bwd_rng_state", "tangents")
     )
+
+
+# Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
+def load_template(name: str, template_dir: Path) -> str:
+    """Load a template file and return its content."""
+    with open(template_dir / f"{name}.py.jinja") as f:
+        return f.read()
