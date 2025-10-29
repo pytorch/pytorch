@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import cast, Optional, Union
@@ -600,6 +601,19 @@ def propagate_shape_and_sharding(
         elif isinstance(cmd, Split):
             in_dim = get_in_dim_to_shard(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
+            if in_dim is not None:
+                shard_mesh_dim, input_src_placement = (
+                    maybe_get_shard_mesh_dim_and_placement(in_dim)
+                )
+                if isinstance(input_src_placement, _StridedShard):
+                    split_factor = math.prod(
+                        [1] + list(cmd.group_shape[0 : cmd.split_id])
+                    )
+
+                    if input_src_placement.split_factor != split_factor:
+                        return None
+                    else:
+                        return in_dim
             if cmd.split_id == 0 and in_dim is not None:
                 # we need to check that the input dimension is divisible
                 # by the size of the submesh we're sharding it on
@@ -650,7 +664,7 @@ def propagate_shape_and_sharding(
         if in_dim is not None:
             shard_dim_map[in_dim.input_dim] = dim
 
-    input_tgt_placements = []
+    input_tgt_placements: list[Placement] = []
     for mesh_dim, p in enumerate(input_src_placements):
         if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]:
             input_tgt_placements.append(Replicate())
@@ -664,14 +678,13 @@ def propagate_shape_and_sharding(
                 return split_factor
             mesh_dim = input_src_spec.dim_map[tensor_dim]
             if mesh_dim >= 0:
-                local_tensor_size = global_tensor_size / input_src_spec.mesh.shape[mesh_dim]
+                local_tensor_size = (
+                    global_tensor_size / input_src_spec.mesh.shape[mesh_dim]
+                )
             else:
                 local_tensor_size = global_tensor_size
             split_factor = split_factor * local_tensor_size
         return split_factor
-            
-        
-
 
     def _rewrite_shard_dim(p: Shard, input_src_spec):
         """
@@ -690,18 +703,16 @@ def propagate_shape_and_sharding(
             inner ``dim`` attribute of ``Shard`` or ``_StridedShard``.
         """
         if isinstance(p, _StridedShard):
-            return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
+            if shard_dim_map[p.dim] > 0:
+                return Shard(shard_dim_map[p.dim])
+            else:
+                return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
         else:
             if p.dim == 0:
                 return Shard(shard_dim_map[p.dim])
             else:
-                # import fbvscode
-                # fbvscode.set_trace()
                 split_factor = _get_split_factor(input_src_spec, p.dim)
                 return _StridedShard(shard_dim_map[p.dim], split_factor=split_factor)
-
-    
-
 
     output_placements = [
         _rewrite_shard_dim(p, input_src_spec) if isinstance(p, Shard) else p
