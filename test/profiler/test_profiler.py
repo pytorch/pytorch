@@ -529,7 +529,7 @@ class TestProfiler(TestCase):
                 found_mm = True
             if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "memcpy" in e.name.lower():
+            if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
                 found_memcpy = True
         if use_cuda:
             self.assertTrue(found_gemm)

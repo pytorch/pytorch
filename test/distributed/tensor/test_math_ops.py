@@ -28,7 +28,9 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -472,11 +474,10 @@ class DistMathOpsTest(DTensorTestBase):
             out_req_grad: bool
 
         subtest_fails = {}
-        valid_filter = (  # noqa: E731
-            lambda cfg: (
-                not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[3:])
-            )
-        )
+
+        def valid_filter(cfg):
+            return not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[3:])
+
         subtest_cfgs = list(
             filter(
                 valid_filter,
@@ -671,10 +672,11 @@ class DistMathOpsTest(DTensorTestBase):
     def test_vector_norm_partial(self):
         device_mesh = self.build_device_mesh()
 
-        rank = device_mesh.get_local_rank()
         all_ranks = list(range(self.world_size))
 
-        local_grad = torch.tensor([rank, 1], dtype=torch.float32)
+        local_grad = map_local_for_rank(
+            self.rank, lambda rank: torch.tensor([rank, 1], dtype=torch.float32)
+        )
         full_grad = torch.tensor([sum(all_ranks), self.world_size], dtype=torch.float32)
 
         partial_grad = DTensor.from_local(local_grad, device_mesh, [Partial()])
@@ -709,11 +711,14 @@ class DistMathOpsTest(DTensorTestBase):
     def test_foreach_norm_partial(self):
         device_mesh = self.build_device_mesh()
 
-        rank = device_mesh.get_local_rank()
         all_ranks = list(range(self.world_size))
 
-        local_grad0 = torch.tensor([rank, 1], dtype=torch.float32)
-        local_grad1 = torch.tensor([rank + 1, 2], dtype=torch.float32)
+        local_grad0 = map_local_for_rank(
+            self.rank, lambda rank: torch.tensor([rank, 1], dtype=torch.float32)
+        )
+        local_grad1 = map_local_for_rank(
+            self.rank, lambda rank: torch.tensor([rank + 1, 2], dtype=torch.float32)
+        )
 
         grad0 = torch.tensor([sum(all_ranks), self.world_size], dtype=torch.float32)
         grad1 = torch.tensor(
@@ -1030,6 +1035,10 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertTrue(out_with_redistribute.placements[0].is_replicate())
         self.assertEqual(out_without_redistribute, out_with_redistribute)
 
+
+DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistMathOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()

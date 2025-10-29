@@ -2329,7 +2329,7 @@ class GuardBuilder(GuardBuilderBase):
         # Strictly only want user-defined functions
         if type(val) is types.FunctionType and hasattr(val, "__code__"):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
-            self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)  # type: ignore[arg-type]
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
             self.FUNCTION_MATCH(guard)
 
@@ -3664,7 +3664,7 @@ class CheckFunctionManager:
             # increase in compile time. We first do a cache flush to measure the
             # guard latency more accurately. This cache flush is expensive.
             # Note  - If you are working on a guard optimization, it might be a
-            # good idea to increase this number for more stabiilty during
+            # good idea to increase this number for more stability during
             # development.
             latency = profile_guard_manager(
                 self.guard_manager.root, output_graph.local_scope, 1

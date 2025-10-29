@@ -812,7 +812,6 @@ if torch.backends.mps.is_available():
             "__rmod__",
             "__rsub__",
             "__rpow__",
-            "bernoulli",
             "clamp_max",
             "clamp_min",
             "masked_scatter",
