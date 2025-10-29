@@ -447,9 +447,7 @@ def _prim_elementwise_meta(
     # (but getting it wrong will cause too many casts to be inserted in traces!)
     if device is not None:
         assert dtype is not None
-        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT:
-            dtype = dtype
-        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
             if utils.is_integer_dtype(dtype) or utils.is_boolean_dtype(dtype):
@@ -457,8 +455,6 @@ def _prim_elementwise_meta(
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
             if utils.is_complex_dtype(dtype):
                 dtype = utils.corresponding_real_dtype(dtype)
-            else:
-                dtype = dtype
 
         assert shape is not None
         return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
@@ -2997,8 +2993,6 @@ _sink_tokens = _make_prim(
     impl_aten=_sink_tokens_aten,
     doc="Sink all of the tokens which were previously used for keeping track of side effects.",
 )
-
-torch.fx.node.has_side_effect(_sink_tokens)
 
 
 register_rng_prims()

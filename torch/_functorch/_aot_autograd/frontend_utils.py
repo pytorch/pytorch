@@ -8,6 +8,7 @@ from typing import Any, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -41,11 +42,11 @@ def process_inputs(
                         return x
                     source = ConstantSource(f"sym_{idx}")
                     return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source),
+                        shape_env.create_symbol(x, source, positive=x >= 0),
                         hint=x,
                         source=source,
                     )
-            if isinstance(x, torch.ScriptObject):
+            if isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
                     fake_mode, x
                 )
@@ -321,5 +322,6 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
             warnings.warn(
                 f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
                 "Such attributes must be registered as buffers using the `register_buffer` API "
-                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer).",
+                stacklevel=2,
             )

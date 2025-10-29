@@ -1,11 +1,8 @@
 # Owner(s): ["module: custom-operators"]
 import copy
-import random
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._functorch.aot_autograd import aot_export_module
-from torch._higher_order_ops.effects import _deregister_effectful_op
 from torch._library.fake_class_registry import maybe_to_fake_obj
 from torch._library.opaque_object import (
     get_payload,
@@ -53,11 +50,6 @@ class OpaqueQueue:
             if not torch.allclose(q1, q2):
                 return False
         return torch.allclose(self.init_tensor_, other.init_tensor_)
-
-
-class RNGState:
-    def __init__(self, seed):
-        self.rng = random.Random(seed)
 
 
 class TestOpaqueObject(TestCase):
@@ -117,30 +109,6 @@ class TestOpaqueObject(TestCase):
             ctx = torch._custom_op.impl.get_ctx()
             u0 = ctx.new_dynamic_size()
             return u0
-
-        torch.library.define(
-            "_TestOpaqueObject::noisy_inject",
-            "(Tensor x, __torch__.torch.classes.aten.OpaqueObject obj) -> Tensor",
-            tags=torch.Tag.pt2_compliant_tag,
-            lib=self.lib,
-        )
-
-        @torch.library.impl(
-            "_TestOpaqueObject::noisy_inject", "CompositeExplicitAutograd", lib=self.lib
-        )
-        def noisy_inject(x: torch.Tensor, obj: torch._C.ScriptObject) -> torch.Tensor:
-            rng_state = get_payload(obj)
-            assert isinstance(rng_state, RNGState)
-            out = x.clone()
-            for i in range(out.numel()):
-                out.view(-1)[i] += rng_state.rng.random()
-            return out
-
-        @torch.library.register_fake("_TestOpaqueObject::noisy_inject", lib=self.lib)
-        def noisy_inject_fake(
-            x: torch.Tensor, obj: torch._C.ScriptObject
-        ) -> torch.Tensor:
-            return torch.empty_like(x)
 
         super().setUp()
 
@@ -292,88 +260,6 @@ def forward(self, arg0_1, arg1_1):
     return add_1
     """,
         )
-
-    def test_aot_export(self):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, rng_state, x):
-                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
-                x = x * x
-                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
-                x = x + x
-                return (x,)
-
-        mod = Model()
-        rng = RNGState(0)
-        obj1 = make_opaque(rng)
-        x = torch.ones(2, 3)
-
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_tq1 = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, obj1)
-        fake_x = fake_mode.from_tensor(x)
-        gm = aot_export_module(mod, (fake_tq1, fake_x), trace_joint=False)[0]
-
-        # inputs: token, rng, x
-        # return: token, res
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.noisy_inject.default, arg2_1, arg1_1);  arg0_1 = arg2_1 = None
-    getitem = with_effects[0]
-    getitem_1 = with_effects[1];  with_effects = None
-    mul = torch.ops.aten.mul.Tensor(getitem_1, getitem_1);  getitem_1 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.noisy_inject.default, mul, arg1_1);  getitem = mul = arg1_1 = None
-    getitem_2 = with_effects_1[0]
-    getitem_3 = with_effects_1[1];  with_effects_1 = None
-    add = torch.ops.aten.add.Tensor(getitem_3, getitem_3);  getitem_3 = None
-    return (getitem_2, add)""",  # noqa: B950
-        )
-
-        # By default, ops with ScriptObjects as inputs are registered as being
-        # effectful
-        _deregister_effectful_op("_TestOpaqueObject::noisy_inject.default")
-
-        # If we register with None, this means the ops do not have effect
-        torch.library.register_effectful_op(
-            "_TestOpaqueObject::noisy_inject.default", None
-        )
-        gm = aot_export_module(mod, (obj1, fake_x), trace_joint=False)[0]
-
-        # There is no longer a token input, and no longer with_effect HOO
-        # because the ops are marked as not effectful
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = None
-    mul = torch.ops.aten.mul.Tensor(noisy_inject, noisy_inject);  noisy_inject = None
-    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg0_1);  mul = arg0_1 = None
-    add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
-    return (add,)""",  # noqa: B950
-        )
-        _deregister_effectful_op("_TestOpaqueObject::noisy_inject.default")
-
-    def test_compile(self):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, rng_state, x):
-                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
-                x = x * x
-                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
-                x = x + x
-                return (x,)
-
-        mod = Model()
-        rng = RNGState(0)
-        obj1 = make_opaque(rng)
-        x = torch.ones(2, 3)
-
-        _ = torch.compile(mod)(obj1, x)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

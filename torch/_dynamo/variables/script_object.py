@@ -24,6 +24,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 import functools
 
 import torch
+from torch._library.opaque_object import is_opaque_type
 
 from .. import graph_break_hints
 from ..exc import unimplemented_v2, UnsafeScriptObjectError, Unsupported
@@ -50,7 +51,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     @classmethod
     def is_matching_cls(cls, user_cls: type):
-        return issubclass(user_cls, torch.ScriptObject)
+        return issubclass(user_cls, torch.ScriptObject) or is_opaque_type(user_cls)
 
     @staticmethod
     def create(proxy, value, **options):
