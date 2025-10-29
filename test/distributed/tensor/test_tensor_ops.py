@@ -569,7 +569,6 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @skipIfRocm
     @with_comms
     def test_index(self):
         meshes = [
