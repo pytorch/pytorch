@@ -7362,6 +7362,7 @@ for shape in [(1,), ()]:
         ):
             checkpoint_sequential(modules_list, 3, a)
 
+    @skipIfTorchDynamo("GraphExecGroup does not support compile")
     def test_checkpoint_graph_execution_group(self):
         def run(use_graph_execution_group):
             counter = [0]
@@ -7378,7 +7379,7 @@ for shape in [(1,), ()]:
 
             group = torch.utils.checkpoint.GraphExecGroup()
 
-            ctx: nullcontext[None] = contextlib.nullcontext()
+            ctx = contextlib.nullcontext()
             if use_graph_execution_group:
                 ctx = group
 
