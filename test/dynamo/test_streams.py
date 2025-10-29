@@ -22,6 +22,11 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         weakref.ref(s)
 
     @requires_cuda
+    def test_event_weakref(self):
+        e = torch.Event()
+        weakref.ref(e)
+
+    @requires_cuda
     def test_run_opcheck(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
