@@ -1230,7 +1230,7 @@ class XPUAllocator : public DeviceAllocator {
     assertValidDevice(dev_to_access);
     c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
         c10::xpu::get_raw_device(dev_to_access));
-    device_allocator[dev_to_access]->addPeerAccess(dev);
+    device_allocators[dev_to_access]->addPeerAccess(dev);
   }
 };
 
