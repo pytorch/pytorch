@@ -1307,7 +1307,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ],
                     )
                 message_eager = message_vt.get_function()
-                attr_prefix = f"_check_msg_{tx.output.graph.nodes.__len__()}"
+                if not hasattr(tx.output, "_check_message_counter"):
+                    tx.output._check_message_counter = 0
+
+                attr_prefix = f"_check_msg_{tx.output._check_message_counter}"
+                tx.output._check_message_counter += 1
+
                 message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
                     attr_prefix, message_eager
                 )
@@ -1318,12 +1323,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return ConstantVariable.create(None)
 
             predicate_proxy = predicate_vt.as_proxy()
+
+            if message_graph_proxy is None:
+                proxy_args = (predicate_proxy,)
+            else:
+                proxy_args = (predicate_proxy, message_graph_proxy)
+
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     self.value,
-                    (predicate_proxy, message_graph_proxy),
+                    proxy_args,
                     {},
                 ),
             )
