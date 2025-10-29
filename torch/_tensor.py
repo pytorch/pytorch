@@ -100,6 +100,11 @@ def _dtype_to_typestr(dtype):
     }[dtype]
 
 
+def _is_dtensor(t):
+    from torch.distributed.tensor import DTensor
+    return isinstance(t, DTensor)
+
+
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
@@ -462,7 +467,10 @@ class Tensor(torch._C.TensorBase):
             return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
             type(self) is not torch.Tensor
-            and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+                or _is_dtensor(self)
+            )
             and (
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (

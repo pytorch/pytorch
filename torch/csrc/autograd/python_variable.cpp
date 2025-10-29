@@ -796,6 +796,9 @@ static Tensor make_tensor_for_subclass_helper(
   return tensor;
 }
 
+static py::handle get_dtensor_class();
+static bool checked_issubclass(PyObject* cls, PyObject* cls2);
+
 static PyObject* THPVariable_make_wrapper_subclass(
     PyObject* /*unused*/,
     PyObject* args,
@@ -844,12 +847,22 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // TODO: This check is not complete; because the user can disable torch
   // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
   // to delete this function entirely
-  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
-  TORCH_CHECK_TYPE(
-      attr.ptr() != nullptr &&
-          attr.ptr() != torch::disabled_torch_dispatch_impl(),
-      ((PyTypeObject*)cls)->tp_name,
-      " must define __torch_dispatch__");
+
+  // We check for DTensor specifically because unpickling a DTensor
+  // goes through this path, and DTensor does not have
+  // __torch_dispatch__.
+
+  const auto dtensor = get_dtensor_class();
+  const bool is_dtensor =
+      cls == dtensor.ptr() || checked_issubclass(cls, dtensor.ptr());
+  if (!is_dtensor) {
+    py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+    TORCH_CHECK_TYPE(
+        attr.ptr() != nullptr &&
+            attr.ptr() != torch::disabled_torch_dispatch_impl(),
+        ((PyTypeObject*)cls)->tp_name,
+        " must define __torch_dispatch__");
+  }
 
   const auto options = TensorOptions()
                            .dtype(r.scalartype(5))
@@ -894,7 +907,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       // false is the default
       /*allow_preexisting_pyobj=*/false,
       // we checked __torch_dispatch__ above; avoid checking again.
-      /*has_torch_dispatch_if_known=*/true);
+      /*has_torch_dispatch_if_known=*/!is_dtensor);
   END_HANDLE_TH_ERRORS
 }
 
@@ -915,6 +928,13 @@ static PyObject* THPVariable_make_wrapper_subclass(
     return storage;                                                \
   }
 #endif
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_dtensor_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("DTensor"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_spec_class,
@@ -1000,6 +1020,14 @@ static bool intern_dtensor_strings() {
   FOR_EACH_DTENSOR_INTERNED_STRING(INTERN_DTENSOR_STRING);
 #undef INTERN_DTENSOR_STRING
   return true;
+}
+
+static bool checked_issubclass(PyObject* cls, PyObject* cls2) {
+  int result = PyObject_IsSubclass(cls, cls2);
+  if (result == -1) {
+    throw py::error_already_set();
+  }
+  return result;
 }
 
 static bool checked_not(PyObject* obj) {
