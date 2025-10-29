@@ -24,9 +24,6 @@ if TYPE_CHECKING:
 
 aten = torch.ops.aten
 
-_INT64_MAX = 9223372036854775807
-_INT64_MIN = -9223372036854775808
-
 
 @onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)
 def aten_gelu_opset20(
@@ -83,7 +80,7 @@ def aten_rms_norm(
     # Create weight tensor if not provided
     if weight is None:
         # pyrefly: ignore [missing-attribute]
-        weight = op23.Constant(value=ir.tensor([1.0], dtype=input.dtype))
+        weight = op23.Constant(value=ir.tensor([1.0] * normalized_dims, dtype=input.dtype))
     elif len(weight.shape) == 0:
         weight = op23.Unsqueeze(weight, [0])
 
