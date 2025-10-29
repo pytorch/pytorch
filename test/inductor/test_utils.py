@@ -74,7 +74,7 @@ class TestUtils(TestCase):
         self.assertEqual(expr.is_integer, None)
         self.assertEqual(expr.is_nonnegative, None)
         # replace abs(x) with y
-        # propagte abs(x) sympy properties.
+        # propagate abs(x) sympy properties.
         result = sympy_subs(expr, {expr: Symbol("y")})
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
