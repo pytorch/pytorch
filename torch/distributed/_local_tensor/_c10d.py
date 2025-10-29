@@ -756,6 +756,9 @@ def _local_monitored_barrier_(
     return
 
 
+MAILBOX: dict[int, list[torch.Tensor]] = {}
+
+
 def _local_send(
     tensors: list[torch.Tensor],
     process_group_so: ScriptObject,
@@ -765,10 +768,22 @@ def _local_send(
     # "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int dst, int tag) -> __torch__.torch.classes.c10d.Work";
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like send. "
-        "Use SPMD collective operations instead."
-    )
+    from . import LocalTensor
+
+    assert len(tensors) == 1
+    tensor = tensors[0]
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+    src = getattr(tensor, "__rank__")
+
+    global MAILBOX
+    if dst not in MAILBOX:
+        MAILBOX[dst] = []
+    MAILBOX[dst].append(tensor._local_tensors[src])
+
+    work = FakeWork()
+    work_so = Work.boxed(work)
+    return work_so
 
 
 def _local_recv_(
@@ -780,10 +795,7 @@ def _local_recv_(
     # "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int src, int tag) -> __torch__.torch.classes.c10d.Work";
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like recv. "
-        "Use SPMD collective operations instead."
-    )
+    return _local_recv_any_source_(tensors, process_group_so, tag)
 
 
 def _local_recv_any_source_(
@@ -792,7 +804,18 @@ def _local_recv_any_source_(
     # "recv_any_source_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int tag) -> __torch__.torch.classes.c10d.Work";
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like recv_any_source. "
-        "Use SPMD collective operations instead."
-    )
+    from . import LocalTensor
+
+    assert len(tensors) == 1
+    tensor = tensors[0]
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+
+    dst = getattr(tensor, "__rank__")
+
+    global MAILBOX
+    tensor._local_tensors[dst] = MAILBOX[dst].pop()
+
+    work = FakeWork()
+    work_so = Work.boxed(work)
+    return work_so
