@@ -4778,7 +4778,7 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or params["autograd"] == True
+                or params["autograd"]
             )
         ),
     )
@@ -4834,7 +4834,7 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or params["autograd"] == True
+                or params["autograd"]
             )
         ),
     )
@@ -4857,6 +4857,46 @@ class GraphModule(torch.nn.Module):
 
             ret = inner(y)
             return x + ret + H1
+
+        inp = torch.randn(3, 4, 5, device=device, requires_grad=autograd)
+
+        for fct, fct_fake, param in [
+            (fct_nested_outside, fct_nested_outside_fake, (H1, H2)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            kwargs_fake["combine_fn"] = fct_fake
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+                autograd_param=None if not autograd else (inp, *param),
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_nested_tensor_inside(
+        self, compile_mode, combine_mode, reverse, device, autograd
+    ):
+        H1 = torch.rand(4, 5, device=device, requires_grad=autograd)
 
         # TODO: Using random tensors in the `combine_fn` triggers the vmap randomness error:
         # RuntimeError: vmap: called random operation while in randomness error mode.
@@ -4882,8 +4922,7 @@ class GraphModule(torch.nn.Module):
         inp = torch.randn(3, 4, 5, device=device, requires_grad=autograd)
 
         for fct, fct_fake, param in [
-            (fct_nested_outside, fct_nested_outside_fake, (H1, H2)),
-            (fct_nested_inside, fct_nested_inside_fake, (H1)),
+            (fct_nested_inside, fct_nested_inside_fake, ()),
         ]:
             kwargs = {
                 "dim": 0,
@@ -4918,7 +4957,7 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or params["autograd"] == True
+                or params["autograd"]
             )
         ),
     )
@@ -4930,7 +4969,7 @@ class GraphModule(torch.nn.Module):
 
         def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
             ret = additional_fct_no_add_inp(x, y)
-            return ret + 2.
+            return ret + 2.0
 
         inp = torch.randn(3, 4, 5, device=device, requires_grad=autograd)
 
@@ -5044,7 +5083,7 @@ class GraphModule(torch.nn.Module):
             and (
                 params["device"] == torch.device("cpu")
                 or params["compile_mode"] == "compile_dynamic_shape"
-                or params["autograd"] == True
+                or params["autograd"]
             )
         ),
     )

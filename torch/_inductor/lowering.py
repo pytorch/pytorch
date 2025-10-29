@@ -2365,7 +2365,7 @@ make_fallback(aten.randint)
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
-    if kwargs.get("generator", None) is not None:
+    if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -2375,7 +2375,7 @@ def rand(*args, **kwargs):
 
 @register_lowering(aten.randn)
 def randn(*args, **kwargs):
-    if kwargs.get("generator", None) is not None:
+    if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -7262,8 +7262,13 @@ def associative_scan(
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     # Check that additional_inputs only contains tensors
-    if any(not isinstance(x, torch.Tensor) and not isinstance(x, TensorBox) for x in additional_inputs):
-        raise RuntimeError("associative_scan in combine_mode='pointwise' only supports torch.Tensor lifted arguments!")
+    if any(
+        not isinstance(x, torch.Tensor) and not isinstance(x, TensorBox)
+        for x in additional_inputs
+    ):
+        raise RuntimeError(
+            "associative_scan in combine_mode='pointwise' only supports torch.Tensor lifted arguments!"
+        )
 
     if len(additional_inputs) > 0:
         subgraph_inputs = [
@@ -7276,12 +7281,11 @@ def associative_scan(
         ]
         lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
-
         def wrapped_combine_fn(lhs, add_inputs, rhs, add_inputs2):
             return lowered_combine_fn(
                 *pytree.tree_leaves(lhs),
                 *pytree.tree_leaves(rhs),
-                *pytree.tree_leaves(add_inputs)
+                *pytree.tree_leaves(add_inputs),
             ) + tuple(pytree.tree_leaves(add_inputs))
     else:
         subgraph_inputs = [

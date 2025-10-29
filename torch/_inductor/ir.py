@@ -2335,8 +2335,16 @@ class Scan(Loops):
     ) -> Any:
         idx = self.reindex(vars, scan_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        additional_inputs = tuple(add_ips_fn(vars) for add_ips_fn in self.additional_inputs_fns)
-        result = ops.scan(self.dtypes, self.combine_fn, values, self.additional_inputs_dtypes, additional_inputs)
+        additional_inputs = tuple(
+            add_ips_fn(vars) for add_ips_fn in self.additional_inputs_fns
+        )
+        result = ops.scan(
+            self.dtypes,
+            self.combine_fn,
+            values,
+            self.additional_inputs_dtypes,
+            additional_inputs,
+        )
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
         )
