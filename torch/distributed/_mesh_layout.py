@@ -9,6 +9,7 @@ from itertools import product
 
 import torch
 from torch.distributed._pycute import (
+    as_tuple,
     coalesce,
     complement,
     composition,
@@ -17,7 +18,7 @@ from torch.distributed._pycute import (
     is_int,
     is_tuple,
     Layout,
-    suffix_product,
+    match_structure,
 )
 
 
@@ -38,9 +39,9 @@ class _MeshLayout(Layout):
     different from that of PyCute's.
     """
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     shape: IntTuple
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     stride: IntTuple
 
     def __post_init__(self) -> None:
@@ -48,14 +49,9 @@ class _MeshLayout(Layout):
             raise TypeError(f"shape must be a tuple or int, got {type(self.shape)}")
         if not is_tuple(self.stride) and not is_int(self.stride):
             raise TypeError(f"stride must be a tuple or int, got {type(self.stride)}")
-        if (
-            is_tuple(self.shape)
-            and is_tuple(self.stride)
-            and len(flatten(self.shape)) != len(flatten(self.stride))
-        ):
+        if not match_structure(self.shape, self.stride):
             raise ValueError(
-                f"sizes {len(flatten(self.shape))} and "
-                f"strides {len(flatten(self.stride))} must have the same length"
+                f"sizes {self.shape} and strides {self.stride} don't match"
             )
 
     @property
@@ -79,6 +75,11 @@ class _MeshLayout(Layout):
 
     # # operator []    (get-i like tuples)
     def __getitem__(self, i: int) -> "_MeshLayout":
+        if i < -len(self) or i >= len(self):
+            raise IndexError(
+                f"Dim {i} is out of range for layout with {len(self)} dimensions. "
+                f"Expected dim to be in range [{-len(self)}, {len(self) - 1}]."
+            )
         layout = super().__getitem__(i)
         return _MeshLayout(layout.shape, layout.stride)
 
@@ -156,50 +157,11 @@ class _MeshLayout(Layout):
         layout = complement(self, world_size)
         return _MeshLayout(layout.shape, layout.stride)
 
-    def unflatten(self, dim: int, unflatten_sizes: tuple[int, ...]) -> "_MeshLayout":
-        """
-        Unflatten a single dimension in the layout by splitting it into multiple dimensions.
-        It takes a dimension at position `dim` and splits it into multiple new dimensions
-        with the specified sizes.
-
-        Args:
-            dim (int): The index of the dimension to unflatten. Must be a valid dimension index.
-            unflatten_sizes (tuple[int, ...]): The new sizes for the dimensions that will replace
-                the original dimension at `dim`. The product of these sizes must equal the size
-                of the original dimension at `dim`.
-
-        Returns:
-            _MeshLayout: A new layout with the specified dimension unflattened.
-
-        Example:
-            Original: sizes=(8,), strides=(1,)  # 8 ranks in 1D
-            Call: unflatten(0, (2, 2, 2))  # Create 3D topology
-            Result: sizes=(2, 2, 2), strides=(4, 2, 1)  # 2*2*2 unflattened topology
-        """
-        # Check that dim is within valid range
-        if dim < 0 or dim >= len(self):
-            raise ValueError(
-                f"dim {dim} is out of range for layout with {len(self)} dimensions. "
-                f"Expected dim to be in range [0, {len(self) - 1}]."
-            )
-
-        # Check that the product of unflatten_sizes equals the original dimension size
-        original_size = self[dim].numel()
-        unflatten_product = math.prod(unflatten_sizes)
-        if unflatten_product != original_size:
-            raise ValueError(
-                f"The product of unflatten_sizes {unflatten_sizes} is {unflatten_product}, "
-                f"but the original dimension at dim={dim} has size {original_size}. "
-                f"These must be equal for unflatten to work correctly."
-            )
-
-        sizes = list(self.sizes)  # type: ignore[arg-type]
-        strides = list(self.strides)  # type: ignore[arg-type]
-        unflatten_layout = self[dim].composition(
-            _MeshLayout(tuple(unflatten_sizes), suffix_product(unflatten_sizes))
-        )
-        sizes[dim : dim + 1] = list(unflatten_layout.sizes)  # type: ignore[arg-type]
-        strides[dim : dim + 1] = list(unflatten_layout.strides)  # type: ignore[arg-type]
+    def splice(self, start: int, end: int, layout: "_MeshLayout") -> "_MeshLayout":
+        sizes = list(as_tuple(self.sizes))
+        strides = list(as_tuple(self.strides))
+        sizes[start:end] = list(as_tuple(layout.sizes))
+        strides[start:end] = list(as_tuple(layout.strides))
         return _MeshLayout(tuple(sizes), tuple(strides))
 
     def all_ranks_from_zero(self) -> list[int]:

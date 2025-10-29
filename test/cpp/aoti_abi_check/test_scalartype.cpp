@@ -74,3 +74,19 @@ TEST(TestScalarType, operator_left_shift) {
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CHECK);
 #undef DEFINE_CHECK
 }
+
+TEST(TestScalarType, toUnderlying) {
+  using torch::headeronly::ScalarType;
+  using torch::headeronly::toUnderlying;
+
+  EXPECT_EQ(toUnderlying(ScalarType::QUInt8), ScalarType::Byte);
+  EXPECT_EQ(toUnderlying(ScalarType::QUInt4x2), ScalarType::Byte);
+  EXPECT_EQ(toUnderlying(ScalarType::QUInt2x4), ScalarType::Byte);
+  EXPECT_EQ(toUnderlying(ScalarType::QInt8), ScalarType::Char);
+  EXPECT_EQ(toUnderlying(ScalarType::QInt32), ScalarType::Int);
+#define DEFINE_CHECK(_, name) \
+  EXPECT_EQ(toUnderlying(ScalarType::name), ScalarType::name);
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CHECK);
+  AT_FORALL_FLOAT8_TYPES(DEFINE_CHECK);
+#undef DEFINE_CHECK
+}

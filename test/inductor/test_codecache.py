@@ -68,11 +68,15 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
+    HAS_XPU_AND_TRITON,
     patch_inductor_backend,
     requires_gpu,
     requires_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 try:
@@ -1146,7 +1150,7 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn1(x):
-            return x + torch.tensor(list(range(0, 12)), device=device)
+            return x + torch.tensor(list(range(12)), device=device)
 
         def fn2(x):
             return x + torch.tensor(list(range(1, 13)), device=device)
@@ -1215,7 +1219,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @with_tf32_off
@@ -1238,7 +1242,7 @@ class TestFxGraphCache(TestCase):
         def fn2(q, k, v):
             return flex_attention(q, k, v, score_mod=score_mod2, block_mask=block_mask)
 
-        a, b, c = (torch.randn(1, 4, 512, 64).cuda() for _ in range(3))
+        a, b, c = (torch.randn(1, 4, 512, 64).to(GPU_TYPE) for _ in range(3))
         compiled_fn = torch.compile(fn)
         compiled_fn2 = torch.compile(fn2)
 
@@ -1839,11 +1843,21 @@ class TestStandaloneCompile(TestCase):
     @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
     @parametrize("graph_partition", (False, True))
+    @parametrize("is_aot", (False, True))
     def test_basic(
-        self, device: str, format: str, dynamic: bool, graph_partition: bool
+        self,
+        device: str,
+        format: str,
+        dynamic: bool,
+        graph_partition: bool,
+        is_aot: bool,
     ) -> None:
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        # AOT mode does not support unpacked format
+        if is_aot and format == "unpacked":
+            raise unittest.SkipTest("AOT mode does not support unpacked format")
 
         mod = torch.nn.Linear(1, 3, device=device)
         x = torch.randn(4, 1, device=device)
@@ -1869,7 +1883,9 @@ class TestStandaloneCompile(TestCase):
                 gm, args, kwargs = self.capture(f)(x)
                 assert not kwargs
 
-                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_artifact = torch._inductor.standalone_compile(
+                    gm, args, aot=is_aot
+                )
                 compiled_artifact.save(path=path, format=format)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -1885,13 +1901,15 @@ class TestStandaloneCompile(TestCase):
                 compiled_out = loaded(*concrete_args)
                 self.assertEqual(eager_out, compiled_out)
 
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            if not is_aot:
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("dynamic", (False, True))
-    def test_call_in_backend(self, dynamic: bool) -> None:
+    @parametrize("is_aot", (False, True))
+    def test_call_in_backend(self, dynamic: bool, is_aot: bool) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
         if dynamic:
@@ -1904,7 +1922,7 @@ class TestStandaloneCompile(TestCase):
         eager_out = f(x)
 
         def backend(gm, args, **kwargs):
-            return torch._inductor.standalone_compile(gm, args)
+            return torch._inductor.standalone_compile(gm, args, aot=is_aot)
 
         with fresh_cache():
             compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
@@ -2055,7 +2073,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_dynamic_shapes_from_graph(self):
+    @parametrize("is_aot", (False, True))
+    def test_dynamic_shapes_from_graph(self, is_aot: bool):
         def f(x):
             return x.shape[0] * x
 
@@ -2067,7 +2086,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             assert not kwargs
 
         compiled_artifact = torch._inductor.standalone_compile(
-            gm, args, dynamic_shapes="from_graph"
+            gm, args, dynamic_shapes="from_graph", aot=is_aot
         )
         x = torch.ones(4)
         (result,) = compiled_artifact(4, x)
@@ -2077,7 +2096,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"autograd_cache_normalize_inputs": True})
-    def test_split_module(self):
+    @parametrize("is_aot", (False, True))
+    def test_split_module(self, is_aot):
         class Mod(torch.nn.Module):
             def forward(self, x, a0, a1, b0, b1, c0, c1):
                 x = x + (a0**2) + (a1 / 2)
@@ -2116,16 +2136,24 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         split = torch.fx.passes.split_module.split_module(gm, gm, split)
 
         # Each of the split graphs only has one output.
-        ca0 = torch._inductor.standalone_compile(split.submod_0, (a0, x, a1))
-        ca1 = torch._inductor.standalone_compile(split.submod_1, (b0, x, b1))
-        ca2 = torch._inductor.standalone_compile(split.submod_2, (c0, x, c1))
+        ca0 = torch._inductor.standalone_compile(
+            split.submod_0, (a0, x, a1), aot=is_aot
+        )
+        ca1 = torch._inductor.standalone_compile(
+            split.submod_1, (b0, x, b1), aot=is_aot
+        )
+        ca2 = torch._inductor.standalone_compile(
+            split.submod_2, (c0, x, c1), aot=is_aot
+        )
 
         y = ca0(a0, x, a1)
         y = ca1(b0, y, b1)
         y = ca2(c0, y, c1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+        if not is_aot:
+            # fx graph cache doesn't run in AOT mode
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
         # TODO: split_module causes ca1 and ca2 to have different type annotations
         # for the parameter x, so we can only AOTAutogradCache cache hit once instead of twice
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
@@ -2138,8 +2166,9 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("is_aot", (False, True))
     @parametrize("config_patches", [True, False])
-    def test_dynamic_shapes_from_example_inputs(self, config_patches):
+    def test_dynamic_shapes_from_example_inputs(self, config_patches, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -2161,6 +2190,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             (5, torch.ones(4)),
             dynamic_shapes="from_example_inputs",
             options={"config_patches": config_patches},
+            aot=is_aot,
         )
         x = torch.ones(4)
         (result,) = compiled_artifact(3, x)
@@ -2175,8 +2205,9 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("is_aot", (True, False))
     @parametrize("dynamic_shapes", ["from_graph", "from_example_inputs"])
-    def test_static_shapes(self, dynamic_shapes):
+    def test_static_shapes(self, dynamic_shapes, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -2186,7 +2217,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             static_gm, args, kwargs = self.capture(f, dynamic=False)(static_x)
             assert not kwargs
         compiled_artifact = torch._inductor.standalone_compile(
-            static_gm, [static_x], dynamic_shapes=dynamic_shapes
+            static_gm, [static_x], dynamic_shapes=dynamic_shapes, aot=is_aot
         )
         x = torch.randn(3)
         (result,) = compiled_artifact(x)
@@ -2198,8 +2229,9 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("is_aot", (True, False))
     @parametrize("dynamic_shapes", ["from_tracing_context", "from_graph"])
-    def test_backend(self, dynamic_shapes):
+    def test_backend(self, dynamic_shapes, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -2208,7 +2240,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         def backend(gm, args, **kwargs):
             compiled_artifact = torch._inductor.standalone_compile(
-                gm, args, dynamic_shapes=dynamic_shapes
+                gm, args, dynamic_shapes=dynamic_shapes, aot=is_aot
             )
             y = torch.randn(4)
             (result,) = compiled_artifact(4, y)
@@ -2221,7 +2253,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_backend_dynamic_shapes_from_example_inputs(self):
+    @parametrize("is_aot", (True, False))
+    def test_backend_dynamic_shapes_from_example_inputs(self, is_aot):
         def f(x):
             return x.shape[0] * x
 
@@ -2230,7 +2263,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         def backend(gm, args, **kwargs):
             compiled_artifact = torch._inductor.standalone_compile(
-                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs"
+                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs", aot=is_aot
             )
             y = torch.ones(4)
             (result,) = compiled_artifact(4, y)
@@ -2923,8 +2956,8 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
@@ -2942,10 +2975,10 @@ class TestAutotuneCache(TestCase):
         def f(x, y, a, b):
             return Model()(x, y, a, b)
 
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
-        a = torch.randn(1000, 100).cuda()
-        b = torch.randn(1000, 100).cuda()
+        x = torch.randn(100, 100).to(GPU_TYPE)
+        y = torch.randn(100, 100).to(GPU_TYPE)
+        a = torch.randn(1000, 100).to(GPU_TYPE)
+        b = torch.randn(1000, 100).to(GPU_TYPE)
         f_compiled = torch.compile(f, fullgraph=True)
 
         with PatchCaches():
@@ -2964,8 +2997,8 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": True})
@@ -2983,12 +3016,12 @@ class TestAutotuneCache(TestCase):
 
         f_compiled = torch.compile(f, fullgraph=True)
 
-        a = torch.randn(101, 100).cuda()
-        b = torch.randn(101, 100).cuda()
-        c = torch.randn(102, 100).cuda()
-        d = torch.randn(102, 100).cuda()
-        e = torch.randn(103, 100).cuda()
-        f = torch.randn(103, 100).cuda()
+        a = torch.randn(101, 100).to(GPU_TYPE)
+        b = torch.randn(101, 100).to(GPU_TYPE)
+        c = torch.randn(102, 100).to(GPU_TYPE)
+        d = torch.randn(102, 100).to(GPU_TYPE)
+        e = torch.randn(103, 100).to(GPU_TYPE)
+        f = torch.randn(103, 100).to(GPU_TYPE)
 
         with PatchCaches():
             f_compiled(a, b, c, d, e, f)
@@ -3025,8 +3058,8 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_triton()
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"bundled_autotune_remote_cache": False})
@@ -3089,8 +3122,8 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu()
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
     @torch._functorch.config.patch({"enable_autograd_cache": False})
@@ -3100,8 +3133,8 @@ class TestRemoteAOTAutogradCache(TestCase):
             return a + b
 
         f_compiled = torch.compile(f)
-        a = torch.randn(101, 100, device="cuda", requires_grad=False)
-        b = torch.randn(101, 100, device="cuda", requires_grad=False)
+        a = torch.randn(101, 100, device=GPU_TYPE, requires_grad=False)
+        b = torch.randn(101, 100, device=GPU_TYPE, requires_grad=False)
         with PatchCaches():
             f_compiled(a, b)
 
@@ -3128,8 +3161,8 @@ class TestRemoteAOTAutogradCache(TestCase):
         for k in global_stats.fx_graph.cache.keys():
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
     @torch._functorch.config.patch({"enable_autograd_cache": False})
@@ -3203,7 +3236,7 @@ class TestUtils(TestCase):
 
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch(
         {
             "coordinate_descent_tuning": True,
@@ -3212,9 +3245,9 @@ class TestUtils(TestCase):
     )
     def test_force_disable_coordinate_descent(self):
         def fn():
-            inp = torch.randn(32, 50, 768, device="cuda")
-            weight = torch.randn(768, 768, device="cuda")
-            layer = torch.nn.LayerNorm(768, device="cuda")
+            inp = torch.randn(32, 50, 768, device=GPU_TYPE)
+            weight = torch.randn(768, 768, device=GPU_TYPE)
+            layer = torch.nn.LayerNorm(768, device=GPU_TYPE)
             return layer(inp @ weight)
 
         torch.compile(fn)()
