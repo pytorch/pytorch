@@ -90,7 +90,7 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     """
     for name, tensor in itertools.chain(
         list(module.named_parameters(recurse=False)),
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         list(module.named_buffers(recurse=False)),
     ):
         if is_traceable_wrapper_subclass(tensor):

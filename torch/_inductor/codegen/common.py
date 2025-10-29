@@ -2784,6 +2784,7 @@ class CSEProxy(DefaultHandler):
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
 
+    # pyrefly: ignore [bad-override]
     def partial_accumulate(self, *args: Any) -> None:
         self.kernel.partial_accumulate(*args)
 

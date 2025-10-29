@@ -247,7 +247,7 @@ class TestIndexing(TestCase):
                 x[ri([0, 2, 4]),], torch.tensor([5, 4, 3], dtype=dtype, device=device)
             )
 
-        # Only validates indexing and setting for Halfs
+        # Only validates indexing and setting for Halves
         if dtype == torch.half:
             reference = consec((10,))
             validate_indexing(reference)
