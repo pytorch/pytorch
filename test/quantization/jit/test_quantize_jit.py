@@ -2926,7 +2926,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 m._c, "forward", {"": qconfig}, inplace=False
             )
         )
-        # Checking the model before fianlize contain unfused patterns
+        # Checking the model before finalize contain unfused patterns
         # that numerically matches the model after quantize by checking
         # number of aten::quantize_per_tensor functions
         # conv has 3 quantize_per_tensor for activations and 1 for weight

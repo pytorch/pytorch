@@ -3342,7 +3342,7 @@ class DimConstraints:
         # alter derivations that depend on old root, to unify to new root
         # e.g. dx=3*_dx+1, dy=dx+1 -> dy=3*_dx+2
         for old_root in introduced_roots.values():
-            for c in results.values():
+            for k, c in list(results.items()):
                 if (
                     "eq" in c
                     and isinstance(c["eq"], sympy.Expr)
@@ -6612,13 +6612,13 @@ class ShapeEnv:
             desc = "Could not guard on data-dependent expression"
             size_oblivious_result_msg = (
                 "consider using data-dependent friendly APIs such as "
-                "guard_or_false, guard_or_true and statically_known_true"
+                "guard_or_false, guard_or_true and statically_known_true."
             )
 
         msg = (
             f"{desc} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
-            f"{size_oblivious_result_msg}"
+            f"{size_oblivious_result_msg}\n"
             f"Caused by: {sloc}\n"
             'For more information, run with TORCH_LOGS="dynamic"\n'
             "For extended logs when we create symbols, also add "

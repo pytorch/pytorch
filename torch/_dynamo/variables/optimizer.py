@@ -289,7 +289,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
             params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             all_static = True
             non_static_grads = []
-            for p, p_vt in zip(group["params"], params_vt.unpack_var_sequence(tx)):
+            for p_ind, (p, p_vt) in enumerate(
+                zip(group["params"], params_vt.unpack_var_sequence(tx))
+            ):
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
                 grad_source = GradSource(
@@ -320,12 +322,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # We have to again iterate over the state dict to collect the
         # tensor_to_source dict. This is used for the finalizer.
-        for idx, value in enumerate(self.value.state.values()):
+        for idx, (p, value) in enumerate(self.value.state.items()):
             p_state_source = DictGetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
             tx.output.guard_on_key_order.add(p_state_source)
-            for inner_idx, v in enumerate(value.values()):
+            for inner_idx, (k, v) in enumerate(value.items()):
                 if (
                     isinstance(v, torch.Tensor)
                     and v not in self.grad_to_source

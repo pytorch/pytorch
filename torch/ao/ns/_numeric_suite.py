@@ -137,7 +137,7 @@ def _get_logger_dict_helper(
     def get_prefix(prefix):
         return prefix if prefix == "" else prefix + "."
 
-    for child in mod.children():
+    for name, child in mod.named_children():
         if isinstance(child, Logger):
             target_dict[get_prefix(prefix) + "stats"] = child.stats
             break
