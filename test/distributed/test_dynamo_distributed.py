@@ -975,6 +975,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             # Number of compiles same on all nodes
             res = [None] * self.world_size
             torch.distributed.all_gather_object(res, len(metrics))
+            print("test_compiler_collectives_automatic_dynamic_tensor RESULTS!!:", res)
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
