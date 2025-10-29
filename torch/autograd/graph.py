@@ -230,7 +230,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
 
     # Note that output_nr default to 0 which is the right value
     # for the AccumulateGrad node.
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
@@ -534,7 +534,7 @@ def register_multi_grad_hook(
                         "expected this hook to be called inside a backward call"
                     )
                 count[id] = count.get(id, 0)
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
                 with lock:
