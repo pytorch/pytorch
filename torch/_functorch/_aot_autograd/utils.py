@@ -137,7 +137,8 @@ def call_func_at_runtime_with_args(
             warnings.warn(
                 "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale.",
+                stacklevel=2,
             )
             out = normalize_as_list(f(*args))
     return out
@@ -157,7 +158,7 @@ class PytreeThunk:
         assert spec is not None
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
-            child.is_leaf() for child in spec.children_specs
+            child.is_leaf() for child in spec.children()
         ):
             self.is_simple = True
         if self.spec.is_leaf():
@@ -330,7 +331,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         output_token_nodes.append(out)
                     else:
                         other_output_nodes.append(out)
@@ -572,10 +573,10 @@ def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     @simple_wraps(f)
     def inner(*args, **kwargs):
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         return f(*args, **kwargs)[0]
 
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return inner
 
 
