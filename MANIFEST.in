@@ -88,6 +88,8 @@ global-exclude .git .git-blame-ignore-revs .gitattributes .gitignore .gitmodules
 global-exclude .gitlab-ci.yml
 
 # Misc files needed for custom setuptools command
+graft .ci/docker/ci_commit_pins
+graft .github/ci_commit_pins
 include .gitignore
 include .gitmodules
 
