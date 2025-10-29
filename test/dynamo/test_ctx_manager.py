@@ -230,7 +230,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 12)
+        self.assertEqual(cnts.op_count, 20)
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -335,7 +335,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 21)
+        self.assertEqual(cnts.op_count, 37)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_compared_with_constant(self):
@@ -517,7 +517,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x, cur_stream, new_stream)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertEqual(cnts.op_count, 27)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
@@ -557,7 +557,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertEqual(cnts.op_count, 27)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
@@ -1834,6 +1834,59 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(len(counters["graph_break"]), 1)
+
+    def test_311_resume_block_keyerror(self):
+        # https://github.com/pytorch/pytorch/issues/162313
+        flag = True
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            if flag:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 4
+            else:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 8
+            return x + 16
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        flag = False
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_311_resume_block_keyerror2(self):
+        # https://github.com/pytorch/pytorch/issues/166176
+        def fn(x):
+            torch._dynamo.graph_break()
+            with torch.no_grad():
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+            return x + 1
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_store_attr_graph_break_key_error(self):
+        # STORE_ATTR on dummy should result in graph break
+        def dummy():
+            pass
+
+        def fn(x):
+            x = x + 2
+            with torch.no_grad():
+                dummy.attr1 = x
+            return x + 4
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        self.assertGreater(len(counters["graph_break"]), 0)
 
 
 class ContextlibContextManagerTests(

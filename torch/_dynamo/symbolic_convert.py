@@ -1436,7 +1436,12 @@ class InstructionTranslatorBase(
                 # an exception table entry, so we also assume that we
                 # are still in the same block. It is probably safe to do
                 # this in 3.11, even though we haven't encountered this case before.
-                if self.block_stack and inst.opname not in ("NOP", "JUMP_BACKWARD"):
+                # In 3.14+, NOT_TAKEN might also not be covered by an exn table entry.
+                if self.block_stack and inst.opname not in (
+                    "NOP",
+                    "JUMP_BACKWARD",
+                    "NOT_TAKEN",
+                ):
                     # If we really escape from a block and the current
                     # instruction is not in another block, then there
                     # should be no other nested blocks that we are in.
@@ -2676,7 +2681,9 @@ class InstructionTranslatorBase(
             reason=GraphCompileReason("store_attr", [self.frame_summary()]),
             stack_pops=2,
         )
-        self.output.add_output_instructions([copy.copy(inst)])
+        inst_copy = copy.copy(inst)
+        inst_copy.exn_tab_entry = None
+        self.output.add_output_instructions([inst_copy])
         self.popn(2)
         self.output.add_output_instructions(
             self.create_call_resume_at(
@@ -2868,9 +2875,12 @@ class InstructionTranslatorBase(
         # so we should not count NullVariables
         stack_len = len(self.stack) - len(meta.stack_null_idxes)
 
+        assert self.current_instruction.offset is not None
+
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
+            self.current_instruction.offset,
             resume_inst.offset,
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
@@ -4238,6 +4248,7 @@ class InstructionTranslatorBase(
         self.f_builtins: dict[str, Any] = f_builtins
         self.code_options: dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
+        self.closure = closure
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
