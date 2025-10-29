@@ -2820,5 +2820,36 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0280": [
+    {
+      "Gb_type": "1-arg super not implemented",
+      "Context": "",
+      "Explanation": "Dynamo failed to trace attribute `{name}` accessed via `super()` (for type `{self.typevar}` and object `{self.objvar}`) because one-argument of super() is not supported.",
+      "Hints": [
+        "Use two-argument super(type, object_or_type)."
+      ]
+    }
+  ],
+  "GB0281": [
+    {
+      "Gb_type": "Invalid or non-const argument in nn.Module __getitem__",
+      "Context": "call_method: {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
+      "Hints": [
+        "Use constant arguments of type str or int for __getitem__"
+      ]
+    }
+  ],
+  "GB0282": [
+    {
+      "Gb_type": "Placement with custom __getattr__ not supported",
+      "Context": "{value_type.__name__} with custom __getattr__",
+      "Explanation": "Dynamo does not support Placement types with custom __getattr__ methods",
+      "Hints": [
+        "Use Placement types without custom __getattr__ methods",
+        "Move the Placement usage outside the compiled region"
+      ]
+    }
   ]
 }

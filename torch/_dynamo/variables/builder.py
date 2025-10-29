@@ -629,7 +629,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
                     source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
             (torch.__version__, lambda self, value: TorchVersionVariable()),
@@ -918,15 +918,19 @@ class VariableBuilder:
         elif trace_rules.is_numpy(value):
             assert np
             if istype(value, types.MethodType):
-                install_guard(
-                    AttrSource(self.source, "__func__").make_guard(
-                        GuardBuilder.CLOSURE_MATCH
+                # Dont guard on cython functions as they dont change ids
+                if inspect.isfunction(value.__func__):
+                    install_guard(
+                        AttrSource(self.source, "__func__").make_guard(
+                            GuardBuilder.CLOSURE_MATCH
+                        )
                     )
-                )
             elif inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)
+            elif inspect.isfunction(value):
+                self.install_guards(GuardBuilder.CLOSURE_MATCH)
             elif callable(value):
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+                self.install_guards(GuardBuilder.ID_MATCH)
             else:
                 self.install_guards(GuardBuilder.TYPE_MATCH)
             return NumpyVariable(value, source=self.source)
@@ -943,7 +947,7 @@ class VariableBuilder:
             return NumpyTypeInfoVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return CollectiveFunctionRewriteVariable.create(
                 self.tx,
                 value,
@@ -1369,7 +1373,7 @@ class VariableBuilder:
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
-            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
@@ -2225,25 +2229,70 @@ class VariableBuilder:
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
             guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        self.install_guards(
-            functools.partial(
-                guard_type,
-                value=(
-                    value
-                    if isinstance(source, NumpyTensorSource)
-                    else TensorWeakRef(value)
-                ),
-            )
+        is_dtensor = torch.distributed.is_available() and isinstance(
+            value, torch.distributed.tensor.DTensor
         )
+        if not is_dtensor:
+            # We guard on the _local_tensor and the _spec, and therefore we dont
+            # have to guard on the outer DTensor.
+            self.install_guards(
+                functools.partial(
+                    guard_type,
+                    value=(
+                        value
+                        if isinstance(source, NumpyTensorSource)
+                        else TensorWeakRef(value)
+                    ),
+                )
+            )
 
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
-            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            install_guard(
-                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
-            )
+            # Tensor subclass guards are very expensive because they are
+            # implemented in Python. Since DTensor is PyTorch-maintained class,
+            # we can skip a lot of these guards.
+            if is_dtensor:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+
+                # The inner tensor name is always _local_tensor. If its not, we
+                # raise assertion to update the check accordingly.
+                inner_tensor_name = value.__tensor_flatten__()[0][0]
+                if inner_tensor_name != "_local_tensor":
+                    raise RuntimeError(
+                        "Expecting Dtensor inner tensor name to be _local_tensor"
+                    )
+
+                # Now selectively guard on the flattening context
+                flattening_ctx = value.__tensor_flatten__()[1]
+                # This is supposed to be (self._spec, self.requires_grad)
+                if not (
+                    len(flattening_ctx) == 2
+                    and flattening_ctx[0] == value._spec
+                    and flattening_ctx[1] == value.requires_grad
+                ):
+                    # If not, raise an assertion to update to the new guards
+                    raise RuntimeError(
+                        "Expecting Dtensor flattening ctx to be _spec, requires_grad"
+                    )
+                # Guard on the dtensor spec
+                install_guard(
+                    AttrSource(self.source, "_spec").make_guard(
+                        GuardBuilder.DTENSOR_SPEC_MATCH
+                    )
+                )
+                # Move this to C++
+                install_guard(
+                    AttrSource(self.source, "requires_grad").make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
+            else:
+                self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                install_guard(
+                    SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+                )
 
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
