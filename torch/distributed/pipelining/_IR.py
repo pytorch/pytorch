@@ -924,7 +924,7 @@ class Pipe(torch.nn.Module):
                 pass
 
         # This is done by (1) `_sink_params` at each submodule;
-        for submod in split.children():
+        for name, submod in split.named_children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()
