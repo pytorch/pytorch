@@ -14,18 +14,6 @@ using namespace c10::CachingDeviceAllocator;
 
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
-// all sizes are rounded to at least 512 bytes
-constexpr size_t kMinBlockSize = 512;
-// largest "small" allocation is 1 MiB
-constexpr size_t kSmallSize = 1048576;
-// "small" allocations are packed in 2 MiB blocks
-constexpr size_t kSmallBuffer = 2097152;
-// "large" allocations may be packed in 20 MiB blocks
-constexpr size_t kLargeBuffer = 20971520;
-// allocations between 1 and 10 MiB may use kLargeBuffer
-constexpr size_t kMinLargeAlloc = 10485760;
-// round up large allocations to 2 MiB
-constexpr size_t kRoundLarge = 2097152;
 
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
@@ -135,6 +123,8 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<xpu::XPUStream, std::deque<std::pair<sycl::event, Block*>>>
       xpu_events;
   DeviceIndex device_index;
+  size_t allowed_memory_maximum = 0;
+  bool set_fraction = false;
 
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
@@ -256,6 +246,12 @@ class DeviceCachingAllocator {
     auto device = p.device();
     if (isRetry) {
       stats.num_alloc_retries += 1;
+    }
+    if (set_fraction &&
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current +
+                size >
+            allowed_memory_maximum) {
+      return false;
     }
     void* ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
@@ -435,6 +431,23 @@ class DeviceCachingAllocator {
       c10::xpu::DeviceProp device_prop;
       c10::xpu::get_device_properties(&device_prop, device);
       auto device_total = device_prop.global_mem_size;
+      // Estimate the available device memory when the SYCL runtime does not
+      // support the corresponding aspect (ext_intel_free_memory).
+      size_t device_free = device_prop.global_mem_size -
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto& raw_device = c10::xpu::get_raw_device(device);
+      // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
+      // affected devices.
+      if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
+        device_free =
+            raw_device.get_info<sycl::ext::intel::info::device::free_memory>();
+      }
+      std::string allowed_info;
+      if (set_fraction) {
+        allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
+      }
+
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
@@ -457,7 +470,11 @@ class DeviceCachingAllocator {
           static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
-          ". Of the allocated memory ",
+          " of which ",
+          format_size(device_free),
+          " is free. ",
+          allowed_info,
+          "Of the allocated memory ",
           format_size(allocated_bytes),
           " is allocated by PyTorch, and ",
           format_size(reserved_bytes - allocated_bytes),
@@ -536,13 +553,21 @@ class DeviceCachingAllocator {
       stats.requested_bytes[statType].reset_peak();
     }
   }
+
+  void setMemoryFraction(double fraction) {
+    c10::xpu::DeviceProp device_prop;
+    c10::xpu::get_device_properties(&device_prop, device_index);
+    auto device_total = device_prop.global_mem_size;
+    allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
+    set_fraction = true;
+  }
 };
 
 static void local_raw_delete(void* ptr);
 
 class XPUAllocator : public DeviceAllocator {
  private:
-  std::mutex mutex;
+  alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
 
   void add_allocated_block(Block* block) {
@@ -698,6 +723,16 @@ class XPUAllocator : public DeviceAllocator {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
   }
+
+  void setMemoryFraction(double fraction, DeviceIndex device) {
+    assertValidDevice(device);
+    TORCH_CHECK_VALUE(
+        0 < fraction && fraction <= 1,
+        "invalid fraction:",
+        fraction,
+        ". Please set within (0, 1].");
+    device_allocators[device]->setMemoryFraction(fraction);
+  }
 };
 
 static XPUAllocator allocator;
@@ -740,6 +775,10 @@ void raw_delete(void* ptr) {
 
 void recordStream(const DataPtr& dataPtr, XPUStream stream) {
   return allocator.recordStream(dataPtr, stream);
+}
+
+void setMemoryFraction(double fraction, DeviceIndex device) {
+  return allocator.setMemoryFraction(fraction, device);
 }
 
 REGISTER_ALLOCATOR(kXPU, &allocator)
