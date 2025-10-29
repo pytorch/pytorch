@@ -787,14 +787,18 @@ def merge_reduce_scatter_bucket(
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
+    # Sort nodes deterministically by name to ensure consistent tensor ordering
+    # This prevents divergence between FSDP2 and SimpleFSDP due to different concatenation orders
+    rs_nodes_sorted = sorted(rs_nodes, key=lambda n: n.name)
+
     # Validate bucket consistency
-    rs0 = rs_nodes[0]
+    rs0 = rs_nodes_sorted[0]
     rs0_val = rs0.meta["val"]
     _, reduce_op, group_size, group_name = rs0.args
     reduce_dtype = rs0_val.dtype
     device = rs0_val.device
 
-    for n in rs_nodes:
+    for n in rs_nodes_sorted:
         rs_val = n.meta["val"]
         assert (
             n.args[1] == reduce_op
@@ -822,7 +826,7 @@ def merge_reduce_scatter_bucket(
 
     return process_collective_bucket(
         g,
-        rs_nodes,
+        rs_nodes_sorted,
         rs_merge_fn,
         create_trace_args,
         insert_before=insert_before,
