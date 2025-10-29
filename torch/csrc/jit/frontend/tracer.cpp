@@ -167,12 +167,12 @@ Value* TracingState::getValue(const IValue& var) {
     // Didn't find it. Bake in a constant
     if (ten.requires_grad()) {
       pauseTracing();
-      std::ostringstream oss;
-      oss << "Cannot insert a Tensor that requires grad as a constant. "
-          << "Consider making it a parameter or input, or detaching the gradient\n"
-          << "Tensor:\n"
-          << ten;
-      throw std::runtime_error(oss.str());
+      TORCH_CHECK(
+          false,
+          "Cannot insert a Tensor that requires grad as a constant. ",
+          "Consider making it a parameter or input, or detaching the gradient\n",
+          "Tensor:\n",
+          ten);
     }
 
     Value* constant = graph->insertConstant(ten);
@@ -208,15 +208,19 @@ Value* TracingState::getValue(const IValue& var) {
       }
     }
 
-    std::ostringstream oss;
     if (var.isFuture()) {
-      oss << "Tried to trace Future or Object that the tracer was not aware of.";
+      TORCH_CHECK(
+          false,
+          "Tried to trace Future or Object that the tracer was not aware of.");
     } else {
-      oss << "Tried to trace " << var
-          << " but it is not part of the active trace. Modules that are called during a trace"
-          << " must be registered as submodules of the thing being traced.";
+      TORCH_CHECK(
+          false,
+          "Tried to trace ",
+          var,
+          " but it is not part of the active trace. Modules that are called during a trace",
+          " must be registered as submodules of the thing being traced.");
     }
-    throw std::runtime_error(oss.str());
+
   } else {
     // If the values are non-tensors, we try to create constants
     // and bake those constants into the traced graph
@@ -225,11 +229,12 @@ Value* TracingState::getValue(const IValue& var) {
       recordSourceLocation(constant.value()->node());
       return *constant;
     }
-    std::ostringstream os;
-    os << "Tracer cannot get value trace for type " << var.tagKind() << ". "
-       << "The below value could not be materialized as a constant:\n"
-       << var;
-    throw std::runtime_error(os.str());
+    TORCH_CHECK(
+        false,
+        "Tracer cannot get value trace for type ",
+        var.tagKind(),
+        ". The below value could not be materialized as a constant:\n",
+        var);
   }
 }
 bool TracingState::hasValue(const IValue& var) const {
@@ -252,15 +257,14 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
 
     auto& value_map = getTracingState()->env_stack.back();
     auto it = value_map.find(iv);
-    if (it == value_map.end()) {
-      std::ostringstream os;
-      os << "output " << i << " (" << var
-         << ") of traced region did not have observable "
-         << "data dependence with trace inputs; this probably indicates your "
-            "program "
-         << "cannot be understood by the tracer.";
-      throw std::runtime_error(os.str());
-    }
+    TORCH_CHECK(
+        it != value_map.end(),
+        "output ",
+        i,
+        " (",
+        var,
+        ") of traced region did not have observable data dependence with trace inputs; ",
+        "this probably indicates your program cannot be understood by the tracer.");
     return it->second;
   } else if (iv.isTensorList()) {
     if (tracing_mode_strict) {
@@ -281,11 +285,10 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     graph->insertNode(tuple_node);
     return tuple_node->output();
   } else if (iv.isGenericDict()) {
-    if (tracing_mode_strict) {
-      throw std::runtime_error(
-          "Encountering a dict at the output of the tracer" +
-          std::string(STRICT_TRACER_MSG));
-    }
+    TORCH_CHECK(
+        !tracing_mode_strict,
+        "Encountering a dict at the output of the tracer",
+        STRICT_TRACER_MSG);
     auto dict = iv.toGenericDict();
     TypePtr key_type = dict.keyType();
     TypePtr value_type = dict.valueType();
@@ -304,15 +307,15 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         }
       }
     }
-
-    if (!key_type_valid || !value_type_valid) {
-      std::ostringstream os;
-      os << "output " << i << " (" << dict << ") of traced region "
-         << "cannot be understood by the tracer, only outputs matching"
-         << "dict[Union[str, Tensor], Union[Tensor, Tuple[Tensor, ...]]] "
-         << "can be a dictionary output of a traced function";
-      throw std::runtime_error(os.str());
-    }
+    TORCH_CHECK(
+        key_type_valid && value_type_valid,
+        "output ",
+        i,
+        " (",
+        dict,
+        ") of traced region cannot be understood by the tracer, only outputs matching ",
+        "dict[Union[str, Tensor], Union[Tensor, Tuple[Tensor, ...]]] ",
+        "can be a dictionary output of a traced function");
     std::vector<Value*> keys;
     std::vector<Value*> values;
     for (const auto& entry : dict) {
@@ -598,10 +601,11 @@ void TracingState::setValue(const IValue& v, Value* value) {
       setValue(entry.value(), static_value);
     }
   } else {
-    std::ostringstream os;
-    os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
-       << "Supported types are tensor, tensor list, and tuple of tensors.";
-    throw std::runtime_error(os.str());
+    TORCH_CHECK(
+        false,
+        "Tracer cannot set value trace for type ",
+        v.tagKind(),
+        ". Supported types are tensor, tensor list, and tuple of tensors.");
   }
 }
 
@@ -801,11 +805,10 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
     recordSourceLocation(info[i]->node());
   }
   for (jit::Value* v : info) {
-    if (*v->type() != *jit::IntType::get()) {
-      throw std::runtime_error(
-          "Type mismatch in setposattr for IntArrayRef. Check that your program "
-          "is valid without tracing, and please file a bug report if it is.");
-    }
+    TORCH_CHECK(
+        *v->type() == *jit::IntType::get(),
+        "Type mismatch in setposattr for IntArrayRef. Check that your program "
+        "is valid without tracing, and please file a bug report if it is.");
   }
   n->addInput(
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
