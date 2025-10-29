@@ -316,7 +316,7 @@ def while_loop_dense(
 
     if stack_output:
         outs: list[torch.Tensor] = []
-        for out in outputs:
+        for i, out in enumerate(outputs):
             outs.append(torch.stack(out, dim=0))
         return tuple(outs)
 
