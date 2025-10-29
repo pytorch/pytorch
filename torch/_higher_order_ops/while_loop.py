@@ -692,7 +692,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 # idx = 0
 # init_grad_carries = grads
-# init_grad_additional_inputs = torch.zeros_like(g_additioanl_inputs)
+# init_grad_additional_inputs = torch.zeros_like(g_additional_inputs)
 # fw_inps = torch.cat([ctx.fw_carried_inputs, fw_outputs[:-1]])
 # while_loop(cond_fn, body_fn, (idx, init_grad_carries, init_grad_additional_inputs,), (fw_additional_inputs, fw_inps))
 
@@ -746,7 +746,6 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             and (shape_env := loop_count.node.shape_env)
             and loop_count in shape_env.pending_fresh_unbacked_symbols
         ):
-            # pyrefly: ignore  # unbound-name
             shape_env.pending_fresh_unbacked_symbols.remove(loop_count)
 
         # Even when body function is not executed, we clone and unsqueeze the input

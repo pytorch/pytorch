@@ -7,12 +7,9 @@ if "%DESIRED_PYTHON%" == "3.13t" (
     set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.13.0/python-3.13.0-amd64.exe"
     set ADDITIONAL_OPTIONS="Include_freethreaded=1"
     set PYTHON_EXEC="python3.13t"
-) else if "%DESIRED_PYTHON%"=="3.14" (
-    echo Python version is set to 3.14 or 3.14t
-    set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.14.0/python-3.14.0rc1-amd64.exe"
 ) else if "%DESIRED_PYTHON%"=="3.14t" (
     echo Python version is set to 3.14 or 3.14t
-    set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.14.0/python-3.14.0rc1-amd64.exe"
+    set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.14.0/python-3.14.0-amd64.exe"
     set ADDITIONAL_OPTIONS="Include_freethreaded=1"
     set PYTHON_EXEC="python3.14t"
 ) else (

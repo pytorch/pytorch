@@ -16,7 +16,8 @@ import os
 import re
 import sys
 import unittest
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.testing
@@ -114,6 +115,17 @@ class TestCase(TorchTestCase):
     # graph break tests
 
 
+class TestCaseWithNestedGraphBreaks(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
+        torch._dynamo.config.nested_graph_breaks = True
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
+
+
 class CPythonTestCase(TestCase):
     """
     Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
@@ -153,9 +165,9 @@ class CPythonTestCase(TestCase):
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
     assertDictEqual = polyfills.assert_dict_equal
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
