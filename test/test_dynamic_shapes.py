@@ -4378,7 +4378,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     @torch._inductor.config.patch("cpp_wrapper", True)
     def test_narrow_unbacked_start_cpp_wrapper(self):
         """Test narrow with unbacked start with cpp_wrapper"""
-        self.test_unbacked_narrow_unbacked_start()
+        self.test_narrow_unbacked_start()
 
 
 instantiate_parametrized_tests(TestUnbacked)
