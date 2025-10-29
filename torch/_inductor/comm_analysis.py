@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from functools import lru_cache
-from typing import Optional
+from typing import ClassVar, Optional
 
 import sympy
 
@@ -255,7 +255,7 @@ class NVLinkConnection(Connection):
     version: str
     num_links: int
     # Bidirectional bandwidth per link (GB/s)
-    BANDWIDTH_PER_LINK = {
+    BANDWIDTH_PER_LINK: ClassVar[dict[str, float]] = {
         "1.0": 40.0,  # 20 GB/s unidirectional × 2
         "2.0": 50.0,  # 25 GB/s unidirectional × 2
         "3.0": 50.0,  # 25 GB/s unidirectional × 2 (A100)
