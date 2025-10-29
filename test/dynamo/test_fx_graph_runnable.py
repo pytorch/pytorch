@@ -363,6 +363,25 @@ class FxGraphRunnableTest(TestCase):
 
         self._exec_and_verify_payload()
 
+    def test_metrics_context(self):
+        """
+        When TORCH_COMPILE_DEBUG is set, provenance_tracking_level is set to 1, and
+        the generated fx_graph_runnable crashed with,
+        RuntimeError: Cannot add inductor_provenance outside of a MetricsContext
+        """
+        import torch._inductor.config as inductor_config
+
+        def f(x):
+            return x * 2 + 1
+
+        # Enable provenance tracking to trigger the code path that adds metrics
+        with inductor_config.patch(
+            {"trace.enabled": True, "trace.provenance_tracking_level": 1}
+        ):
+            x = torch.randn(4, 4)
+            torch.compile(f)(x)
+            self._exec_and_verify_payload()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
