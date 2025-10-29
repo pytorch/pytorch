@@ -547,62 +547,23 @@ def rebind_unbacked(
         assert shape_env is not None
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
-            # Sometimes, things were previously unbacked bindings become constants.
-            # There are two situations this can happen.
+            # Sometimes, previously unbacked bindings become constants,
+            # or they might be replaced to other backed or unbacked replacements.
             #
-            # First, you might have a runtime assert that causes the
-            # constant-ification.  In this case, the /binding/ itself will
-            # still be an unbacked symbol (because we will only force it
-            # to be a constant later in fake tensor propagation).  In this
-            # case, u1 is a SymInt and we still do all our work as normal.
+            # Example:
+            #   u = x.item()
+            #   torch._check(u == 5)
             #
-            # But second, it might be that fake tensor propagation DIRECTLY
-            # converted the unbacked SymInt into a constant.  This happens
-            # more rarely, but we have identified two situations it can
-            # validly occur:
+            # The safest approach is to retrieve raw_u1 from u1.node._expr
+            # and perform the rebinding on the original unbacked symbol,
+            # even if it’s no longer directly referenced.
             #
-            # - If you have a tensor_version operator, these are initially
-            #   allocated as unbacked SymInts, but after AOTAutograd they
-            #   get forced specialized to specific values.  In this case,
-            #   there is no reason to do runtime asserts on them, this is
-            #   just a hack to properly keep track of them to start.
-            #
-            # - If you have an item() call on a constant tensor, the result
-            #   of the item() call is constant and we do not need runtime
-            #   asserts on this symbol.  In
-            #   https://github.com/pytorch/pytorch/issues/140625 we have a
-            #   case where in the initial trace of the program we are unable
-            #   to determine that torch.tensor is constant, but then
-            #   subsequent passes cause torch.tensor to become a constant and
-            #   then the unbacked symbol goes poof.
-            #
-            # In all of these cases, it is no longer necessary to generate
-            # deferred runtime asserts, since other subsystems (e.g., the
-            # constant-ification pass) ensure that the quantity is now truly
-            # static and cannot change at runtime.  So it's OK to discard
-            # in these situations.
-            #
-            # There is one more hazard (re
-            # https://github.com/pytorch/pytorch/issues/141248), the problem
-            # is that you can end up with "dangling" unbacked symbols that
-            # exist in the ShapeEnv but are never bound anywhere.  You might
-            # like an invariant that unbacked symbols never get lost.  But
-            # we do not have this invariant, so do not try to enforce it.
-            if isinstance(u1, (int, float)):
-                log.info(
-                    "rebind_unbacked: discard %s %s %s -> %s",
-                    n.target,
-                    raw_u0,
-                    path,
-                    u1,
-                )
-                continue
+            # In other words, we should always rebind the original symbol
+            # before any replacements are applied.
+            #   u0 -> u0 == s1
+            raw_u1 = u1.node._expr
 
-            # We only care about rebinding unbacked things
-            if u1.node.hint is not None:
-                continue
-
-            raw_u1 = u1.node.expr
+            # TODO Do we still need this logic bellow?
             # Simplify SymBool binding
             if (
                 isinstance(raw_u1, sympy.Piecewise)

@@ -1742,8 +1742,14 @@ Tensor narrow_symint(
     // instead of 0.
 
     auto use_different = start.sym_lt(0).sym_and(end.sym_eq(0)).toSymInt();
-    return at::slice_symint(
-        self, dim, start, end + use_different * cur_size, 1);
+    auto result =
+        at::slice_symint(self, dim, start, end + use_different * cur_size, 1);
+
+    // Ensure slice allocted unbacked size is specialized back to length.
+    SymInt new_size = result.sym_sizes()[dim];
+    TORCH_SYM_CHECK(new_size.sym_eq(length), "")
+
+    return result;
   }
 }
 
