@@ -969,7 +969,7 @@ class AutogradCompilerInstance:
 
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
         unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
-        i = -1
+        i: int | None = None
         for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):  # noqa: B007
             unpack_nodes.update(node.users.keys())
         assert i == len(_graph_placeholders) - 1
