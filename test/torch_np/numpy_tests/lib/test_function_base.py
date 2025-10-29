@@ -2596,12 +2596,12 @@ class TestBincount(TestCase):
         intp_refcount = sys.getrefcount(np.dtype(np.intp))
         double_refcount = sys.getrefcount(np.dtype(np.double))
 
-        for j in range(10):
+        for _ in range(10):
             np.bincount([1, 2, 3])
         assert_equal(sys.getrefcount(np.dtype(np.intp)), intp_refcount)
         assert_equal(sys.getrefcount(np.dtype(np.double)), double_refcount)
 
-        for j in range(10):
+        for _ in range(10):
             np.bincount([1, 2, 3], [4, 5, 6])
         assert_equal(sys.getrefcount(np.dtype(np.intp)), intp_refcount)
         assert_equal(sys.getrefcount(np.dtype(np.double)), double_refcount)

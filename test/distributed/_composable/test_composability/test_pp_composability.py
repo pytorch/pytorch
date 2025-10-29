@@ -336,7 +336,7 @@ class ComposabilityTest(MultiProcessTestCase):
             for model in partial_models
         ]
 
-        for train_step in range(5):
+        for _train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
             inputs = torch.rand((num_microbatches, dim), device=self.device)
@@ -517,7 +517,7 @@ class ComposabilityTest(MultiProcessTestCase):
             for model in ref_partial_models
         ]
 
-        for train_step in range(5):
+        for _train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
             for ref_optimizer in ref_optimizers:
