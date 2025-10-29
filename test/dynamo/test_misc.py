@@ -1525,7 +1525,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         x = torch.randn(3)
         torch._dynamo.maybe_mark_dynamic(x, 0)
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check()"
+        ):
             f(x)
 
     def test_check_assert_error_at_runtime_when_predicate_true_and_message_has_closure(
@@ -1539,7 +1541,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         x = torch.randn(4)
         torch._dynamo.maybe_mark_dynamic(x, 0)
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check()"
+        ):
             f(x)
 
     def test_assert(self):
