@@ -319,18 +319,11 @@ def _varlen_attn_backward_fake(
 def _backward(
     ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor, grad_philox_offset: torch.Tensor
 ) -> tuple[Optional[torch.Tensor], ...]:
-    query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state = ctx.saved_tensors
+    query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state, philox_offset = ctx.saved_tensors
 
     max_q = ctx.max_q
     max_k = ctx.max_k
     is_causal = ctx.is_causal
-<<<<<<< HEAD
-=======
-    out = ctx.output
-    lse = ctx.lse
-    rng_state = ctx.rng_state
-    philox_offset = ctx.philox_offset
->>>>>>> 985daf6c528 (debugging cudnn numerics)
 
     dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,
