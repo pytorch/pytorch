@@ -158,7 +158,7 @@ class RingAttentionTest(DTensorTestBase):
             # parameters because when require_grad is True, resize_ is not
             # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
             # now. So we can just use context_parallel() to shard q, k, v.
-            # In reality, context_paralle() should be used to shard the input.
+            # In reality, context_parallel() should be used to shard the input.
             # In reality, context_parallel() should only be used to shard
             # the model inputs (batch).
 
@@ -701,7 +701,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         )
 
         # TODO: change this for-loop to run_subtests
-        # Use a for-loop instead of run_subtests because we need to intialize the mask
+        # Use a for-loop instead of run_subtests because we need to initialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
         for batch_size, max_seq_len, lb_type in itertools.product(
