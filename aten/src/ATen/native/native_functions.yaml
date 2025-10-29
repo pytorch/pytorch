@@ -423,6 +423,7 @@
   variants: function
   dispatch:
     CPU, CUDA, MPS, Meta: view_as_complex
+    SparseCPU, SparseCUDA: view_as_complex_sparse
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
