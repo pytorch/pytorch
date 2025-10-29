@@ -283,8 +283,9 @@ def _for_each_rank_run_func(
         alias = False
         # For the in-place ops return self
         ret = args[0]
-        # Ensure that wrapper tensor size is synchronized with its local tensors
-        ret._sync_meta()
+        if isinstance(func, OpOverload) and torch.Tag.inplace_view in func.tags:
+            # Ensure that wrapper tensor size is synchronized with its local tensors
+            ret._sync_meta()
     else:
         ret = _combine_rank_results(flat_rank_rets, default_value)
 
@@ -567,6 +568,11 @@ class LocalTensor(torch.Tensor):
             dtype=dtype,
             device=device,
             layout=layout,
+            # In place ops potentially change local tensor sizes (e.g. resize_). While
+            # executing an in-place op the return value must be the same as "self" input
+            # otherwise we can introduce errors due to tensor identity changes. Hence we
+            # need to be able to update wrapper subclass sizes after in-place ops. This
+            # dispatch policy allows us to do that.
             dispatch_sizes_strides_policy="sizes",
             requires_grad=requires_grad,
             _extra_dispatch_keys=extra_dispatch_keys,
@@ -676,38 +682,6 @@ class LocalTensor(torch.Tensor):
             return self.reconcile().numpy(force=force)
         else:
             raise RuntimeError("Numpy is not available")
-
-    def __lt__(
-        self, other: torch.Tensor | bool | complex | float | int
-    ) -> torch.Tensor:
-        if isinstance(other, AsyncCollectiveTensor):
-            other = other.wait()
-
-        result: dict[int, torch.Tensor] = {
-            r: (
-                t < other._local_tensors[r]
-                if isinstance(other, LocalTensor)
-                else t < other
-            )
-            for r, t in self._local_tensors.items()
-        }
-        return LocalTensor(result, self.requires_grad)
-
-    def __gt__(
-        self, other: torch.Tensor | bool | complex | float | int
-    ) -> torch.Tensor:
-        if isinstance(other, AsyncCollectiveTensor):
-            other = other.wait()
-
-        result: dict[int, torch.Tensor] = {
-            r: (
-                t > other._local_tensors[r]
-                if isinstance(other, LocalTensor)
-                else t > other
-            )
-            for r, t in self._local_tensors.items()
-        }
-        return LocalTensor(result, self.requires_grad)
 
     def contiguous(
         self,
