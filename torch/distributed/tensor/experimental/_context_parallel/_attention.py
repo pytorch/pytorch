@@ -17,13 +17,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
-from torch.distributed.tensor.experimental._context_parallel._load_balancer import (
-    _create_default_load_balancer,
-    _HeadTailLoadBalancer,
-    _LoadBalancer,
-    _PerDocumentHeadTailLoadBalancer,
-    _PTRRLoadBalancer,
-)
 from torch.distributed.tensor.parallel import ParallelStyle
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
@@ -32,26 +25,11 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from ._context_parallel._cp_custom_ops import flex_cp_allgather
+from ._cp_custom_ops import flex_cp_allgather
+from ._load_balancer import _create_default_load_balancer, _LoadBalancer
 
 
-__all__ = [
-    "_CausalBehavior",
-    "_context_parallel_shard",
-    "_ContextParallel",
-    "_cp_options",
-    "_disable_context_parallel_dispatcher",
-    "_enable_context_parallel_dispatcher",
-    "_is_causal_behavior",
-    "_RotateMethod",
-    "context_parallel",
-    "context_parallel_unshard",
-    "set_rotate_method",
-    "_HeadTailLoadBalancer",
-    "_LoadBalancer",
-    "_PerDocumentHeadTailLoadBalancer",
-    "_PTRRLoadBalancer",
-]
+__all__ = ["context_parallel", "set_rotate_method"]
 
 
 class _CausalBehavior(Enum):
