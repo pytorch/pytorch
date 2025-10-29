@@ -5,8 +5,6 @@
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
-#include <vector>
-
 namespace at::xpu {
 
 // p2pAccessEnabled_ is a flattened 2D matrix of size [num_devices x

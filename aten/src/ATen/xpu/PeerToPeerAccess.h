@@ -1,6 +1,7 @@
+#pragma once
+
 #include <c10/core/Device.h>
 #include <c10/macros/Macros.h>
-#include <cstdint>
 
 namespace at::xpu {
 namespace detail {
