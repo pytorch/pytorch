@@ -9013,10 +9013,11 @@ Example::
 
 add_docstr(
     torch.rand_like,
-    r"""
+    """
 rand_like(input, *, generator=None, dtype=None, layout=None, device=None, \
 requires_grad=False, memory_format=torch.preserve_format) -> Tensor
-
+"""
+    + r"""
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
 ``torch.rand_like(input)`` is equivalent to
@@ -9089,7 +9090,8 @@ add_docstr(
     """
 randint_like(input, low=0, high, \\*, generator=None, dtype=None, layout=torch.strided, \
 device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
-
+"""
+    + r"""
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
 random integers generated uniformly between :attr:`low` (inclusive) and
 :attr:`high` (exclusive).
@@ -9172,10 +9174,11 @@ Example::
 
 add_docstr(
     torch.randn_like,
-    r"""
+    """
 randn_like(input, *, generator=None, dtype=None, layout=None, device=None, \
 requires_grad=False, memory_format=torch.preserve_format) -> Tensor
-
+"""
+    + r"""
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1. Please refer to :func:`torch.randn` for the
 sampling process of complex dtypes. ``torch.randn_like(input)`` is equivalent to
