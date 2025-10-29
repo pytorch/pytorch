@@ -399,7 +399,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         handler = optree.register_pytree_node.get(tuple, namespace=namespace)  # type: ignore[attr-defined]
         assert handler is not None
         return PyTreeSpec(
-            tuple(children),  # type: ignore[arg-type]
+            tuple(children),
             tuple,
             None,
             tuple(range(len(children))),
@@ -447,7 +447,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             namespace=namespace,
         )
         return PyTreeSpec(
-            tuple(children),
+            tuple(children),  # type: ignore[arg-type]
             dict,
             metadata,
             entries,
