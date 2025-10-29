@@ -617,6 +617,9 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "index_select(): self and output must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  at::assert_no_internal_overlap(output);
+  at::assert_no_overlap(output, self);
+  at::assert_no_overlap(output, index);
   auto output_size = self.sizes().vec();
   if (self.dim() > 0) {
     output_size[dim] = num_indices;
@@ -907,6 +910,8 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "index_fill_(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_fill_(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(self.is_complex() || !source.is_complex(),
+              "index_fill_(): Converting complex Scalar to non-complex type is not supported");
   // MPS.scatter crashes if used with complex dtypes
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "index_fill_(): Complex types are yet not supported");
 

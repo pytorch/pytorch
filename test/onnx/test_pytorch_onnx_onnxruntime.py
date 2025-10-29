@@ -1935,7 +1935,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
                 # Add transpose to hide shape/type information
-                # Otherwise shape and type are still avaiable from input.
+                # Otherwise shape and type are still available from input.
                 x = x.transpose(1, 2)
                 y = y.transpose(1, 2)
                 return x / y, torch.true_divide(x, y)
@@ -3878,7 +3878,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
             def forward(self, x, k):
-                # When sorted=False, order of elements in the outout tensors
+                # When sorted=False, order of elements in the output tensors
                 # are not expected to match between PyTorch and ORT
                 topk_unsorted = torch.topk(x, k, largest=False, sorted=False)
                 topk_sorted = torch.topk(x, k, largest=False, sorted=True)
@@ -4361,7 +4361,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 super().__init__()
                 self.weight = torch.nn.Buffer(torch.ones(5))
                 # torch.nn.Embedding is converted to ONNX::Gather.
-                # Constant folding will be triggerred for constant inputs.
+                # Constant folding will be triggered for constant inputs.
                 # This pattern is common for constant mask inputs in transformer models.
                 self.embed = torch.nn.Embedding(8, 3)
 
@@ -4879,7 +4879,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_rnn_no_bias(self):
         def make_model(layers, packed_sequence):
-            batch_first = True if packed_sequence == 2 else False
+            batch_first = packed_sequence == 2
             model = torch.nn.RNN(
                 RNN_INPUT_SIZE,
                 RNN_HIDDEN_SIZE,
@@ -4900,7 +4900,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             return model
 
         def make_input(batch_size, layers, packed_sequence):
-            batch_first = True if packed_sequence == 2 else False
+            batch_first = packed_sequence == 2
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
@@ -5389,7 +5389,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(7, 3, 5)
         self._argmin_argmax_model(input)
 
-    # Argmin and Argmax with "select_last_index" is not supprted before opset 12
+    # Argmin and Argmax with "select_last_index" is not supported before opset 12
     # "select_last_index" was added in opset 12 to deal with corner case where the
     # same value appears multiple times in the tensor
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -10511,7 +10511,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 amax = torch.ones(4)
                 scale = amax / 127.0
                 zero_point = torch.zeros_like(amax, dtype=torch.int)
-                # Quantize twice to test differnet branches
+                # Quantize twice to test different branches
                 y = torch.fake_quantize_per_channel_affine(
                     input, scale, zero_point, 1, 0, 255
                 )
