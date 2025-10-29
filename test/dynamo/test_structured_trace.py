@@ -1260,6 +1260,8 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 torch._dynamo.reset()
 
                 mod = SimpleModule().cuda()
+                for p in mod.parameters():
+                    p.requires_grad = False
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
@@ -1327,6 +1329,8 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 torch._dynamo.reset()
 
                 mod = MixedModule().cuda()
+                for p in mod.parameters():
+                    p.requires_grad = False
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
@@ -1381,6 +1385,8 @@ def forward(self, x_1: "f32[2][1]cpu"):
             with self._setup_runtime_estimates_capture() as payload_buffer:
                 torch._dynamo.reset()
                 mod = Mixed().cuda()
+                for p in mod.parameters():
+                    p.requires_grad = False
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
                 payload = payload_buffer.getvalue().strip()
