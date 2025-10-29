@@ -7409,8 +7409,7 @@ for shape in [(1,), ()]:
 
         x = torch.randn(3, 3, requires_grad=True)
         out = checkpoint(fn, x, use_reentrant=False)
-        group = torch.utils.checkpoint.GraphExecGroup()
-        with group:
+        with torch.utils.checkpoint.GraphExecGroup():
             # Under this context, we will enforce that two backward are disjoint
             # even if retain_graph=True.
             out.sum().backward(retain_graph=True)
