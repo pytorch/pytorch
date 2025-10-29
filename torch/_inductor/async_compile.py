@@ -228,18 +228,6 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
-@contextlib.contextmanager
-def async_compile_pool_manager():
-    """
-    Context manager to quiesce the subproc pool at the end of compilation, i.e.,
-    when dynamo is done.
-    """
-    try:
-        yield
-    finally:
-        AsyncCompile.quiesce()
-
-
 class AsyncCompile:
     """
     Utilities to compile in thread pools or subprocess pools (in the case of Triton).
@@ -275,7 +263,7 @@ class AsyncCompile:
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(get_compile_threads())
+            pool = SubprocPool(get_compile_threads(),quiesce= config.quiesce_async_compile_pool)
         else:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
@@ -330,20 +318,6 @@ class AsyncCompile:
         if not cls._ready_future:
             cls._ready_future = cls.process_pool().submit(cls._get_ready)
         return cls._ready_future.done()
-
-    @classmethod
-    def quiesce(cls) -> None:
-        """
-        If using a SubprocPool, signal the sidecar process to shut down its
-        ProcessPoolExecutor.
-        """
-        # Don't inadvertently create a process pool if it doesn't already exist:
-        if not cls.process_pool.cache_info().currsize:
-            return
-        if config.quiesce_async_compile_pool:
-            pool = cls.process_pool()
-            if isinstance(pool, SubprocPool):
-                pool.quiesce()
 
     @classmethod
     def wakeup(cls) -> None:
