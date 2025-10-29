@@ -977,6 +977,14 @@ if HAS_CUDA_AND_TRITON:
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 1)
 
+            # test that op_overload name takes effect which lead to 2 partitions
+            torch._inductor.config.custom_should_partition_ops = ["mylib::baz.default"]
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 2)
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_with_memory_plan_reuse(self):
