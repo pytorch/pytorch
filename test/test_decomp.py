@@ -1484,7 +1484,7 @@ class HasDecompTest(TestCase):
             var_node_21 = torch.matmul(
                 var_node_22.to(torch.float64), var_node_25.to(torch.float64)
             )  # size=(156, 16), stride=(16, 1), dtype=float64, device=cuda
-            var_node_29 = arg_8  # size=(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), stride=(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), dtype=bool, device=cuda
+            var_node_29 = arg_8
             _x_nz = torch.zeros(
                 (9, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
                 dtype=torch.bool,
