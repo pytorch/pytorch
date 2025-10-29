@@ -74,7 +74,7 @@ class TestCase(InductorTestCase):
         def run(op, args, kwargs):
             return op(*args, **kwargs)
 
-        sample_inputs_itr = op.sample_inputs("cuda", dtype, requires_grad=False)
+        sample_inputs_itr = op.sample_inputs(GPU_TYPE, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
@@ -335,7 +335,9 @@ class TestCase(InductorTestCase):
         self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
 
 
-instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestCase, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

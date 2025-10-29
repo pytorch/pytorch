@@ -210,9 +210,16 @@ class PlacementVariable(DistributedVariable):
         if name in constant_fold_functions:
             try:
                 value_type = type(self.value)
-                assert (
-                    inspect.getattr_static(value_type, "__getattr__", None) is None
-                ), "no custom getattr allowed!"
+                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                    unimplemented_v2(
+                        gb_type="Placement with custom __getattr__ not supported",
+                        context=f"{value_type.__name__} with custom __getattr__",
+                        explanation="Dynamo does not support Placement types with custom __getattr__ methods",
+                        hints=[
+                            "Use Placement types without custom __getattr__ methods",
+                            "Move the Placement usage outside the compiled region",
+                        ],
+                    )
                 method = inspect.getattr_static(value_type, name)
             except AttributeError:
                 method = None
