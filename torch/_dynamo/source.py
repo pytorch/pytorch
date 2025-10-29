@@ -20,7 +20,8 @@ the code needed to recreate values.
 import dataclasses
 import enum
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch._guards import ChainedSource, Guard, GuardSource, Source
 

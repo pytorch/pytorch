@@ -16,7 +16,7 @@ collection support for PyTorch APIs.
 
 import functools
 import types
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
@@ -272,6 +272,30 @@ def _is_pytreespec_instance(
     obj: Any, /
 ) -> TypeIs[Union[TreeSpec, python_pytree.TreeSpec]]:
     return isinstance(obj, (TreeSpec, python_pytree.TreeSpec))
+
+
+def treespec_leaf() -> TreeSpec:
+    """Make a treespec representing a leaf node."""
+    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
+    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
+
+
+def treespec_dict(
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[tuple[Any, TreeSpec]]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
+    return optree.treespec_dict(
+        mapping,
+        **kwargs,
+        none_is_leaf=True,
+        namespace="torch",
+    )
 
 
 def tree_is_leaf(
@@ -716,7 +740,6 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -777,7 +800,6 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -948,7 +970,10 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert _is_pytreespec_instance(treespec)
+    if not _is_pytreespec_instance(treespec):
+        raise AssertionError(
+            f"_broadcast_to_and_flatten: Expected `treespec` to be instance of PyTreeSpec but got {type(treespec)}"
+        )
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
@@ -1005,9 +1030,14 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
         return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
+@deprecated(
+    "`isinstance(treespec, LeafSpec)` is deprecated, "
+    "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
+    category=FutureWarning,
+)
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):  # type: ignore[misc,final]
-    def __new__(cls) -> "LeafSpec":
-        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+    def __new__(cls) -> Self:
+        return treespec_leaf()  # type: ignore[return-value]
 
 
 def tree_flatten_with_path(
@@ -1097,7 +1127,7 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
 
 
 with python_pytree._NODE_REGISTRY_LOCK:
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     python_pytree._cxx_pytree_imported = True
     args, kwargs = (), {}  # type: ignore[var-annotated]
     for args, kwargs in python_pytree._cxx_pytree_pending_imports:
