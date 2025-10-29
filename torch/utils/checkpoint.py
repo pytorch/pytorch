@@ -340,7 +340,6 @@ def noop_context_fn():
 #     break. And here, the following disable wrapper ensures that
 #     TorchDynamo does not trigger again on the frames created by
 #     utils.checkpoint innards.
-@torch._disable_dynamo
 def checkpoint(
     function,
     *args,
@@ -500,11 +499,11 @@ def checkpoint(
             function, preserve, context_fn, determinism_check, debug, early_stop, *args, **kwargs
         )
         # Runs pre-forward logic
-        next(gen)
+        _run_fn_with_dynamo_disabled(next, gen)
         ret = function(*args, **kwargs)
         # Runs post-forward logic
         try:
-            next(gen)
+            _run_fn_with_dynamo_disabled(next, gen)
         except StopIteration:
             return ret
 

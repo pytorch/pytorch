@@ -623,10 +623,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         self.assertEqual(result, expected)
 
-        # One graph for torch.sin on the input, and other for torch.cos.
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)
-        self.assertEqual(len(cnt.graphs), 2)
+        # Graphs:
+        # 1. fn, torch.sin(x)
+        # 2. gn, a = torch.sigmoid(torch.matmul(x, y))
+        # 3. gn, return torch.cos(a)
+        # 4. fn, return torch.cos(...
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, 5)
+        self.assertEqual(len(cnt.graphs), 4)
 
     @requires_cuda_and_triton
     def test_kwargs(self, device):
