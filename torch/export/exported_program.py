@@ -1500,7 +1500,7 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if transformed_gm is self.graph_module and not res.modified:
             return self
 
@@ -1579,7 +1579,7 @@ class ExportedProgram:
             verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
