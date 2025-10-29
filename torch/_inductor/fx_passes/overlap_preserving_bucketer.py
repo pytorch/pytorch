@@ -1,40 +1,9 @@
-import dataclasses
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
 import torch.fx as fx
-
-
-log = logging.getLogger(__name__)
-bucket_log = logging.getLogger(f"{__name__}.bucketing")
-
-
-@dataclasses.dataclass(slots=True)
-class WhyNoBucket:
-    name1: str
-    name2: str
-    reason: str
-    args: tuple[Any, ...]
-
-    def __init__(self, node1: fx.Node, node2: fx.Node) -> None:
-        self.name1 = node1.name
-        self.name2 = node2.name
-        self.reason = ""
-        self.args = ()
-
-    def __call__(self, reason: str, *args: Any) -> None:
-        self.reason = reason
-        self.args = args
-        bucket_log.debug(self)
-
-    def __str__(self) -> str:
-        return f"cannot bucket {self.name1} with {self.name2}: " + (
-            self.reason % self.args
-        )
-
-
 from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
@@ -50,6 +19,29 @@ from torch._inductor.fx_passes.overlap_scheduling import (
     is_compute_node,
 )
 from torch.utils._ordered_set import OrderedSet
+
+
+bucket_log = logging.getLogger(__name__)
+
+
+@dataclass
+class WhyNoBucket:
+    name1: str
+    name2: str
+    reason: str
+    args: tuple[Any, ...]
+
+    def __init__(self, node1: fx.Node, node2: fx.Node) -> None:
+        self.name1 = node1.name
+        self.name2 = node2.name
+        self.reason = ""
+        self.args = ()
+
+    def __call__(self, reason: str, *args: Any) -> None:
+        if bucket_log.isEnabledFor(logging.DEBUG):
+            bucket_log.debug(
+                "cannot bucket %s with %s: " + reason, self.name1, self.name2, *args
+            )
 
 
 def is_collective_or_wait(n: fx.Node) -> bool:
