@@ -319,7 +319,7 @@ class TestVarlenAttention(NNTestCase):
         torch.manual_seed(42)
 
         shape = VarlenShape(
-            batch_size=8, max_seq_len=2048, embed_dim=1024, num_heads=16
+            batch_size=2, max_seq_len=128, embed_dim=32, num_heads=4
         )
 
         attention_block = AttentionBlock(

@@ -20,7 +20,7 @@ __all__ = ["varlen_attn", "AuxRequest"]
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
-    return False
+    return True
 
 
 class AuxRequest(NamedTuple):
@@ -43,7 +43,7 @@ def _varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
 
@@ -51,9 +51,9 @@ def _varlen_attn(
     """
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
-
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
+
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -69,7 +69,7 @@ def _varlen_attn(
             False,  # return_debug_mask
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
-        output, softmax_lse, rng_state = result[0], result[1], result[6]
+        output, softmax_lse, rng_state, philox_offset = result[0], result[1], result[6], result[7]
     else:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
@@ -84,11 +84,13 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
+        philox_offset = torch.zeros((), dtype=torch.int64, device=query.device)
 
     rng_state_ = torch.zeros(
         (2,), dtype=torch.uint64, device=query.device
     )  # hardcoded since dropout is hardcoded to 0
-    return output, softmax_lse, rng_state_
+
+    return output, softmax_lse, rng_state_, philox_offset
 
 
 @_varlen_attn.register_fake
@@ -112,16 +114,24 @@ def _varlen_attn_fake(
     # Output has same shape as query
     output = torch.empty_like(query)
 
-    # For varlen path: logsumexp shape is (num_heads, total_q)
+    # For varlen path with cuDNN: logsumexp shape is (total_q, num_heads, 1)
     total_q = query.size(0)
     num_heads = query.size(1)
-    logsumexp = torch.empty(
-        (num_heads, total_q), dtype=torch.float, device=query.device
-    )
+
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+    if use_cudnn:
+        logsumexp = torch.empty(
+            (total_q, num_heads, 1), dtype=torch.float, device=query.device
+        )
+    else:
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
+    philox_offset = torch.zeros((), dtype=torch.int64, device=query.device)
 
-    return output, logsumexp, rng_state
+    return output, logsumexp, rng_state, philox_offset
 
 
 def varlen_attn(
@@ -195,7 +205,7 @@ def varlen_attn(
         ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
         ... )
     """
-    out, lse, _ = torch.ops.torch_attn._varlen_attn(
+    out, lse, _, _ = torch.ops.torch_attn._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
     if return_aux is not None and return_aux.lse:
@@ -205,9 +215,9 @@ def varlen_attn(
 
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
-    out, lse, rng_state = output
+    out, lse, rng_state, philox_offset = output
 
-    ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
+    ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state, philox_offset)
 
     ctx.max_q = max_q
     ctx.max_k = max_k
@@ -228,27 +238,35 @@ def _varlen_attn_backward(
     max_k: int,
     is_causal: bool,
     rng_state: torch.Tensor,
+    philox_offset: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     unused = torch.empty(0, device=query.device)
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
+
+        head_dim = query.size(-1)
+        scale = 1.0 / (head_dim ** 0.5)
+
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            lse,
-            cu_seq_q,
-            cu_seq_k,
-            max_q,
-            max_k,
-            0.0,
-            is_causal,
-            rng_state,
-            unused,
+            grad_out = grad_out,
+            query = query,
+            key = key,
+            value = value,
+            out = out,
+            logsumexp = lse,
+            philox_seed = rng_state,
+            philox_offset = philox_offset,
+            attn_bias = None,
+            cum_seq_q = cu_seq_q,
+            cum_seq_k = cu_seq_k,
+            max_q = max_q,
+            max_k = max_k,
+            dropout_p = 0.0,
+            is_causal = is_causal,
+            # passing in scale doesn't change the value of the gradients
+            # scale=scale
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")
@@ -285,6 +303,7 @@ def _varlen_attn_backward_fake(
     max_k: int,
     is_causal: bool,
     rng_state: torch.Tensor,
+    philox_offset: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -298,9 +317,9 @@ def _varlen_attn_backward_fake(
 
 
 def _backward(
-    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
+    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor, grad_philox_offset: torch.Tensor
 ) -> tuple[Optional[torch.Tensor], ...]:
-    query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state = ctx.saved_tensors
+    query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state, philox_offset = ctx.saved_tensors
 
     max_q = ctx.max_q
     max_k = ctx.max_k
@@ -319,6 +338,7 @@ def _backward(
         max_k,
         is_causal,
         rng_state,
+        philox_offset
     )
     return dq, dk, dv, None, None, None, None, None, None
 
