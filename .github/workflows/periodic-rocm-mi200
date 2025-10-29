@@ -1,4 +1,4 @@
-name: periodic-mi200
+name: periodic-rocm-mi200
 
 on:
   schedule:
@@ -11,7 +11,7 @@ on:
     - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
-      - ciflow/periodic-mi200/*
+      - ciflow/periodic-rocm-mi200/*
     branches:
       - release/*
   workflow_dispatch:
