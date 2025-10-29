@@ -4921,12 +4921,13 @@ def get_all_cudagraph_segments():
     return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
 
 
-def cudagraphify(fn, inputs, pool=None):
+def cudagraphify(fn, inputs, pool=None, stream=None):
     if not TEST_CUDA_GRAPH:
         raise unittest.SkipTest("cuda graph test is skipped")
 
     torch.cuda.synchronize()
-    stream = torch.cuda.Stream()
+    if stream is None:
+        stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(stream):
         fn(*inputs)
@@ -5220,6 +5221,47 @@ class TestBlockStateAbsorption(TestCase):
 
         torch._C._cuda_cudaCachingAllocator_raw_delete(output_ptrs[2])
 
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    def _test_set_segment_states_to_checkpoint(self):
+        def foo(x, idx):
+            r1 = x.expand([1, 2097152 // 8]).clone()
+            r2 = x.expand([idx, 2097152]).clone()
+            return r1, r2
+
+        # init common resource
+        pool_id = torch.cuda.graph_pool_handle()
+        com_stream = torch.cuda.Stream()
+        com_device = torch.cuda.current_device()
+        inp = torch.tensor([7]).cuda()
+
+        # start capture graph1
+        graph1, outputs1 = cudagraphify(foo, [inp, 1], pool=pool_id, stream=com_stream)
+        graph1_state = torch._C._cuda_getCheckpointState(com_device, pool_id)
+        graph1.replay()
+        output1_metadata = [tensor_metadata(t) for t in outputs1]
+        outputs1 = None
+
+        # start capture graph2
+        graph2, outputs2 = cudagraphify(foo, [inp, 2], pool=pool_id, stream=com_stream)
+        graph2_state = torch._C._cuda_getCheckpointState(com_device, pool_id)
+        graph2.replay()
+        outputs2 = None
+
+        # replay graph1
+        graph1.replay()
+        reconstructed_tensors1 = [
+            reconstruct_from_tensor_metadata(metadata) for metadata in output1_metadata
+        ]
+        output1_new_storage = [
+            output.untyped_storage()._cdata for output in reconstructed_tensors1
+        ]
+        torch._C._cuda_setCheckpointPoolState(
+            com_device, graph1_state, [], output1_new_storage
+        )
+        self.assertEqual(live_blocks(pool_id), 2)
+
+        del reconstructed_tensors1
         self.assertEqual(live_blocks(pool_id), 0)
 
     @skipIfNoTorchVision
