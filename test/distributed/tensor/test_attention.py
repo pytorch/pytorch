@@ -158,7 +158,7 @@ class RingAttentionTest(DTensorTestBase):
             # parameters because when require_grad is True, resize_ is not
             # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
             # now. So we can just use context_parallel() to shard q, k, v.
-            # In reality, context_paralle() should be used to shard the input.
+            # In reality, context_parallel() should be used to shard the input.
             # In reality, context_parallel() should only be used to shard
             # the model inputs (batch).
 

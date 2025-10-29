@@ -158,7 +158,7 @@ static void reduction_out_mps(const Tensor& input_t,
     IntArrayRef dim = opt_dim.value();
     for (const auto dim_val : dim) {
       auto wrap_dim = maybe_wrap_dim(dim_val, input_shape.size());
-      // canSqueeze logic is broken when dim is negative, it introduces off-by-one-erros or crashes
+      // canSqueeze logic is broken when dim is negative, it introduces off-by-one-errors or crashes
       // See https://github.com/pytorch/pytorch/issues/136132#issuecomment-2354482608
       if (wrap_dim >= 4 || dim_val < 0) {
         canSqueezeLastDim = false;

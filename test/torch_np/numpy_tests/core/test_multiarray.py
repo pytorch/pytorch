@@ -2702,7 +2702,7 @@ class TestMethods(TestCase):
         a = np.zeros((100, 100))
         if HAS_REFCOUNT:
             assert_(sys.getrefcount(a) < 50)
-        for i in range(100):
+        for _ in range(100):
             a.diagonal()
         if HAS_REFCOUNT:
             assert_(sys.getrefcount(a) < 50)
@@ -4457,7 +4457,7 @@ class TestResize(TestCase):
 
     def test_0d_shape(self):
         # to it multiple times to test it does not break alloc cache gh-9216
-        for i in range(10):
+        for _ in range(10):
             x = np.empty((1,))
             x.resize(())
             assert_equal(x.shape, ())
@@ -5081,7 +5081,7 @@ class TestDot(TestCase):
         v = np.random.random_sample((16, 32))
 
         r = np.empty((1024, 32))
-        for i in range(12):
+        for _ in range(12):
             dot(f, v, r)
         if HAS_REFCOUNT:
             assert_equal(sys.getrefcount(r), 2)
@@ -6678,7 +6678,7 @@ class TestWhere(TestCase):
         np.random.seed(2)
         array = np.random.rand(*shape)
 
-        for i in range(10):
+        for _ in range(10):
             benchmark = array.nonzero()
             result = array.nonzero()
             assert_array_equal(benchmark, result)

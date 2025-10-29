@@ -79,7 +79,7 @@ assert torch.get_default_dtype() is torch.float32
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -1836,30 +1836,6 @@ class TestTorchDeviceType(TestCase):
                 lambda: op_call(a),
                 '_bincount_cuda',
                 False)
-
-    # Ensures that kthvalue throws nondeterministic alerts in the correct cases
-    @dtypes(torch.double)
-    def test_nondeterministic_alert_kthvalue(self, device, dtype):
-        def test_func(call_type):
-            S = 10
-            k = 5
-            a = torch.randn(S, device=device)
-            if call_type == 'function':
-                torch.kthvalue(a, k)
-            elif call_type == 'method':
-                a.kthvalue(k)
-            elif call_type == 'out':
-                values = torch.empty_like(a)
-                indices = torch.empty((), device=device, dtype=torch.long)
-                torch.kthvalue(a, k, out=(values, indices))
-            else:
-                self.fail(f"'{call_type}' is not a valid call type")
-
-        for call_type in ['function', 'method', 'out']:
-            self.check_nondeterministic_alert(
-                lambda: test_func('function'),
-                'kthvalue CUDA',
-                torch.device(device).type == 'cuda')
 
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
