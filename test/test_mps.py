@@ -12930,6 +12930,249 @@ class TestMetalLibrary(TestCaseMPS):
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
 
 
+class TestMPSMemoryManagement(TestCase):
+    """Test suite for MPS memory management fixes"""
+
+    def setUp(self):
+        """Set up clean state before each test"""
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+        time.sleep(0.1)
+
+    def tearDown(self):
+        """Clean up after each test"""
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+
+    def test_freeInactiveBuffers_called_in_emptyCache(self):
+        """
+        Test that freeInactiveBuffers() is called in MPSAllocator.mm::emptyCache()
+
+        Verifies that buffers in buffers_pending_free are freed when emptyCache()
+        is called, rather than accumulating indefinitely.
+        File: aten/src/ATen/mps/MPSAllocator.mm
+        """
+        # Warm up to establish baseline
+        for _ in range(10):
+            x = torch.randn(1000, 1000, device='mps')
+            y = x @ x.T
+
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+        time.sleep(0.1)
+
+        baseline = torch.mps.driver_allocated_memory()
+
+        # Create and delete many tensors
+        for _ in range(100):
+            x = torch.randn(1000, 1000, device='mps')
+            y = x @ x.T
+
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+        time.sleep(0.1)
+
+        after_cleanup = torch.mps.driver_allocated_memory()
+        leaked = after_cleanup - baseline
+
+        # Should free most memory (allow 50MB overhead for caching)
+        self.assertLess(
+            leaked,
+            50 * 1024 * 1024,
+            f"Leaked {leaked / 1e6:.1f}MB - buffers not being freed"
+        )
+
+    def test_deviceSynchronize_called_in_emptyCache(self):
+        """
+        Test that deviceSynchronize() is called in MPSHooks.mm::emptyCache()
+
+        Verifies that emptyCache() waits for GPU completion before attempting
+        to free buffers.
+        File: aten/src/ATen/mps/MPSHooks.mm
+        """
+        # Create substantial GPU work
+        large_tensors = []
+        for _ in range(50):
+            x = torch.randn(2000, 2000, device='mps')
+            y = x @ x.T @ x
+            large_tensors.append(y)
+
+        del large_tensors
+
+        # Call empty_cache and measure time
+        start = time.time()
+        torch.mps.empty_cache()
+        duration = time.time() - start
+
+        # Should take measurable time due to synchronization
+        self.assertGreater(
+            duration,
+            0.001,
+            f"empty_cache() returned too fast ({duration*1000:.3f}ms)"
+        )
+
+        time.sleep(0.1)
+        memory = torch.mps.driver_allocated_memory()
+
+        # Should be back to reasonable baseline
+        self.assertLess(
+            memory,
+            500 * 1024 * 1024,
+            f"Memory still high after sync: {memory / 1e6:.1f}MB"
+        )
+
+    def test_eventPool_emptyCache_called(self):
+        """
+        Test that getMPSEventPool()->emptyCache() is called in MPSHooks.mm::emptyCache()
+
+        Verifies that event pool is cleared to prevent event metadata accumulation.
+        File: aten/src/ATen/mps/MPSHooks.mm
+        """
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+        time.sleep(0.1)
+
+        baseline = torch.mps.driver_allocated_memory()
+
+        # Create operations that use events
+        for _ in range(5):
+            for _ in range(100):
+                x = torch.randn(1000, 1000, device='mps')
+                y = x @ x.T
+
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
+            time.sleep(0.05)
+
+        final = torch.mps.driver_allocated_memory()
+        growth = final - baseline
+
+        # Should not accumulate event pool memory
+        self.assertLess(
+            growth,
+            15 * 1024 * 1024,
+            f"Event pool leaked: {growth / 1e6:.1f}MB growth"
+        )
+
+    def test_memory_management_integration(self):
+        """
+        Integration test for memory management functions
+
+        Verifies that freeInactiveBuffers(), deviceSynchronize(), and event pool
+        clearing work together correctly.
+        Files: aten/src/ATen/mps/MPSAllocator.mm, aten/src/ATen/mps/MPSHooks.mm
+        """
+        model = nn.Sequential(
+            nn.Linear(500, 500),
+            nn.ReLU(),
+            nn.Linear(500, 100)
+        ).to('mps')
+
+        optimizer = torch.optim.Adam(model.parameters())
+
+        # Warm up
+        for _ in range(10):
+            x = torch.randn(100, 500, device='mps')
+            y = torch.randn(100, 100, device='mps')
+            loss = nn.functional.mse_loss(model(x), y)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+        time.sleep(0.1)
+
+        baseline = torch.mps.driver_allocated_memory()
+
+        # Run multiple epochs
+        num_epochs = 10
+        batches_per_epoch = 100
+
+        for epoch in range(num_epochs):
+            for batch in range(batches_per_epoch):
+                x = torch.randn(100, 500, device='mps')
+                y = torch.randn(100, 100, device='mps')
+                pred = model(x)
+                loss = nn.functional.mse_loss(pred, y)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
+            time.sleep(0.05)
+
+        final = torch.mps.driver_allocated_memory()
+        total_growth = final - baseline
+
+        # Should maintain stable memory
+        self.assertLess(
+            total_growth,
+            100 * 1024 * 1024,
+            f"Memory grew {total_growth / 1e6:.1f}MB over {num_epochs} epochs"
+        )
+
+    def test_emptyCache_frees_memory(self):
+        """
+        Test that torch.mps.empty_cache() actually reduces memory usage
+
+        Verifies the overall functionality of the memory management fixes.
+        Files: aten/src/ATen/mps/MPSAllocator.mm, aten/src/ATen/mps/MPSHooks.mm
+        """
+        # Allocate substantial memory
+        tensors = []
+        for _ in range(50):
+            x = torch.randn(2000, 2000, device='mps')
+            y = x @ x.T
+            tensors.append(y)
+
+        torch.mps.synchronize()
+        memory_before_delete = torch.mps.driver_allocated_memory()
+
+        del tensors
+
+        # Call empty_cache
+        torch.mps.empty_cache()
+        time.sleep(0.1)
+
+        memory_after_cleanup = torch.mps.driver_allocated_memory()
+        freed = memory_before_delete - memory_after_cleanup
+
+        # Should free significant memory
+        self.assertGreater(
+            freed,
+            100 * 1024 * 1024,
+            f"empty_cache() only freed {freed / 1e6:.1f}MB"
+        )
+
+    def test_repeated_emptyCache_stability(self):
+        """
+        Test that repeated empty_cache() calls work correctly
+
+        Verifies stability of memory management functions.
+        Files: aten/src/ATen/mps/MPSAllocator.mm, aten/src/ATen/mps/MPSHooks.mm
+        """
+        for iteration in range(5):
+            for _ in range(20):
+                x = torch.randn(1000, 1000, device='mps')
+                y = x @ x.T
+
+            torch.mps.empty_cache()
+            torch.mps.empty_cache()
+            torch.mps.empty_cache()
+            time.sleep(0.05)
+
+        memory = torch.mps.driver_allocated_memory()
+
+        # Should maintain reasonable memory usage
+        self.assertLess(
+            memory,
+            500 * 1024 * 1024,
+            f"Memory after repeated operations: {memory / 1e6:.1f}MB"
+        )
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -12944,6 +13187,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestMPSMemoryManagement)
 
 if __name__ == "__main__":
     run_tests()
