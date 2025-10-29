@@ -2,7 +2,7 @@
 import logging
 import math
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from functools import lru_cache
 from typing import ClassVar, Optional
@@ -254,6 +254,7 @@ class NVLinkConnection(Connection):
 
     version: str
     num_links: int
+    _bandwidth: float = field(init=False)
     # Bidirectional bandwidth per link (GB/s)
     BANDWIDTH_PER_LINK: ClassVar[dict[str, float]] = {
         "1.0": 40.0,  # 20 GB/s unidirectional × 2
@@ -294,6 +295,7 @@ class InfiniBandConnection(Connection):
 
     rate: float = 200.0  # Default (4xHDR), ibstat Rate output, Gbps per direction
     num_ports: int = 4
+    _bandwidth: float = field(init=False)
 
     def __post_init__(self) -> None:
         self._bandwidth = self.rate / 8 * self.num_ports * 2
