@@ -841,6 +841,39 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
                 )
             )
 
+    def test_disable_nested_graph_breaks(self):
+        global f1, f2, f3, f4, f5
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        # NOTE since the disable_nested_graph_breaks decorator is implemented as a
+        # context manager, we don't need to separately test context manager usage.
+        @torch._dynamo.disable_nested_graph_breaks
+        def f3(x):
+            return f2(x + 16) + 32
+
+        def f4(x):
+            return f3(x + 64) + 128
+
+        def f5(x):
+            return f4(x + 256) + 512
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f5)
+        x = torch.zeros(3)
+        res = f5(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # 2 frames from each of f5+f4, f3, f2, f1
+        self.assertEqual(cnts.frame_count, 8)
+        self.assertEqual(cnts.op_count, 10)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
