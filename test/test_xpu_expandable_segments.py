@@ -4,7 +4,7 @@
 import pathlib
 import sys
 
-from test_xpu import testXpu, testXPUOpsXPU  # noqa: F401
+from test_xpu import TestXpu, TestXPUOpsXPU  # noqa: F401
 
 import torch
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
