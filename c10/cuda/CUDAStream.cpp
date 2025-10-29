@@ -128,7 +128,7 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   } else if (s.isExt()) {
     stream << "EXT";
   } else {
-    stream << "PRIORITY " << int(s.getStreamType());
+    stream << "PRIORITY " << static_cast<int>(s.getStreamType());
   }
   return stream;
 }

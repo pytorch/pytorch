@@ -158,7 +158,7 @@ class RingAttentionTest(DTensorTestBase):
             # parameters because when require_grad is True, resize_ is not
             # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
             # now. So we can just use context_parallel() to shard q, k, v.
-            # In reality, context_paralle() should be used to shard the input.
+            # In reality, context_parallel() should be used to shard the input.
             # In reality, context_parallel() should only be used to shard
             # the model inputs (batch).
 
@@ -701,7 +701,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         )
 
         # TODO: change this for-loop to run_subtests
-        # Use a for-loop instead of run_subtests because we need to intialize the mask
+        # Use a for-loop instead of run_subtests because we need to initialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
         for batch_size, max_seq_len, lb_type in itertools.product(
@@ -769,6 +769,41 @@ class TestCPCustomOps(DTensorTestBase):
         ]
         for example in examples_k_v:
             torch.library.opcheck(flex_cp_allgather, example)
+
+
+class TestSharding(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_context_parallel_shard(self) -> None:
+        B = 4
+        seq_len = 32
+
+        device_mesh = init_device_mesh(
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+        )
+        freqs_cis = torch.arange(0, seq_len, device=self.device_type)
+        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+
+        load_balancer = _HeadTailLoadBalancer(
+            seq_len, self.world_size, torch.device(self.device_type)
+        )
+        freqs_cis_shard, q_shard, k_shard, v_shard = _context_parallel_shard(
+            device_mesh, [freqs_cis, q, k, v], [0, 1, 1, 1], load_balancer=load_balancer
+        )
+        self.assertEqual(freqs_cis_shard.size(), (seq_len // 2,))
+        chunks = freqs_cis.chunk(self.world_size * 2)
+        self.assertEqual(
+            freqs_cis_shard,
+            torch.cat(
+                [chunks[self.rank], chunks[self.world_size * 2 - self.rank - 1]], dim=0
+            ),
+        )
 
 
 if __name__ == "__main__":

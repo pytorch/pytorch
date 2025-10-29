@@ -32,10 +32,10 @@ import sys
 import traceback
 import warnings
 import weakref
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, TypeVar
 
 import sympy
@@ -67,6 +67,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     ShapeEnv,
     Specialization,
+    uninteresting_files,
 )
 from torch.fx.node import Target
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -462,6 +463,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
     def __init__(
         self,
         output_graph_guards_state: OutputGraphGuardsState,
+        import_sources: Optional[dict[str, str]] = None,
         shape_env: Optional[ShapeEnv] = None,
         export_metadata: Optional[ExportMetaData] = None,
         tracked_fakes_id_to_source: Optional[dict[int, list[Source]]] = None,
@@ -484,6 +486,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
         )
 
+        self.import_sources = import_sources or {}
         # The following fields are currently known to be used by clients.
         # In particular, we need:
         # - shape_env, for building guards
@@ -709,7 +712,7 @@ class OutputGraph(OutputGraphCommon):
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
@@ -1157,7 +1160,7 @@ class OutputGraph(OutputGraphCommon):
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
 
                 assert "tensor_dict" not in vt.as_proxy().node.meta
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 vt.as_proxy().node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 return vt
@@ -1169,7 +1172,7 @@ class OutputGraph(OutputGraphCommon):
                 install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
                 def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     return NNModuleVariable(type(target), module_key, target, **options)
 
             else:
@@ -1866,7 +1869,7 @@ class OutputGraph(OutputGraphCommon):
                 _get_source_debug_name(var.source) for var in potential_side_effects
             ]
 
-            if len(side_effect_refs):
+            if side_effect_refs:
                 warnings.warn(
                     f"While exporting, we found certain side effects happened in the model.forward. "
                     f"Here are the list of potential sources you can double check: {side_effect_refs}"
@@ -2045,9 +2048,8 @@ class OutputGraph(OutputGraphCommon):
         tx = self.root_tx
         assert tx is not None
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
-            # pyrefly: ignore  # unbound-name
             compile_pg = ds.compile_pg
-            # pyrefly: ignore  # unbound-name
+
             log.info("compiler_collective %s", ds.local_state)
             torch._logging.trace_structured(
                 "artifact",
@@ -2055,7 +2057,6 @@ class OutputGraph(OutputGraphCommon):
                     "name": "compiler_collective",
                     "encoding": "string",
                 },
-                # pyrefly: ignore  # unbound-name
                 payload_fn=lambda: ds.local_state.render(),
             )
             device_types = compile_pg._device_types
@@ -2069,9 +2070,9 @@ class OutputGraph(OutputGraphCommon):
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
-                # pyrefly: ignore  # unbound-name
+
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
-                # pyrefly: ignore  # unbound-name
+
                 ds.all_states = all_states
             # Clear speculation log, because are tracing may diverge due to
             # this information from the compiler collective
@@ -2122,6 +2123,15 @@ class OutputGraph(OutputGraphCommon):
                 # while creating the graph module because self.graph and root
                 # are out of sync. This only happens for `get_attr` nodes, so
                 # here we clean up the get_attr nodes that are unused.
+                for attr in dir(root):
+                    subgraph = getattr(root, attr)
+                    if isinstance(subgraph, fx.GraphModule):
+                        insert_deferred_runtime_asserts(
+                            subgraph,
+                            self.shape_env,
+                            name,
+                            export=self.export,
+                        )
                 self.remove_unused_get_attr_nodes()
                 insert_deferred_runtime_asserts(
                     fx.GraphModule(root, self.graph),
@@ -2194,6 +2204,17 @@ class OutputGraph(OutputGraphCommon):
 
                 with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
                     # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+
+                    # Why create a new FakeTensorMode?
+                    #
+                    # The reason this needs to be done is because when we do Dynamo tracing, fake
+                    # tensors can have their metadata mutated. Thus, the fake tensor we allocated
+                    # for any given tensor may no longer be valid for the beginning trace of the
+                    # graph. Nor is it convenient to "clone" the input tensors before mutating them,
+                    # since you have to preserve aliasing. So we just reconstruct the FakeTensorMode
+                    # from scratch when we go to AOTAutograd. But the ShapeEnv must be preserved as
+                    # Dynamo made decisions about what is dynamic or not / guards from the user code
+                    # that is not in graph.
                     backend_fake_mode = torch._subclasses.FakeTensorMode(
                         shape_env=old_fake_mode.shape_env,
                     )
@@ -2401,7 +2422,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -2456,7 +2477,6 @@ class OutputGraph(OutputGraphCommon):
                 isinstance(b, torch.SymBool)
                 and (r := b.node.maybe_as_bool()) is not None
             ):
-                # pyrefly: ignore  # unbound-name
                 return r
             # TODO: We can also technically remove all cases when the input
             # doesn't have unbacked inputs, since it's all in the ShapeEnv
@@ -2738,12 +2758,14 @@ class DynamoTracerOutput:
     error_on_graph_break: bool
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
+    closure: Optional[tuple[Any, ...]]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
     ) -> None:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
+        self.closure = tracer.closure
         if error:
             self.output_graph = None
         else:
@@ -2822,7 +2844,7 @@ def check_pt2_compliant_op(
                 hints=[],
             )
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
@@ -2830,7 +2852,7 @@ def check_pt2_compliant_op(
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 f"which resolves to the overload ({overload}) that is "
                 f"not PT2 compliant.",
             )
@@ -2851,7 +2873,7 @@ class LazyProxy:
         **kwargs: P.kwargs,
     ) -> None:
         self.tracer = tracer
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
@@ -3170,11 +3192,18 @@ class SubgraphTracer(fx.Tracer):
                 if not tx.is_co_filename_from_nn_modules():
                     frame_summaries.append(tx.frame_summary())
                 tx = getattr(tx, "parent", None)
+
+            filtered_frame_summaries = [
+                frame
+                for frame in frame_summaries
+                if frame.filename not in uninteresting_files()
+            ]
+
             # Reverse the frame_summaries, such that the innermost frame is at the last
-            frame_summaries.reverse()
+            filtered_frame_summaries.reverse()
 
             # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(frame_summaries).format()
+            msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
         if (
@@ -3728,7 +3757,7 @@ class SubgraphTracer(fx.Tracer):
             if v1 != v2
         ]
 
-        if len(mutated_inputs):
+        if mutated_inputs:
             mutated_nodes = [input_nodes[i] for i in mutated_inputs]
             msg = f"Input mutation detected at {mutated_nodes}"
             return MutationInfo(True, msg)
