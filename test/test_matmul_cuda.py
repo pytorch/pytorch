@@ -1,6 +1,7 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import time
 import unittest
 from itertools import product
 from functools import partial
@@ -15,11 +16,11 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM53OrLater,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
-    xfailIfSM120OrLater,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
@@ -40,6 +41,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     runOnRocmArch,
+    serialTest,
     skipIfRocm,
     TEST_CUDA,
     TEST_WITH_ROCM,
@@ -231,7 +233,7 @@ class TestMatmulCuda(InductorTestCase):
     def test_cublas_addmm_alignment(self, dtype):
         device = 'cuda'
         # perturb X, A, or B alignment
-        for idx in range(0, 3):
+        for idx in range(3):
             for offset in range(1, 3):
                 offsets = [0, 0, 0]
                 offsets[idx] = offset
@@ -326,7 +328,6 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
-    @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -364,7 +365,6 @@ class TestMatmulCuda(InductorTestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
-    @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -420,7 +420,6 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
 
-    @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -454,15 +453,12 @@ class TestMatmulCuda(InductorTestCase):
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
-    @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
-        if TEST_WITH_ROCM and a_row_major and b_row_major and dtype in [torch.bfloat16, torch.float16]:
-            self.skipTest("failed using hipblaslt on rocm 6.4.2")
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -853,6 +849,29 @@ class TestMatmulCuda(InductorTestCase):
                     op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
                 else:
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
+
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
+    @serialTest()
+    def test_greencontext_carveout(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx.set_context()
+        torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        partial_res = torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        ctx.pop_context()
+        torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
+        full_res = torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t3 = time.perf_counter()
+        self.assertEqual(partial_res, full_res)
+        self.assertGreater(t1 - t0, t3 - t2)
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")

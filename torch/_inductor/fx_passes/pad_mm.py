@@ -95,7 +95,7 @@ def should_pad_common(mat1: Tensor, mat2: Tensor, input: Tensor | None = None) -
             if isinstance(x, int):
                 continue
             elif utils.is_symbolic(x):
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 if not x.node.has_hint():
                     return False
                 symbolic_cnt += 1
@@ -105,7 +105,7 @@ def should_pad_common(mat1: Tensor, mat2: Tensor, input: Tensor | None = None) -
         if symbolic_cnt == len(t.size()):
             return False
         return all(
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
             for x in t.stride()
         )
@@ -399,7 +399,7 @@ def should_pad_bench(*args: Any, **kwargs: Any) -> bool:
 def get_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("pad_mm_benchmark_get_do_bench"):
         return functools.partial(
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
             warmup=5,
         )
@@ -484,7 +484,7 @@ def _should_pad_bench(
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
                 size_hints = realize_symbols(t.size())
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 stride_hint = realize_symbols(t.stride())
                 real_size = (
                     sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
@@ -919,9 +919,9 @@ def _pad_mm_init() -> None:
             pattern,
             replacement,
             args,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             joint_fwd_bwd,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
@@ -932,9 +932,9 @@ def _pad_mm_init() -> None:
             pattern,
             replacement,
             args,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             fwd_only,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,

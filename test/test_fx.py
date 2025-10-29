@@ -6,6 +6,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import gc
 import functools
 import inspect
 import io
@@ -19,6 +20,7 @@ import traceback
 import types
 import typing
 import unittest
+import weakref
 import warnings
 from math import sqrt
 from torch.multiprocessing import Process
@@ -202,7 +204,7 @@ def side_effect_func(x: torch.Tensor):
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -1623,6 +1625,25 @@ class TestFX(JitTestCase):
         g.erase_node(neg)
 
         self.assertTrue(neg not in relu.users)
+
+    @skipIfTorchDynamo("Dynamo does not free right away")
+    def test_prepend_does_not_leak(self):
+        g = Graph()
+        x = g.placeholder("x")
+        relu = g.call_function(torch.relu, (x,))
+        neg = g.call_function(torch.neg, (x,))
+
+        relu.prepend(neg)
+
+        ref = weakref.ref(neg)
+        g.erase_node(neg)
+        del g
+        del x
+        del relu
+        del neg
+        gc.collect()
+
+        self.assertIsNone(ref())
 
     def test_remove_uses_with_custom_filter(self):
         g: torch.fx.Graph = Graph()
@@ -3584,7 +3605,7 @@ class TestFX(JitTestCase):
 
         class LeafTracerNotB(Tracer):
             def is_leaf_module(self, module, name):
-                return False if "b" in name else True
+                return "b" not in name
 
         # Recompile calls added "for fun", since they
         # chain __call__ wrappers.
@@ -4177,7 +4198,7 @@ def run_getitem_target():
 
 class TestOperatorSignatures(JitTestCase):
     def setUp(self):
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4220,7 +4241,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         super().setUp()
         self.maxDiff = None
 
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4576,7 +4597,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations

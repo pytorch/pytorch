@@ -158,7 +158,8 @@ def load(
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     with _profile():
@@ -246,8 +247,10 @@ def _load_state_dict(
             except Exception:
                 logger.info("Rank local metadata is not found.")
 
-        assert planner is not None
-        assert metadata is not None
+        if planner is None:
+            raise AssertionError("planner is None")
+        if metadata is None:
+            raise AssertionError("metadata is None")
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
 
         if (
@@ -269,7 +272,8 @@ def _load_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
-        assert planner is not None
+        if planner is None:
+            raise AssertionError("planner is None")
         all_local_plans = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
@@ -284,8 +288,10 @@ def _load_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
-        assert planner is not None
-        assert central_plan is not None
+        if planner is None:
+            raise AssertionError("planner is None")
+        if central_plan is None:
+            raise AssertionError("central_plan is None")
         final_local_plan = planner.finish_plan(central_plan)
         all_reads = storage_reader.read_data(final_local_plan, planner)
 
@@ -360,7 +366,8 @@ def _load_state_dict_from_keys(
     no_dist = not (dist.is_available() and dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     storage_reader = cast(

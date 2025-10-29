@@ -1671,7 +1671,7 @@ def _low_contention_all_gather(
             local_buf.copy_(tensor)
         # pull
         symm_mem.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
@@ -1706,7 +1706,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     with _get_backend_stream():
         # pull + offline reduction
         symm_mem.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             src_buf = symm_mem.get_buffer(
                 remote_rank,
@@ -1743,7 +1743,7 @@ def _low_contention_reduce_scatter_with_workspace(
     with _get_backend_stream():
         # push + offline reduction
         workspace.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             dst_buf = workspace.get_buffer(
                 remote_rank, chunks[0].shape, chunks[0].dtype, chunks[0].numel() * rank
@@ -1848,7 +1848,7 @@ def empty(
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
+# pyrefly: ignore [inconsistent-overload]
 def empty(
     size: Sequence[_int],
     *,
@@ -1863,8 +1863,6 @@ def empty(  # type: ignore[misc]
     device: _device | None = None,
 ) -> torch.Tensor:
     r"""
-    empty(*size, *, dtype=None, device=None) -> Tensor
-
     Similar to :func:`torch.empty()`. The returned tensor can be used by
     :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
     symmetric memory tensor among participating processes.
@@ -1954,7 +1952,7 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
 
     Args:
         backend (str): the backend for symmetric memory allocation. Currently,
-        only "NVSHMEM", "CUDA", "NCCL" are supported.
+            only `"NVSHMEM"`, `"CUDA"`, `"NCCL"` are supported.
     """
     _SymmetricMemory.set_backend(name)
 
@@ -1965,8 +1963,7 @@ def get_backend(device: _device) -> str | None:
     found, return None.
 
     Args:
-        device (class:`torch.device` or str): the device for which to get the
-        backend.
+        device (`torch.device` or str): the device for which to get the backend.
     """
     return _SymmetricMemory.get_backend(torch.device(device))
 
@@ -1974,9 +1971,10 @@ def get_backend(device: _device) -> str | None:
 def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
     r"""
     Get the MemPool allocator for symmetric memory for a given device.
+
     Args:
-        device (class:`torch.device` or str): the device for which to get the
-        MemPool allocator.
+        device (`torch.device` or str): the device for which to get the MemPool
+            allocator.
     """
     return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
