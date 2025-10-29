@@ -502,7 +502,7 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 
 
 def propagate_shape_and_sharding(
-    input_src_placements: Sequence[Placement],
+    input_src_spec,
     global_input_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
@@ -519,6 +519,7 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
+    input_src_placements: Sequence[Placement] = input_src_spec.placements
     if not len(input_src_placements) == len(mesh_sizes):
         raise AssertionError(f"{input_src_placements} != {mesh_sizes}")
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
@@ -570,12 +571,10 @@ def propagate_shape_and_sharding(
                 )
                 input_sharded = shard_mesh_dim is not None
                 if i > 0:
-                    can_shard_dim = False
                     if strict_view and input_sharded:
-                        raise RuntimeError(
-                            f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
-                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
-                        )
+                        for x in range(0, dim.input_dim + 1):
+                            shardable_dims[x] = [True] * mesh_ndim
+                        return dim
                 elif input_sharded:
                     if not (shard_placement is not None and shard_mesh_dim is not None):
                         raise AssertionError(
@@ -651,16 +650,30 @@ def propagate_shape_and_sharding(
         if in_dim is not None:
             shard_dim_map[in_dim.input_dim] = dim
 
-    input_tgt_placements = [
-        (
-            Replicate()
-            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
-            else p
-        )
-        for mesh_dim, p in enumerate(input_src_placements)
-    ]
+    input_tgt_placements = []
+    for mesh_dim, p in enumerate(input_src_placements):
+        if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]:
+            input_tgt_placements.append(Replicate())
+        else:
+            input_tgt_placements.append(p)
 
-    def _rewrite_shard_dim(p: Shard):
+    def _get_split_factor(input_src_spec, shard_dim):
+        split_factor = 1
+        for tensor_dim, global_tensor_size in enumerate(input_src_spec.shape):
+            if tensor_dim >= shard_dim:
+                return split_factor
+            mesh_dim = input_src_spec.dim_map[tensor_dim]
+            if mesh_dim >= 0:
+                local_tensor_size = global_tensor_size / input_src_spec.mesh.shape[mesh_dim]
+            else:
+                local_tensor_size = global_tensor_size
+            split_factor = split_factor * local_tensor_size
+        return split_factor
+            
+        
+
+
+    def _rewrite_shard_dim(p: Shard, input_src_spec):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -679,10 +692,19 @@ def propagate_shape_and_sharding(
         if isinstance(p, _StridedShard):
             return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
         else:
-            return Shard(shard_dim_map[p.dim])
+            if p.dim == 0:
+                return Shard(shard_dim_map[p.dim])
+            else:
+                # import fbvscode
+                # fbvscode.set_trace()
+                split_factor = _get_split_factor(input_src_spec, p.dim)
+                return _StridedShard(shard_dim_map[p.dim], split_factor=split_factor)
+
+    
+
 
     output_placements = [
-        _rewrite_shard_dim(p) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p, input_src_spec) if isinstance(p, Shard) else p
         for p in input_tgt_placements
     ]
 
@@ -721,7 +743,7 @@ def register_op_strategy_map(
             input_src_spec = input_placement_strategy.output_spec
 
             input_tgt_placements, output_placements = propagate_shape_and_sharding(
-                input_src_spec.placements,
+                input_src_spec,
                 tuple(global_in_shape),
                 rules,
                 mesh.shape,
