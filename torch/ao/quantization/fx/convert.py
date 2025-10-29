@@ -282,11 +282,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         # 2. insert choose_qparams op and update the qparams list
         with graph.inserting_before(node):
             input_node = node.args[0]
-            choose_qparams_op_inputs = [node.args[0]]
-            for key, value in qparams.items():
-                # we have quant_min, quant_max and dtype, all should be stored
-                # as literals
-                choose_qparams_op_inputs.append(value)
+            choose_qparams_op_inputs = [node.args[0]] + list(qparams.values())
             choose_qparams_node = graph.create_node(
                 "call_function", choose_qparams_op, tuple(choose_qparams_op_inputs), {}
             )
@@ -297,6 +293,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             zero_point_node = graph.create_node(
                 "call_function", operator.getitem, (choose_qparams_node, 1), {}
             )
+            # we have quant_min, quant_max and dtype, all should be stored
+            # as literals
             quant_min = qparams["_quant_min_"]
             quant_max = qparams["_quant_max_"]
             dtype = qparams["_dtype_"]
@@ -482,7 +480,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 quantize_op_inputs.append(value)
 
             quantized_node = graph.create_node(
@@ -498,7 +496,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
                 quantize_op_inputs.append(value)
