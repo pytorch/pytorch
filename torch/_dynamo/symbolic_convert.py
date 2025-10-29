@@ -1376,6 +1376,19 @@ class InstructionTranslatorBase(
         except (ReturnValueOp, YieldValueOp):
             return False
         except (Unsupported, StepUnsupported) as e:
+            # More restrictive condition than should_compile_partial_graph:
+            # if this condition is true, then we SHOULD NOT attempt to find
+            # a previous checkpoint to resume from and try to resume - we should
+            # immediately error out.
+            # The condition is more restrictive because, it may be possible to resume significantly earlier
+            # in the code (the most recent speculation point). This happens, for example, in the case
+            # of a graph break in a try block.
+            if (
+                self.one_graph
+                or self.error_on_graph_break
+                or self.is_tracing_resume_prologue
+            ):
+                raise
             if self.current_speculation is None:
                 log.debug("empty checkpoint")
                 if isinstance(e, StepUnsupported):
