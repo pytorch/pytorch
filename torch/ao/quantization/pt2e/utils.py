@@ -7,6 +7,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -14,7 +15,6 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx import GraphModule, Node
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-from torch.utils._pytree import LeafSpec
 
 
 __all__ = [
@@ -90,7 +90,6 @@ def _find_q_dq_node_for_user(
         and arg.op == "call_function"
         and arg.target in _QUANTIZE_OPS
     ):
-        # pyrefly: ignore  # unbound-name
         q_node = arg
     return (q_node, dq_node)
 
@@ -123,7 +122,8 @@ def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
 def _get_tensor_constant_from_node(node, m):
     if node is None:
         return None
-    assert node.op == "get_attr"
+    if node.op != "get_attr":
+        raise AssertionError(f"Expected node.op to be 'get_attr', got {node.op}")
     target_atoms = node.target.split(".")
     attr_itr = m
     for i, atom in enumerate(target_atoms):
@@ -248,7 +248,10 @@ def fold_bn_weights_into_conv_node(
 
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
-    assert isinstance(weight_attr_name, str)
+    if not isinstance(weight_attr_name, str):
+        raise AssertionError(
+            f"Expected conv_weight_node.target to be a string attribute name, got {type(weight_attr_name)}"
+        )
     _assign_attr(fused_weight, m, weight_attr_name, _AttrKind.PARAMETER)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
@@ -474,7 +477,10 @@ def _replace_literals_with_new_placeholders(
         exclude_literals = []
 
     in_spec = gm._in_spec
-    args_spec = in_spec.children_specs[0]
+    assert in_spec.type is tuple
+    args_spec = in_spec.child(0)
+    assert args_spec.type is tuple
+    args_spec_children = args_spec.children()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node
@@ -489,7 +495,7 @@ def _replace_literals_with_new_placeholders(
                     else:
                         ph_node = gm.graph.placeholder("arg" + str(cnt))
                         new_args.append(ph_node)
-                        args_spec.children_specs.append(LeafSpec())
+                        args_spec_children.append(pytree.treespec_leaf())
                         cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
@@ -500,8 +506,8 @@ def _replace_literals_with_new_placeholders(
         node.args = new_args
 
     # Update `num_nodes`, `num_leaves`, `num_children`.
-    args_spec.__post_init__()
-    in_spec.__post_init__()
+    args_spec = pytree.treespec_tuple(args_spec_children)
+    gm._in_spec = in_spec = pytree.treespec_tuple([args_spec, *in_spec.children()[1:]])
     return gm
 
 
