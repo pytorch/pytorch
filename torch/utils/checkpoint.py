@@ -1142,7 +1142,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
         def unpack_hook(holder):
             # First check if we're inside a GraphExecutionGroup context
-            gid = GraphExecutionGroup.get_current_group()
+            gid = GraphExecutionGroup._get_current_group()
             if gid is None:
                 # Fallback to using the current graph task id
                 gid = torch._C._current_graph_task_id()

@@ -7383,13 +7383,11 @@ for shape in [(1,), ()]:
                 ctx = group
 
             with ctx:
-                grad_y, = torch.autograd.grad(
-                    z,
-                    inputs=(y,),
-                    grad_outputs=(torch.ones(3, 3),)
+                (grad_y,) = torch.autograd.grad(
+                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3),)
                 )
 
-                grad_x, = torch.autograd.grad(
+                (grad_x,) = torch.autograd.grad(
                     y,
                     inputs=(x,),
                     grad_outputs=(grad_y,),
@@ -7399,7 +7397,6 @@ for shape in [(1,), ()]:
                 self.assertEqual(counter[0], 2)
             else:
                 self.assertEqual(counter[0], 3)
-
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
