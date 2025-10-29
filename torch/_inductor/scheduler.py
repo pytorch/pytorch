@@ -327,22 +327,23 @@ class MixOrderReduction:
 
             if len(index_names) == 0:
                 continue
-            assert len(index_names) == 1
-            index_name = index_names[0]
-            index_expr = loop_body.indexing_exprs[index_name]
-            var_ranges = loop_body.var_ranges
 
-            # assumes the final symbol is for reduction
-            var_symbols = list(var_ranges.keys())
-            stride_vars = V.graph.sizevars.stride_vars(
-                index_expr,
-                var_symbols,
-                var_symbols,
-            )
-            n_congituous_read += stride_vars[-1] == 1
-            if n_congituous_read > 0:
-                break
-        return n_congituous_read > 0
+            # there can be multiple index_names some times
+            for index_name in index_names:
+                index_expr = loop_body.indexing_exprs[index_name]
+                var_ranges = loop_body.var_ranges
+
+                # assumes the final symbol is for reduction
+                var_symbols = list(var_ranges.keys())
+                stride_vars = V.graph.sizevars.stride_vars(
+                    index_expr,
+                    var_symbols,
+                    var_symbols,
+                )
+                n_congituous_read += stride_vars[-1] == 1
+                if n_congituous_read > 0:
+                    return True
+        return False
 
 
 @dataclasses.dataclass
