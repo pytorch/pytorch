@@ -2,10 +2,8 @@
 
 import contextlib
 import unittest
-from typing import Union
 
 import torch
-
 import torch.distributed as dist
 import torch.fx.traceback as fx_traceback
 from torch._dynamo.functional_export import (
@@ -506,17 +504,17 @@ class DTensorExportTest(TestCase):
     def test_union_typed_annotation(self):
         def fn(leaf: torch.Tensor | DTensor):
             def nest_fn(leaf: torch.Tensor | DTensor):
-            # def nest_fn(leaf: Union[torch.Tensor, DTensor]):  # this works
+                # def nest_fn(leaf: Union[torch.Tensor, DTensor]):  # this works
                 if isinstance(leaf, DTensor):
                     leaf = leaf.to_local()
                 return leaf
+
             return nest_fn(leaf) + 1
 
         z = torch.randn(16, 16)
         gm = graph_capture_and_aot_export_joint_with_descriptors(fn, (z,))
 
         print(gm)
-
 
 
 instantiate_parametrized_tests(DTensorExportTest)
