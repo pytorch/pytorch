@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     _TestParametrizer,
     skipIfMPS,
     skipIfTorchDynamo,
-    skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
@@ -2200,9 +2199,6 @@ optim_db: list[OptimizerInfo] = [
                 skipIfMPS,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
                 device_type="mps",
-            ),
-            DecorateInfo(
-                skipIfXpu(msg="SparseAdam is not yet supported on the XPU stack"),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
