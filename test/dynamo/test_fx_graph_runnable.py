@@ -382,6 +382,21 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
 
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_dynamic_expression(self):
+        """
+        Test not emitting something like "s27*s53**2 = 36"
+        """
+
+        def f(x):
+            return torch.ops.aten._adaptive_avg_pool2d(
+                x, (6, 6)
+            ), torch.ops.aten._adaptive_avg_pool2d(x + 1, (2, 5))
+
+        x = torch.randn(2, 4, 16, 16)
+        torch.compile(f)(x)
+        self._exec_and_verify_payload()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
