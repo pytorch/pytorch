@@ -1057,7 +1057,7 @@ class DeviceCachingAllocator {
             dev_to_access) != devices_with_peer_access.end()) {
       return;
     }
-    devices_with_peer_access_.push_back(dev_to_access);
+    devices_with_peer_access.push_back(dev_to_access);
     for (const auto& es : expandable_segments) {
       es->addPeer(dev_to_access);
     }
