@@ -17,12 +17,6 @@ VarlenShape = namedtuple(
     "VarlenShape", ["batch_size", "max_seq_len", "embed_dim", "num_heads"]
 )
 
-default_tolerances = {
-    torch.float16: {"atol": 1e-1, "rtol": 1e-1},
-    torch.bfloat16: {"atol": 9e-2, "rtol": 5e-2},
-    torch.float32: {"atol": 1e-5, "rtol": 1.3e-6},
-}
-
 
 class OpLoggingMode(TorchDispatchMode):
     """Logging mode that captures all dispatched operations"""
@@ -103,17 +97,11 @@ class AttentionBlock(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # attn_out = F.scaled_dot_product_attention(
-        #     q, k, v, attn_mask=attn_mask, is_causal=is_causal
-        # )
-
         if is_causal:
-            # Create causal mask and combine with padding mask
             causal_mask = torch.triu(
                 torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool),
                 diagonal=1,
             )
-            # Expand and combine: True where attention should be masked out
             combined_mask = causal_mask[None, None, :, :] | ~attn_mask
             attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=~combined_mask)
         else:
