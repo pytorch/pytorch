@@ -1620,7 +1620,7 @@ class GraphExecGroup:
     @classmethod
     def _get_current_group(cls) -> Optional["GraphExecGroup"]:
         # Private API to be used by utils like AC
-        return cls._tls._current_group
+        return getattr(GraphExecGroup._tls, "current_group", None)
 
 
 # Note: [compiled autograd and checkpoint unpack hook]
