@@ -260,7 +260,7 @@ class NVLinkConnection(Connection):
         "2.0": 50.0,  # 25 GB/s unidirectional × 2
         "3.0": 50.0,  # 25 GB/s unidirectional × 2 (A100)
         "4.0": 50.0,  # 25 GB/s unidirectional × 2 (H100, H200)
-        "5.0": 400,  # 200 GB/s unidirectional x 2 (GB200)
+        "5.0": 400.0,  # 200 GB/s unidirectional x 2 (GB200)
     }
 
     def __post_init__(self) -> None:
