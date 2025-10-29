@@ -13,6 +13,7 @@
 #include <ATen/ceil_div.h>
 #include <c10/macros/Macros.h>
 #include <cmath>
+#include <type_traits>
 
 namespace at::native {
 
@@ -553,6 +554,7 @@ namespace {
       const index_t grad_input_memory_span) {
     // Typically `float` even if `scalar_t` is `half` or `bflaot16` to ensure
     // all intermediate calculations (like accumulations in LDS) are done in full precision.
+    // Sometimes even `double` as well.
     using opmath_t = at::opmath_type<scalar_t>;
 
     // 2D tile size.
@@ -586,10 +588,14 @@ namespace {
     constexpr int CCHUNK = 4;
 
     // Dynamic shared memory layout: [CCHUNK][SMEM_H][SMEM_W_PAD]
-    extern __shared__ opmath_t smem_raw[];
+    // Using a type-agnostic fundamental type like `unsigned char` instead of
+    // the template type `opmath_t` to avoid potential redeclaration.
+    extern __shared__ unsigned char smem_raw[];
+    opmath_t* smem = reinterpret_cast<opmath_t*>(smem_raw);
     // 3D array of [c_chunk_idx][y][x] to 1D smem_row indexing.
+    // x is the fastest-varying coordinate into the padded dimension.
     auto smem_idx = [&](int c_chunk_idx, int y, int x) -> opmath_t& {
-      return smem_raw[(c_chunk_idx * SMEM_H + y) * SMEM_W_PAD + x];
+      return smem[(c_chunk_idx * SMEM_H + y) * SMEM_W_PAD + x];
     };
 
     // `blockIdx.z` maps to the batch index of the 3D grid of blocks.
@@ -663,6 +669,18 @@ namespace {
           // Compile-time check for a performance win hopefully.
           // When INPUT_REQ_GRAD is false, the entire `if` block is removed by the compiler.
           if (INPUT_REQ_GRAD) {
+            // Typed LDS atomic add (supports `float`/`double` `opmath_t`).
+            // `opmat_t` itself already handles half precision -> full precision.
+            // If opmath_t could be `double`, casting to `float` may lose precision.
+            auto atomic_add_smem = [] __device__ (opmath_t* addr, opmath_t v) {
+              if constexpr (std::is_same<opmath_t, float>::value) {
+                atomicAdd(reinterpret_cast<float*>(addr), static_cast<float>(v));
+              } else if constexpr (std::is_same<opmath_t, double>::value) {
+                atomicAdd(reinterpret_cast<double*>(addr), static_cast<double>(v));
+              } else {
+                static_assert(!std::is_same<opmath_t, opmath_t>::value, "Unsupported opmath_t for LDS atomicAdd");
+              }
+            }
             auto accumulate = [&](index_t iy_g, index_t ix_g, opmath_t weight) {
               // Global bounds check, same as the original impelmentation,
               // to check if the target input coord is valid.
@@ -673,7 +691,10 @@ namespace {
                 // Check if the local coord falls within the LDS tile with halo.
                 if (s_iy >= 0 && s_iy < SMEM_H && s_ix >= 0 && s_ix < SMEM_W) {
                   // Core optimization: `atomicAdd` to LDS instead of global memory.
-                  atomicAdd(reinterpret_cast<float*>(&smem_idx(c_idx, s_iy, s_ix)), static_cast<float>(weight * gOut));
+                  // Grid sampling is overwhelmingly used with `float`, `half`, or BFloat16 tensors.
+                  // `double` is rarely required for this operation, though.
+                  //atomicAdd(reinterpret_cast<float*>(&smem_idx(c_idx, s_iy, s_ix)), static_cast<float>(weight * gOut));
+                  atomic_add_smem(&smem_idx(c_idx, s_iy, s_ix), weight * gOut);
                 } else {
                   // FIXME:
                   // Simply ignore the coord outside the tile.
@@ -753,6 +774,7 @@ namespace {
       constexpr int SMEM_H = TILE_H + 2 * HALO;
       constexpr int SMEM_W = TILE_W + 2 * HALO;
       constexpr int SMEM_W_PAD = SMEM_W + 1;
+      // Size calculation uses the scalar_t of the current dispatcher instantiation.
       const size_t smem_bytes = CCHUNK * SMEM_H * SMEM_W_PAD * sizeof(at::opmath_type<scalar_t>);
 
       // Dispatcher for template parameters
