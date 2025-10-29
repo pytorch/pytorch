@@ -751,7 +751,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(2, 5, 3)
         onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
         # Test with multi-dimensional normalized_shape
         class RMSNormModel2D(torch.nn.Module):
@@ -790,7 +790,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         onnx_program = self.export(RMSNormWithEps(), (x,), opset_version=23)
 
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_enable_gqa_in_attention_23_with_dropout(self):
         class Model(torch.nn.Module):
