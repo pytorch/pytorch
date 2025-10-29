@@ -25,4 +25,8 @@ C10_XPU_API void raw_delete(void* ptr);
 
 C10_XPU_API void recordStream(const DataPtr& dataPtr, XPUStream stream);
 
+C10_XPU_API void enablePeerAccess(
+    c10::DeviceIndex dev,
+    c10::DeviceIndex dev_to_access);
+
 } // namespace c10::xpu::XPUCachingAllocator
