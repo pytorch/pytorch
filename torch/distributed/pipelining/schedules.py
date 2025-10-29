@@ -1064,7 +1064,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         return pipeline_order
 
 
-def _requires_reduce_grad(action_type: _ComputationType):
+def _requires_reduce_grad(action_type: _ComputationType) -> bool:
     return action_type in (I, W, B, OVERLAP_F_B)
 
 
@@ -2219,6 +2219,8 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     mb_index,
                     last_backward=last_backward,
                 )
+            elif comp_type == REDUCE_GRAD:
+                pass
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
