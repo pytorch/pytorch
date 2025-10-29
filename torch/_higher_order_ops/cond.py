@@ -52,7 +52,7 @@ class CondOp(HigherOrderOperator):
         validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, pred, true_fn, false_fn, operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -286,7 +286,7 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
 
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         pred,

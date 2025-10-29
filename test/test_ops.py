@@ -2647,7 +2647,7 @@ fake_skips = (
     "linalg.eigvals",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "linalg.eigvalsh",  # aten::linalg_eigvalsh.out' with arguments from the 'Meta' backend
     "linalg.matrix_power",  # Could not run 'aten::eye.m_out' with arguments from the 'Meta' backend
-    # "linalg.pinv",  # Could not run 'aten::pinv.out' with arguments from the 'Meta' backen
+    # "linalg.pinv",  # Could not run 'aten::pinv.out' with arguments from the 'Meta' backend
     "linalg.matrix_rank.hermitian",  # Could not run 'aten::linalg_eigvalsh.out' with arguments from the 'Meta' backend
     "linalg.pinv.hermitian",  # tensor.mH is only supported on matrices or batches of matrices. Got 1-D tensor
     "linalg.solve",  # Could not run 'aten::linalg_solve' with arguments from the 'Meta' backend
