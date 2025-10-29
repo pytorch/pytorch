@@ -1756,7 +1756,7 @@ Tensor narrow_tensor_symint(
     SymInt length) {
   TORCH_CHECK(
       start.dim() == 0 &&
-          sIntegralType(start.scalar_type(), /*includeBool=*/false),
+          isIntegralType(start.scalar_type(), /*includeBool=*/false),
       "start must be an 0-dim integral Tensor.");
   c10::SymInt st = start.item().toSymInt();
   return at::narrow_symint(self, dim, std::move(st), std::move(length));
@@ -5016,4 +5016,3 @@ int64_t dense_dim_default(const Tensor& self) {
 }
 
 } // namespace at::native
- 
