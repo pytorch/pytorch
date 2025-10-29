@@ -115,11 +115,10 @@ static PyObject* THPEvent_record(
   }
   if (_stream != Py_None) {
     auto stream = reinterpret_cast<THPStream*>(_stream);
-    self->event.record(
-        c10::Stream::unpack3(
-            stream->stream_id,
-            static_cast<c10::DeviceIndex>(stream->device_index),
-            static_cast<c10::DeviceType>(stream->device_type)));
+    self->event.record(c10::Stream::unpack3(
+        stream->stream_id,
+        static_cast<c10::DeviceIndex>(stream->device_index),
+        static_cast<c10::DeviceType>(stream->device_type)));
   } else {
     c10::impl::VirtualGuardImpl impl{
         static_cast<c10::DeviceType>(self->event.device_type())};
@@ -194,11 +193,10 @@ static PyObject* THPEvent_wait(
     }
     if (_stream != Py_None) {
       auto stream = reinterpret_cast<THPStream*>(_stream);
-      self->event.block(
-          c10::Stream::unpack3(
-              stream->stream_id,
-              static_cast<c10::DeviceIndex>(stream->device_index),
-              static_cast<c10::DeviceType>(stream->device_type)));
+      self->event.block(c10::Stream::unpack3(
+          stream->stream_id,
+          static_cast<c10::DeviceIndex>(stream->device_index),
+          static_cast<c10::DeviceType>(stream->device_type)));
     } else {
       c10::impl::VirtualGuardImpl impl{
           static_cast<c10::DeviceType>(self->event.device_type())};
