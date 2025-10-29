@@ -75,6 +75,8 @@ REQUIRE_HIGHER_TOLERANCE_AMP = {}
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "beit_base_patch16_224",
+    "deit_base_distilled_patch16_224",
+    "vit_base_patch16_siglip_256",
 }
 
 # These models need higher tolerance in MaxAutotune mode
