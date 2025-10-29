@@ -99,15 +99,18 @@ def rand(seed, offset, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
 
 
 def rand_eager_kernel(seed, offset_blocks, tid, VEC, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
+    _u32 = lambda x: hl.cast(hl.UInt(32), x)
+    _u64 = lambda x: hl.cast(hl.UInt(64), x)
+    _f32 = lambda x: hl.cast(hl.Float(32), x)
+
     inv = _f32(1.0 / 4294967296.0)  # 2^-32
     half = _f32(0.5) * inv
 
     tid_u64 = _u64(tid)
-
     VEC_u64 = _u64(VEC)
     subseq = tid_u64 // VEC_u64
     which4 = (tid_u64 % VEC_u64) // _u64(4)
-    lane = _u32(tid_u64 % _u64(4))
+    lane = tid_u64 % _u64(4)
 
     offblk = _u64(offset_blocks) + which4
 

@@ -252,17 +252,17 @@ def device_assert_then(cond, msg, r):
 def rand_eager_kernel(
     seed,
     offset_blocks,
-    tid: tl.tensor, 
-    VEC: tl.constexpr  
+    tid: tl.tensor,
+    VEC: tl.constexpr
 ):
-    inv  = 1.0 / 4294967296.0 
+    inv  = 1.0 / 4294967296.0
     half = inv * 0.5
 
     tid_u64 = tid.to(tl.uint64)
 
-    subseq  = (tid_u64 // VEC)
-    which4  = ((tid_u64 % VEC) // 4)
-    lane    = (tid_u64 % 4).to(tl.uint32)
+    subseq = tid_u64 // VEC
+    which4 = (tid_u64 % VEC) // 4
+    lane = tid_u64 % 4
 
     offblk = offset_blocks.to(tl.uint64) + which4
 
