@@ -17,10 +17,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
-from ._load_balancer import (
-    _create_default_load_balancer,
-    _LoadBalancer,
-)
 from torch.distributed.tensor.parallel import ParallelStyle
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
@@ -30,6 +26,7 @@ from torch.nn.attention.flex_attention import (
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from ._cp_custom_ops import flex_cp_allgather
+from ._load_balancer import _create_default_load_balancer, _LoadBalancer
 
 
 __all__ = ["context_parallel", "set_rotate_method"]

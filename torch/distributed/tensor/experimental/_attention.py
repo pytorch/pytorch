@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-# Backward compatibility stub - this module has been moved to context_parallel/_attention.py
+# Backward compatibility stub - this module has been moved to _context_parallel/_attention.py
 
-from torch.distributed.tensor.experimental.context_parallel._attention import (
+from torch.distributed.tensor.experimental._context_parallel._attention import (
     _CausalBehavior,
     _context_parallel_shard,
     _ContextParallel,
@@ -14,12 +14,13 @@ from torch.distributed.tensor.experimental.context_parallel._attention import (
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.experimental.context_parallel._load_balancer import (
+from torch.distributed.tensor.experimental._context_parallel._load_balancer import (
     _HeadTailLoadBalancer,
     _LoadBalancer,
     _PerDocumentHeadTailLoadBalancer,
     _PTRRLoadBalancer,
 )
+
 
 __all__ = [
     "_CausalBehavior",
