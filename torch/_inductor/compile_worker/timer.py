@@ -42,6 +42,7 @@ class Timer:
             with self.lock:
                 if self.exit:
                     return
+                assert self.last_called is not None
                 if self.last_called + self.duration >= time():
                     continue
                 self.last_called = None
