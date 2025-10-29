@@ -1,11 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import logging
+import unittest
 from datetime import timedelta
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
@@ -23,10 +25,11 @@ from torch.distributed.checkpoint._pg_transport import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.tensor import DTensor
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
+    at_least_x_gpu,
+    HAS_ACCELERATOR,
     MultiProcContinuousTest,
-    requires_nccl,
+    requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -34,6 +37,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 logger = logging.getLogger(__name__)
 
@@ -160,9 +165,9 @@ def _test_pg_transport_with_mixed_content(self, device) -> None:
 
 
 def _test_pg_transport_with_sharded_tensor(self, device) -> None:
-    # Set current CUDA device for NCCL
-    if device.type == "cuda":
-        torch.cuda.set_device(device)
+    # Set current accelerator device for NCCL/XCCL
+    if device.type == "cuda" or device.type == "xpu":
+        torch.accelerator.set_device_index(device)
 
     state_dict = _create_sharded_tensor_state_dict(self.rank, self.world_size, device)
     transport = PGTransport(_get_default_group(), timedelta(seconds=10), device)
@@ -227,34 +232,36 @@ class PgTransportCPU(MultiProcContinuousTest):
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
-class PgTransportCUDA(MultiProcContinuousTest):
+class PgTransportGPU(MultiProcContinuousTest):
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
 
     @classmethod
     def backend_str(cls) -> Optional[str]:
-        return "nccl"
-
-    @classmethod
-    def device_type(cls) -> str:
-        return "cuda"
+        return dist.get_default_backend_for_device(cls.device_type())
 
     @property
     def device(self) -> torch.device:
         return torch.device(f"{self.device_type()}:{self.rank}")
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @requires_accelerator_dist_backend()
+    @skip_but_pass_in_sandcastle_if(
+        not at_least_x_gpu(2), "test requires 2+ accelerators"
+    )
     def test_pg_transport(self) -> None:
         _test_pg_transport(self, self.device)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @requires_accelerator_dist_backend()
+    @skip_but_pass_in_sandcastle_if(
+        not at_least_x_gpu(2), "test requires 2+ accelerators"
+    )
     def test_pg_transport_with_mixed_content(self) -> None:
         _test_pg_transport_with_mixed_content(self, self.device)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @requires_accelerator_dist_backend()
+    @skip_but_pass_in_sandcastle_if(
+        not at_least_x_gpu(2), "test requires 2+ accelerators"
+    )
     def test_pg_transport_with_sharded_tensor(self) -> None:
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
@@ -578,13 +585,10 @@ class TestPGTransportEdgeCases(TestCase):
         self.pg.send = MagicMock(return_value=self.mock_work)
         self.pg.recv = MagicMock(return_value=self.mock_work)
 
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_send_checkpoint_with_cpu_tensors(self):
-        """Test send_checkpoint with CPU tensors when device is CUDA."""
-        # Skip if CUDA is not available
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
-
-        device = torch.device("cuda:0")
+        """Test send_checkpoint with CPU tensors when device is accelerator."""
+        device = torch.device(f"{device_type}:0")
 
         # Create a state dict with CPU tensors
         state_dict = {
@@ -592,7 +596,7 @@ class TestPGTransportEdgeCases(TestCase):
             "cpu_tensor2": torch.randn(3, 4),
         }
 
-        # Create transport with CUDA device
+        # Create transport with accelerator device
         transport = PGTransport(self.pg, self.timeout, device)
 
         # Call send_checkpoint

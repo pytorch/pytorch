@@ -515,8 +515,11 @@ def meta_copy_(self, src, non_blocking=False):
 def inferUnsqueezeGeometry(tensor, dim):
     result_sizes = list(tensor.size())
     result_strides = list(tensor.stride())
+    # pyrefly: ignore [unsupported-operation]
     new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
+    # pyrefly: ignore [bad-argument-type]
     result_sizes.insert(dim, 1)
+    # pyrefly: ignore [bad-argument-type]
     result_strides.insert(dim, new_stride)
     return result_sizes, result_strides
 
@@ -841,7 +844,7 @@ def sym_constrain_range_for_size(size, min=None, max=None):
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
     if min is None and max is None:
-        torch._check_is_size(size)
+        torch._check(size >= 0)
         return
 
     if isinstance(size, (SymFloat, SymBool)):
@@ -1787,7 +1790,7 @@ def _padding_check_valid_input(input, padding, *, dim):
         for d in range(1, input_dim):
             valid_batch_mode = valid_batch_mode and input.size(d) != 0
     else:
-        for d in range(0, input_dim):
+        for d in range(input_dim):
             valid_non_batch_mode = valid_non_batch_mode and input.size(d) != 0
 
     # allow empty batch size but not other dimensions.
@@ -2341,19 +2344,19 @@ def calc_conv_nd_return_shape(
 
     ret_shape = [input_tensor.shape[0], out_channels]
     if isinstance(stride, IntLike):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         stride = [stride] * len(dims)
     elif len(stride) == 1:
         stride = [stride[0]] * len(dims)
 
     if isinstance(padding, IntLike):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         padding = [padding] * len(dims)
     elif len(padding) == 1:
         padding = [padding[0]] * len(dims)
 
     if isinstance(dilation, IntLike):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         dilation = [dilation] * len(dims)
     elif len(dilation) == 1:
         dilation = [dilation[0]] * len(dims)
@@ -2361,7 +2364,7 @@ def calc_conv_nd_return_shape(
     output_padding_list: Optional[list[int]] = None
     if output_padding:
         if isinstance(output_padding, IntLike):
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             output_padding_list = [output_padding] * len(dims)
         elif len(output_padding) == 1:
             output_padding_list = [output_padding[0]] * len(dims)
@@ -2374,19 +2377,19 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     padding[i],
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     from torch.fx.experimental.symbolic_shapes import sym_or
@@ -2719,20 +2722,22 @@ if torch._C._has_mkldnn:
 
     @register_meta(torch.ops.quantized.int4mm_packed_weight_cpu)
     def meta_int4mm_packed_weight_cpu(x, w, q_group_size, q_scale_and_zeros):
-        torch._check(x.dim() == 2, f"x must be a 2D tensor, got {x.dim()}D")
-        torch._check(w.dim() == 2, f"w must be a 2D tensor, got {w.dim()}D")
+        torch._check(x.dim() == 2, lambda: f"x must be a 2D tensor, got {x.dim()}D")
+        torch._check(w.dim() == 2, lambda: f"w must be a 2D tensor, got {w.dim()}D")
         torch._check(
             x.dtype in [torch.float32, torch.float16, torch.bfloat16],
-            f"expected x to be f32/f16/bf16, got {x.dtype}",
+            lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
         )
-        torch._check(w.dtype == torch.uint8, f"expected w to be uint8, got {w.dtype}")
+        torch._check(
+            w.dtype == torch.uint8, lambda: f"expected w to be uint8, got {w.dtype}"
+        )
         torch._check(
             q_group_size.dtype == torch.int64,
-            f"q_group_size must be int64, got {q_group_size.dtype}",
+            lambda: f"q_group_size must be int64, got {q_group_size.dtype}",
         )
         torch._check(
             q_scale_and_zeros.dtype == x.dtype,
-            f"q_scale_and_zeros must have the same dtype as x, got {q_scale_and_zeros.dtype}",
+            lambda: f"q_scale_and_zeros must have the same dtype as x, got {q_scale_and_zeros.dtype}",
         )
         return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
@@ -3452,7 +3457,7 @@ def meta_index_Tensor(self, indices):
         """
         shape = before_shape + replacement_shape + after_shape
         strides = list(self.stride())
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         strides[len(before_shape) : len(self.shape) - len(after_shape)] = [0] * len(
             replacement_shape
         )
@@ -4351,6 +4356,8 @@ def meta_index_put_(self, indices, values, accumulate=False):
 
 
 def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype=None):
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_eq
+
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
 
@@ -4364,7 +4371,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     output_size = (bs, res_rows, res_cols)
 
     torch._check(
-        batch2_sizes[0] == bs and batch2_sizes[1] == contraction_size,
+        sym_and(sym_eq(batch2_sizes[0], bs), sym_eq(batch2_sizes[1], contraction_size)),
         lambda: f"Expected size for first two dimensions of batch2 tensor to be: [{bs}"
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
@@ -4384,7 +4391,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     if not is_bmm and self_baddbmm is not None:
         torch._check(self_baddbmm.dim() == 3, lambda: "self must be a 3D tensor")
         torch._check(
-            self_baddbmm.size() == output_size,
+            sym_eq(self_baddbmm.size(), output_size),
             lambda: f"Expected an input tensor shape with shape {output_size} but got shape: {self_baddbmm.size()}",
         )
 
@@ -4893,7 +4900,7 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     for d in range(ndim - 3, ndim):
         torch._check(
             self.size(d) > 0,
-            f"fractional_max_pool2d: Expected input to have non-zero "
+            lambda: f"fractional_max_pool2d: Expected input to have non-zero "
             f" size for non-batch dimensions, but got {self.size()} with dimension {d} empty",
         )
 
@@ -4931,7 +4938,7 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     d = random_samples.size(2)
     torch._check(
         n >= input_batch,
-        "Expect _random_samples.size(0) no less then input batch size.",
+        lambda: "Expect _random_samples.size(0) no less then input batch size.",
     )
     torch._check(
         c == input_channels,
@@ -5303,10 +5310,11 @@ def grid_sampler_3d_backward(
 
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
-    dtype = kwargs.get("dtype", None)
+    dtype = kwargs.get("dtype")
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
+    # pyrefly: ignore [not-iterable]
     return torch.empty(size, *args, **kwargs)
 
 
@@ -6440,6 +6448,13 @@ def meta_scaled_mm(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
                 )
+            elif (
+                scale_a.size(0) == m
+                and scale_a.size(1) == scale_b.size(0) == (_k + 128 - 1) // 128
+                and scale_b.size(1) == (n + 128 - 1) // 128
+            ):
+                # (BlockWise1x128, BlockWise128x128)
+                pass  # do nothing, but do not error
             else:
                 # does not match any valid scaling type
                 torch._check(
@@ -6448,6 +6463,8 @@ def meta_scaled_mm(
                         "Invalid scaling configuration. "
                         "For tensorwise scaling, both scales should be scalar. "
                         f"For rowwise scaling, scale_a should be ({m}, 1), scale_b should be (1, {n}). "
+                        f"For (BlockWise1x128, BlockWise128x128), scale_a should be ({m}, {(_k + 128 - 1) // 128}), "
+                        + f"scale_b should be ({(_k + 128 - 1) // 128}, {(n + 128 - 1) // 128}). "
                         f"Got scale_a.size()=({scale_a.size(0)}, {scale_a.size(1)}) "
                         f"and scale_b.size()=({scale_b.size(0)}, {scale_b.size(1)})"
                     ),
@@ -6664,7 +6681,7 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),
@@ -6833,7 +6850,7 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
-    torch._check_is_size(k)
+    torch._check(k >= 0)
     torch._check(k <= sliceSize, lambda: "k not in range for dimension")
 
     topKSize = list(self.shape)
@@ -7190,7 +7207,7 @@ def meta_searchsorted(
     # Per the docs, if side == "left" and right is True, we error.
     torch._check(
         side != "left" or not right,
-        "torch.searchsorted(): side and right can't be set to opposites, got side of "
+        lambda: "torch.searchsorted(): side and right can't be set to opposites, got side of "
         "left while right was True",
     )
 
@@ -7301,7 +7318,7 @@ def meta_embedding_bag_per_sample_weights_backward(
     embedding_features = grad.size(1)
     torch._check(
         mode == MODE_SUM,
-        "embedding_bag_backward: per_sample_weights only supported for mode='sum'",
+        lambda: "embedding_bag_backward: per_sample_weights only supported for mode='sum'",
     )
     torch._check(grad.dim() == 2)
     torch._check(indices.dim() == 1)
@@ -7448,7 +7465,7 @@ def _meta_grouped_mm_common(
     if not mat_a_is_2d or not mat_b_is_2d:
         torch._check(
             mat_a.size(-1) == mat_b.size(-2),
-            "contraction dimension of mat_a and mat_b must match",
+            lambda: "contraction dimension of mat_a and mat_b must match",
         )
 
     if scaled:

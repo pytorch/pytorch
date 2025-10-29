@@ -451,10 +451,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             torch.library.register_autograd("_mylib::zoo", foo_bwd, lib=lib)
 
-            torch.library.register_effectful_op(
+            torch.library._register_effectful_op(
                 torch.ops._mylib.zoo.default, _EffectType.ORDERED
             )
-            torch.library.register_effectful_op(
+            torch.library._register_effectful_op(
                 "_mylib::zoo2.default", _EffectType.ORDERED
             )
 
