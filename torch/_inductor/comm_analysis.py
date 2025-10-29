@@ -1,6 +1,9 @@
+# mypy: disable-error-code=attr-defined
 import logging
 import math
-from enum import IntEnum
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum, IntEnum
 from functools import lru_cache
 from typing import Optional
 
@@ -217,12 +220,6 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
     return est_time_ms
 
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
-
-
 class ConnectionType(Enum):
     CURRENT_DEVICE = "current_device"
     NVLINK = "nvlink"
@@ -334,9 +331,7 @@ def nccl_pg_connectivity(pg: ProcessGroup) -> list[Connection]:
     rank = pg.rank()
     size = pg.size()
     from torch._C._autograd import DeviceType
-    from torch._C._distributed_c10d import (
-        _detect_dma_connectivity,  # type: ignore[attr-defined]
-    )
+    from torch._C._distributed_c10d import _detect_dma_connectivity
 
     nvlink_conn = _detect_dma_connectivity(DeviceType.CUDA, "nvlink")
     nvlink_matrix = nvlink_conn.matrix
@@ -536,7 +531,6 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
-    use_nccl_estimator: bool = True,
 ) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
@@ -565,30 +559,12 @@ def estimate_nccl_collective_runtime_from_fx_node(
         normalize_to_only_use_kwargs=True,
     )
     assert opt_args_kwargs is not None
-    args, kwargs = opt_args_kwargs
+    _, kwargs = opt_args_kwargs
 
     group_name = kwargs["group_name"]
     group_size = _get_group_size_by_name(group_name)
     assert isinstance(fx_node.target, torch._ops.OpOverload)
     coll = get_collective_type_from_kernel_name(fx_node.target.name())
-
-    if use_nccl_estimator:
-        # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
-        from torch.distributed.distributed_c10d import _resolve_process_group
-
-        pg = _resolve_process_group(group_name)
-        with torch.distributed._time_estimator(
-            group=pg, device=device
-        ) as time_estimator:
-            w = fn(*args, **kwargs)
-            torch.ops._c10d_functional.wait_tensor.default(w)
-        est_time_us = time_estimator.estimated_time
-        # -1000 constant is NCCL return in case of error during estimations.
-        # Observed it for all_to_all estimations.
-        if est_time_us < 0:
-            return None
-        est_time_ms = est_time_us / 1e3
-        return est_time_ms
 
     return estimate_nccl_collective_runtime_impl(
         tensor_storage_size_bytes, group_size, coll, group_name
