@@ -17,7 +17,7 @@ This opset is designed to serve as the functional IR to interface with backends.
 ```
 
 ```{csv-table}
-   :file: ../../build/ir/aten_ops.csv
+   :file: ../../../build/ir/aten_ops.csv
    :widths: auto
    :header-rows: 1
 ```
@@ -34,7 +34,7 @@ This opset is designed to interface with compiler backends.
 ```
 
 ```{csv-table}
-   :file: ../../build/ir/prims_ops.csv
+   :file: ../../../build/ir/prims_ops.csv
    :widths: auto
    :header-rows: 1
 ```
