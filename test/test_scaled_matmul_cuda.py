@@ -426,7 +426,7 @@ def data_to_nvfp4_with_global_scale(x, block_size):
     # Per-tensor max
     global_max = x.abs().max()
 
-    # Contants
+    # Constants
     # Global encoding scale for block-scales
     S_enc = FP4_MAX_VAL * F8E4M3_MAX_VAL / global_max
     S_dec = 1. / S_enc

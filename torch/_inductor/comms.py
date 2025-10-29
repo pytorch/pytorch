@@ -424,10 +424,7 @@ def _reorder_communication_preserving_peak_memory_internal(
             return
 
         # Candidate becomes last use of some bufs
-        for (
-            gn,
-            bufs,
-        ) in group_n_to_bufs_after_swap_dealloc_by_candidate.items():
+        for bufs in group_n_to_bufs_after_swap_dealloc_by_candidate.values():
             for buf in bufs:
                 buf_to_snode_last_use[buf] = candidate
 
@@ -840,7 +837,7 @@ def _schedule_for_comm(
         else:
             schedule(snode)
 
-    for snode, deps in unmet_deps.items():
+    for deps in unmet_deps.values():
         assert len(deps) == 0, (
             f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
         )
@@ -1552,11 +1549,8 @@ Graph: {graph}
                     node.args = new_args
 
     # Delete `fsdp.copy_(unsharded_param, Y)` nodes
-    for (
-        unsharded_param,
-        fsdp_copy_node_idxes,
-    ) in unsharded_param_to_fsdp_copy_node_idxes.items():
-        for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
+    for fsdp_copy_node_idxes in unsharded_param_to_fsdp_copy_node_idxes.values():
+        for fsdp_copy_node_idx in fsdp_copy_node_idxes:
             fsdp_copy_node = node_list[fsdp_copy_node_idx]
             graph.erase_node(fsdp_copy_node)
 
