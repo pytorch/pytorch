@@ -2845,7 +2845,7 @@ class Scheduler:
         # NB: None means that the dependency is on an input.  Don't actually
         # generate a dependency because if we do, Inductor will start trying
         # to free the unbacked int but that's pointless
-        for name, val in V.graph.graph_inputs.items():
+        for val in V.graph.graph_inputs.values():
             if isinstance(val, sympy.Expr):
                 for fs in val.free_symbols:
                     unbacked_symbol_to_origin_node[fs] = None
@@ -3545,9 +3545,7 @@ class Scheduler:
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             for hint_override in config.multi_kernel_hints:
                 choice_timings = multi_node.choice_timings(hint_override)
-                for choice, unfused_time in sorted(
-                    choice_timings.items(), key=lambda x: x[1]
-                ):
+                for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
                     if not isinstance(
                         choice, torch._inductor.select_algorithm.TritonTemplateCaller
                     ):
@@ -5715,6 +5713,7 @@ class Scheduler:
                     raise AssertionError(f"{type(self)=}")
                 backend.codegen_combo_kernel(node)
             elif isinstance(node, FusedMixOrderReductions):
+                # pyrefly: ignore [unbound-name]
                 self.get_backend(device).codegen_mix_order_reduction(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 # pyrefly: ignore [unbound-name]

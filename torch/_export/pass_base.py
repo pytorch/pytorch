@@ -188,7 +188,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
 
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         def placeholder(
             self,
             target: str,  # type: ignore[override]
@@ -440,7 +440,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = self.ExportInterpreter(self, graph_module)
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         prev_interpreter, self.interpreter = (
             self.interpreter,
             torch.fx.Interpreter(  # type: ignore[assignment]

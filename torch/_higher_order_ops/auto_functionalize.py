@@ -610,7 +610,7 @@ def do_auto_functionalize_v2(
     normalized_kwargs = {}
 
     schema = op._schema
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
 
