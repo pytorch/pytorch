@@ -1541,6 +1541,7 @@ class SIMDScheduling(BaseScheduling):
         ):
             return self._codegen_mix_order_reduction(node2, node1)
 
+        # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
 
         assert V.graph.sizevars.statically_known_gt(
