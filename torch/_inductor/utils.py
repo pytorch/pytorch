@@ -712,18 +712,14 @@ def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
 def cache_on_self_and_args(
     fn: Callable[Concatenate[Any, P], RV],
 ) -> Callable[Concatenate[Any, P], RV]:
-    ctx = {"fn": fn}
-    exec(
-        """cache = {}\ndef wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> RV:
+    cache = {}
+
+    @functools.wraps(fn)
+    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> RV:
         key = (id(self), args, tuple(sorted(kwargs.items())))
         if key not in cache:
             cache[key] = fn(self, *args, **kwargs)
         return cache[key]
-        """.lstrip(),
-        ctx,
-    )
-
-    wrapper = functools.wraps(fn)(ctx["wrapper"])
 
     return wrapper
 
