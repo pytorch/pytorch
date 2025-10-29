@@ -2041,7 +2041,8 @@ class PythonWrapperCodegen(CodeGen):
             neg = self.codegen_sizevar(
                 sympy.Max(0, sympy.Min(x + node.size, node.size))
             )
-            return f"{pos} if {x} >= 0 else {neg}"
+            x_cond = self.codegen_sizevar(x)
+            return f"{pos} if {x_cond} >= 0 else {neg}"
 
         def codegen_with_step(start_var, end_var, step):
             if step == 1:
