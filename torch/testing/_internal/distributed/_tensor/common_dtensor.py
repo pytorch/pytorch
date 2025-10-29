@@ -426,7 +426,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
-        # for form subgroup to avoid unnecesssary overhead.
+        # for form subgroup to avoid unnecessary overhead.
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
@@ -446,7 +446,7 @@ class DTensorTestBase(MultiProcessTestCase):
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
 
-        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+        if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
             # of the most pripority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.

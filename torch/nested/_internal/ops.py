@@ -51,7 +51,7 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
     # For other dims, subtract 1 to convert to inner space.
     return (
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         ragged_dim - 1 if dim == 0 else dim - 1
     )
 
@@ -2008,7 +2008,7 @@ def index_put_(func, *args, **kwargs):
     else:
         lengths = inp.lengths()
     torch._assert_async(
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
     )

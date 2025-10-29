@@ -3955,7 +3955,7 @@ def forward(self, causal_mask, fill_value):
     def test_export_custom_op_lib(self):
         ops_registered_before = set(torch.ops.mylib)
 
-        # Assert warning for CompositeImplictAutograd op
+        # Assert warning for CompositeImplicitAutograd op
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo123(Tensor x) -> Tensor")
             lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
@@ -16109,6 +16109,7 @@ class GraphModule(torch.nn.Module):
                 add: "f32[2, 4]" = torch.ops.aten.add.Tensor(relu, arg1_1);  relu = arg1_1 = None
                 return (add,)
 """,
+            ignore_empty_lines=True,
         )
 
         ep = export(M(), (x, y), strict=strict).run_decompositions({})
@@ -16141,6 +16142,7 @@ class GraphModule(torch.nn.Module):
                 add: "f32[2, 4]" = torch.ops.aten.add.Tensor(relu, arg1_1);  relu = arg1_1 = None
                 return (add,)
 """,
+            ignore_empty_lines=True,
         )
 
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
