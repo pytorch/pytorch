@@ -564,32 +564,32 @@ def rebind_unbacked(
             raw_u1 = u1.node._expr
 
             # TODO Do we still need this logic bellow?
-            # Simplify SymBool binding
-            if (
-                isinstance(raw_u1, sympy.Piecewise)
-                and len(raw_u1.args) == 2
-                and (
-                    raw_u1_args0 := cast(
-                        tuple[sympy.Basic, sympy.Basic], raw_u1.args[0]
-                    )
-                )
-                and raw_u1_args0[0] == 1
-                and isinstance(eq := raw_u1_args0[1], sympy.Eq)
-                and isinstance(new_raw_u1 := eq.lhs, sympy.Symbol)
-                and shape_env.var_to_range[new_raw_u1].issubset(ValueRanges(0, 1))
-                and eq.rhs == 1
-                and cast(tuple[sympy.Basic, sympy.Basic], raw_u1.args[1]) == (0, True)
-            ):
-                # This is what the pattern match above is testing
-                repacked = _sympy_cast_symbool_to_symint_guardless(
-                    # pyrefly: ignore  # unbound-name
-                    sympy.Eq(new_raw_u1, 1)
-                )
-                assert repacked == raw_u1, f"{repacked} != {raw_u1}"
-                # Cancel the to_int(to_bool(x)). This is sound because x in
-                # [0, 1]
-                # pyrefly: ignore  # unbound-name
-                raw_u1 = new_raw_u1
+            # # Simplify SymBool binding
+            # if (
+            #     isinstance(raw_u1, sympy.Piecewise)
+            #     and len(raw_u1.args) == 2
+            #     and (
+            #         raw_u1_args0 := cast(
+            #             tuple[sympy.Basic, sympy.Basic], raw_u1.args[0]
+            #         )
+            #     )
+            #     and raw_u1_args0[0] == 1
+            #     and isinstance(eq := raw_u1_args0[1], sympy.Eq)
+            #     and isinstance(new_raw_u1 := eq.lhs, sympy.Symbol)
+            #     and shape_env.var_to_range[new_raw_u1].issubset(ValueRanges(0, 1))
+            #     and eq.rhs == 1
+            #     and cast(tuple[sympy.Basic, sympy.Basic], raw_u1.args[1]) == (0, True)
+            # ):
+            #     # This is what the pattern match above is testing
+            #     repacked = _sympy_cast_symbool_to_symint_guardless(
+            #         # pyrefly: ignore  # unbound-name
+            #         sympy.Eq(new_raw_u1, 1)
+            #     )
+            #     assert repacked == raw_u1, f"{repacked} != {raw_u1}"
+            #     # Cancel the to_int(to_bool(x)). This is sound because x in
+            #     # [0, 1]
+            #     # pyrefly: ignore  # unbound-name
+            #     raw_u1 = new_raw_u1
 
             if not isinstance(raw_u1, sympy.Symbol):
                 assert not raw_u1.free_symbols, (
