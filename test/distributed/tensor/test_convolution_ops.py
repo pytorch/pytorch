@@ -241,6 +241,7 @@ DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
         "test_conv3d",
         "test_conv_backward_none_grad_inp",
         "test_depthwise_convolution",
+        "test_downsampling_convolution",
     ],
 )
 
