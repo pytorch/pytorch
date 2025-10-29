@@ -111,9 +111,9 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
-def _get_source_debug_name(source: Source) -> str:
+def _get_source_debug_name(source: Optional[Source]) -> str:
     try:
-        return source.name()
+        return source.name()  # type: ignore[union-attr]
     except NotImplementedError:
         return "<unknown source>"
 
