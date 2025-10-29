@@ -1,0 +1,29 @@
+# Owner(s): ["module: intel"]
+# run time xpu tests, but with the allocator using expandable segments
+
+import pathlib
+import sys
+
+import torch
+from torch.testing._internal.common_utils import run_tests, IS_WINDOWS
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.stats.import_test_stats import get_disabled_tests
+
+
+# Make sure to remove REPO_ROOT after import is done
+sys.path.remove(str(REPO_ROOT))
+
+if __name__ == "__main__":
+    if (
+        torch.xpu.is_available()
+        and not IS_WINDOWS
+    ):
+        get_disabled_tests(".")
+
+        torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
+
+        run_tests()
