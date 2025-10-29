@@ -273,11 +273,23 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       }
 
       // Compute output of batch norm
+      auto castTensorIfNeeded = [&](MPSGraphTensor* tensor, NSString* name) -> MPSGraphTensor* {
+        if (tensor && tensor.dataType != input_mps_dtype) {
+          return [mpsGraph castTensor:tensor toType:input_mps_dtype name:name];
+        }
+        return tensor;
+      };
+
+      MPSGraphTensor* normMeanTensor = castTensorIfNeeded(saveMeanTensor, @"bn_norm_mean_cast");
+      MPSGraphTensor* normVarTensor = castTensorIfNeeded(varTensor, @"bn_norm_var_cast");
+      MPSGraphTensor* normWeightTensor = castTensorIfNeeded(weightTensor, @"bn_norm_weight_cast");
+      MPSGraphTensor* normBiasTensor = castTensorIfNeeded(biasTensor, @"bn_norm_bias_cast");
+
       MPSGraphTensor* outputTensor = [mpsGraph normalizationWithTensor:inputTensor
-                                                            meanTensor:saveMeanTensor
-                                                        varianceTensor:varTensor
-                                                           gammaTensor:weightTensor
-                                                            betaTensor:biasTensor
+                                                            meanTensor:normMeanTensor
+                                                        varianceTensor:normVarTensor
+                                                           gammaTensor:normWeightTensor
+                                                            betaTensor:normBiasTensor
                                                                epsilon:(float)epsilon
                                                                   name:nil];
 

@@ -1902,6 +1902,28 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad, atol=1e-5, rtol=1e-5)
         self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad, atol=1e-5, rtol=1e-5)
 
+    def test_batch_norm_mixed_dtypes(self):
+        # See issue: https://github.com/pytorch/pytorch/issues/154887#issue-3111485538
+        input_mps = torch.rand((2, 3, 4), dtype=torch.float16, device="mps")
+        input_cpu = input_mps.clone().cpu()
+        mean_mps = torch.rand((3,), dtype=torch.float32, device="mps")
+        mean_cpu = mean_mps.clone().cpu()
+        var_mps = torch.rand((3,), dtype=torch.float32, device="mps")
+        var_cpu = var_mps.clone().cpu()
+
+        cases = [
+            ("functional", lambda inp, mean, var: torch.nn.functional.batch_norm(
+                inp, mean, var, training=False, eps=1e-5)),
+            ("native_legit_no_training", lambda inp, mean, var: torch.ops.aten._native_batch_norm_legit_no_training.default(
+                inp, None, None, mean, var, 0.1, 1e-5)[0]),
+        ]
+
+        for name, fn in cases:
+            mps_out = fn(input_mps, mean_mps, var_mps)
+            cpu_out = fn(input_cpu, mean_cpu, var_cpu)
+            self.assertEqual(mps_out, cpu_out, atol=1e-2, rtol=1e-2, msg=f"{name} mismatch")
+
+
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)
         x = torch.nn.LayerNorm(4).to("mps")
