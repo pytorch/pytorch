@@ -11,7 +11,6 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch.autograd.graph import GraphExecutionGroup
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -33,6 +32,7 @@ __all__ = [
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
+    "GraphExecutionGroup",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -1591,6 +1591,40 @@ def _checkpoint_without_reentrant_generator(
         )
 
     return
+
+
+class GraphExecutionGroup:
+    """Context manager to annotate that a set of backward passes are disjoint
+
+    The group ID is assigned upon construction from an incrementing counter. When used
+    as a context manager, it sets a global variable that utilities like AC can read
+    to determine which execution group is currently active.
+    """
+
+    _current_group: Optional[int] = None
+    _counter: int = 0
+
+    def __init__(self) -> None:
+        self._id: int = GraphExecutionGroup._counter
+        GraphExecutionGroup._counter += 1
+
+    def __enter__(self) -> "GraphExecutionGroup":
+        if GraphExecutionGroup._current_group is not None:
+            raise RuntimeError(
+                "GraphExecutionGroup contexts cannot be nested. "
+                f"Already inside group {GraphExecutionGroup._current_group}"
+            )
+        GraphExecutionGroup._current_group = self._id
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        GraphExecutionGroup._current_group = None
+
+    @classmethod
+    def _get_current_group(cls) -> Optional[int]:
+        # Private API to be used by utils like AC
+        return cls._current_group
+
 
 # Note: [compiled autograd and checkpoint unpack hook]
 # When tracing via compiled autograd, this hook will be visible to the

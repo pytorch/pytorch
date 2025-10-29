@@ -7376,7 +7376,7 @@ for shape in [(1,), ()]:
 
             y, z = checkpoint(fn, x, use_reentrant=False)
 
-            group = torch.autograd.graph.GraphExecutionGroup()
+            group = torch.utils.checkpoint.GraphExecutionGroup()
 
             ctx = contextlib.nullcontext()
             if use_graph_execution_group:
