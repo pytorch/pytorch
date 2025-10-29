@@ -30,9 +30,12 @@ __all__ = [
     "NodeSource",
     "NodeSourceAction",
     "get_graph_provenance_json",
+    "set_current_replay_node",
+    "get_current_replay_node",
 ]
 
 current_meta: dict[str, Any] = {}
+current_replay_node: Optional[Node] = None
 should_preserve_node_meta = False
 
 
@@ -398,6 +401,31 @@ def set_current_meta(node, pass_name=""):
 @compatibility(is_backward_compatible=False)
 def get_current_meta() -> dict[str, Any]:
     return current_meta
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def set_current_replay_node(node):
+    """
+    Set the currently replay node. If `current_replay_node` is not None,
+    then we're re-generating the `current_replay_node` in FunctionalTensorMode.
+    """
+    # See [Note] annotation for more details.
+    global current_replay_node
+    saved_current_replay_node = current_replay_node
+    try:
+        current_replay_node = node
+        yield
+    finally:
+        current_replay_node = saved_current_replay_node
+
+
+@compatibility(is_backward_compatible=False)
+def get_current_replay_node():
+    """
+    Get the currently replay node
+    """
+    return current_replay_node
 
 
 @compatibility(is_backward_compatible=False)
