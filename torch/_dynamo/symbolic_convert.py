@@ -5024,7 +5024,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         ):
             if isinstance(val, ConstantVariable) and val.value is None:
                 try:
-                    val = tos.next_variable(self)
+                    val = tos.next_variable(self)  # type: ignore[arg-type]
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code
