@@ -835,17 +835,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_full(self, tx, size, fill_value, **kwargs):
             if isinstance(fill_value, TensorVariable):
                 # Decompose: create empty tensor and fill it
-                # This avoids the scalar extraction
+                # This avoids the scalar extraction at compile time
                 empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
                     tx, [size], kwargs
                 )
-                return TorchInGraphFunctionVariable(torch.Tensor.fill_).call_method(
-                    tx, "fill_", [empty_result, fill_value], {}
-                )
+                # Call fill_ method on the empty tensor
+                return empty_result.call_method(tx, "fill_", [fill_value], {})
             else:
-                # Original path for scalar fill_values
-                return TorchInGraphFunctionVariable(torch.full).call_function(
-                    tx, [size, fill_value], kwargs
+                # For Python scalars and other non-tensor types, use default lowering
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch.ops.aten.full.default,
+                        *proxy_args_kwargs([size, fill_value], kwargs),
+                    ),
                 )
 
         @register(torch._foreach_lerp_)
