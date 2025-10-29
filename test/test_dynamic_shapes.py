@@ -3662,7 +3662,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass a contiguous tensor. A recompilation will happen due to 0/1 speciialization on stride.
+        # Pass a contiguous tensor. A recompilation will happen due to 0/1 specialization on stride.
         log_stream, ctx = logs_to_string(
             "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
