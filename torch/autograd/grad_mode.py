@@ -415,6 +415,6 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args) -> None:
         torch._C._autograd._unsafe_set_version_counter(self.tensors, self.prev_versions)
