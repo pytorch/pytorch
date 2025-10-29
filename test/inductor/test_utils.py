@@ -74,7 +74,7 @@ class TestUtils(TestCase):
         self.assertEqual(expr.is_integer, None)
         self.assertEqual(expr.is_nonnegative, None)
         # replace abs(x) with y
-        # propagte abs(x) sympy properties.
+        # propagate abs(x) sympy properties.
         result = sympy_subs(expr, {expr: Symbol("y")})
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
@@ -198,10 +198,10 @@ class TestUtils(TestCase):
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, dtype):
         ret = get_device_tflops(dtype)
-        self.assertTrue(type(ret) == float)
+        self.assertTrue(type(ret) is float)
 
 
-instantiate_device_type_tests(TestUtils, globals())
+instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

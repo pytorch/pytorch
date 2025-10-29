@@ -28,6 +28,7 @@
     is_available
     is_bf16_supported
     is_initialized
+    is_tf32_supported
     set_device
     set_stream
     stream
@@ -84,6 +85,7 @@
      memory_stats_as_nested_dict
      reset_accumulated_memory_stats
      reset_peak_memory_stats
+     set_per_process_memory_fraction
 ```
 
 ```{eval-rst}

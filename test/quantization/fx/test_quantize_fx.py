@@ -826,7 +826,7 @@ class TestFuseFx(QuantizationTestCase):
         # check conv module has two inputs
         named_modules = dict(m.named_modules())
         for node in m.graph.nodes:
-            if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
+            if node.op == "call_module" and type(named_modules[node.target]) is torch.nn.Conv2d:
                 self.assertTrue(len(node.args) == 2, msg="Expecting the fused op to have two arguments")
 
     def test_fusion_pattern_with_matchallnode(self):
@@ -917,7 +917,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = torch.fx.symbolic_trace(M())
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
-            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+            if n.op == 'call_module' and type(modules[n.target]) is nn.ReLU:
                 self.assertTrue(_is_match(modules, n, pattern))
 
     def test_pattern_match_constant(self):
@@ -1221,7 +1221,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
-                        # make sure seralization works
+                        # make sure serialization works
                         state_dict = copy.deepcopy(model.state_dict())
                         all_keys = _get_keys(module_name, is_dynamic)
                         for key in all_keys:
@@ -1484,7 +1484,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -1569,7 +1569,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
