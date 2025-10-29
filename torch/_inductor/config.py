@@ -92,6 +92,7 @@ precompilation_timeout_seconds: int = 60 * 60
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
+    env_name_default="TORCHINDUCTOR_FX_GRAPH_CACHE_DEFAULT",
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
@@ -205,6 +206,9 @@ static_weight_shapes = True
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
+runtime_triton_nan_asserts = (
+    os.environ.get("TORCHINDUCTOR_RUNTIME_TRITON_NAN_ASSERTS") == "1"
+)
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
 # Disable by default in fbcode
@@ -705,7 +709,7 @@ conv_1x1_as_mm = False
 #   split_reductions: uses multiple kernels to gain more parallelism
 #   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
 # enabling both of these will implicitly disable split_reductions
-split_reductions = True
+split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
@@ -745,6 +749,8 @@ combo_kernels_autotune = 1
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
 combo_kernel_foreach_dynamic_shapes = True
+# Maximum number of arguments (read/write buffers) allowed in a combo kernel
+combo_kernel_max_num_args = 250
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1529,6 +1535,10 @@ class triton:
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
     enable_pdl = False
+
+    mix_order_reduction = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
+    )
 
 
 class aot_inductor:

@@ -1000,6 +1000,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.exit_stack.close()
         super().tearDown()
 
+    def test_compiled_module_truthiness(self):
+        # Test with empty ModuleList
+        original_empty = nn.ModuleList()
+        compiled_empty = torch.compile(original_empty)
+        self.assertEqual(bool(original_empty), bool(compiled_empty))
+        self.assertFalse(bool(compiled_empty))
+        # Test with non-empty ModuleList
+        original_filled = nn.ModuleList([nn.Linear(10, 5)])
+        compiled_filled = torch.compile(original_filled)
+        self.assertEqual(bool(original_filled), bool(compiled_filled))
+        self.assertTrue(bool(compiled_filled))
+
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
         cloned_root = root.clone_manager(lambda x: True)
@@ -7260,30 +7272,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
         )
 
-    def test_311_resume_block_keyerror(self):
-        # https://github.com/pytorch/pytorch/issues/162313
-        flag = True
-
-        def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 2
-            if flag:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 4
-            else:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 8
-            return x + 16
-
-        inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        flag = False
-        self.assertEqual(fn(inp), opt_fn(inp))
-
     def test_cells_unsupported_step_exception(self):
         # This error happened because:
         #  - we were generating cells into a list on the stack
@@ -8100,6 +8088,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         gm = _dynamo_graph_capture_for_export(foo)(x, y)
         res = gm(x, y)
         self.assertEqual(res, ref)
+
+    def test_current_accelerator(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.accelerator.current_accelerator()
+            return x + 1
+
+        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
 
 
 instantiate_parametrized_tests(ReproTests)
