@@ -1,17 +1,31 @@
-import dataclasses
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
 import torch.fx as fx
+from torch._dynamo.utils import counters
+from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
+from torch._inductor.fx_passes.bucketing import (
+    bucket_key,
+    BucketMode,
+    is_all_gather_into_tensor as is_all_gather,
+    is_reduce_scatter_tensor as is_reduce_scatter,
+    is_wait_tensor,
+)
+from torch._inductor.fx_passes.overlap_scheduling import (
+    CollBucket,
+    CollectiveInfo,
+    get_group_name,
+    is_compute_node,
+)
+from torch.utils._ordered_set import OrderedSet
 
 
-log = logging.getLogger(__name__)
-bucket_log = logging.getLogger(f"{__name__}.bucketing")
+bucket_log = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass(slots=True)
+@dataclass
 class WhyNoBucket:
     name1: str
     name2: str
@@ -25,31 +39,10 @@ class WhyNoBucket:
         self.args = ()
 
     def __call__(self, reason: str, *args: Any) -> None:
-        self.reason = reason
-        self.args = args
-        bucket_log.debug(self)
-
-    def __str__(self) -> str:
-        return f"cannot bucket {self.name1} with {self.name2}: " + (
-            self.reason % self.args
-        )
-
-
-from torch._dynamo.utils import counters
-from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
-from torch._inductor.fx_passes.bucketing import (
-    bucket_key,
-    is_all_gather_into_tensor as is_all_gather,
-    is_reduce_scatter_tensor as is_reduce_scatter,
-    is_wait_tensor,
-)
-from torch._inductor.fx_passes.overlap_scheduling import (
-    CollBucket,
-    CollectiveInfo,
-    get_group_name,
-    is_compute_node,
-)
-from torch.utils._ordered_set import OrderedSet
+        if bucket_log.isEnabledFor(logging.DEBUG):
+            bucket_log.debug(
+                "cannot bucket %s with %s: " + reason, self.name1, self.name2, *args
+            )
 
 
 def is_collective_or_wait(n: fx.Node) -> bool:
@@ -137,7 +130,7 @@ class OverlapPreservingBucketer:
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
-        bucket_mode: str = "custom_ops_multidtype",
+        bucket_mode: BucketMode = "custom_ops_multidtype",
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -750,7 +743,9 @@ class OverlapPreservingBucketer:
         """
 
         from torch._inductor.fx_passes.bucketing import (
+            is_all_reduce_tensor,
             merge_all_gather_bucket,
+            merge_all_reduce_bucket,
             merge_reduce_scatter_bucket,
         )
 
@@ -775,6 +770,13 @@ class OverlapPreservingBucketer:
                 bucket,
                 insert_before=next_node,
                 mode="custom_ops",
+            )
+        elif is_all_reduce_tensor(bucket[0]):
+            new_nodes, replacements = merge_all_reduce_bucket(
+                self.graph,
+                bucket,
+                mode="custom_ops",
+                insert_before=next_node,
             )
         else:
             assert is_reduce_scatter(bucket[0])
