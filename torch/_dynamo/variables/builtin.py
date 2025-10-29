@@ -2802,14 +2802,7 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(
             a,
-            (
-                ConstDictVariable,
-                DictKeysVariable,
-                MutableMappingVariable,
-                SetVariable,
-                UserDefinedDictVariable,
-                UserDefinedObjectVariable,
-            ),
+            (DictKeysVariable, SetVariable, UserDefinedObjectVariable),
         ):
             return a.call_method(tx, "__xor__", [b], {})
 

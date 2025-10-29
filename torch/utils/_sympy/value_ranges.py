@@ -111,6 +111,10 @@ def vr_is_expr(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[sympy.Expr]]:
     return not vr.is_bool
 
 
+def is_sympy_integer(value) -> TypeGuard[sympy.Integer]:
+    return isinstance(value, sympy.Integer)
+
+
 ExprIn = Union[int, float, sympy.Expr]
 BoolIn = Union[bool, SympyBoolean]
 AllIn = Union[ExprIn, BoolIn]
@@ -514,10 +518,6 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.coordinatewise_increasing_map(a, b, sympy.And)
 
     @staticmethod
-    def xor_(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, sympy.Xor)
-
-    @staticmethod
     def _bool_to_int(x):
         if x.is_singleton():
             return ValueRanges.wrap(sympy.Integer(1 if x.lower else 0))
@@ -574,13 +574,6 @@ class SymPyValueRangeAnalysis:
     def bitwise_xor(cls, a, b):
         a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
         if a.is_bool and b.is_bool:
-            return cls.xor_(a, b)
-        if a.is_bool:
-            a = cls._bool_to_int(a)
-        if b.is_bool:
-            b = cls._bool_to_int(b)
-
-        try:
             lower_lower = a.lower ^ b.lower
             lower_upper = a.lower ^ b.upper
             upper_lower = a.upper ^ b.lower
@@ -588,11 +581,21 @@ class SymPyValueRangeAnalysis:
 
             lower = min(lower_lower, lower_upper, upper_lower, upper_upper)
             upper = max(lower_lower, lower_upper, upper_lower, upper_upper)
-        except Exception:
-            lower = -int_oo
-            upper = int_oo
 
-        return ValueRanges(lower, upper)
+            return ValueRanges(lower, upper)
+        if a.is_bool:
+            a = cls._bool_to_int(a)
+        if b.is_bool:
+            b = cls._bool_to_int(b)
+        if (
+            a.lower == a.upper
+            and b.lower == b.upper
+            and is_sympy_integer(a.lower)
+            and is_sympy_integer(b.lower)
+        ):
+            value_range = a.lower ^ b.lower
+            return ValueRanges(value_range, value_range)
+        return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
     def eq(a, b):
