@@ -459,6 +459,8 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
+        if TEST_WITH_ROCM and a_row_major and b_row_major and dtype in [torch.bfloat16, torch.float16]:
+            self.skipTest("failed using hipblaslt on rocm 6.4.2")
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
