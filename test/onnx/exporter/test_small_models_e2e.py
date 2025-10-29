@@ -760,7 +760,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(2, 5, 7, 3)
         onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_weight(self):
         """Test RMS normalization with weight parameter."""
