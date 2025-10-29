@@ -83,7 +83,9 @@ def aten_rms_norm(
     # Create weight tensor if not provided
     if weight is None:
         # pyrefly: ignore [missing-attribute]
-        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op23.Constant(value=ir.tensor([1.0], dtype=input.dtype))
+    elif len(weight.shape) == 0:
+        weight = op23.Unsqueeze(weight, [0])
 
     return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
 
