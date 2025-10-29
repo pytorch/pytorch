@@ -29,4 +29,6 @@ C10_XPU_API void enablePeerAccess(
     c10::DeviceIndex dev,
     c10::DeviceIndex dev_to_access);
 
+C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
+
 } // namespace c10::xpu::XPUCachingAllocator
