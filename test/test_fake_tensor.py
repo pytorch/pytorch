@@ -117,8 +117,8 @@ class FakeTensorTest(TestCase):
             y.backward()
 
     def test_basic(self):
-        x = torch.empty(2, 2, device="cpu")
-        y = torch.empty(4, 2, 2, device="cpu")
+        x = torch.empty(2, 2, device="meta")
+        y = torch.empty(4, 2, 2, device="meta")
         with FakeTensorMode() as mode:
             x = mode.from_tensor(x)
             y = mode.from_tensor(y)
@@ -126,10 +126,6 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.shape, (4, 2, 2))
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
-
-
-
-
 
     def test_custom_op_fallback(self):
         from torch.library import impl, Library
