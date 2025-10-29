@@ -86,7 +86,7 @@ namespace at {
 
       if (ivalue.isTensor()) {
         auto tensor = std::move(ivalue).toTensor();
-        bool is_wrapped_number = (tensor.unsafeGetTensorImpl()->is_wrapped_number()) ? true : false;
+        bool is_wrapped_number = tensor.unsafeGetTensorImpl()->is_wrapped_number();
         if (tensor._is_zerotensor()) {
           TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",
                     "obtained using .clone() if you want a mutable tensor.");
@@ -100,18 +100,17 @@ namespace at {
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
           const Tensor& tensor = tensors[j];
-          bool is_wrapped_number = (tensor.unsafeGetTensorImpl()->is_wrapped_number()) ? true : false;
+          bool is_wrapped_number = tensor.unsafeGetTensorImpl()->is_wrapped_number();
           if (tensor._is_zerotensor()) {
             // TODO: assert requires_grad=False
             //_like should not propagate zerotensor dispatch key
             TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",
                     "obtained using .clone() if you want a mutable tensor.");
-            tensors[j] = at::zeros({}, tensor.options()).expand(tensor.sizes());
-            Tensor updated_tensor = tensors[j];
+            Tensor _tensor = at::zeros({}, tensor.options()).expand(tensor.sizes());
             if (is_wrapped_number) {
-              updated_tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+              _tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
             }
-            tensors[j] = updated_tensor;
+            tensors[j] = _tensor;
           }
         }
         (*stack)[stack_start + i] = std::move(tensors);
