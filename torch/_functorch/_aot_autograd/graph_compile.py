@@ -35,7 +35,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     lazy_format_graph_code,
 )
-from torch._guards import CompileContext, detect_fake_mode, TracingContext
+from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any

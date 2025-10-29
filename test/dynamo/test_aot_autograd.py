@@ -1720,7 +1720,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_unbacked_operations_with_compile(self):
+    def test_unbacked_activation_specialized_in_inductor(self):
         """Test compilation with unbacked operations like nonzero."""
         torch._dynamo.reset()
 
