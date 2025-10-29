@@ -1733,14 +1733,13 @@ Tensor narrow_symint(
     // Avoid the complex symbolic expressions path for non-unbacked.
     return at::slice_symint(self, dim, start + cur_size, end + cur_size, 1);
   } else {
-    // Cannot statically determine the condition, use unbacked approach
-    // This is an interesting situation, when start is negative and
-    // start + length == 0: slice and narrow do different things.
-    // i.e: x.narrow(0, -2, 2) != x[-2:0] in that case we want to
-    // pass curr_size instead of 0. Otherwise they would do the same thing.
-
-    // this says at runtime if start<0 and end==0 then pass cur_size
-    // insetead of 0.
+    // Cannot statically determine the condition due to unbacked.
+    // This is an interesting situation; when start is negative and
+    // start + length == 0, slice and narrow do different things.
+    // i.e., x.narrow(0, -2, 2) != x[-2:0]; in that case, we want to
+    // pass curr_size instead of 0. Otherwise, they would do the same thing.
+    // This says at runtime: if start < 0 and end == 0, then pass curr_size
+    // instead of 0.
 
     auto use_different = start.sym_lt(0).sym_and(end.sym_eq(0)).toSymInt();
     return at::slice_symint(
@@ -1757,7 +1756,7 @@ Tensor narrow_tensor_symint(
     SymInt length) {
   TORCH_CHECK(
       start.dim() == 0 &&
-          isIntegralType(start.scalar_type(), /*includeBool=*/false),
+          sIntegralType(start.scalar_type(), /*includeBool=*/false),
       "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
   return at::narrow_symint(self, dim, c10::SymInt(st), std::move(length));
@@ -5017,3 +5016,4 @@ int64_t dense_dim_default(const Tensor& self) {
 }
 
 } // namespace at::native
+ 
