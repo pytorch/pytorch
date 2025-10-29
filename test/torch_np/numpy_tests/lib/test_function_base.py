@@ -3361,42 +3361,42 @@ class TestPercentile(TestCase):
         assert_equal(np.percentile(a, 0.3), np.nan)
         assert_equal(np.percentile(a, 0.3).ndim, 0)
 
-        # axis0 zerod
+        # axis0 zeroed
         b = np.percentile(np.arange(24, dtype=float).reshape(2, 3, 4), 0.3, 0)
         b[2, 3] = np.nan
         b[1, 2] = np.nan
         assert_equal(np.percentile(a, 0.3, 0), b)
 
-        # axis0 not zerod
+        # axis0 not zeroed
         b = np.percentile(np.arange(24, dtype=float).reshape(2, 3, 4), [0.3, 0.6], 0)
         b[:, 2, 3] = np.nan
         b[:, 1, 2] = np.nan
         assert_equal(np.percentile(a, [0.3, 0.6], 0), b)
 
-        # axis1 zerod
+        # axis1 zeroed
         b = np.percentile(np.arange(24, dtype=float).reshape(2, 3, 4), 0.3, 1)
         b[1, 3] = np.nan
         b[1, 2] = np.nan
         assert_equal(np.percentile(a, 0.3, 1), b)
-        # axis1 not zerod
+        # axis1 not zeroed
         b = np.percentile(np.arange(24, dtype=float).reshape(2, 3, 4), [0.3, 0.6], 1)
         b[:, 1, 3] = np.nan
         b[:, 1, 2] = np.nan
         assert_equal(np.percentile(a, [0.3, 0.6], 1), b)
 
-        # axis02 zerod
+        # axis02 zeroed
         b = np.percentile(np.arange(24, dtype=float).reshape(2, 3, 4), 0.3, (0, 2))
         b[1] = np.nan
         b[2] = np.nan
         assert_equal(np.percentile(a, 0.3, (0, 2)), b)
-        # axis02 not zerod
+        # axis02 not zeroed
         b = np.percentile(
             np.arange(24, dtype=float).reshape(2, 3, 4), [0.3, 0.6], (0, 2)
         )
         b[:, 1] = np.nan
         b[:, 2] = np.nan
         assert_equal(np.percentile(a, [0.3, 0.6], (0, 2)), b)
-        # axis02 not zerod with method='nearest'
+        # axis02 not zeroed with method='nearest'
         b = np.percentile(
             np.arange(24, dtype=float).reshape(2, 3, 4),
             [0.3, 0.6],

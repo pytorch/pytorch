@@ -73,13 +73,20 @@ class SymbolicStreamState:
     def __init__(self) -> None:
         from ..source import CurrentStreamSource
 
-        stream_var = LazyVariableTracker.create(
-            torch.accelerator.current_stream(),
-            source=CurrentStreamSource(torch.accelerator.current_stream().device),
-        )
-        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
-            [stream_var]  # type: ignore[list-item]
-        )
+        if torch.accelerator.is_available():
+            stream_var = LazyVariableTracker.create(
+                torch.accelerator.current_stream(),
+                source=CurrentStreamSource(torch.accelerator.current_stream().device),
+            )
+            self.cur_stream_stack: collections.deque[StreamVariable] = (
+                collections.deque(
+                    [stream_var]  # type: ignore[list-item]
+                )
+            )
+        else:
+            self.cur_stream_stack: collections.deque[StreamVariable] = (
+                collections.deque()
+            )
 
     def enter_stream(self, stream: "StreamVariable") -> None:
         self.cur_stream_stack.append(stream)

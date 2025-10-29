@@ -206,6 +206,9 @@ static_weight_shapes = True
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
+runtime_triton_nan_asserts = (
+    os.environ.get("TORCHINDUCTOR_RUNTIME_TRITON_NAN_ASSERTS") == "1"
+)
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
 # Disable by default in fbcode
@@ -2078,17 +2081,6 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 write_are_deterministic_algorithms_enabled = (
     os.getenv("TORCHINDUCTOR_WRITE_ARE_DETERMINISTIC_ALGORITHMS_ENABLED", "1") == "1"
 )
-
-
-class lookup_table:
-    # Lookup table for template config overrides
-    table: Optional[dict[str, list[dict[str, Any]]]] = None
-
-    # Enable template src_hash checking in lookup table to prevent using stale configs.
-    # If True, configs with 'template_hash' field will be compared against the template's
-    # src_hash at runtime and filtered out if they don't match. If False, no
-    # hash checking is performed.
-    check_src_hash: bool = True
 
 
 class test_configs:
