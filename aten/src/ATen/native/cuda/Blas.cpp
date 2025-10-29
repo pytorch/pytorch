@@ -174,7 +174,7 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
     // Conditions for bias to be fusable
     && (
       self.is_contiguous() &&
-      // NOTE: fine to have 1-len dims to the left from the leading one
+      // NOTE: fine to have 1-len dims to the left from the right-most one
       (self.dim() == 1 || self.squeeze().dim() == 1) &&
       self.sizes().back() == mat2_sizes[1]
     )
