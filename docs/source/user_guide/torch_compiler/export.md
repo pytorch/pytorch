@@ -660,8 +660,8 @@ export/ir_spec
 export/pt2_archive
 export/draft_export
 export/joint_with_descriptors
-cond
-generated/exportdb/index
+../../cond
+../../generated/exportdb/index
 torch.compiler_aot_inductor
 torch.compiler_ir
 ```
@@ -670,7 +670,7 @@ torch.compiler_ir
 :caption: Deep Dive for PyTorch Developers
 :maxdepth: 1
 
-user_guide/torch_compiler/torch.compiler_dynamic_shapes
+torch.compiler_dynamic_shapes
 torch.compiler_fake_tensor
 torch.compiler_transformations
 ```

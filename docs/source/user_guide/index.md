@@ -36,7 +36,7 @@ torch_compiler/torch.compiler.md
 :maxdepth: 1
 :caption: Torch Export
 
-torch_compiler/export_concepts.md
+torch_compiler/export.md
 ```
 
 ```{toctree}
