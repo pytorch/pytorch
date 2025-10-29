@@ -26,7 +26,7 @@ class PublicBindings(HeuristicInterface):
         try:
             changed_files = query_changed_files()
         except Exception as e:
-            warn(f"Can't query changed test files due to {e}", stacklevel=2)
+            warn(f"Can't query changed test files due to {e}")
             changed_files = []
 
         if any(
