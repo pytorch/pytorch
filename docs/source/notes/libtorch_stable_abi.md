@@ -122,14 +122,14 @@ The above is relevant in two places:
     }
     ```
 
-2. `aoti_torch_call_dispatcher`
+2. `torch_call_dispatcher`
     This API allows you to call the PyTorch dispatcher from C/C++ code. It has the following signature:
 
     ```cpp
-    aoti_torch_call_dispatcher_v2(const char* opName, const char* overloadName, StableIValue* stack, uint64_t extension_build_version);
+    torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack, uint64_t extension_build_version);
     ```
 
-    `aoti_torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
+    `torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
     StableIValues and the `TORCH_ABI_VERSION` of the user extension. This call will populate any return values of the
     op into the stack in their StableIValue form, with `ret0` at index 0, `ret1` at index 1, and so on.
 
@@ -156,4 +156,4 @@ Extensions can select the minimum abi version to be compatible with using:
 
 before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
 
-The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_FEATURE_VERSION they are exposed in and forward compatible with newer libtorch binaries.
+The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.
