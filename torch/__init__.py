@@ -1810,7 +1810,7 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
     _check_with(
         NotImplementedError,
         cond,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         message,
     )
 
@@ -2669,7 +2669,7 @@ def compile(
                     dynamic=dynamic,
                     disable=disable,
                     guard_filter_fn=guard_filter_fn,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                 )(model)(*args, **kwargs)
 
         return export_wrapped_fn

@@ -1661,8 +1661,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # We need to have this check this way, because in case init is a TreeSpec and carry
         # but carry is only a LeafSpec, these two cannot be compared correctly.
         if (
-            isinstance(xs_treespec.as_python_constant(), pytree.LeafSpec)
-            != isinstance(_combine_treespec.as_python_constant(), pytree.LeafSpec)
+            xs_treespec.as_python_constant().is_leaf()
+            != _combine_treespec.as_python_constant().is_leaf()
         ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
             xs_treespec, _combine_treespec
         ).as_python_constant():
@@ -1714,7 +1714,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 # Check that the combine_fn is pointwise, if combine_mode='pointwise'
                 if not has_only_uses(
                     node,
-                    lambda use: any(tag in (torch.Tag.pointwise) for tag in use.tags) or use.op == "output"
+                    lambda use: any(tag in (torch.Tag.pointwise,) for tag in use.tags) or use.op == "output"
                 ):
                     raise RuntimeError(
                         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
