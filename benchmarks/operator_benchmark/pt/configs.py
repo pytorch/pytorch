@@ -141,8 +141,6 @@ conv_3d_configs_long = op_bench.cross_product_configs(
     D=[128],
     H=[128],
     W=[128],
-    G=[1],
-    pad=[0],
     device=["cpu", "cuda"],
     tags=["long"],
 )
