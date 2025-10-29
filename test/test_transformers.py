@@ -2845,6 +2845,41 @@ class TestSDPACudaOnly(NNTestCase):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
 
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_broken_166211(self):
+        # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
+        shape = (20, 4, 4, 32)
+        scale = 10
+        for i in range(100):
+            q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            q.requires_grad = True
+            k.requires_grad = True
+            v.requires_grad = True
+
+            grad_attn_output = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+
+            q_ref = q.detach().clone()
+            q_ref.requires_grad = True
+            k_ref = k.detach().clone()
+            k_ref.requires_grad = True
+            v_ref = v.detach().clone()
+            v_ref.requires_grad = True
+
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
+                attn_output_ref = torch.nn.functional.scaled_dot_product_attention(q_ref, k_ref, v_ref)
+                attn_output_ref.backward(grad_attn_output)
+
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                attn_output.backward(grad_attn_output)
+
+            self.assertEqual(q.grad, q_ref.grad, atol=10.0, rtol=0.05)
+            self.assertEqual(k.grad, k_ref.grad, atol=10.0, rtol=0.05)
+            self.assertEqual(v.grad, v_ref.grad, atol=10.0, rtol=0.05)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attention_mask_variants(self, device, mask_dim: list[int]):
