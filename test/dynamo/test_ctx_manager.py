@@ -537,7 +537,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             with torch.cuda.stream(new_stream):
                 x = torch.add(x, 4)
 
-            new_event = torch.cuda.Event()
+            new_event = torch.Event()
             new_event.record(new_stream)
 
             new_event.wait(cur_stream)
