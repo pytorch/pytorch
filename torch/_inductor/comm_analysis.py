@@ -1,12 +1,16 @@
-import functools
+# mypy: disable-error-code=attr-defined
 import logging
 import math
-from enum import IntEnum
-from typing import Optional
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import Enum, IntEnum
+from functools import lru_cache
+from typing import ClassVar, Optional
 
 import sympy
 
 import torch
+from torch.distributed import ProcessGroup
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -30,7 +34,7 @@ class NVIDIA_GPU_TYPE(IntEnum):
     HOPPER = 2
 
 
-@functools.lru_cache
+@lru_cache
 def get_gpu_type() -> NVIDIA_GPU_TYPE:
     gpu_info = torch.utils.collect_env.get_gpu_info(torch.utils.collect_env.run) or ""
     if "V100" in gpu_info:
@@ -216,8 +220,164 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
     return est_time_ms
 
 
+class ConnectionType(Enum):
+    CURRENT_DEVICE = "current_device"
+    NVLINK = "nvlink"
+    INFINIBAND = "infiniband"
+
+
+class Connection(ABC):
+    """Base class for GPU interconnect connections"""
+
+    @property
+    @abstractmethod
+    def type(self) -> ConnectionType:
+        """Connection type"""
+
+    @property
+    @abstractmethod
+    def bandwidth(self) -> float:
+        """Bidirectional bandwidth in GB/s"""
+
+
+@dataclass
+class CurrentDevice(Connection):
+    """Dummy Implementation"""
+
+    type: ConnectionType = ConnectionType.CURRENT_DEVICE
+    bandwidth: float = 0.0
+
+
+@dataclass
+class NVLinkConnection(Connection):
+    """NVLink connection for intra-node GPU communication"""
+
+    version: str
+    num_links: int
+    _bandwidth: float = field(init=False)
+    # Bidirectional bandwidth per link (GB/s)
+    BANDWIDTH_PER_LINK: ClassVar[dict[str, float]] = {
+        "1.0": 40.0,  # 20 GB/s unidirectional × 2
+        "2.0": 50.0,  # 25 GB/s unidirectional × 2
+        "3.0": 50.0,  # 25 GB/s unidirectional × 2 (A100)
+        "4.0": 50.0,  # 25 GB/s unidirectional × 2 (H100, H200)
+        "5.0": 400.0,  # 200 GB/s unidirectional x 2 (GB200)
+    }
+
+    def __post_init__(self) -> None:
+        if self.version not in self.BANDWIDTH_PER_LINK:
+            raise ValueError(
+                f"Unknown NVLink version: {self.version}. "
+                f"Supported versions: {list(self.BANDWIDTH_PER_LINK.keys())}"
+            )
+        # Calculate total bidirectional bandwidth
+        self._bandwidth = self.BANDWIDTH_PER_LINK[self.version] * self.num_links
+
+    @property
+    def bandwidth(self) -> float:
+        """Bidirectional bandwidth in GB/s"""
+        return self._bandwidth
+
+    @property
+    def type(self) -> ConnectionType:
+        return ConnectionType.NVLINK
+
+    def __str__(self) -> str:
+        return f"NVLink v{self.version} ({self.num_links} links, {self.bandwidth:.0f} GB/s bidirectional)"
+
+    def __repr__(self) -> str:
+        return f"NVLinkConnection(version='{self.version}', num_links={self.num_links}, bandwidth={self.bandwidth:.0f})"
+
+
+@dataclass
+class InfiniBandConnection(Connection):
+    """InfiniBand connection for inter-node communication"""
+
+    rate: float = 200.0  # Default (4xHDR), ibstat Rate output, Gbps per direction
+    num_ports: int = 4
+    _bandwidth: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._bandwidth = self.rate / 8 * self.num_ports * 2
+
+    @property
+    def type(self) -> ConnectionType:
+        return ConnectionType.INFINIBAND
+
+    @property
+    def bandwidth(self) -> float:
+        """Bidirectional bandwidth in GB/s"""
+        return self._bandwidth
+
+    def __str__(self) -> str:
+        return f"InfiniBand Rate:{self.rate} ({self.bandwidth:.0f} GB/s bidirectional)"
+
+    def __repr__(self) -> str:
+        return (
+            f"InfiniBandConnection(rate='{self.rate}', bandwidth={self.bandwidth:.0f})"
+        )
+
+
+@lru_cache(maxsize=128)
+def nccl_pg_connectivity(pg: ProcessGroup) -> list[Connection]:
+    """
+    Returns NCCL ProcessGroup Connectivity.
+    The list of Connection objects, corresponding to each rank in PG.
+    Connection has bandwidth property to return bidirectional bandwidth.
+    For own ranks returns CurrentDevice.
+
+    Attention:
+    Does collective operation to gather uuid of devices in PG.
+    The result should be cached.
+    """
+    rank = pg.rank()
+    size = pg.size()
+    from torch._C._autograd import DeviceType
+    from torch._C._distributed_c10d import _detect_dma_connectivity
+
+    nvlink_conn = _detect_dma_connectivity(DeviceType.CUDA, "nvlink")
+    nvlink_matrix = nvlink_conn.matrix
+
+    devices_uuids = [
+        str(torch.cuda.get_device_properties(i).uuid)
+        for i in range(torch.cuda.device_count())
+    ]
+    current_device_idx = torch.cuda.current_device()
+
+    props = torch.cuda.get_device_properties(current_device_idx)
+    uuid = str(props.uuid)
+    gathered: list[list[str]] = [[] for _ in range(size)]
+    torch.distributed.all_gather_object(gathered, [uuid], pg)
+    nvlink_n = len(nvlink_matrix)
+    uuid_to_nvlinkconn = {}
+    for dev_idx in range(nvlink_n):
+        # TODO: retrieve nvlink version
+        version = "4.0"
+        num_links = nvlink_matrix[current_device_idx][dev_idx]
+        uuid_to_nvlinkconn[devices_uuids[dev_idx]] = NVLinkConnection(
+            version, num_links
+        )
+
+    conn: list[Connection] = []
+    for r in range(size):
+        uuid = gathered[r][0]
+        if r == rank:
+            conn.append(CurrentDevice())
+            continue
+        if uuid in uuid_to_nvlinkconn:
+            conn.append(uuid_to_nvlinkconn[uuid])
+            continue
+
+        # TODO: get number of ports and ib rate, parsing ibstat?
+        conn.append(InfiniBandConnection())
+    return conn
+
+
 def estimate_nccl_collective_runtime_impl(
-    tensor_storage_size_bytes: int, group_size: int, coll: NCCL_COLL
+    tensor_storage_size_bytes: int,
+    group_size: int,
+    coll: NCCL_COLL,
+    group_name: Optional[str] = None,
 ) -> float:
     """
     Returns estimated NCCL collective runtime in milliseconds (ms).
@@ -236,12 +396,24 @@ def estimate_nccl_collective_runtime_impl(
 
     # Currently assumes each node has 8 gpus. And when >1 node is used, assumes each node uses all 8 gpus.
     # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
-    num_gpus_per_node = 8
-    nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
 
     if nRanks <= 1:
         return 0
+
+    if group_name is not None:
+        from torch._C._distributed_c10d import _resolve_process_group
+
+        pg = _resolve_process_group(group_name)
+        group_conn = nccl_pg_connectivity(pg)
+        num_ib_conn = 1
+        for c in group_conn:
+            if isinstance(c, InfiniBandConnection):
+                num_ib_conn += 1
+        nNodes = num_ib_conn
+    else:
+        num_gpus_per_node = 8
+        nNodes = math.ceil(group_size / num_gpus_per_node)
 
     # Assumes ring algorithm
     nccl_algo = NCCL_ALGO.RING
@@ -341,8 +513,10 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     tensor_storage_size_bytes = get_collective_input_size_bytes(node)
     group_size = get_collective_group_size(node)
     coll = get_collective_type(node)
+    group_name: Optional[str] = None
+    # TODO: retrieve group_name from node.constant_args
     return estimate_nccl_collective_runtime_impl(
-        tensor_storage_size_bytes, group_size, coll
+        tensor_storage_size_bytes, group_size, coll, group_name
     )
 
 
@@ -357,7 +531,8 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 
 
 def estimate_nccl_collective_runtime_from_fx_node(
-    fx_node: torch.fx.Node, override_size: Optional[int] = None
+    fx_node: torch.fx.Node,
+    override_size: Optional[int] = None,
 ) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
@@ -388,10 +563,11 @@ def estimate_nccl_collective_runtime_from_fx_node(
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
 
-    group_size = _get_group_size_by_name(kwargs["group_name"])
+    group_name = kwargs["group_name"]
+    group_size = _get_group_size_by_name(group_name)
     assert isinstance(fx_node.target, torch._ops.OpOverload)
     coll = get_collective_type_from_kernel_name(fx_node.target.name())
 
     return estimate_nccl_collective_runtime_impl(
-        tensor_storage_size_bytes, group_size, coll
+        tensor_storage_size_bytes, group_size, coll, group_name
     )
