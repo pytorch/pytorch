@@ -43,7 +43,8 @@ if TYPE_CHECKING:
     from ..ir import IRNode
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..runtime.runtime_utils import green_text, yellow_text
+from ..runtime.hints import DeviceProperties
+from ..runtime.runtime_utils import green_text, yellow_text, next_power_of_2
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -1544,6 +1545,21 @@ class SIMDScheduling(BaseScheduling):
         ):
             return self._codegen_mix_order_reduction(node2, node1)
 
+        def _pick_split_size():
+            # the overriden has highest priority
+            if config.triton.mix_order_reduction_split_size is not None:
+                return config.triton.mix_order_reduction_split_size
+
+            # heuristics based on number of SMs
+            device_prop = DeviceProperties.create(node1.get_device())
+            num_sm = device_prop.multi_processor_count
+            estimated_num_splits = num_sm * 8
+            split_size = max(next_power_of_2(numel // estimated_num_splits), 16)
+            split_size = min(split_size, 128)
+            return split_size
+
+        split_size = _pick_split_size()
+
         metrics.codegen_mix_order_reduction += 1
 
         assert V.graph.sizevars.statically_known_gt(
@@ -1556,7 +1572,6 @@ class SIMDScheduling(BaseScheduling):
             node2
         )
 
-        split_size = config.triton.mix_order_reduction_split_size
         nsplit = (numel + split_size - 1) // split_size
 
         converted_nodes = []

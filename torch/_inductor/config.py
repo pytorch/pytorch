@@ -1534,7 +1534,7 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "1") == "1"
     )
 
-    mix_order_reduction_split_size = 64
+    mix_order_reduction_split_size = None
 
 
 class aot_inductor:
