@@ -282,11 +282,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         # 2. insert choose_qparams op and update the qparams list
         with graph.inserting_before(node):
             input_node = node.args[0]
-            choose_qparams_op_inputs = [node.args[0]]
-            for value in qparams.values():
-                # we have quant_min, quant_max and dtype, all should be stored
-                # as literals
-                choose_qparams_op_inputs.append(value.copy())
+            choose_qparams_op_inputs = [node.args[0]] + list(qparams.values())
             choose_qparams_node = graph.create_node(
                 "call_function", choose_qparams_op, tuple(choose_qparams_op_inputs), {}
             )
@@ -297,6 +293,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             zero_point_node = graph.create_node(
                 "call_function", operator.getitem, (choose_qparams_node, 1), {}
             )
+            # we have quant_min, quant_max and dtype, all should be stored
+            # as literals
             quant_min = qparams["_quant_min_"]
             quant_max = qparams["_quant_max_"]
             dtype = qparams["_dtype_"]
