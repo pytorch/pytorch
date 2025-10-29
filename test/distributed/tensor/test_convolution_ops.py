@@ -227,6 +227,20 @@ class DistConvolutionOpsTest(DTensorTestBase):
         out_dt, out = self._run_single_arg_fwd(model, x)
         self.assertEqual(out_dt.shape, out.shape)
 
+    @with_comms
+    def test_reflection2d(self):
+        model = nn.ReflectionPad2d(padding=1)
+        x = torch.rand(1, 1, 8, 8, device=self.device_type)
+        out_dt, out = self._run_single_arg_fwd(model, x)
+        self.assertEqual(out_dt, out)
+
+    @with_comms
+    def test_replication3d(self):
+        model = nn.ReplicationPad3d(padding=1)
+        x = torch.rand(1, 1, 4, 4, 4, device=self.device_type)
+        out_dt, out = self._run_single_arg_fwd(model, x)
+        self.assertEqual(out_dt, out)
+
 
 if __name__ == "__main__":
     run_tests()
