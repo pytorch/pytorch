@@ -231,7 +231,7 @@ class LoopOrderingTest(TestCase):
                     return x.to(torch.float32)
                 return x
 
-            # Wordaround the issue that call allclose on fp8 tensor triggers error
+            # Workaround the issue that call allclose on fp8 tensor triggers error
             #   RuntimeError: "mul_cuda" not implemented for 'Float8_e4m3fn'
             expect = tree_map(_cast, expect)
             actual = tree_map(_cast, actual)
@@ -547,7 +547,7 @@ class LoopOrderingTest(TestCase):
 
         # A small amount of extra memory access for:
         # - store output for the first reduction
-        # - load input for the second redution
+        # - load input for the second reduction
         # - store output for the second reduction
         expected_numbytes += (M * 2 + 1) * x.itemsize
 

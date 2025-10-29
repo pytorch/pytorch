@@ -16,6 +16,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
+    @requires_cuda
     def test_stream_weakref(self):
         s = torch.Stream()
         weakref.ref(s)
