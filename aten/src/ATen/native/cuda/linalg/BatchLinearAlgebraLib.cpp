@@ -1643,7 +1643,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
 
   int n = cuda_int_cast(input.size(-1), "n");
   int lda = std::max<int64_t>(1, n);
-  auto batch_size = batchCount(vectors);
+  auto batch_size = batchCount(input);
 
   if (n == 0 || batch_size == 0) {
     //XGeev does not support empty input, so we need to handle this case separately to
