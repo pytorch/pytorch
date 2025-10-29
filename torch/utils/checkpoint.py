@@ -11,6 +11,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch.autograd.graph import GraphExecutionGroup
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1140,10 +1141,14 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return holder
 
         def unpack_hook(holder):
-            gid = torch._C._current_graph_task_id()
-            if gid == -1:
-                # generate a temporary id if we trigger unpack outside of a backward call
-                gid = int(uuid.uuid4())
+            # First check if we're inside a GraphExecutionGroup context
+            gid = GraphExecutionGroup.get_current_group()
+            if gid is None:
+                # Fallback to using the current graph task id
+                gid = torch._C._current_graph_task_id()
+                if gid == -1:
+                    # generate a temporary id if we trigger unpack outside of a backward call
+                    gid = int(uuid.uuid4())
 
             if not frame.is_recomputed[gid]:
                 ctx = frame.input_saver.grad_fn

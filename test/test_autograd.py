@@ -7362,6 +7362,45 @@ for shape in [(1,), ()]:
         ):
             checkpoint_sequential(modules_list, 3, a)
 
+    def test_checkpoint_graph_execution_group(self):
+        def run(use_graph_execution_group):
+            counter = [0]
+
+            def fn(x):
+                counter[0] += 1
+                y = x.sin().cos()
+                z = y.sin().cos()
+                return y, z
+
+            x = torch.randn(3, 3, requires_grad=True)
+
+            y, z = checkpoint(fn, x, use_reentrant=False)
+
+            group = torch.autograd.graph.GraphExecutionGroup()
+
+            ctx = contextlib.nullcontext()
+            if use_graph_execution_group:
+                ctx = group
+
+            with ctx:
+                grad_y, = torch.autograd.grad(
+                    z,
+                    inputs=(y,),
+                    grad_outputs=(torch.ones(3, 3),)
+                )
+
+                grad_x, = torch.autograd.grad(
+                    y,
+                    inputs=(x,),
+                    grad_outputs=(grad_y,),
+                )
+
+            if use_graph_execution_group:
+                self.assertEqual(counter[0], 2)
+            else:
+                self.assertEqual(counter[0], 3)
+
+
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
             out = x.sin().exp()

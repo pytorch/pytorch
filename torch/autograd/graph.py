@@ -44,6 +44,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "GraphExecutionGroup",
 ]
 
 
@@ -252,6 +253,80 @@ def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> No
     if isinstance(tensor, torch.Tensor):
         tensor = (tensor,)
     torch._C._increment_version(tensor)
+
+
+class GraphExecutionGroup:
+    """Context manager for tracking graph execution groups during backward passes.
+
+    This represents the concept that we're still morally doing a single backward pass,
+    but doing it in partial pieces that are disjoint. Features like activation
+    checkpointing can utilize this information to act accordingly.
+
+    The group ID is assigned upon construction from an incrementing counter. When used
+    as a context manager, it sets a global variable that utilities like AC can read
+    to determine which execution group is currently active.
+
+    Example::
+
+        >>> import torch
+        >>> # Create execution groups
+        >>> group1 = torch.autograd.graph.GraphExecutionGroup()
+        >>> print(f"Group 1 ID: {group1.group_id}")
+        Group 1 ID: 0
+        >>> group2 = torch.autograd.graph.GraphExecutionGroup()
+        >>> print(f"Group 2 ID: {group2.group_id}")
+        Group 2 ID: 1
+        >>> # Use as context manager
+        >>> with group1:
+        ...     print(f"Current group: {torch.autograd.graph.GraphExecutionGroup.get_current_group()}")
+        Current group: 0
+        >>> # Query current group (outside context)
+        >>> print(torch.autograd.graph.GraphExecutionGroup.get_current_group())
+        None
+    """
+
+    _current_group: Optional[int] = None
+    _counter: int = 0
+
+    def __init__(self) -> None:
+        self._group_id: int = GraphExecutionGroup._counter
+        GraphExecutionGroup._counter += 1
+        self._prev_group: Optional[int] = None
+
+    def __enter__(self) -> "GraphExecutionGroup":
+        if GraphExecutionGroup._current_group is not None:
+            raise RuntimeError(
+                "GraphExecutionGroup contexts cannot be nested. "
+                f"Already inside group {GraphExecutionGroup._current_group}"
+            )
+        GraphExecutionGroup._current_group = self._group_id
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        GraphExecutionGroup._current_group = None
+
+    @classmethod
+    def get_current_group(cls) -> Optional[int]:
+        """Get the current execution group ID, or None if not in a group context.
+
+        This is the global variable that utilities like activation checkpointing
+        can read to determine which execution group is currently active.
+
+        Returns:
+            The current execution group ID if inside a context, otherwise None.
+        """
+        return cls._current_group
+
+    @property
+    def group_id(self) -> int:
+        """Get the group ID assigned to this instance.
+
+        The ID is assigned upon construction from an incrementing counter.
+
+        Returns:
+            The execution group ID for this instance.
+        """
+        return self._group_id
 
 
 class saved_tensors_hooks:
