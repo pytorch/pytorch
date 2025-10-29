@@ -2204,6 +2204,17 @@ class OutputGraph(OutputGraphCommon):
 
                 with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
                     # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+
+                    # Why create a new FakeTensorMode?
+                    #
+                    # The reason this needs to be done is because when we do Dynamo tracing, fake
+                    # tensors can have their metadata mutated. Thus, the fake tensor we allocated
+                    # for any given tensor may no longer be valid for the beginning trace of the
+                    # graph. Nor is it convenient to "clone" the input tensors before mutating them,
+                    # since you have to preserve aliasing. So we just reconstruct the FakeTensorMode
+                    # from scratch when we go to AOTAutograd. But the ShapeEnv must be preserved as
+                    # Dynamo made decisions about what is dynamic or not / guards from the user code
+                    # that is not in graph.
                     backend_fake_mode = torch._subclasses.FakeTensorMode(
                         shape_env=old_fake_mode.shape_env,
                     )
