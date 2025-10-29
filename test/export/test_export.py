@@ -6093,26 +6093,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         retry_export(
             cf_implicitsize(),
             (torch.tensor(2), torch.randn(10)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y, fixes):
                 i = y.item()
                 eval(fixes)
-                # instead of xs[i]
                 return torch.stack(xs, 0).narrow(0, i, 1).squeeze()
 
         retry_export(
             cf_stacklist(),
             ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_tensorsplit(torch.nn.Module):
@@ -6166,7 +6159,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y):
                 # y.item() is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+                if y.item() < 0:
+                    return (
+                        torch.stack(xs, 0).narrow(0, y.item() + xs.size(), 1).squeeze()
+                    )
+                else:
+                    return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
 
         with self.assertRaisesRegex(
             error_type,
@@ -6196,7 +6194,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, xs, y):
                 box = Box(y.item())
                 # box.content is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+                if box.content < 0:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
+                else:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
 
         with self.assertRaisesRegex(
             error_type,
