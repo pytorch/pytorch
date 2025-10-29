@@ -32,7 +32,7 @@ __all__ = [
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
-    "GraphExecutionGroup",
+    "GraphExecGroup",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -1141,8 +1141,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return holder
 
         def unpack_hook(holder):
-            # First check if we're inside a GraphExecutionGroup context
-            gid = GraphExecutionGroup._get_current_group()
+            # First check if we're inside a GraphExecGroup context
+            gid = GraphExecGroup._get_current_group()
             if gid is None:
                 # Fallback to using the current graph task id
                 gid = torch._C._current_graph_task_id()
@@ -1593,32 +1593,32 @@ def _checkpoint_without_reentrant_generator(
     return
 
 
-class GraphExecutionGroup:
-    """Context manager to annotate that a set of backward passes are disjoint
+class GraphExecGroup:
+    """Any checkpointed regions encountered by backward under the same instance
+    of this context manager will only trigger recompute at most once, even if
+    there are multiple calls to backward.
 
-    The group ID is assigned upon construction from an incrementing counter. When used
-    as a context manager, it sets a global variable that utilities like AC can read
-    to determine which execution group is currently active.
+    Backward calls under the same instance of this context manager must execute
+    over non-overlapping regions of the backward graph even if retain_graph=True.
     """
-
     _current_group: Optional[int] = None
     _counter: int = 0
 
     def __init__(self) -> None:
-        self._id: int = GraphExecutionGroup._counter
-        GraphExecutionGroup._counter += 1
+        self._id: int = GraphExecGroup._counter
+        GraphExecGroup._counter += 1
 
-    def __enter__(self) -> "GraphExecutionGroup":
-        if GraphExecutionGroup._current_group is not None:
+    def __enter__(self) -> "GraphExecGroup":
+        if GraphExecGroup._current_group is not None:
             raise RuntimeError(
-                "GraphExecutionGroup contexts cannot be nested. "
-                f"Already inside group {GraphExecutionGroup._current_group}"
+                "GraphExecGroup contexts cannot be nested. "
+                f"Already inside group {GraphExecGroup._current_group}"
             )
-        GraphExecutionGroup._current_group = self._id
+        GraphExecGroup._current_group = self._id
         return self
 
     def __exit__(self, *args: object) -> None:
-        GraphExecutionGroup._current_group = None
+        GraphExecGroup._current_group = None
 
     @classmethod
     def _get_current_group(cls) -> Optional[int]:

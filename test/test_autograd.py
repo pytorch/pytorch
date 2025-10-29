@@ -7376,9 +7376,9 @@ for shape in [(1,), ()]:
 
             y, z = checkpoint(fn, x, use_reentrant=False)
 
-            group = torch.utils.checkpoint.GraphExecutionGroup()
+            group = torch.utils.checkpoint.GraphExecGroup()
 
-            ctx = contextlib.nullcontext()
+            ctx: nullcontext[None] = contextlib.nullcontext()
             if use_graph_execution_group:
                 ctx = group
 
@@ -7397,6 +7397,24 @@ for shape in [(1,), ()]:
                 self.assertEqual(counter[0], 2)
             else:
                 self.assertEqual(counter[0], 3)
+
+        run(use_graph_execution_group=True)
+        run(use_graph_execution_group=False)
+
+        # Test the not actually disjoint case (using retain_graph=True since
+        # otherwise autograd itself will catch this)
+        def fn(x):
+            return x.sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=True)
+        out = checkpoint(fn, x, use_reentrant=False)
+        group = torch.utils.checkpoint.GraphExecGroup()
+        with group:
+            # Under this context, we will enforce that two backward are disjoint
+            # even if retain_graph=True.
+            out.sum().backward(retain_graph=True)
+            with self.assertRaisesRegex(RuntimeError, "was already unpacked once"):
+                out.sum().backward()
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
