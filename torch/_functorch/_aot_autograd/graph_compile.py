@@ -35,13 +35,13 @@ from torch._dynamo.utils import (
     dynamo_timed,
     lazy_format_graph_code,
 )
-from torch._guards import CompileContext, TracingContext
+from torch._guards import CompileContext, detect_fake_mode, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1743,8 +1743,6 @@ def _aot_stage2b_bw_compile(
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
                 # value. Using suppress_guards and guard_or_true to avoid that.
-                from torch._guards import detect_fake_mode
-                from torch.fx.experimental.symbolic_shapes import guard_or_true
 
                 stride_different = False
                 fake_mode = detect_fake_mode()
@@ -1754,7 +1752,7 @@ def _aot_stage2b_bw_compile(
                     else nullcontext()
                 )
 
-                # Inductor can choose different strdies for activations than
+                # Inductor can choose different strides for activations than
                 # what backward graph has. if we can't statically tell that
                 # strides are the same, we assume they are not.
                 with suppress_ctx:
