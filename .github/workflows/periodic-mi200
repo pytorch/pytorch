@@ -11,7 +11,7 @@ on:
     - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
-      - ciflow/periodic/*
+      - ciflow/periodic-mi200/*
     branches:
       - release/*
   workflow_dispatch:
