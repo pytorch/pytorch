@@ -348,7 +348,7 @@ def _do_bench_using_profiling(
         ]
     ) as p:
         # Benchmark
-        for i in range(n_repeat):
+        for _ in range(n_repeat):
             # we clear the L2 cache before each run
             cache.zero_()
             # record time of `fn`
@@ -584,7 +584,7 @@ def has_uses(
 
     use_aggregate_fn = get_use_aggregate_fn(use_aggregate_type)
 
-    def user_has_use(use: Node) -> bool:
+    def has_uses_impl(use: Node) -> bool:
         if use.op != "call_function":
             return False
         if not (
@@ -593,14 +593,14 @@ def has_uses(
         ):
             return False
 
-        # Process getitem and view
         target = cast(torch._ops.OpOverload, use.target)
+        # Process getitem and view
         if target is operator.getitem or is_view(target):
-            return use_aggregate_fn(user_has_use(user) for user in use.users)
+            return use_aggregate_fn(has_uses_impl(user) for user in use.users)
 
         return use_selector_fn(target)
 
-    return use_aggregate_fn(user_has_use(user) for user in target.users)
+    return use_aggregate_fn(has_uses_impl(user) for user in target.users)
 
 
 def has_uses_tagged_as(
