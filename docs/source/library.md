@@ -49,7 +49,6 @@ via PyTorch's C++ operator registration APIs).
 .. autofunction:: register_autocast
 .. autofunction:: register_autograd
 .. autofunction:: register_fake
-.. autofunction:: register_effectful_op
 .. autofunction:: register_vmap
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
