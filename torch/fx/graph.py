@@ -608,29 +608,31 @@ class CodeGen:
             else:
                 body.append("\n")
 
-        prev_stacktrace = None
+        prev_summary_str = None
 
         def append_stacktrace_summary(node: Node):
             """
             Append a summary of the stacktrace to the generated code. This is
             useful for debugging.
             """
-            nonlocal prev_stacktrace
+            nonlocal prev_summary_str
 
             if node.op not in {"placeholder", "output"}:
-                stack_trace = node.stack_trace
-                if stack_trace:
-                    if stack_trace != prev_stacktrace:
-                        prev_stacktrace = stack_trace
-                        if parsed_stack_trace := _parse_stack_trace(stack_trace):
-                            summary_str = parsed_stack_trace.get_summary_str()
-                        else:
-                            summary_str = ""
-                        body.append(f"\n {dim(f'# {summary_str}')}\n")
-                elif prev_stacktrace != "":
-                    prev_stacktrace = ""
-                    no_stacktrace_msg = "# No stacktrace found for following nodes"
-                    body.append(f"\n{dim(no_stacktrace_msg)}\n")
+                annotation_str = ""
+                annotation = node.meta.get("custom", {})
+                if annotation:
+                    annotation_str = f" Annotation: {annotation}"
+
+                stack_trace_str = "No stacktrace found for following nodes"
+                if stack_trace := node.stack_trace:
+                    if parsed_stack_trace := _parse_stack_trace(stack_trace):
+                        stack_trace_str = parsed_stack_trace.get_summary_str()
+
+                summary_str = f"\n{dim(f'#{annotation_str} {stack_trace_str}')}\n"
+
+                if summary_str != prev_summary_str:
+                    prev_summary_str = summary_str
+                    body.append(summary_str)
 
         def stringify_shape(shape: Iterable) -> str:
             return f"[{', '.join([str(x) for x in shape])}]"
@@ -931,24 +933,25 @@ class _PyTreeCodeGen(CodeGen):
             return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
     def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+        in_spec = self.pytree_info.in_spec
         # when kwargs is present, in_spec is tuple(args, kwargs)
         has_args_kwargs_tuple = (
-            self.pytree_info.in_spec.type is tuple
-            and self.pytree_info.in_spec.num_children == 2
-            and self.pytree_info.in_spec.children_specs[0].type is tuple
-            and self.pytree_info.in_spec.children_specs[1].type is dict
+            in_spec.type is tuple
+            and in_spec.num_children == 2
+            and in_spec.child(0).type is tuple
+            and in_spec.child(1).type is dict
         )
         fn_kwargs = "{}"
         fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
         if has_args_kwargs_tuple:
-            count_args = self.pytree_info.in_spec.children_specs[0].num_children
+            count_args = in_spec.child(0).num_children
             fn_args = self.pytree_info.orig_args[:count_args]
             fn_kwargs = (
                 "{"
                 + ", ".join(
                     f"'{k}':{v}"
                     for k, v in zip(
-                        self.pytree_info.in_spec.children_specs[1].context,
+                        in_spec.child(1).context,
                         self.pytree_info.orig_args[count_args:],
                     )
                 )
