@@ -16,9 +16,13 @@ from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class TestCompileWorker(TestCase):
+    def make_pool(size):
+        return SubprocPool(size)
+
+
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_basic_jobs(self):
-        pool = SubprocPool(2)
+        pool = self.make_pool(2)
         try:
             a = pool.submit(operator.add, 100, 1)
             b = pool.submit(operator.sub, 100, 1)
@@ -29,7 +33,7 @@ class TestCompileWorker(TestCase):
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_exception(self):
-        pool = SubprocPool(2)
+        pool = self.make_pool(2)
         try:
             a = pool.submit(raise_testexc)
             with self.assertRaisesRegex(
@@ -42,7 +46,7 @@ class TestCompileWorker(TestCase):
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_crash(self):
-        pool = SubprocPool(2)
+        pool = self.make_pool(2)
         try:
             with self.assertRaises(Exception):
                 a = pool.submit(os._exit, 1)
@@ -58,7 +62,7 @@ class TestCompileWorker(TestCase):
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_quiesce(self):
-        pool = SubprocPool(2)
+        pool = self.make_pool(2)
         try:
             a = pool.submit(operator.add, 100, 1)
             pool.quiesce()
@@ -75,12 +79,16 @@ class TestCompileWorker(TestCase):
         os.environ["ROLE_RANK"] = "0"
         with tempfile.NamedTemporaryFile(delete=True) as temp_log:
             os.environ["TORCHINDUCTOR_WORKER_LOGPATH"] = temp_log.name
-            pool = SubprocPool(2)
+            pool = self.make_pool(2)
             try:
                 pool.submit(operator.add, 100, 1)
                 self.assertEqual(os.path.exists(temp_log.name), True)
             finally:
                 pool.shutdown()
+
+class TestCompileWorkerWithTimer(TestCase):
+    def make_pool(size):
+        return SubprocPool(size, quiesce=True)
 
 
 class TestTimer(TestCase):
