@@ -32,8 +32,7 @@ struct InputBuffer {
       size_t pos,
       Variable&& var,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const std::optional<c10::Stream>& opt_consumer_stream,
-      const std::shared_ptr<Node>& fn);
+      const std::optional<c10::Stream>& opt_consumer_stream);
 
   Variable operator[](size_t pos) {
     return buffer[pos];
