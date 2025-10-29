@@ -34,7 +34,7 @@ struct Dist {
   //     finish :   This tells what to do with the aggregated value to compute
   //                the norm. Generally this is the result of val ^ (1 / p).
   //     backward : This is the gradient for that norm. Arguments are pretty
-  //                self explanitory.
+  //                self explanatory.
   //
   // There are a few cases where these aren't used. The 0 norm has no backward,
   // because it's always 0, so that's shortcircuited earlier. There's a special
@@ -160,10 +160,9 @@ struct Dist {
     // value of k.
     parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start](int64_t k, int64_t end) {
       const Vec pvec(p);
-      double n2 = n - .5;
+      double n2 = static_cast<double>(n) - .5;
       // The -1 accounts for floating point truncation issues
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
+      int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2.0 * static_cast<double>(k) - 1.0)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
       const scalar_t * self_i = self_start + i * m;
@@ -422,19 +421,19 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double 
   });
 }
 
-static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
+void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_backward", [&] {
     Dist<scalar_t>::apply_backward_pdist(result, grad, self, p, dist);
   });
 }
 
-static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
+void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist", [&] {
     Dist<scalar_t>::apply_cdist(result, x1, x2, p);
   });
 }
 
-static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
+void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_backward", [&] {
     Dist<scalar_t>::apply_backward_cdist(result, grad, x1, x2, p, dist);
   });

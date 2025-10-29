@@ -125,7 +125,7 @@ def map(
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, f, num_mapped_args, *flat_args):
         ctx._f = f
         ctx._num_mapped_args = num_mapped_args
