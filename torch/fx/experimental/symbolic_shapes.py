@@ -841,7 +841,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
         if factor == 1:
             return expr
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         atoms = [div_by_factor(x, factor) for x in atoms]
         return _sympy_from_args(
             sympy.Add, atoms, sort=True, is_commutative=expr.is_commutative
@@ -2207,7 +2207,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.inner_contexts is None:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.inner_contexts = {}
 
 
@@ -2296,12 +2296,12 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
     # only re-create the objects if any of the args changed to avoid expensive
     # checks when re-creating objects.
     new_args = [_fast_expand(arg) for arg in expr.args]  # type: ignore[arg-type]
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return _fast_expand(expr.func(*new_args))
 
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     if expr.is_Pow:
         base: sympy.Expr
         exp: sympy.Expr
@@ -2311,11 +2311,11 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
                 return sympy.expand_multinomial(expr, deep=False)
             elif exp < 0:
                 return S.One / sympy.expand_multinomial(S.One / expr, deep=False)
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     elif expr.is_Mul:
         num: list[sympy.Expr] = []
         den: list[sympy.Expr] = []
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         for arg in expr.args:
             if arg.is_Pow and arg.args[1] == -1:
                 den.append(S.One / arg)  # type: ignore[operator, arg-type]
@@ -2437,7 +2437,7 @@ def _maybe_evaluate_static_worker(
 
     # TODO: remove this try catch (esp for unbacked_only)
     try:
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         new_expr = expr.xreplace(new_shape_env)
     except RecursionError:
         log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
@@ -2975,19 +2975,19 @@ class DimConstraints:
             # is_integer tests though haha
             return (base - mod_reduced) / divisor
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if expr.has(Mod):
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             expr = expr.replace(Mod, mod_handler)
         # 7 // -3 is -3, 7 % -3 is -2, and 7 - (-2) / -3 is -3.0 so negative
         # arguments should be OK.
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if expr.has(PythonMod):
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             expr = expr.replace(PythonMod, mod_handler)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if expr.has(FloorDiv):
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
@@ -5106,7 +5106,7 @@ class ShapeEnv:
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 self.val_to_var[val] = sympy_expr
 
             if isinstance(val, int):
@@ -5338,9 +5338,9 @@ class ShapeEnv:
 
         # Expand optional inputs, or verify invariants are upheld
         if input_contexts is None:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             input_contexts = [
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 _create_no_constraints_context(t) if isinstance(t, Tensorlike) else None
                 for t in placeholders
             ]
@@ -5350,7 +5350,7 @@ class ShapeEnv:
             for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
                     if context is None:
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         input_contexts[i] = _create_no_constraints_context(t)
                 else:
                     assert isinstance(t, (SymInt, int, SymFloat, float))
@@ -5636,7 +5636,7 @@ class ShapeEnv:
                 s = sympy.Float(val)
                 input_guards.append((source, s))
 
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
@@ -5999,7 +5999,7 @@ class ShapeEnv:
                 else:
                     str_msg = f"  - {msg_cb()}"
                     error_msgs.append(str_msg)
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     debug_names.add(debug_name)
             if len(error_msgs) > 0:
                 debug_names_str = ", ".join(sorted(debug_names))
@@ -6133,7 +6133,7 @@ class ShapeEnv:
         Get a list of guards, but pruned so it only provides guards that
         reference symints from the passed in input
         """
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         symints = {
             s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
         }
@@ -6396,7 +6396,7 @@ class ShapeEnv:
         Apply symbol replacements to any symbols in the given expression.
         """
         replacements = {}
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         for s in expr.free_symbols:
             r = self._find(s)
 
@@ -6406,7 +6406,7 @@ class ShapeEnv:
             if not r.is_Symbol or r != s:
                 replacements[s] = r
         if replacements:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             return safe_expand(expr.xreplace(replacements))
         else:
             return expr
@@ -7181,7 +7181,7 @@ class ShapeEnv:
         instructions = list(dis.Bytecode(frame.f_code))
         co_lines, offset = inspect.getsourcelines(frame.f_code)
         start, end, cur = None, None, None
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         for i, instr in enumerate(instructions):
             if instr.starts_line is not None:
                 cur = instr.starts_line
