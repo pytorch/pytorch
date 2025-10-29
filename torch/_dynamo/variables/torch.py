@@ -1307,14 +1307,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ],
                     )
                 message_eager = message_vt.get_function()
-                if not hasattr(tx.output, "_check_message_counter"):
-                    tx.output._check_message_counter = 0
-
-                attr_prefix = f"_check_msg_{tx.output._check_message_counter}"
-                tx.output._check_message_counter += 1
 
                 message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
-                    attr_prefix, message_eager
+                    "_check_message", message_eager
                 )
             predicate_vt = args[0]
 
