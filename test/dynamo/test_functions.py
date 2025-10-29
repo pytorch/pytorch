@@ -5215,6 +5215,37 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.randn(1)
         self.assertEqual(opt_mod(x), x + 1)
+    
+    def test_full_with_tensor_fill_value(self):
+        """Test that torch.full works correctly with dynamic tensor fill_value"""
+        def func(x):
+            return torch.full((2,), x, dtype=torch.float64)
+        
+        func_compiled = torch.compile(func)
+        
+        # Test with different values
+        x1 = torch.tensor(5.0, dtype=torch.float64)
+        x2 = torch.tensor(10.0, dtype=torch.float64)
+        
+        result1 = func_compiled(x1)
+        expected1 = torch.full((2,), x1, dtype=torch.float64)
+        self.assertEqual(result1, expected1)
+        
+        # This is where the bug occurred - second call reused first value
+        result2 = func_compiled(x2)
+        expected2 = torch.full((2,), x2, dtype=torch.float64)
+        self.assertEqual(result2, expected2)
+        
+        # Test with different dtypes
+        for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
+            def func_typed(x):
+                return torch.full((3,), x, dtype=dtype)
+            
+            func_typed_compiled = torch.compile(func_typed)
+            x_typed = torch.tensor(7, dtype=dtype)
+            result = func_typed_compiled(x_typed)
+            expected = torch.full((3,), x_typed, dtype=dtype)
+            self.assertEqual(result, expected)
 
 
 instantiate_parametrized_tests(FunctionTests)
