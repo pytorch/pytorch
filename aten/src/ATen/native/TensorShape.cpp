@@ -1745,7 +1745,7 @@ Tensor narrow_symint(
     auto result =
         at::slice_symint(self, dim, start, end + use_different * cur_size, 1);
 
-    // Ensure slice allocted unbacked size is specialized back to length.
+    // Ensure slice allocated unbacked size is specialized to length.
     SymInt new_size = result.sym_sizes()[dim];
     TORCH_SYM_CHECK(new_size.sym_eq(length), "")
 
