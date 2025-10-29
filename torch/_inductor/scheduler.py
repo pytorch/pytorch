@@ -68,6 +68,7 @@ from .utils import (
     cache_on_self,
     cmp,
     device_need_guard,
+    get_current_backend,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
@@ -196,9 +197,10 @@ class MixOrderReduction:
             return False
         if not node1.is_gpu() or not node2.is_gpu():
             return False
+        device_type = node1.get_device().type
         if (
-            node1.get_device().type not in ("cuda", "xpu")
-            or config.cuda_backend != "triton"
+            device_type not in ("cuda", "xpu")
+            or get_current_backend(device_type) != "triton"
         ):  # type: ignore[union-attr]
             return False
         if not node1.is_reduction() or not node2.is_reduction():
