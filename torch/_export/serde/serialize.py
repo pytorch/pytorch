@@ -739,11 +739,7 @@ class GraphModuleSerializer(metaclass=Final):
                 output_keys = meta_val.keys()
                 output_indices = []
 
-                constexpr_keys = set()
-                for p in kernel.params:
-                    if p.is_constexpr:
-                        constexpr_keys.add(p.name)
-
+                constexpr_keys = {p.name for p in kernel.params if p.is_constexpr}
                 found_constexpr = False
                 args_new = ()
                 i = 0
@@ -773,6 +769,10 @@ class GraphModuleSerializer(metaclass=Final):
                     "output_indices": output_indices,
                     "num_warps": kernel_cache_metadata.num_warps,
                 }
+                if hasattr(kernel_cache_metadata, "num_cpu_threads"):
+                    kwargs_new["num_cpu_threads"] = (
+                        kernel_cache_metadata.num_cpu_threads
+                    )
 
                 if hasattr(kernel_cache_metadata, "shared"):
                     kwargs_new["shared_memory_bytes"] = kernel_cache_metadata.shared
@@ -3189,7 +3189,7 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, dict):
         v_type = typing.get_args(cls)[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
-    elif cls == float:
+    elif cls is float:
         return float(data)
     return data
 

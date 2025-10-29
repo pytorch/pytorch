@@ -94,11 +94,11 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   }
 
   void synchronizeEvent(void* event) const override {
-    return impl_->synchronizeEvent(event);
+    impl_->synchronizeEvent(event);
   }
 
   void synchronizeDevice(const DeviceIndex device_index) const override {
-    return impl_->synchronizeDevice(device_index);
+    impl_->synchronizeDevice(device_index);
   }
 
  private:

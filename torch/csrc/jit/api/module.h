@@ -93,7 +93,7 @@ struct TORCH_API Module : public Object {
   Module(Module&&) noexcept = default;
   Module& operator=(Module&&) noexcept = default;
   Module(
-      c10::QualifiedName,
+      c10::QualifiedName /*class_name*/,
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}

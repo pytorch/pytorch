@@ -58,4 +58,18 @@ void all_to_all_vdev_2d_offset(
     at::Tensor& out_splits_offsets,
     std::string group_name);
 
+void tile_reduce(
+    at::Tensor& in_tile,
+    at::Tensor& out_tile,
+    int64_t root,
+    std::string group_name,
+    std::string reduce_op = "sum");
+
+void multi_root_tile_reduce(
+    at::ArrayRef<at::Tensor> in_tiles,
+    at::Tensor& out_tile,
+    at::ArrayRef<int64_t> roots,
+    std::string group_name,
+    std::string reduce_op = "sum");
+
 } // namespace c10d::nvshmem_extension
