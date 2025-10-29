@@ -789,7 +789,9 @@ def merge_reduce_scatter_bucket(
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     # Sort nodes deterministically by name to ensure consistent tensor ordering
     # This prevents divergence between FSDP2 and SimpleFSDP due to different concatenation orders
+    print("pre-sorted reduce scatter", [node.name for node in rs_nodes])
     rs_nodes_sorted = sorted(rs_nodes, key=lambda n: n.name)
+    print("post-sorted reduce scatter", [node.name for node in rs_nodes])
 
     # Validate bucket consistency
     rs0 = rs_nodes_sorted[0]
