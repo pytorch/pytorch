@@ -907,7 +907,7 @@ def diff_tensor_meta(
         try:
             if val1 != val2:
                 pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
-        except GuardOnDataDependentSymNode:
+        except GuardOnDataDependentSymNode as _:
             pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
             continue
     return pair_diffs
@@ -1197,7 +1197,7 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
 
     # call_op preserves ordering of proxies via schema
     materialized_args = []
-    for i, proxy in enumerate(arg_proxies):
+    for i, (proxy, arg) in enumerate(zip(arg_proxies, schema.arguments)):
         if (
             isinstance(proxy, torch.fx.Node)
             and proxy.op == "get_attr"
