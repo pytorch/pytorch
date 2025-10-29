@@ -13,7 +13,6 @@ from torch.testing._internal.common_utils import parametrize, run_tests, skipIfR
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-
 VarlenShape = namedtuple(
     "VarlenShape", ["batch_size", "max_seq_len", "embed_dim", "num_heads"]
 )
@@ -112,18 +111,13 @@ class AttentionBlock(nn.Module):
             # Create causal mask and combine with padding mask
             causal_mask = torch.triu(
                 torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool),
-                diagonal=1
+                diagonal=1,
             )
             # Expand and combine: True where attention should be masked out
             combined_mask = causal_mask[None, None, :, :] | ~attn_mask
-            attn_out = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=~combined_mask
-            )
+            attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=~combined_mask)
         else:
-            attn_out = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask
-            )
-
+            attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
 
         attn_out = (
             attn_out.transpose(1, 2)
@@ -355,7 +349,9 @@ class TestVarlenAttention(NNTestCase):
         )
 
         variable_length_batch_data = create_variable_length_batch(shape, device, dtype)
-        golden_variable_length_batch_data = create_variable_length_batch(shape, device, torch.float64)
+        golden_variable_length_batch_data = create_variable_length_batch(
+            shape, device, torch.float64
+        )
 
         varlen_output = attention_block.forward_varlen(
             variable_length_batch_data["x_packed"],
@@ -372,7 +368,7 @@ class TestVarlenAttention(NNTestCase):
         golden_sdpa_output = golden_attention_block.forward_sdpa(
             golden_variable_length_batch_data["x_padded"],
             golden_variable_length_batch_data["seq_lengths"],
-            is_causal=is_causal
+            is_causal=is_causal,
         )
 
         start_idx = 0
@@ -383,7 +379,9 @@ class TestVarlenAttention(NNTestCase):
             sdpa_seq = sdpa_output[i, :seq_len]
             golden_sdpa_seq = golden_sdpa_output[i, :seq_len]
 
-            fwd_atol = 2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            fwd_atol = (
+                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            )
 
             varlen_error = (varlen_seq - fwd_atol).abs().max().item()
             sdpa_error = (sdpa_seq - fwd_atol).abs().max().item()
@@ -436,7 +434,9 @@ class TestVarlenAttention(NNTestCase):
             sdpa_grad_seq = sdpa_grad[i, :seq_len]
             golden_sdpa_seq = golden_sdpa_grad[i, :seq_len]
 
-            fwd_atol = 2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            fwd_atol = (
+                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            )
 
             varlen_error = (varlen_grad_seq - fwd_atol).abs().max().item()
             sdpa_error = (sdpa_grad_seq - fwd_atol).abs().max().item()
