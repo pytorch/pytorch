@@ -968,7 +968,7 @@ struct vec_host_softmax_backward {
   }
 };
 
-static void softmax_lastdim_kernel_impl(
+void softmax_lastdim_kernel_impl(
     const Tensor& result,
     const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -977,13 +977,13 @@ static void softmax_lastdim_kernel_impl(
       [&] { vec_host_softmax_lastdim<scalar_t, false>::apply(result, self); });
 }
 
-static void softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_t dim) {
+void softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(),
     "softmax_kernel_impl",
     [&] { vec_softmax<scalar_t, false>::apply(result, self, dim); });
 }
 
-static void log_softmax_lastdim_kernel_impl(
+void log_softmax_lastdim_kernel_impl(
     const Tensor& result,
     const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -992,13 +992,13 @@ static void log_softmax_lastdim_kernel_impl(
       [&] { vec_host_softmax_lastdim<scalar_t, true>::apply(result, self); });
 }
 
-static void log_softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_t dim) {
+void log_softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(),
     "softmax_kernel_impl",
     [&] { vec_softmax<scalar_t, true>::apply(result, self, dim); });
 }
 
-static void softmax_backward_lastdim_kernel_impl(
+void softmax_backward_lastdim_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
@@ -1010,7 +1010,7 @@ static void softmax_backward_lastdim_kernel_impl(
       });
 }
 
-static void log_softmax_backward_lastdim_kernel_impl(
+void log_softmax_backward_lastdim_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
@@ -1022,7 +1022,7 @@ static void log_softmax_backward_lastdim_kernel_impl(
       });
 }
 
-static void softmax_backward_kernel_impl(
+void softmax_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output,
@@ -1038,7 +1038,7 @@ static void softmax_backward_kernel_impl(
       });
 }
 
-static void log_softmax_backward_kernel_impl(
+void log_softmax_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output,
