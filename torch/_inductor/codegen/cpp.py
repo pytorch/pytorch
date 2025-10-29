@@ -159,6 +159,7 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
 ]
 
 MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
+    torch.float64,
     torch.float,
     torch.bfloat16,
     torch.float16,
@@ -1119,6 +1120,14 @@ class CppOverrides(OpOverrides):
             code.writeline("return left - right;")
         code.writeline("()")
         return code
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
 
 
 CppOverrides._initialize_pointwise_overrides("cpp")

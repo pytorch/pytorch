@@ -5,6 +5,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 
 class TestStream(TestCase):
+    @skipIfTorchDynamo()
     def test_stream_create(self):
         stream = torch.Stream(device="openreg")
         self.assertEqual(stream.device_index, torch.openreg.current_device())
@@ -24,6 +25,7 @@ class TestStream(TestCase):
         )
         self.assertEqual(stream, stream1)
 
+    @skipIfTorchDynamo()
     def test_stream_context(self):
         with torch.Stream(device="openreg:1") as stream:
             self.assertEqual(torch.accelerator.current_stream(), stream)
@@ -40,6 +42,7 @@ class TestStream(TestCase):
         current_stream = torch.accelerator.current_stream()
         self.assertEqual(current_stream, stream2)
 
+    @skipIfTorchDynamo()
     def test_stream_synchronize(self):
         stream = torch.Stream(device="openreg:1")
         self.assertEqual(True, stream.query())
@@ -49,12 +52,14 @@ class TestStream(TestCase):
         stream.synchronize()
         self.assertEqual(True, stream.query())
 
+    @skipIfTorchDynamo()
     def test_stream_repr(self):
         stream = torch.Stream(device="openreg:1")
         self.assertTrue(
             "torch.Stream device_type=openreg, device_index=1" in repr(stream)
         )
 
+    @skipIfTorchDynamo()
     def test_stream_wait_stream(self):
         stream_1 = torch.Stream(device="openreg:0")
         stream_2 = torch.Stream(device="openreg:1")

@@ -249,6 +249,14 @@ class DtypePropagationOpsHandler:
         return None
 
     @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: DTypeArg,
+    ) -> None:
+        return None
+
+    @staticmethod
     def load(name: str, index) -> torch.dtype:
         return upcast_compute_type(V.graph.get_dtype(name))
 
