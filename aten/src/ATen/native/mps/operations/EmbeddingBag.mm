@@ -7,6 +7,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/EmbeddingBag.h>
+#include <ATen/ops/aminmax.h>
 
 #include <fmt/format.h>
 
@@ -109,21 +110,14 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   params.padding_idx = padding_idx;
 
   if (num_indices > 0) {
-    auto indices_cpu = indices.to(kCPU);
-    AT_DISPATCH_INDEX_TYPES(indices_cpu.scalar_type(), "embedding_bag_mps_check_indices", [&]() {
-      const auto* indices_data = indices_cpu.const_data_ptr<index_t>();
-      for (const auto i : c10::irange(indices_cpu.numel())) {
-        const auto idx = static_cast<int64_t>(indices_data[i]);
-        TORCH_CHECK(0 <= idx && idx < num_embeddings,
-                    "Index ",
-                    i,
-                    " of input takes value ",
-                    idx,
-                    " which is not in the valid range [0, ",
-                    num_embeddings,
-                    ")");
-      }
-    });
+    auto [min_index, max_index] = at::aminmax(indices);
+    const auto min_idx_val = min_index.item<int64_t>();
+    const auto max_idx_val = max_index.item<int64_t>();
+    TORCH_CHECK(
+        min_idx_val >= 0, "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ", min_idx_val);
+    TORCH_CHECK(max_idx_val < num_embeddings,
+                "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+                max_idx_val);
   }
 
   auto num_threads = output.numel();

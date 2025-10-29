@@ -6982,12 +6982,7 @@ class TestMPS(TestCaseMPS):
             (idx_cpu_neg, idx_cpu_neg.to('mps')),
             (idx_cpu_pos, idx_cpu_pos.to('mps')),
         )
-        num_embeddings = weight_cpu.size(0)
-        msg = (
-            r"(?:embedding_bag: )?"
-            r"(Expected idx >= 0 && idx < num_embeddings|"
-            rf"Index \d+ of input takes value -?\d+ which is not in the valid range \[0, {num_embeddings}\))"
-        )
+        msg = r"embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be -?\d+"
 
         for mode in ("sum", "mean", "max"):
             ps_weight_pairs = ((None, None),)
