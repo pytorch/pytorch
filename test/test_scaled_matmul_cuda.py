@@ -43,12 +43,12 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
-    _f32_to_floatx_unpacked,
     _floatx_unpacked_to_f32,
     ceil_div, to_blocked,
     to_mxfp,
     from_blocked_format,
     generate_jagged_offs,
+    pack_uint4,
 )
 
 
