@@ -120,7 +120,7 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        tf32_precision=0.05 if TEST_WITH_ROCM else 0.005,
+        tf32_precision=0.005,
         default_dtype=torch.double,
     ),
     dict(
