@@ -650,10 +650,6 @@ or equal to the number of stages ({self._num_stages})."
             args_split, kwargs_split, targets_split, losses, return_outputs
         )
 
-        # Stage post processing
-        grad_scale_factor = self._n_microbatches if self.scale_grads else 1
-        self._stage._post_backward(grad_scale_factor)
-
         # Return merged results per original format
         if self._stage.is_last and return_outputs:
             return self._merge_outputs(self._stage.output_chunks)
@@ -1065,7 +1061,7 @@ class Schedule1F1B(PipelineScheduleSingle):
 
 
 def _requires_reduce_grad(action_type: _ComputationType) -> bool:
-    return action_type in (I, W, B, OVERLAP_F_B)
+    return action_type in (I, W, B)
 
 
 def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[_Action]:
@@ -1074,22 +1070,43 @@ def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[_Action]:
     reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
     """
     stage_with_bw_count: dict[int, int] = defaultdict(int)
-    for a in actions:
-        if a is None:
-            continue
+
+    def _count_leaf_action(a):
         if _requires_reduce_grad(a.computation_type):
             stage_with_bw_count[a.stage_index] += 1
-    actions_with_reduce_grad: list[_Action] = []
-    cnt: dict[int, int] = defaultdict(int)
+
     for a in actions:
         if a is None:
             continue
-        actions_with_reduce_grad.append(a)
+        if a.computation_type == OVERLAP_F_B and a.sub_actions is not None:
+            for sub_action in a.sub_actions:
+                _count_leaf_action(sub_action)
+        else:
+            _count_leaf_action(a)
+
+    actions_with_reduce_grad: list[_Action] = []
+    cnt: dict[int, int] = defaultdict(int)
+
+    def _leaf_action(a, to_schedule):
         if _requires_reduce_grad(a.computation_type):
             stage_index = a.stage_index
             cnt[stage_index] += 1
             if cnt[stage_index] == stage_with_bw_count[stage_index]:
-                actions_with_reduce_grad.append(_Action(stage_index, REDUCE_GRAD, None))
+                to_schedule.append(stage_index)
+
+    for a in actions:
+        if a is None:
+            continue
+        actions_with_reduce_grad.append(a)
+        schedule_reduce_grad_stage_idxs: list[int] = []
+        if a.computation_type == OVERLAP_F_B and a.sub_actions is not None:
+            for sub_action in a.sub_actions:
+                _leaf_action(sub_action, schedule_reduce_grad_stage_idxs)
+        else:
+            _leaf_action(a, schedule_reduce_grad_stage_idxs)
+
+        for stage_idx in schedule_reduce_grad_stage_idxs:
+            actions_with_reduce_grad.append(_Action(stage_idx, REDUCE_GRAD, None))
     return actions_with_reduce_grad
 
 
@@ -1630,12 +1647,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
             args_split, kwargs_split, targets_split, losses, return_outputs
         )
 
-        # Stage post processing
-        # TODO: remove this section and include as part of the schedule IR?
-        for stage in self._stages:
-            grad_scale_factor = self._n_microbatches if self.scale_grads else 1
-            stage._post_backward(grad_scale_factor)
-
         # Return merged results per original format
         for stage in self._stages:
             if stage.is_last and return_outputs:
@@ -1951,6 +1962,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
                     actions[rank]
                 )
+                self.pipeline_order_with_comms[rank] = _add_reduce_grad(
+                    self.pipeline_order_with_comms[rank]  # type: ignore[arg-type]
+                )
 
             self.pipeline_order_with_comms = _add_send_recv(
                 self.pipeline_order_with_comms,
@@ -2059,8 +2073,11 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
             assert mb_index >= 0 or comp_type in (
                 UNSHARD,
                 RESHARD,
+                REDUCE_GRAD,
             ), f"{action=} missing mb_index"
             stage_idx = action.stage_index
+            if stage_idx not in stage_index_to_stage:
+                torch.distributed.breakpoint()
             stage = stage_index_to_stage[stage_idx]
             stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
             # see [Note: V-schedule special case]
@@ -2220,7 +2237,8 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     last_backward=last_backward,
                 )
             elif comp_type == REDUCE_GRAD:
-                pass
+                grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+                stage.perform_reduce_grad(grad_scale_factor)
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 

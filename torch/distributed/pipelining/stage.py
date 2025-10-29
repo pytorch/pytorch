@@ -978,7 +978,7 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def _post_backward(self, grad_scale_factor: int):
+    def perform_reduce_grad(self, grad_scale_factor: int):
         # Manually call post backward for FSDP
         if isinstance(self.submod, FSDPModule):
             fsdp_module = self.submod
