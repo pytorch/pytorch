@@ -755,6 +755,8 @@ def run_test_retries(
                 REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
             ) as f:
                 current_failure = f.read()
+                if current_failure == "null":
+                    current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -774,6 +776,9 @@ def run_test_retries(
                 "Test succeeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
+            # This is for log classifier so it can prioritize consistently
+            # failing tests instead of reruns. [1:-1] to remove quotes
+            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -788,8 +793,6 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    if "null" in num_failures:
-        num_failures[f"'{test_file}'"] = num_failures.pop("null")
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
@@ -1119,6 +1122,9 @@ def run_doctests(test_module, test_directory, options):
 
     if torch.mps.is_available():
         os.environ["TORCH_DOCTEST_MPS"] = "1"
+
+    if torch.distributed.is_available():
+        os.environ["TORCH_DOCTEST_DISTRIBUTED"] = "1"
 
     if 0:
         # TODO: could try to enable some of these
@@ -1620,7 +1626,7 @@ def get_selected_tests(options) -> list[str]:
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
-        # Exclude all xpu specifc tests otherwise
+        # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
 
     # Filter to only run onnx tests when --onnx option is specified
