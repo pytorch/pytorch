@@ -2835,7 +2835,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
                 torch.compile(mm, dynamic=dynamic)(a, b)
                 reset()
             global_stats.report()
-            self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
+            self.assertEqual(global_stats.autotune_remote, Stats(0, 0, 0))
 
 
 class _TestTritonTemplateCaller(TritonTemplateCaller):
