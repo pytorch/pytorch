@@ -1462,6 +1462,36 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         y = f(x)
         self.assertEqual(y.shape, x.shape)
 
+    def test_check_compiles_when_predicate_true_and_message_has_global(self):
+        global GLOBAL_INT
+        GLOBAL_INT = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: f"{GLOBAL_INT} is not greater than 3")
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_raises_at_runtime_when_predicate_false_and_message_has_global(self):
+        global GLOBAL_INT
+        GLOBAL_INT = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: f"{GLOBAL_INT} is not greater than 3")
+            return x + 1
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(RuntimeError, None):
+            f(x)
+
     def test_check_raises_at_runtime_when_predicate_false_and_message_None(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
