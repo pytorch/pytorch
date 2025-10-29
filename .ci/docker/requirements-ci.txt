@@ -340,7 +340,7 @@ sympy==1.13.3
 #test that import:
 
 onnx==1.19.1 ; python_version < "3.14"
-# pin onnx to 1.18.0 issue
+# Unpin once Python 3.14 is supported. See  onnxruntime issue 26309.
 onnx==1.18.0 ; python_version == "3.14"
 #Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
