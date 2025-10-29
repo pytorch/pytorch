@@ -180,6 +180,10 @@ class OpDispatcher:
         if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
+                from torch.distributed.tensor import explicit_mode
+
+                if explicit_mode:
+                    raise RuntimeError("Comms detected")
                 # If sharding propagation decision needs redistribute, perform redistribute
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 assert output_sharding.redistribute_schema is not None

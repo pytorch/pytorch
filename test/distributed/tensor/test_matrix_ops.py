@@ -241,6 +241,28 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(y, dy.full_tensor())
 
     @with_comms
+    def test_explicit_matmul(self):
+        device_mesh = self.build_device_mesh()
+        dim = 128
+        x = torch.randn(8, dim)
+        A = torch.randn(dim, dim)
+        y = torch.matmul(x, A)
+
+        # Prepare DTensors
+        dx = distribute_tensor(x, device_mesh, [Shard(0)])
+        dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+        # with CommDebugMode() as comm_mode:
+        torch.distributed.tensor.explicit_mode = True
+        with self.assertRaisesRegex(RuntimeError, "Comms detected"):
+            torch.matmul(dx, dA)
+
+        # # need to replicate
+        # self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        # self.assertEqual(y, dy.full_tensor())
+
+    @with_comms
     def test_t(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
