@@ -887,6 +887,44 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(test_out, correct))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
+    def test_multidtype_bucketing(self):
+        """Test that all_gathers with different dtypes get bucketed together."""
+
+        def func(a, b, c, *, ranks):
+            # Three all_gathers with different dtypes
+            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)  # float32
+            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)  # bfloat16
+            ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)  # float16
+
+            # Use all results
+            return ag1.sum() + ag2.sum() + ag3.sum()
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(4, 4, dtype=torch.float32, device=device_type)
+            b = torch.ones(4, 4, dtype=torch.bfloat16, device=device_type) * 2
+            c = torch.ones(4, 4, dtype=torch.float16, device=device_type) * 3
+            ranks = list(range(self.world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+            out, aten_graph_str = run_and_get_aten_graph(compiled, a, b, c)
+
+            # Should have 1 bucketed all_gather despite different dtypes
+            FileCheck().check_count(
+                "torch.ops._c10d_functional.wait_tensor.default", 1, exactly=True
+            ).run(aten_graph_str)
+
+            # Verify correctness
+            correct = func(a, b, c, ranks=ranks)
+            self.assertTrue(same(out, correct))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
