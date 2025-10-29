@@ -8,7 +8,7 @@ dnf -y install gmp-devel libmpc-devel texinfo flex bison
 
 cd /usr/local/src
 # fetch source for gcc 13
-git clone --depth 1 --branch releases/gcc-13.3.0  https://gcc.gnu.org/git/gcc.git gcc-13.3.0
+git clone --depth 1 --single-branch -b releases/gcc-13.3.0 https://github.com/gcc-mirror/gcc.git gcc-13.3.0
 
 mkdir -p gcc-13.3.0/build-gomp
 cd gcc-13.3.0/build-gomp
