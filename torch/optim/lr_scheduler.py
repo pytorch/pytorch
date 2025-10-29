@@ -267,6 +267,7 @@ class LRScheduler:
                     "`lr_scheduler.step()`. See more details at "
                     "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
                     UserWarning,
+                    stacklevel=2,
                 )
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
@@ -279,11 +280,12 @@ class LRScheduler:
                     "See more details at "
                     "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
                     UserWarning,
+                    stacklevel=2,
                 )
 
         self._step_count += 1
         if epoch is not None:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self._update_lr(epoch)
 
     def _update_lr(self, epoch: Optional[int] = None):
@@ -420,6 +422,7 @@ class LambdaLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
+                # pyrefly: ignore  # unsupported-operation
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -539,6 +542,7 @@ class MultiplicativeLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
+                # pyrefly: ignore  # unsupported-operation
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -1215,6 +1219,7 @@ class SequentialLR(LRScheduler):
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
         for idx, s in enumerate(self._schedulers):
+            # pyrefly: ignore  # unsupported-operation
             state_dict["_schedulers"][idx] = s.state_dict()
 
         return state_dict
@@ -1557,6 +1562,7 @@ class ChainedScheduler(LRScheduler):
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
         for idx, s in enumerate(self._schedulers):
+            # pyrefly: ignore  # unsupported-operation
             state_dict["_schedulers"][idx] = s.state_dict()
 
         return state_dict
@@ -1692,7 +1698,7 @@ class ReduceLROnPlateau(LRScheduler):
         if epoch is None:
             epoch = self.last_epoch + 1
         else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self.last_epoch = epoch
 
         if self._is_better(current, self.best):
