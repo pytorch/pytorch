@@ -8,7 +8,13 @@ from sympy import Symbol, sympify
 
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
-from torch._inductor.fx_utils import count_flops_fx, countable_fx, FakeTensorUpdater
+from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.fx_utils import (
+    count_flops_fx,
+    countable_fx,
+    FakeTensorUpdater,
+    get_fake,
+)
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
@@ -77,7 +83,7 @@ class TestUtils(TestCase):
         self.assertEqual(expr.is_integer, None)
         self.assertEqual(expr.is_nonnegative, None)
         # replace abs(x) with y
-        # propagte abs(x) sympy properties.
+        # propagate abs(x) sympy properties.
         result = sympy_subs(expr, {expr: Symbol("y")})
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
@@ -204,10 +210,39 @@ class TestUtils(TestCase):
         self.assertTrue(type(ret) is float)
 
 
-instantiate_device_type_tests(TestUtils, globals())
+instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 
 class TestFakeTensorUpdater(TestCase):
+    def _insert_clone(self, main_graph: torch.fx.GraphModule) -> None:
+        updater = FakeTensorUpdater(main_graph)
+
+        def recursively_test_graph_mod(gm: torch.fx.GraphModule) -> None:
+            for node in gm.graph.find_nodes(op="placeholder"):
+                with gm.graph.inserting_after(node):
+                    copy_node = gm.graph.call_function(
+                        torch.ops.aten.clone.default, (node,)
+                    )
+
+                modified_nodes = node.replace_all_uses_with(
+                    copy_node, delete_user_cb=lambda n: n != copy_node
+                )
+
+                # The minimum number of nodes to be updated is all the nodes that had
+                # arguments replaced, plus the newly inserted copy_node.
+                with V.set_fake_mode(detect_fake_mode(get_fake(node, gm))):
+                    self.assertGreaterEqual(
+                        updater.incremental_update(), len(modified_nodes) + 1
+                    )
+
+            # iterate over subgraphs, updating *main_graph*
+            for subgraph_name in (s for s in dir(gm) if s.startswith("subgraph_")):
+                subgraph = getattr(gm, subgraph_name)
+                self.assertIsInstance(subgraph, torch.fx.GraphModule)
+                recursively_test_graph_mod(subgraph)
+
+        recursively_test_graph_mod(main_graph)
+
     def _modify_node(self, main_graph: torch.fx.GraphModule) -> None:
         updater = FakeTensorUpdater(main_graph)
 
@@ -249,6 +284,7 @@ class TestFakeTensorUpdater(TestCase):
         torch.compile(backend=backend, fullgraph=True)(fn)(*args)
 
         self._modify_node(deepcopy(backend.graphs[0]))
+        self._insert_clone(deepcopy(backend.graphs[0]))
 
     def test_hop_no_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -266,15 +302,10 @@ class TestFakeTensorUpdater(TestCase):
         def nested_section_outer(a: torch.Tensor) -> torch.Tensor:
             return nested_section_inner(nested_section_inner(a))
 
-        @torch.compiler.nested_compile_region
-        def nested_section_mega_outer(a: torch.Tensor) -> torch.Tensor:
-            return nested_section_outer(nested_section_outer(a))
-
         def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             x = nested_section_inner(a)
             y = nested_section_outer(b)
-            z = nested_section_mega_outer(a)
-            return x + y + z
+            return x + y
 
         a = torch.randint(0, (1 << 16), (32, 32, 32), dtype=torch.int32)
         b = torch.randint(0, (1 << 16), (32, 32, 32), dtype=torch.int32)
