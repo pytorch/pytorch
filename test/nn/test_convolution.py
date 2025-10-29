@@ -93,6 +93,47 @@ class TestConvolutionNN(NNTestCase):
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
+    def test_huge_padding(self):
+        class Conv1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=1,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv1", module=self.conv1)
+
+        input_data = torch.randn(1, 16, 100)
+        model = Conv1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv1(input_data)
+
+        class ConvTransposed1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transposed1d = nn.ConvTranspose1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=2,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv_transposed1d", module=self.conv_transposed1d)
+
+        input_data = torch.randn(1, 16, 100)
+        model = ConvTransposed1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv_transposed1d(input_data)
+
     def test_invalid_conv1d(self):
         for dtype in [
             torch.half,
@@ -229,6 +270,55 @@ class TestConvolutionNN(NNTestCase):
             torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-1)
         with self.assertRaisesRegex(ValueError, "groups must be a positive integer"):
             torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-2)
+
+    def test_conv_aten_invalid_groups(self):
+        # test low-level aten ops with invalid groups parameter
+        grad_output = torch.randn(2, 4, 8, dtype=torch.double)
+        input = torch.randn(2, 5, 8, dtype=torch.double)
+        weight = torch.randn(5, 4, 3, dtype=torch.double)
+        bias_sizes = [4]
+        stride = [1]
+        padding = [1]
+        dilation = [1]
+        transposed = True
+        output_padding = [0]
+        output_mask = [True, True, True]
+
+        # test groups=0
+        with self.assertRaisesRegex(
+            RuntimeError, "expected groups to be greater than 0, but got groups=0"
+        ):
+            torch.ops.aten.convolution_backward(
+                grad_output,
+                input,
+                weight,
+                bias_sizes,
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                0,
+                output_mask,
+            )
+
+        # test groups=-1
+        with self.assertRaisesRegex(
+            RuntimeError, "expected groups to be greater than 0, but got groups=-1"
+        ):
+            torch.ops.aten.convolution_backward(
+                grad_output,
+                input,
+                weight,
+                bias_sizes,
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                -1,
+                output_mask,
+            )
 
     def test_conv3d_overflow_values(self):
         input = torch.full(
@@ -960,7 +1050,7 @@ class TestConvolutionNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
-        # dominante the layout of output.
+        # dominant the layout of output.
         # which is not the same as current behavior, we'll fix this in
         # following up PRs and remove the `expectedFailure` tag
         input = torch.randint(
@@ -1243,7 +1333,7 @@ class TestConvolutionNN(NNTestCase):
             kernel_x = torch.zeros([3, 1, 1, radius * 2 + 1], device=image.device)
             image = torch.nn.functional.conv2d(image, kernel_x, groups=image.shape[-3])
 
-        for i in range(0, 128):
+        for i in range(128):
             # This should not fail
             reproducer(radius=i)
 
@@ -3550,7 +3640,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     input_format=input_format,
                     weight_format=weight_format,
                 )
-                # test when input chanels is 1 and not converted to channels last
+                # test when input channel is 1 and not converted to channels last
                 helper(
                     nn.Conv2d,
                     2,
@@ -3839,9 +3929,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                         # This is because we have N111 weight that cannot handle
                         # the ambiguous memory_format
                         if w_f == torch.channels_last:
-                            if layer == nn.Conv2d and filter_size * c != 1:
+                            if layer is nn.Conv2d and filter_size * c != 1:
                                 output_format = torch.channels_last
-                            if layer == nn.ConvTranspose2d and filter_size * k != 1:
+                            if layer is nn.ConvTranspose2d and filter_size * k != 1:
                                 output_format = torch.channels_last
                     self._run_conv(
                         layer,
