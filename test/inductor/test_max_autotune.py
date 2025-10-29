@@ -1533,7 +1533,7 @@ class TestMaxAutotune(TestCase):
             ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
+                "triton_.*_fused_mm_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(
@@ -1554,7 +1554,7 @@ class TestMaxAutotune(TestCase):
             ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
+                "triton_.*_fused_.*_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(
@@ -1609,7 +1609,7 @@ class TestMaxAutotune(TestCase):
 
             out, code = run_and_get_code(compiled_func, a, b)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
+                "triton_.*_fused_.*.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"2\*s[0-9]+"
             ).check_regex("s[0-9]+ = 32").run(code[0])
@@ -2095,7 +2095,7 @@ class TestMaxAutotune(TestCase):
 
         # Test loop.
         def test_func2(x):
-            for i in range(0, 10):
+            for i in range(10):
                 x = torch.matmul(x, x)
             return x
 
