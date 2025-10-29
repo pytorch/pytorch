@@ -505,6 +505,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // unique id used to tell the trace buffer that this
     // work has completed
     std::optional<uint64_t> trace_id_;
+    std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
