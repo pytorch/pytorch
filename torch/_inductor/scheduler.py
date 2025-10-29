@@ -4925,12 +4925,9 @@ class Scheduler:
         # Can only do this for FallbackKernels
         ir_node = node.node
         if isinstance(ir_node, torch._inductor.ir.FallbackKernel):
-            operator = ir_node.op_overload
-            if (
-                operator is not None
-                and operator.name() in config.custom_should_partition_ops
-            ):
-                assert isinstance(operator, torch._ops.OpOverload)
+            op = ir_node.op_overload
+            if op is not None and op.name() in config.custom_should_partition_ops:
+                assert isinstance(op, torch._ops.OpOverload)
                 return True
 
         # When not using cudagraphs, keep all kernels in the `call` function
