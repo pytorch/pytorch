@@ -431,7 +431,10 @@ def _worker_loop(
 
     shared_rng = torch.Generator()
     if isinstance(dataset, IterDataPipe):
-        assert shared_seed is not None
+        if shared_seed is None:
+            raise AssertionError(
+                "shared_seed must be provided for IterDataPipe workers"
+            )
         shared_rng.manual_seed(shared_seed)
         dataset = apply_random_seed(dataset, shared_rng)
 
