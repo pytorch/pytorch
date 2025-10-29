@@ -1802,7 +1802,4 @@ class TestPatternMatcher(TestCase):
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
-        # We use torch.ops.fsdp above.
-        import torch.distributed.fsdp
-
         run_tests()
