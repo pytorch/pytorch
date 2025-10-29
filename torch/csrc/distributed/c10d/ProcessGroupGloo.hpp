@@ -99,6 +99,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // unique id used to tell the trace buffer that this
     // work has completed
     std::optional<uint64_t> trace_id_;
+    std::optional<uint64_t> trace_reset_epoch_;
     std::shared_ptr<gloo::Context> context_;
     const std::chrono::milliseconds timeout_;
 
