@@ -3892,19 +3892,57 @@ class TestThreadingDataLoader(TestCase):
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
-    def test_threading_worker_info(self):
-        # Test that worker_info is properly set in thread workers
-        dataset = SynchronizedSeedDataset(2, 1, 2)
-        dataloader = DataLoader(
-            dataset,
-            batch_size=1,
-            num_workers=2,
+    def test_threading_thread_rng_deterministic(self):
+        # Test that using thread_rng provides deterministic results
+        class ThreadRNGTransformDataset(Dataset):
+            def __init__(self, size):
+                self.size = size
+
+            def __len__(self):
+                return self.size
+
+            def __getitem__(self, idx):
+                worker_info = torch.utils.data.get_worker_info()
+
+                # Use thread-local generator - thread-safe!
+                # Not adding a fallback here because this should exist,
+                # otherwise something is wrong with the threading setup
+                generator = worker_info.thread_rng.torch_generator
+
+                # Apply random transform using thread-specific generator
+                random_val = (
+                    torch.empty(1).uniform_(0.0, 1.0, generator=generator).item()
+                )
+                return random_val
+
+        # Run twice with same seed - should get identical results
+        dataset1 = ThreadRNGTransformDataset(100)
+        torch.manual_seed(42)
+        loader1 = DataLoader(
+            dataset1,
+            batch_size=10,
+            num_workers=3,
             worker_method="thread",
         )
+        results1 = list(loader1)
 
-        seeds = set()
-        seeds.update(batch[0] for batch in dataloader)
-        self.assertEqual(len(seeds), 2)  # Should have 2 different seeds, one per worker
+        dataset2 = ThreadRNGTransformDataset(100)
+        torch.manual_seed(42)
+        loader2 = DataLoader(
+            dataset2,
+            batch_size=10,
+            num_workers=3,
+            worker_method="thread",
+        )
+        results2 = list(loader2)
+
+        flattened1 = [item for batch in results1 for item in batch]
+        flattened2 = [item for batch in results2 for item in batch]
+
+        self.assertTrue(
+            flattened1 == flattened2,
+            "Results should be deterministic when using thread_rng",
+        )
 
     def test_threading_different_batch_sizes(self):
         # Test with different batch sizes
@@ -4159,8 +4197,58 @@ class TestThreadingDataLoader(TestCase):
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
 
+    def test_threading_worker_info_unique_per_thread(self):
+        # Test that each worker thread gets unique worker_id, seed, and thread_rng
+        import threading
+
+        worker_info_captured = []
+
+        def init_fn(worker_id):
+            info = torch.utils.data.get_worker_info()
+            worker_info_captured.append(
+                {
+                    "worker_id": info.id,
+                    "seed": info.seed,
+                    "thread_rng_id": id(info.thread_rng)
+                    if hasattr(info, "thread_rng")
+                    else None,
+                    "thread_id": threading.get_ident(),
+                }
+            )
+
+        dataset = SeedDataset(8)
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=3,
+            worker_method="thread",
+            worker_init_fn=init_fn,
+        )
+        list(loader)
+
+        self.assertEqual(len(worker_info_captured), 3)
+
+        # Check unique worker_id
+        worker_ids = [w["worker_id"] for w in worker_info_captured]
+        self.assertEqual(len(set(worker_ids)), 3)
+
+        # Check unique seed
+        seeds = [w["seed"] for w in worker_info_captured]
+        self.assertEqual(len(set(seeds)), 3)
+
+        # Check unique thread_rng (if available)
+        thread_rng_ids = [
+            w["thread_rng_id"] for w in worker_info_captured if w["thread_rng_id"]
+        ]
+        if thread_rng_ids:
+            self.assertEqual(len(set(thread_rng_ids)), len(thread_rng_ids))
+
+        # Check unique thread_id
+        thread_ids = [w["thread_id"] for w in worker_info_captured]
+        self.assertEqual(len(set(thread_ids)), 3)
+
     def test_threading_worker_info_thread_rng(self):
-        # Test that WorkerInfo now includes thread_rng for thread workers
+        # Test that WorkerInfo includes thread_rng for thread workers
         worker_info_data = []
 
         def worker_init_with_thread_rng_check(worker_id):
