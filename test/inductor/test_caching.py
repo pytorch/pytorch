@@ -213,11 +213,12 @@ class ConfigTest(TestCase):
             self.assert_versioned_config(enabled)
 
     def test_versioned_config_jk_failure(self) -> None:
-        """Test that _versioned_config uses OSS default values in non-Facebook environments.
+        """Test that _versioned_config disables configuration when JustKnobs fails.
 
-        Verifies that when running in non-fbcode environments (is_fbcode=False) with no
-        environment variable overrides, the configuration falls back to the OSS default
-        value. This ensures proper behavior for open-source PyTorch distributions.
+        Verifies that when JustKnobs returns 0 (indicating a failure or unavailability),
+        the configuration is disabled regardless of version settings. This ensures the
+        system safely falls back to a disabled state when configuration data is unavailable
+        from the remote configuration service.
         """
         with (
             self.FOO_ENV_VAR_OVERRIDE_LOCK.acquire(timeout=1),
@@ -743,6 +744,18 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @parametrize("intf_typename", intf_typenames)
     def test_defaults(self, intf_typename: str) -> None:
+        """Test cache interfaces with default configuration using the record decorator.
+
+        Verifies that both fast and deterministic cache interfaces correctly cache
+        function results using the record decorator with default parameters. Tests that:
+        1. First call executes the function and caches the result
+        2. Second call returns cached result without executing the function
+        3. Cached results match original results
+        4. Cache lookup is significantly faster than function execution
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
         sleep_t: int = 5
 
@@ -777,6 +790,17 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @parametrize("intf_typename", intf_typenames)
     def test_custom_params_encoder(self, intf_typename: str) -> None:
+        """Test cache interfaces with custom parameter encoder for non-serializable args.
+
+        Verifies that custom parameter encoders allow caching of functions with
+        non-serializable parameters (like lambda functions). Tests that:
+        1. Non-serializable parameters can be cached when using custom encoder
+        2. Cache lookups work correctly with encoded parameters
+        3. Function results are correctly cached and retrieved
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
         sleep_t: int = 5
 
@@ -800,6 +824,18 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @parametrize("intf_typename", intf_typenames)
     def test_custom_result_encoder_and_decoder(self, intf_typename: str) -> None:
+        """Test cache interfaces with custom result encoder and decoder.
+
+        Verifies that custom result encoders and decoders allow transformation of
+        cached results. Tests that:
+        1. First call executes the function and caches the encoded result
+        2. Second call returns the decoded cached result
+        3. Decoder transformation is applied when retrieving from cache
+        4. Original function result differs from cached decoded result
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
         sleep_t: int = 5
 
@@ -825,6 +861,18 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @parametrize("intf_typename", intf_typenames)
     def test_custom_ischema(self, intf_typename: str) -> None:
+        """Test cache interfaces with custom isolation schema for selective context.
+
+        Verifies that custom isolation schemas allow caching based on specific context
+        forms. Tests that:
+        1. Cache correctly isolates based on selected context (inductor_configs)
+        2. Different configurations in selected context produce different cache keys
+        3. Configurations in excluded context don't affect caching
+        4. Cache hits occur when selected context matches, regardless of excluded context
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
         sleep_t: int = 5
 
@@ -880,6 +928,16 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @parametrize("intf_typename", intf_typenames)
     def test_params_encoder_required(self, intf_typename: str) -> None:
+        """Test that CustomParamsEncoderRequiredError is raised for non-serializable parameters.
+
+        Verifies that when a function decorated with @record is called with non-serializable
+        parameters (like lambda functions) without a custom parameter encoder, the cache
+        interface raises CustomParamsEncoderRequiredError. This ensures proper error handling
+        when attempting to cache functions with parameters that cannot be pickled.
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
 
         @intf.record()
@@ -898,6 +956,16 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @parametrize("intf_typename", intf_typenames)
     def test_result_encoder_required(self, intf_typename: str) -> None:
+        """Test that CustomResultEncoderRequiredError is raised for non-serializable results.
+
+        Verifies that when a function decorated with @record returns non-serializable
+        results (like lambda functions) without a custom result encoder, the cache
+        interface raises CustomResultEncoderRequiredError. This ensures proper error
+        handling when attempting to cache functions with results that cannot be pickled.
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
 
         @intf.record()
@@ -916,6 +984,17 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @parametrize("intf_typename", intf_typenames)
     def test_result_encoder_and_decoder_required(self, intf_typename: str) -> None:
+        """Test that encoder and decoder must be provided together.
+
+        Verifies that the cache interface raises appropriate errors when trying to use
+        custom result encoder without decoder or vice versa. Tests that:
+        1. CustomResultEncoderRequiredError is raised when decoder provided without encoder
+        2. CustomResultDecoderRequiredError is raised when encoder provided without decoder
+        This ensures proper pairing of encoding and decoding operations.
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
 
         with self.assertRaises(exceptions.CustomResultEncoderRequiredError):
@@ -944,6 +1023,17 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @patch_remote_cache_with_on_disk_cache
     def test_strictly_pre_populated_determinism(self) -> None:
+        """Test strictly pre-populated determinism mode for deterministic caching.
+
+        Verifies that when strictly pre-populated determinism is enabled, the
+        deterministic cache only uses pre-loaded cached data without allowing
+        any new insertions. Tests that:
+        1. Cache can be pre-populated from a dump file
+        2. Pre-populated entries can be retrieved successfully
+        3. Cache misses raise StrictDeterministicCachingKeyNotFoundError
+        4. Insert operations raise StrictDeterministicCachingInsertionError
+        This ensures deterministic behavior by preventing any runtime computation.
+        """
         intf: intfs._DeterministicCacheIntf = self.intf_from_typename(
             "_DeterministicCacheIntf"
         )
@@ -1008,6 +1098,16 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @patch_remote_cache_with_on_disk_cache
     def test_strictly_cached_determinism(self) -> None:
+        """Test strictly cached determinism mode for deterministic caching.
+
+        Verifies that when strictly cached determinism is enabled, the deterministic
+        cache operates in read-only mode for existing cache entries. Tests that:
+        1. Pre-existing cache entries can be retrieved successfully
+        2. Cache misses raise StrictDeterministicCachingKeyNotFoundError
+        3. Insert operations raise StrictDeterministicCachingInsertionError
+        4. No new computations or cache insertions are allowed
+        This ensures full determinism by only allowing access to pre-cached results.
+        """
         intf: intfs._DeterministicCacheIntf = self.intf_from_typename(
             "_DeterministicCacheIntf"
         )
@@ -1054,6 +1154,19 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_remote_cache_with_on_disk_cache
     @parametrize("intf_typename", intf_typenames)
     def test_caching_module_disabled(self, intf_typename: str) -> None:
+        """Test cache behavior when caching module is globally disabled.
+
+        Verifies that when the caching module is disabled (IS_CACHING_MODULE_ENABLED=False),
+        the cache interfaces do not cache any results. Tests that:
+        1. get() returns None (no cache lookup happens)
+        2. insert() returns False (no caching occurs)
+        3. @record decorated functions always execute (no cache hits)
+        4. Function execution time remains slow (no performance benefit from caching)
+        This ensures the system behaves correctly when caching is turned off globally.
+
+        Args:
+            intf_typename: Cache interface type to test ("_FastCacheIntf" or "_DeterministicCacheIntf")
+        """
         intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
         sleep_t: int = 5
 
@@ -1086,6 +1199,16 @@ class InterfacesTest(TestMixin, TestCase):
     @patch_deterministic_cache_intf_no_dump_on_exit
     @patch_remote_cache_with_on_disk_cache
     def test_deterministic_caching_disabled(self) -> None:
+        """Test deterministic cache behavior when deterministic caching is disabled.
+
+        Verifies that when deterministic caching is disabled (IS_DETERMINISTIC_CACHING_ENABLED=False),
+        the deterministic cache interface raises DeterministicCachingDisabledError for all operations.
+        Tests that:
+        1. get() raises DeterministicCachingDisabledError
+        2. insert() raises DeterministicCachingDisabledError
+        3. @record decorated functions raise DeterministicCachingDisabledError
+        This ensures the system properly prevents deterministic cache operations when disabled.
+        """
         intf: intfs._DeterministicCacheIntf = self.intf_from_typename(
             "_DeterministicCacheIntf"
         )
@@ -1141,12 +1264,27 @@ class LocksTest(TestMixin, TestCase):
             raise NotImplementedError
 
     def test_BLOCKING(self) -> None:
+        """Test that the _BLOCKING constant is set to -1.0 for infinite wait.
+
+        Verifies that the _BLOCKING timeout constant has the correct value of -1.0,
+        which indicates an infinite timeout (blocks indefinitely until lock is acquired).
+        """
         self.assertEqual(locks._BLOCKING, -1.0)
 
     def test_NON_BLOCKING(self) -> None:
+        """Test that the _NON_BLOCKING constant is set to 0.0 for immediate return.
+
+        Verifies that the _NON_BLOCKING timeout constant has the correct value of 0.0,
+        which indicates that lock acquisition should return immediately without waiting.
+        """
         self.assertEqual(locks._NON_BLOCKING, 0.0)
 
     def test_BLOCKING_WITH_TIMEOUT(self) -> None:
+        """Test that _BLOCKING_WITH_TIMEOUT constant has a positive value for finite wait.
+
+        Verifies that the _BLOCKING_WITH_TIMEOUT constant is greater than 0.0,
+        indicating a finite timeout duration (blocks for specified seconds).
+        """
         self.assertGreater(locks._BLOCKING_WITH_TIMEOUT, 0.0)
 
     @patch.object(locks, "_BLOCKING_WITH_TIMEOUT", 1.0)
@@ -1292,6 +1430,20 @@ class LocksTest(TestMixin, TestCase):
         self,
         impl_typename_combos: tuple[str, ...],
     ) -> None:
+        """Test acquiring multiple cache implementation locks simultaneously.
+
+        Verifies that the _acquire_many_impl_locks_with_timeout function correctly
+        acquires locks for multiple cache implementations (in-memory and on-disk)
+        simultaneously using context manager semantics. Tests that:
+        1. All locks are acquired when entering the context manager
+        2. Locks are held during the with block execution
+        3. All locks are properly released when exiting the context manager
+        4. Works correctly for single and multiple cache implementations
+
+        Args:
+            impl_typename_combos: Tuple of cache implementation type names to test
+                                 (combinations of "_InMemoryCacheImpl" and "_OnDiskCacheImpl")
+        """
         impls: list[impls._CacheImpl] = []
         for impl_typename in impl_typename_combos:
             impl: impls._CacheImpl = self.impl_from_typename(impl_typename)

@@ -154,36 +154,81 @@ class ValueUnPicklingError(ValueDecodingError):
 
 
 class CustomParamsEncoderRequiredError(UserError):
-    pass
+    """Error raised when a custom parameter encoder is required but not provided.
+
+    This exception occurs when attempting to cache a function with parameters
+    that cannot be automatically serialized. A custom encoder must be provided
+    to convert the parameters into a serializable format.
+    """
 
 
 class CustomResultEncoderRequiredError(UserError):
-    pass
+    """Error raised when a custom result encoder is required but not provided.
+
+    This exception occurs when attempting to cache a function result that
+    cannot be automatically serialized. A custom encoder must be provided
+    to convert the result into a serializable format.
+    """
 
 
 class CustomResultDecoderRequiredError(UserError):
-    pass
+    """Error raised when a custom result decoder is required but not provided.
+
+    This exception occurs when a custom result encoder is provided without
+    a corresponding decoder. Both encoder and decoder must be provided together
+    to ensure proper serialization and deserialization of cached results.
+    """
 
 
 class DeterministicCachingDisabledError(UserError):
-    pass
+    """Error raised when attempting to use deterministic caching while it's disabled.
+
+    This exception is raised when code tries to access the deterministic caching
+    interface (dcache) but deterministic caching has been disabled through
+    configuration. Use the icache interface for automatic fallback behavior.
+    """
 
 
 class DeterministicCachingRequiresStrongConsistencyError(UserError):
-    pass
+    """Error raised when deterministic caching is enabled without strong consistency.
+
+    Deterministic caching with global synchronization requires a remote cache
+    backend with strong consistency guarantees. This exception is raised when
+    the configured remote cache does not provide these guarantees.
+    """
 
 
 class StrictDeterministicCachingKeyNotFoundError(UserError):
-    pass
+    """Error raised when a cache key is not found in strict deterministic mode.
+
+    In strictly pre-populated or strictly cached deterministic modes, all cache
+    keys must either be pre-populated or already cached. This exception is raised
+    when attempting to access a key that doesn't exist in these strict modes.
+    """
 
 
 class DeterministicCachingInvalidConfigurationError(UserError):
-    pass
+    """Error raised when deterministic caching configuration is invalid.
+
+    This exception occurs when deterministic caching is enabled but none of
+    the required configuration modes (STRICTLY_PRE_POPULATED_DETERMINISM,
+    GLOBAL_DETERMINISM, or LOCAL_DETERMINISM) are enabled.
+    """
 
 
 class StrictDeterministicCachingInsertionError(UserError):
-    pass
+    """Error raised when attempting to insert into cache in strict deterministic mode.
+
+    In strictly pre-populated or strictly cached deterministic modes, insertions
+    are not allowed as the cache should only contain pre-populated or previously
+    cached values. This exception is raised when attempting to insert new entries.
+    """
 
 
 class DeterministicCachingIMCDumpConflictError(SystemError):
-    pass
+    """Error raised when in-memory cache dumps conflict with existing dumps.
+
+    This exception occurs when attempting to dump the in-memory cache to disk
+    but the dump file already exists with conflicting entries. This indicates
+    a potential race condition or inconsistency in cache state.
+    """

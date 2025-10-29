@@ -1,3 +1,10 @@
+"""Cache interface implementations for PyTorch Inductor runtime caching.
+
+This module provides high-level cache interfaces that wrap the low-level cache
+implementations. It includes fast caching and deterministic caching interfaces,
+along with callback mechanisms for logging and monitoring cache operations.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -33,12 +40,24 @@ logger: Logger = getLogger(__name__)
 
 
 class _IntfCallbackOrigin(Enum):
+    """Enumeration of cache operation origins for callback logging.
+
+    Defines the type of cache interface method that triggered a callback,
+    used to categorize logging and monitoring events.
+    """
+
     RECORD = "record"
     GET = "get"
     INSERT = "insert"
 
 
 class _IntfCallbackAction(Enum):
+    """Enumeration of cache operation actions for callback logging.
+
+    Defines the outcome or action taken during a cache operation,
+    providing detailed information about what happened during the operation.
+    """
+
     REPLAY = "replay"
     RECORD_INSERTED = "record_inserted"
     RECORD_NOT_INSERTED = "record_not_inserted"
@@ -57,6 +76,20 @@ def _intf_callback(
     params: Params,
     *args: Any,
 ) -> None:
+    """Log cache operation events with detailed timing and result information.
+
+    This callback function is invoked after cache operations to log performance
+    metrics and operation outcomes. It provides different logging messages based
+    on the origin and action of the cache operation.
+
+    Args:
+        origin: The type of cache operation (RECORD, GET, or INSERT)
+        action: The outcome of the operation (HIT, MISS, INSERTED, etc.)
+        dur: Duration of the operation in seconds
+        fn: The function being cached
+        params: The parameters passed to the function
+        *args: Additional context-specific arguments (results, timing info)
+    """
     if origin == _IntfCallbackOrigin.RECORD:
         result: R = args[0]
         if action == _IntfCallbackAction.REPLAY:
@@ -169,7 +202,14 @@ def _intf_callback(
 
 
 class _CacheIntf(ABC):
+    """Abstract base class for cache interfaces.
+
+    Provides high-level caching operations including get, insert, and record
+    functionality with support for custom serialization and isolation schemas.
+    """
+
     def __init__(self) -> None:
+        """Initialize the cache interface with a threading lock."""
         self._lock: Lock = Lock()
 
     def _make_key(
@@ -179,6 +219,17 @@ class _CacheIntf(ABC):
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
     ) -> Any:
+        """Generate a cache key from function name, parameters, and isolation context.
+
+        Args:
+            fn: The function being cached
+            params: Tuple of (args, kwargs) for the function call
+            ischema: Optional isolation schema for cache key partitioning
+            custom_params_encoder: Optional custom encoder for function parameters
+
+        Returns:
+            A composite key combining function information and isolation context
+        """
         callee: str = fn.__name__
         fkey: Any = (
             (callee, params)
@@ -191,6 +242,16 @@ class _CacheIntf(ABC):
         return (fkey, ikey)
 
     def _make_dummy_record_wrapper(self, fn: Callable[P, R]) -> Callable[P, R]:
+        """Create a no-op wrapper that just calls the function without caching.
+
+        Used when caching is disabled to maintain API compatibility.
+
+        Args:
+            fn: The function to wrap
+
+        Returns:
+            A wrapper function that directly calls fn without any caching
+        """
         @wraps(fn)
         def dummy_wrapper(*args: Any, **kwargs: Any) -> R:
             return fn(*args, **kwargs)
@@ -206,7 +267,21 @@ class _CacheIntf(ABC):
         custom_result_encoder: Callable[[R], Any] | None = None,
         custom_result_decoder: Callable[[Any], R] | None = None,
     ) -> Callable[P, R]:
-        pass
+        """Create a wrapper that implements the record caching pattern.
+
+        This method must be implemented by subclasses to provide their specific
+        caching behavior.
+
+        Args:
+            fn: The function to wrap with caching behavior
+            ischema: Optional isolation schema for cache key partitioning
+            custom_params_encoder: Optional encoder for function parameters
+            custom_result_encoder: Optional encoder for function results
+            custom_result_decoder: Optional decoder for cached results
+
+        Returns:
+            A wrapped function that implements caching logic
+        """
 
     @abstractmethod
     def _get(
@@ -217,7 +292,21 @@ class _CacheIntf(ABC):
         custom_params_encoder: Callable[P, Any] | None = None,
         custom_result_decoder: Callable[[Any], R] | None = None,
     ) -> impls.Hit | None:
-        pass
+        """Retrieve a cached result for the given function and parameters.
+
+        This method must be implemented by subclasses to provide their specific
+        retrieval logic.
+
+        Args:
+            fn: The function whose result is being retrieved
+            params: Tuple of (args, kwargs) for the function call
+            ischema: Optional isolation schema for cache key partitioning
+            custom_params_encoder: Optional encoder for function parameters
+            custom_result_decoder: Optional decoder for cached results
+
+        Returns:
+            Hit object containing the cached result, or None on cache miss
+        """
 
     @abstractmethod
     def _insert(
@@ -229,19 +318,31 @@ class _CacheIntf(ABC):
         custom_params_encoder: Callable[P, Any] | None = None,
         custom_result_encoder: Callable[[R], Any] | None = None,
     ) -> bool:
-        pass
+        """Insert a result into the cache for the given function and parameters.
+
+        This method must be implemented by subclasses to provide their specific
+        insertion logic.
+
+        Args:
+            fn: The function whose result is being cached
+            params: Tuple of (args, kwargs) for the function call
+            result: The result value to cache
+            ischema: Optional isolation schema for cache key partitioning
+            custom_params_encoder: Optional encoder for function parameters
+            custom_result_encoder: Optional encoder for function results
+
+        Returns:
+            True if insertion succeeded, False if the key already exists
+        """
 
     @property
     def lock(self) -> locks._LockProtocol:
-        """Get a context manager for acquiring the file lock.
+        """Get a context manager for acquiring the cache lock.
 
-        Uses file locking to ensure thread safety across processes.
-
-        Args:
-            timeout: Optional timeout in seconds (float) for acquiring the file lock.
+        Provides thread-safe access to cache operations.
 
         Returns:
-            A callable that returns a context manager for the file lock.
+            A callable that accepts an optional timeout and returns a context manager
         """
 
         def _lock_with_timeout(
@@ -259,6 +360,22 @@ class _CacheIntf(ABC):
         custom_params_encoder: Callable[P, Any] | None = None,
         custom_result_decoder: Callable[[Any], R] | None = None,
     ) -> impls.Hit | None:
+        """Retrieve a cached result for a function call with given parameters.
+
+        Public interface method that checks if caching is enabled, acquires locks,
+        calls the internal _get method, and logs the operation.
+
+        Args:
+            fn: The function whose result is being retrieved
+            params: Tuple of (args, kwargs) for the function call
+            ischema: Optional isolation schema for cache key partitioning
+            custom_params_encoder: Optional encoder for function parameters
+            custom_result_decoder: Optional decoder for cached results
+
+        Returns:
+            Hit object containing the cached result, or None if caching is disabled
+            or on cache miss
+        """
         if not config.IS_CACHING_MODULE_ENABLED():
             return None
 
@@ -293,6 +410,22 @@ class _CacheIntf(ABC):
         custom_params_encoder: Callable[P, Any] | None = None,
         custom_result_encoder: Callable[[R], Any] | None = None,
     ) -> bool:
+        """Insert a result into the cache for a function call with given parameters.
+
+        Public interface method that checks if caching is enabled, acquires locks,
+        calls the internal _insert method, and logs the operation.
+
+        Args:
+            fn: The function whose result is being cached
+            params: Tuple of (args, kwargs) for the function call
+            result: The result value to cache
+            ischema: Optional isolation schema for cache key partitioning
+            custom_params_encoder: Optional encoder for function parameters
+            custom_result_encoder: Optional encoder for function results
+
+        Returns:
+            True if insertion succeeded, False if caching is disabled or key exists
+        """
         if not config.IS_CACHING_MODULE_ENABLED():
             return False
 
@@ -328,6 +461,29 @@ class _CacheIntf(ABC):
         custom_result_encoder: Callable[[R], Any] | None = None,
         custom_result_decoder: Callable[[Any], R] | None = None,
     ) -> Callable[[Callable[P, R]], Callable[P, R]]:
+        """Create a decorator that caches function results with automatic cache-or-compute logic.
+
+        The record pattern checks the cache first, and if a cached result exists, returns it.
+        Otherwise, executes the function, caches the result, and returns the computed value.
+
+        Args:
+            ischema: Optional isolation schema for cache key partitioning
+            custom_params_encoder: Optional encoder for function parameters
+            custom_result_encoder: Optional encoder for function results
+            custom_result_decoder: Optional decoder for cached results
+
+        Returns:
+            A decorator function that wraps the target function with caching logic
+
+        Raises:
+            CustomResultDecoderRequiredError: If encoder provided without decoder
+            CustomResultEncoderRequiredError: If decoder provided without encoder
+
+        Example:
+            @cache.record()
+            def expensive_computation(x: int, y: int) -> int:
+                return x * y + some_expensive_operation()
+        """
         if custom_result_encoder and not custom_result_decoder:
             raise exceptions.CustomResultDecoderRequiredError(
                 "Custom result encoder provided without custom result decoder."
@@ -349,12 +505,32 @@ class _CacheIntf(ABC):
 
 
 class _FastCacheIntf(_CacheIntf):
+    """Fast caching interface with in-memory and on-disk storage.
+
+    Provides efficient caching without deterministic guarantees. Uses a two-tier
+    approach with in-memory caching for speed and on-disk persistence. Suitable
+    for development and scenarios where determinism across machines is not required.
+
+    Attributes:
+        _imc: In-memory cache implementation for fast access
+        _callee_to_odc: Mapping of function names to their on-disk cache implementations
+    """
+
     def __init__(self) -> None:
+        """Initialize fast cache with in-memory and on-disk storage."""
         super().__init__()
         self._imc: impls._InMemoryCacheImpl = impls._InMemoryCacheImpl()
         self._callee_to_odc: dict[str, impls._OnDiskCacheImpl] = {}
 
     def _get_odc_from_callee(self, callee: str) -> impls._OnDiskCacheImpl:
+        """Get or create an on-disk cache instance for the given function name.
+
+        Args:
+            callee: The function name to get the on-disk cache for
+
+        Returns:
+            On-disk cache implementation for the specified function
+        """
         if not (odc := self._callee_to_odc.get(callee)):
             callee_sub_dir: PathLike[str] = Path(callee)
             odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
@@ -496,7 +672,38 @@ class _FastCacheIntf(_CacheIntf):
 
 
 class _DeterministicCacheIntf(_CacheIntf):
+    """Deterministic caching interface with global or local synchronization.
+
+    Provides caching with deterministic guarantees across multiple machines or
+    processes. Supports three modes: strictly pre-populated (read-only from dump),
+    global determinism (using remote cache with strong consistency), and local
+    determinism (using on-disk cache for single-machine consistency).
+
+    The interface ensures that all workers computing the same function with the
+    same parameters will get the same result, either by synchronizing through a
+    shared cache or by using pre-populated results.
+
+    Attributes:
+        _imc: In-memory cache implementation for fast access and memoization
+        _get_sc_from_callee: Function that returns the synchronization cache
+                            (on-disk, remote, or None for pre-populated mode)
+        _rc: Remote cache implementation (for global determinism)
+        _callee_to_odc: Mapping of function names to on-disk caches (for local determinism)
+    """
+
     def __init__(self) -> None:
+        """Initialize deterministic cache with appropriate synchronization backend.
+
+        Sets up the cache based on configuration:
+        - STRICTLY_PRE_POPULATED_DETERMINISM: No sync cache, read-only from dump
+        - GLOBAL_DETERMINISM: Uses remote cache with strong consistency
+        - LOCAL_DETERMINISM: Uses on-disk cache for local synchronization
+
+        Raises:
+            DeterministicCachingRequiresStrongConsistencyError: If global determinism
+                is enabled but remote cache doesn't provide strong consistency
+            DeterministicCachingInvalidConfigurationError: If no determinism mode is enabled
+        """
         super().__init__()
         self._imc: impls._InMemoryCacheImpl = impls._InMemoryCacheImpl()
 
@@ -537,10 +744,19 @@ class _DeterministicCacheIntf(_CacheIntf):
         atexit.register(self._dump_imc_to_disk)
 
     def __del__(self) -> None:
+        """Cleanup method to unregister the in-memory cache dump function."""
         atexit.unregister(self._dump_imc_to_disk)
         del self
 
     def _get_odc_from_callee(self, callee: str) -> impls._OnDiskCacheImpl:
+        """Get or create an on-disk cache instance for the given function name.
+
+        Args:
+            callee: The function name to get the on-disk cache for
+
+        Returns:
+            On-disk cache implementation for the specified function
+        """
         if not (odc := self._callee_to_odc.get(callee)):
             callee_sub_dir: PathLike[str] = Path(callee)
             odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
@@ -548,6 +764,19 @@ class _DeterministicCacheIntf(_CacheIntf):
         return odc
 
     def _dump_imc_to_disk(self) -> Path | None:
+        """Dump the in-memory cache contents to disk for persistence.
+
+        This method is registered with atexit and runs when the program terminates.
+        It serializes the in-memory cache to a JSON file for later pre-population.
+        If the dump file already exists, it merges the contents, raising an error
+        if there are conflicting entries.
+
+        Returns:
+            Path to the dump file if cache was non-empty, None otherwise
+
+        Raises:
+            DeterministicCachingIMCDumpConflictError: If dump file exists with conflicting entries
+        """
         with self.lock():  # type: ignore[call-arg]
             to_dump: dict[str, str] = {
                 repr(key): repr(value) for key, value in self._imc._memory.items()

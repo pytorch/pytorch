@@ -28,7 +28,23 @@ _LockContextManager: TypeAlias = _GeneratorContextManager[None, None, None]
 
 
 class _LockProtocol(Protocol):  # noqa: PYI046
-    def __call__(self, timeout: float | None = None) -> _LockContextManager: ...
+    """Protocol defining the interface for lock acquisition callables.
+
+    This protocol specifies the expected signature for lock acquisition functions
+    that return context managers. It's used to ensure type safety across different
+    lock implementations (threading.Lock, FileLock, etc.).
+    """
+
+    def __call__(self, timeout: float | None = None) -> _LockContextManager:
+        """Acquire a lock with optional timeout and return a context manager.
+
+        Args:
+            timeout: Optional timeout in seconds. If None, uses implementation default.
+
+        Returns:
+            A context manager that releases the lock when exited.
+        """
+        ...
 
 
 # Infinite timeout - blocks indefinitely until lock is acquired.
@@ -195,6 +211,27 @@ def _acquire_many_impl_locks_with_timeout(
     *impls: impls._CacheImpl,
     timeout: float | None = None,
 ) -> Generator[None, None, None]:
+    """Context manager that safely acquires multiple cache implementation locks with timeout.
+
+    This function provides a safe way to acquire locks for multiple cache implementations
+    simultaneously, ensuring all locks are acquired in sequence and all are released
+    even if an exception occurs during execution. Uses ExitStack to manage multiple
+    context managers efficiently.
+
+    Args:
+        *impls: Variable number of cache implementation objects whose locks should be acquired
+        timeout: Timeout in seconds for each lock acquisition. If None, uses the default
+                timeout defined by each implementation's lock.
+
+    Yields:
+        None: Yields control to the caller while holding all locks
+
+    Example:
+        with _acquire_many_impl_locks_with_timeout(imc, odc, timeout=30.0):
+            # Critical section - all locks are held
+            perform_multi_cache_operation()
+        # All locks are automatically released here
+    """
     with ExitStack() as stack:
         for impl in impls:
             stack.enter_context(impl.lock(timeout))
