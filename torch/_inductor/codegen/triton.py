@@ -4593,7 +4593,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         )
                     self.body.writeline(f"{name} = {updated}")
 
-            for idx, partial_accum in enumerate(self.saved_partial_accumulate):
+            for idx in range(len(self.saved_partial_accumulate)):
                 self.body.writeline(
                     f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )

@@ -68,7 +68,7 @@ def get_filenames(self, subname):
 
 
 class TestSerialization(TestCase):
-    """Test backward compatiblity for serialization and numerics"""
+    """Test backward compatibility for serialization and numerics"""
 
     # Copy and modified from TestCase.assertExpected
     def _test_op(
