@@ -950,7 +950,7 @@ use_static_cuda_launcher: bool = static_cuda_launcher_default()
 static_launch_user_defined_triton_kernels: bool = Config(
     justknob="pytorch/inductor:static_launch_user_defined_triton_kernels",
     env_name_force="TORCHINDUCTOR_STATIC_LAUNCH_USER_DEFINED_TRITON_KERNELS",
-    default=False,
+    default=True,
 )
 
 # Raise error if we bypass the launcher
