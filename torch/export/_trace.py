@@ -97,7 +97,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
 )
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.graph import _PyTreeInfo
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -186,7 +186,7 @@ def _ignore_backend_decomps():
 def _disable_custom_triton_op_functional_decomposition():
     old = torch._functorch.config.decompose_custom_triton_ops
     try:
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         torch._functorch.config.decompose_custom_triton_ops = False
         yield torch._functorch.config.decompose_custom_triton_ops
     finally:
@@ -365,7 +365,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     **nn_module_stack,
                 }
                 node.meta["nn_module_stack"] = {
@@ -514,7 +514,6 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
                 simplify=True,
             )
         ):
-            # pyrefly: ignore  # unbound-name
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
@@ -688,7 +687,7 @@ def _restore_state_dict(
     for name, _ in list(
         chain(
             original_module.named_parameters(remove_duplicate=False),
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             original_module.named_buffers(remove_duplicate=False),
         )
     ):
@@ -1538,12 +1537,10 @@ def _strict_export(
 
     orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
-    gm_torch_level.graph._codegen = _PyTreeCodeGen(
-        _PyTreeInfo(
-            orig_arg_names,
-            gm_torch_level._in_spec,
-            out_spec,
-        )
+    gm_torch_level.graph._codegen.pytree_info = _PyTreeInfo(
+        orig_arg_names,
+        gm_torch_level._in_spec,
+        out_spec,
     )
     gm_torch_level.recompile()
 
@@ -2170,7 +2167,7 @@ def _export_for_training(
                 if torch._export.config.error_on_lifted_constant_tensors:
                     raise RuntimeError(error_msg)
                 else:
-                    warnings.warn(error_msg)
+                    warnings.warn(error_msg, stacklevel=2)
 
     export_graph_signature = export_artifact.aten.sig
 
@@ -2246,7 +2243,8 @@ def _export_for_training(
                 f"This is likely result of torch.export.export not being able to track side effects "
                 f"that is happening outside of model scope.\n\n"
                 f"Leaked tensors:\n  {leak_details}\n\n"
-                f"Alternatively, please file a bug report to PyTorch team for further debugging help."
+                f"Alternatively, please file a bug report to PyTorch team for further debugging help.",
+                stacklevel=2,
             )
 
             del legit_leak
