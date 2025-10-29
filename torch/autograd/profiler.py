@@ -221,6 +221,7 @@ class profile:
         if not self.enabled:
             return
         self.use_cuda = use_cuda
+        self.kineto_failed = False
         if self.use_cuda:
             warn(
                 "The attribute `use_cuda` will be deprecated soon, "
@@ -397,12 +398,12 @@ class profile:
         self._needs_processing = True
 
         t0 = perf_counter_ns()
-
         self.kineto_results = _disable_profiler()
+        if len(self.kineto_results.events()) == 0:
+            self.kineto_failed = True
         t1 = perf_counter_ns()
         self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_end_time_ns = t0
-
         _run_on_profiler_stop()
 
         self._stats.profiling_window_duration_sec = (
@@ -498,6 +499,9 @@ class profile:
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
+        if self.kineto_failed:
+            print("Kineto failed, no trace to export")
+            return
         if kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
