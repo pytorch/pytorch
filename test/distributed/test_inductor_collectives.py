@@ -23,6 +23,7 @@ from torch._inductor.comms import (
     sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
 from torch._inductor.scheduler import (
     _get_mm_like_fn,
     BaseSchedulerNode,
@@ -51,7 +52,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -2124,8 +2124,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.moves, 0)
 
 
-
-
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -2213,6 +2211,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             group_name, torch.distributed.group.WORLD
         )
         group_size = group.size()
+
         def func(inp, group_size, group_name):
             ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
                 inp, group_size, group_name
@@ -2225,15 +2224,18 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             return ag_1_wait
 
         from torch._inductor.comm_analysis import nccl_pg_connectivity
+
         conn = nccl_pg_connectivity(group)
         assert len(conn) > 0
 
         gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
-        ag_n = None
         g = gm.graph
         for n in g.nodes:
             if is_all_gather_into_tensor(n):
-                from torch._inductor.comm_analysis import estimate_nccl_collective_runtime_from_fx_node
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
                 est_ms = estimate_nccl_collective_runtime_from_fx_node(n)
                 assert est_ms > 0
 
