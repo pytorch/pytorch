@@ -151,6 +151,6 @@ def bias_correction(
             bias.data = updated_bias
 
             # Resets the data contained in the loggers
-            for submodule in quantized_model.modules():
+            for name, submodule in quantized_model.named_modules():
                 if isinstance(submodule, MeanShadowLogger):
                     submodule.clear()
