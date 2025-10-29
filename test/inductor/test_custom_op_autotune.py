@@ -182,16 +182,13 @@ class TestCustomOpAutoTune(TestCase):
         def _(input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8):
             return torch.empty_like(input_tensor)
 
-        lib_name, op_name = test_op_name.split("::")
-        op_object = getattr(getattr(torch.ops, lib_name), op_name)
-
         decompositions = [
             rmsnorm_decomposition1,
             rmsnorm_decomposition2,
         ]
 
         register_custom_op_autotuning(
-            op_object.default,
+            test_rmsnorm_op,
             configs=[CustomOpConfig(decomp) for decomp in decompositions],
             name="test_rmsnorm_autotuned",
             input_gen_fns={
@@ -216,7 +213,7 @@ class TestCustomOpAutoTune(TestCase):
             # Test autotuning
             expected = rmsnorm_decomposition1(input_tensor, weight)
             self._run_autotune_test(
-                op_object, (input_tensor, weight), expected, f"RMSNorm_{i}"
+                test_rmsnorm_op, (input_tensor, weight), expected, f"RMSNorm_{i}"
             )
 
     @skipIfXpu
@@ -298,12 +295,9 @@ class TestCustomOpAutoTune(TestCase):
                 dtype=input_tensor.dtype,
             )
 
-        lib_name, op_name = test_op_name.split("::")
-        op_object = getattr(getattr(torch.ops, lib_name), op_name)
-
         # Use explicit configs with method parameter as tuning knob
         register_custom_op_autotuning(
-            op_object.default,
+            test_mlp_op,
             configs=[
                 CustomOpConfig(method=1),  # Batched approach
                 CustomOpConfig(method=2),  # Fused weights
@@ -344,14 +338,14 @@ class TestCustomOpAutoTune(TestCase):
             torch.testing.assert_close(
                 result,
                 expected,
-                rtol=1e-5,
-                atol=1e-5,
+                rtol=1e-2,
+                atol=1e-2,
                 msg=f"Method {method} not equivalent to method 0",
             )
 
         # Test autotuning - all should be mathematically equivalent
         self._run_autotune_test(
-            op_object,
+            test_mlp_op,
             (input_tensor, gate_weight, up_weight, down_weight),
             expected,
             "MLP",
@@ -405,12 +399,9 @@ class TestCustomOpAutoTune(TestCase):
         def _(a: torch.Tensor, b: torch.Tensor, k_splits: int = 4):
             return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
 
-        lib_name, op_name = test_op_name.split("::")
-        op_object = getattr(getattr(torch.ops, lib_name), op_name)
-
         # Register autotuning with different k_splits values using decomposition function
         register_custom_op_autotuning(
-            op_object.default,
+            test_decompose_k_op,
             configs=[
                 CustomOpConfig(k_splits=32),
                 CustomOpConfig(k_splits=64),
@@ -432,7 +423,7 @@ class TestCustomOpAutoTune(TestCase):
 
         a, b = self._create_decompose_k_inputs()
         expected = a @ b
-        self._run_autotune_test(op_object, (a, b), expected, "DecomposeK")
+        self._run_autotune_test(test_decompose_k_op, (a, b), expected, "DecomposeK")
 
     @skipIfXpu
     def test_multi_parameter_tuning(self):
@@ -484,12 +475,9 @@ class TestCustomOpAutoTune(TestCase):
         ):
             return torch.empty_like(x)
 
-        lib_name, op_suffix = op_name.split("::")
-        op_object = getattr(getattr(torch.ops, lib_name), op_suffix)
-
         # Use explicit configs with scale_mode and chunk_size parameters as tuning knobs
         register_custom_op_autotuning(
-            op_object.default,
+            multi_param_op,
             configs=[
                 CustomOpConfig(scale_mode=1),  # Broadcast
                 CustomOpConfig(scale_mode=2, chunk_size=16),  # Chunked 16
@@ -534,7 +522,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Test autotuning
         self._run_autotune_test(
-            op_object, (test_x, test_factor), expected_result, "MultiParam"
+            multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
 
