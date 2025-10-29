@@ -608,29 +608,31 @@ class CodeGen:
             else:
                 body.append("\n")
 
-        prev_stacktrace = None
+        prev_summary_str = None
 
         def append_stacktrace_summary(node: Node):
             """
             Append a summary of the stacktrace to the generated code. This is
             useful for debugging.
             """
-            nonlocal prev_stacktrace
+            nonlocal prev_summary_str
 
             if node.op not in {"placeholder", "output"}:
-                stack_trace = node.stack_trace
-                if stack_trace:
-                    if stack_trace != prev_stacktrace:
-                        prev_stacktrace = stack_trace
-                        if parsed_stack_trace := _parse_stack_trace(stack_trace):
-                            summary_str = parsed_stack_trace.get_summary_str()
-                        else:
-                            summary_str = ""
-                        body.append(f"\n {dim(f'# {summary_str}')}\n")
-                elif prev_stacktrace != "":
-                    prev_stacktrace = ""
-                    no_stacktrace_msg = "# No stacktrace found for following nodes"
-                    body.append(f"\n{dim(no_stacktrace_msg)}\n")
+                annotation_str = ""
+                annotation = node.meta.get("custom", {})
+                if annotation:
+                    annotation_str = f" Annotation: {annotation}"
+
+                stack_trace_str = "No stacktrace found for following nodes"
+                if stack_trace := node.stack_trace:
+                    if parsed_stack_trace := _parse_stack_trace(stack_trace):
+                        stack_trace_str = parsed_stack_trace.get_summary_str()
+
+                summary_str = f"\n{dim(f'#{annotation_str} {stack_trace_str}')}\n"
+
+                if summary_str != prev_summary_str:
+                    prev_summary_str = summary_str
+                    body.append(summary_str)
 
         def stringify_shape(shape: Iterable) -> str:
             return f"[{', '.join([str(x) for x in shape])}]"
