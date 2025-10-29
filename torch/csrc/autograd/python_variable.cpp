@@ -878,13 +878,19 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // data
   auto sym_sizes = r.symintlist(1);
   auto sym_strides_own = r.symintlistOptional(2);
+  std::optional<DispatchKeySet> extra_dispatch_keys =
+      r.toDispatchKeySetOptional(13);
+  if (is_dtensor) {
+    extra_dispatch_keys = extra_dispatch_keys.value_or(DispatchKeySet())
+                              .add(c10::DispatchKey::DTensor);
+  }
   Tensor tensor = make_tensor_for_subclass_helper(
       /*sym_sizes=*/r.symintlist(1),
       /*sym_strides=*/r.symintlistOptional(2),
       /*sym_storage_offset=*/r.toSymIntOptional(3),
       options,
       /*storage_size=*/r.toSymIntOptional(14),
-      r.toDispatchKeySetOptional(13));
+      extra_dispatch_keys);
 
   const auto sizes_strides_policy = r.stringViewOptional(10);
   if (sizes_strides_policy.has_value()) {
