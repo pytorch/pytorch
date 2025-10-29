@@ -1,3 +1,10 @@
+"""Implementations of ONNX operators as native Torch ops.
+
+NOTE: Fake implementations:
+    Refer to https://docs.pytorch.org/docs/stable/library.html#torch.library.register_fake
+    for more details on how to create fake kernels.
+"""
+
 # flake8: noqa: B950
 import math
 from collections.abc import Callable
