@@ -71,7 +71,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optiona
   return output;
 }
 
-static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
   if (reduction == at::Reduction::Mean) {
     return unreduced.mean();
   } else if (reduction == at::Reduction::Sum) {
@@ -127,7 +127,7 @@ namespace {
 template<bool inplace>
 using Ctype = std::conditional_t<inplace, Tensor&, Tensor>;
 
-static Tensor make_feature_noise(const Tensor& input) {
+Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
   TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
   std::vector<int64_t> sizes;
@@ -141,7 +141,7 @@ static Tensor make_feature_noise(const Tensor& input) {
   return at::empty(sizes, input.options());
 }
 
-static bool is_fused_kernel_acceptable(const Tensor& input, double p) {
+bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.is_privateuseone()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
@@ -210,7 +210,7 @@ ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
 ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
 ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
-static Tensor dropout(const Tensor& input, double p, bool train) {
+Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {

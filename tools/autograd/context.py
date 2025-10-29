@@ -1,5 +1,5 @@
 import functools
-from typing import Callable
+from collections.abc import Callable
 
 from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo as NFWDI
 from torchgen.context import native_function_manager
