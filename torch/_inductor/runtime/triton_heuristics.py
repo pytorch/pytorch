@@ -3370,6 +3370,25 @@ def persistent_reduction(
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
 
+    if inductor_meta.get("RSPLIT_SIZE"):
+        new_configs = []
+        for c in configs:
+            c.kwargs["RSPLIT_SIZE"] = inductor_meta.get("RSPLIT_SIZE")
+
+            # small XBLOCK to use less registers/smem
+            c.kwargs["XBLOCK"] = 1
+            c.num_warps //= 2
+            c.num_warps = max(c.num_warps, 2)
+
+            # less warps so potentially each sm can run more thread blocks
+            # Inside each thread block, we handle the split sequentially,
+            # more thread blocks is beneficial here.
+            newc = copy.deepcopy(c)
+            newc.num_warps = 2
+            new_configs.append(newc)
+
+        configs = unique_configs(new_configs)
+
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
@@ -3531,24 +3550,13 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta, filename=None, inductor_meta=None):
+def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
     """
-    configs = []
-
-    # Naive autotuning path for num_warps
-    if not inductor_meta.get("autotune_pointwise", True) and not (
-        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
-    ):
-        configs.append(triton.Config({}, num_stages=1, num_warps=8))
-    else:
-        for warps in [1, 2, 4, 8]:
-            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
-
     return cached_autotune(
         None,
-        configs,
+        [triton.Config({}, num_stages=1, num_warps=num_warps)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -3676,6 +3684,16 @@ class Grid2DWithYZOverflow(GridExpr):
         )
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
+
+
+class MixOrderReductionGrid(GridExpr):
+    def generate(self, meta: dict[str, int]) -> None:
+        split_size = meta.get("RSPLIT_SIZE")
+        xblock = meta.get("XBLOCK")
+        assert split_size
+        assert xblock
+        assert split_size % xblock == 0
+        self.x_grid = self.ceildiv("xnumel", split_size)
 
 
 class CooperativeReductionGrid(GridExpr):

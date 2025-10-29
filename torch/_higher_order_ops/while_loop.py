@@ -54,7 +54,7 @@ class WhileLoopOp(HigherOrderOperator):
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, cond_fn, body_fn, carried_inputs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -316,7 +316,7 @@ def while_loop_dense(
 
     if stack_output:
         outs: list[torch.Tensor] = []
-        for i, out in enumerate(outputs):
+        for out in outputs:
             outs.append(torch.stack(out, dim=0))
         return tuple(outs)
 
@@ -431,7 +431,7 @@ def while_loop_tracing(
             elif isinstance(x, torch.Tensor):
                 x = x.clone()
                 if hasattr(x, "constant") and x.constant is not None:
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     x.constant = None
             return x
 
@@ -454,7 +454,7 @@ def while_loop_tracing(
 
         next_name = None
         i = 0
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         while not next_name:
             candidate = f"while_loop_cond_graph_{i}"
             if hasattr(proxy_mode.tracer.root, candidate):
@@ -692,14 +692,14 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 # idx = 0
 # init_grad_carries = grads
-# init_grad_additional_inputs = torch.zeros_like(g_additioanl_inputs)
+# init_grad_additional_inputs = torch.zeros_like(g_additional_inputs)
 # fw_inps = torch.cat([ctx.fw_carried_inputs, fw_outputs[:-1]])
 # while_loop(cond_fn, body_fn, (idx, init_grad_carries, init_grad_additional_inputs,), (fw_additional_inputs, fw_inps))
 
 
 class WhileLoopAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         cond_fn,
@@ -729,7 +729,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ctx.additional_inputs = additional_inputs
         ctx.fw_outputs = fw_outputs
         loop_count = None
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         for out in fw_outputs:
             if isinstance(out, torch.Tensor):
                 if loop_count is not None:
@@ -883,7 +883,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             while_loop_op(
                 cond_gm,
                 body_gm,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 (
                     init_idx,
                     *init_grad_carries,
