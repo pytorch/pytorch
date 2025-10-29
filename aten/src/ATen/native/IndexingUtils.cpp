@@ -16,7 +16,7 @@ bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
   auto linearId = elements - 1;
 
   // NOTE: Assumes all strides are positive, which is true for now
-  for (int64_t i = t.dim() - 1; i >= 0; --i) {
+  for (auto i = t.dim() - 1; i >= 0; --i) {
     auto curDimIndex = linearId % t.sym_size(i);
     auto curDimOffset = curDimIndex * t.sym_stride(i);
     offset += curDimOffset;
