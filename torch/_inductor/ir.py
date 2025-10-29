@@ -935,7 +935,7 @@ class Loops(IRNode):
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -1231,7 +1231,7 @@ class Reduction(Loops):
 
     __repr__ = __str__
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("Reduction")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return super().get_free_symbol_uses(unbacked_only) | OrderedSet().union(
             *(get_free_symbols(e, unbacked_only) for e in self.reduction_ranges)
@@ -2331,7 +2331,7 @@ class Scan(Loops):
 
     # HACK we mimic reduction
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("Scan")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
         # need to explicitly represent the closure so we can pull out unbacked
@@ -2542,7 +2542,7 @@ class Sort(Loops):
 
     # HACK we mimic reduction
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("Sort")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return (
             super().get_free_symbol_uses(unbacked_only)
@@ -2791,7 +2791,7 @@ def is_unaligned(node: IRNode) -> bool:
 class BaseView(IRNode):
     data: IRNode
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("BaseView")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return self.data.get_free_symbol_uses(unbacked_only)
 
@@ -3366,7 +3366,7 @@ class ReinterpretView(BaseView):
     def freeze_layout(self) -> None:
         pass
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("ReinterpretView")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -3901,7 +3901,7 @@ class Layout(OutputSpec):
     def storage_size(self) -> Expr:
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("Layout")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4157,7 +4157,7 @@ class NonOwningLayout(Layout):
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("NonOwningLayout")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4446,7 +4446,7 @@ class Buffer(IRNode, CodegenSymbol):
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet([self.get_name()])
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("Buffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4519,7 +4519,7 @@ class NoneAsConstantBuffer(IRNode):
     def get_reads(self) -> OrderedSet[Dep]:
         return OrderedSet()
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("NoneAsConstantBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4539,7 +4539,7 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     expr: Expr
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("ShapeAsConstantBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4612,7 +4612,7 @@ class ComputedBuffer(OperationBuffer):
                     self.data.get_size(),
                 )
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("ComputedBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -5066,7 +5066,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.subgraph_inps: Optional[list[Optional[Union[IRNode, sympy.Expr]]]] = None
         self.subgraph_outs: Optional[list[Optional[IRNode]]] = None
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("TritonTemplateBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -5433,7 +5433,7 @@ class InputsKernel(OperationBuffer):
     def num_reads(self) -> int:
         return 1
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("InputsKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -5608,7 +5608,7 @@ class ConcatKernel(NopKernel):
             and not isinstance(src.data, ExternKernelAlloc)
         )
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("ConcatKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -6525,7 +6525,7 @@ class ExternKernel(InputsKernel):
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("ExternKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -6985,7 +6985,7 @@ class UserDefinedTritonKernel(ExternKernel):
             original_fxnode_name=self.fx_node.name,
         )
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("UserDefinedTritonKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -7424,7 +7424,7 @@ class DynamicSelectStorageOffset(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_offset_symbol])
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("DynamicSelectStorageOffset")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -7475,7 +7475,7 @@ class DynamicSliceSize(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_size_symbol])
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("DynamicSliceSize")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -7540,7 +7540,7 @@ class AssertScalar(ExternKernel):
     def has_side_effects(self) -> bool:
         return True
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("AssertScalar")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -8215,7 +8215,7 @@ class MultiOutput(ExternKernel):
         self.indices = indices
         self.skip_size_stride_alignment_checks = skip_size_stride_alignment_checks
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("MultiOutput")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -8338,7 +8338,7 @@ class MutableBox(IRNode):
     def realize(self) -> Optional[str]:
         return self.data.realize()
 
-    @cache_on_self_and_args
+    @cache_on_self_and_args("MutableBox")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -9175,7 +9175,7 @@ class EffectfulKernel(FallbackKernel):
 
 
 class NonTensorObj(IRNode):
-    @cache_on_self_and_args
+    @cache_on_self_and_args("NonTensorObj")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
