@@ -1047,6 +1047,21 @@ class DeviceCachingAllocator {
       stats.requested_bytes[statType].reset_peak();
     }
   }
+
+  void addPeerAccess(c10::DeviceIndex dev_to_access) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    if (std::find(
+            devices_with_peer_access_.begin(),
+            devices_with_peer_access_.end(),
+            dev_to_access) != devices_with_peer_access_.end()) {
+      return;
+    }
+    devices_with_peer_access_.push_back(dev_to_access);
+    for (const auto& es : expandable_segments_) {
+      es->addPeer(dev_to_access);
+    }
+  }
 };
 
 static void local_raw_delete(void* ptr);
@@ -1072,6 +1087,15 @@ class XPUAllocator : public DeviceAllocator {
       allocated_blocks.erase(it);
     }
     return block;
+  }
+
+  void assertValidDevice(DeviceIndex device) {
+    const auto device_num = device_allocators.size();
+    TORCH_CHECK(
+        0 <= device && device < static_cast<int64_t>(device_num),
+        "Invalid device argument ",
+        device,
+        ": did you call init?");
   }
 
  public:
@@ -1186,15 +1210,6 @@ class XPUAllocator : public DeviceAllocator {
     xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
   }
 
-  void assertValidDevice(DeviceIndex device) {
-    const auto device_num = device_allocators.size();
-    TORCH_CHECK(
-        0 <= device && device < static_cast<int64_t>(device_num),
-        "Invalid device argument ",
-        device,
-        ": did you call init?");
-  }
-
   DeviceStats getDeviceStats(DeviceIndex device) override {
     assertValidDevice(device);
     return device_allocators[device]->getStats();
@@ -1208,6 +1223,14 @@ class XPUAllocator : public DeviceAllocator {
   void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
+  }
+
+  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
+    assertValidDevice(dev);
+    assertValidDevice(dev_to_access);
+    c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
+        c10::xpu::get_raw_device(dev_to_access));
+    device_allocator[dev_to_access]->addPeerAccess(dev);
   }
 };
 
@@ -1251,6 +1274,10 @@ void raw_delete(void* ptr) {
 
 void recordStream(const DataPtr& dataPtr, XPUStream stream) {
   return allocator.recordStream(dataPtr, stream);
+}
+
+void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
+  return allocator.enablePeerAccess(dev, dev_to_access);
 }
 
 REGISTER_ALLOCATOR(kXPU, &allocator)
