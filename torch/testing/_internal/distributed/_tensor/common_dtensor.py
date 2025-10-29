@@ -447,7 +447,7 @@ class DTensorTestBase(MultiProcessTestCase):
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
 
-        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+        if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
             # of the most pripority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
