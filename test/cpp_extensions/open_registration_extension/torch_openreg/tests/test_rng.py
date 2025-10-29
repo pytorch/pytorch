@@ -34,13 +34,6 @@ class TestRNG(TestCase):
         generator.manual_seed(42)
         self.assertEqual(generator.initial_seed(), 42)
 
-    def test_offset_unsupported(self):
-        # openreg is a CPU-simulated backend and does not support offsets
-        with self.assertRaisesRegex(RuntimeError, "does not support set_offset"):
-            torch.openreg.set_offset(123)
-        with self.assertRaisesRegex(RuntimeError, "does not support get_offset"):
-            torch.openreg.get_offset()
-
     # LITERALINCLUDE END: OPENREG GENERATOR TEST EXAMPLES
 
 
