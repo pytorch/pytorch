@@ -197,11 +197,11 @@ class MixOrderReduction:
             return False
         if not node1.is_gpu() or not node2.is_gpu():
             return False
-        device_type = node1.get_device().type
+        device_type = node1.get_device().type  # type: ignore[union-attr]
         if (
             device_type not in ("cuda", "xpu")
             or get_current_backend(device_type) != "triton"
-        ):  # type: ignore[union-attr]
+        ):
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
