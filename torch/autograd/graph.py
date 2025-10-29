@@ -287,10 +287,6 @@ class GraphExecutionGroup:
         # Private API to be used by utils like AC
         return cls._current_group
 
-    @property
-    def group_id(self) -> int:
-        return self._id
-
 
 class saved_tensors_hooks:
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
