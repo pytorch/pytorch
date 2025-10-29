@@ -69,5 +69,5 @@ The filtered kernels to print environment variable has the names of the kernels 
 
 ### Common Sources of Issues
 
-- [**Dynamic shapes**](./user_guide/torch_compiler/torch.compiler_dynamic_shapes.md): Historically a source of many IMAs. Pay special attention when debugging dynamic shape scenarios.
+- [**Dynamic shapes**](./torch.compiler_dynamic_shapes.md): Historically a source of many IMAs. Pay special attention when debugging dynamic shape scenarios.
 - **Custom ops**: Especially when implemented in C++ and used with dynamic shapes. There is a need to Symint'ify the meta function.
