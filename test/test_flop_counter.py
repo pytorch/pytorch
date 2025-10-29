@@ -230,13 +230,13 @@ class TestFlopCounter(TestCase):
         weight = torch.randn(1, 1, 1, 1, requires_grad=True)
         assert_equivalence(lambda: F.conv2d(x, weight).sum().backward(), 8)
 
-        for in_channels, out_channels in [
-            (1, 1),
-            (1, 3),
-            (3, 1),
-            (3, 7),
-            (2, 4),
-            (4, 2),
+        for in_channels, out_channels, groups in [
+            (1, 1, 1),
+            (1, 3, 1),
+            (3, 1, 1),
+            (3, 7, 1),
+            (2, 4, 2),
+            (4, 2, 2),
         ]:
             x = torch.rand(1, in_channels, 4, 4, requires_grad=True)
             weight = torch.randn(out_channels, in_channels, 2, 2, requires_grad=True)
@@ -270,7 +270,7 @@ class TestFlopCounter(TestCase):
         model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
 
         with FlopCounterMode() as mode:
-            for _i in range(50):
+            for i in range(50):
                 out = model(x)
                 out.sum().backward()
         self.assertExpectedInline(str(mode.get_total_flops()), """1536000""")

@@ -7555,7 +7555,7 @@ metadata incorrectly.
             (_inp, _tg3),
         ]
 
-        for  (inp_fn, tg_fn) in TEST_CASES:
+        for inp_fn, tg_fn in TEST_CASES:
             ref_x = inp_fn()
             x = ref_x.detach().clone().requires_grad_()
 
