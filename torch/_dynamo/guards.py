@@ -318,7 +318,7 @@ class GuardManagerWrapper:
             is_diff_guard_node = (
                 node.get_source() in self.diff_guard_sources or node.fail_count() > 0
             )
-            for _idx, (key_mgr, val_mgr) in sorted(
+            for idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
@@ -441,7 +441,7 @@ class GuardManagerWrapper:
             is_subtree_tag_safe = True
 
             # Recurse to get the tag safe roots from subtree.
-            for _idx, (key_mgr, val_mgr) in sorted(
+            for idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 if key_mgr is not None:
@@ -449,7 +449,9 @@ class GuardManagerWrapper:
                 if val_mgr is not None:
                     tag_safe_roots.extend(visit(val_mgr))
 
-            for key_mgr, val_mgr in node.get_key_value_managers().values():
+            for idx, (key_mgr, val_mgr) in sorted(
+                node.get_key_value_managers().items()
+            ):
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
 
@@ -2148,19 +2150,6 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker, get_verbose_code_parts(global_name, guard)
-        )
-
-    def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
-        # Copied from DTensor __metadata_guard__
-        # TODO - Consider moving this to C++ if stable
-        value = deepcopy(self.get(guard.name))
-
-        def guard_fn(x: Any) -> bool:
-            return x._check_equals(value, skip_shapes=True)
-
-        code = f"__dtensor_spec_{id(guard_fn)}"
-        self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts(code, guard)
         )
 
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
