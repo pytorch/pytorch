@@ -3600,16 +3600,12 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline("if not should_loop:")
         if stack_output:
             # Handle the case when loop never executes
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
                 self.writeline(ExitSubgraphLine(self))
         else:
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.clone()")
                 self.writeline(ExitSubgraphLine(self))
