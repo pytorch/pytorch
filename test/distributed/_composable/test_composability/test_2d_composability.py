@@ -238,9 +238,7 @@ class TestFullyShard2DTraining(FSDPTest):
             # runs its reduce-scatter
             self.assertIsInstance(model.pos_embeddings.weight.placements[1], Shard)
             self.assertIsInstance(model.pos_embeddings.weight.grad.placements[1], Shard)
-            for ref_param, param in zip(
-                ref_model.parameters(), model.parameters()
-            ):
+            for ref_param, param in zip(ref_model.parameters(), model.parameters()):
                 full_grad = param.grad.full_tensor()
                 self.assertEqual(ref_param.grad, full_grad)
 

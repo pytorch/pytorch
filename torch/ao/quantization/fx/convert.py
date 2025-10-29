@@ -286,7 +286,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             for value in qparams.values():
                 # we have quant_min, quant_max and dtype, all should be stored
                 # as literals
-                choose_qparams_op_inputs.append(value)
+                choose_qparams_op_inputs.append(value.copy())
             choose_qparams_node = graph.create_node(
                 "call_function", choose_qparams_op, tuple(choose_qparams_op_inputs), {}
             )
