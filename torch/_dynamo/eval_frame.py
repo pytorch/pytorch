@@ -1791,7 +1791,7 @@ def rewrite_signature(
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
 
-        for val in candidates:
+        for i, val in enumerate(candidates):
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
