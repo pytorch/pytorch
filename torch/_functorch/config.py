@@ -280,7 +280,7 @@ backward_pass_autocast = "same_as_forward"
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = False if is_fbcode() else True
+donated_buffer = not is_fbcode()
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
@@ -311,6 +311,9 @@ graphsafe_rng_functionalization = True
 # TODO: once AOT compile calls aot autograd directly instead of
 # through compile_fx, we can remove this
 force_non_lazy_backward_lowering = False
+
+# only for testing, used to turn functionalization off in AOTDispatcher
+_test_disable_functionalization = True
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests

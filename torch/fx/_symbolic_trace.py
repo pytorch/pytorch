@@ -9,10 +9,10 @@ import logging
 import math
 import os
 import warnings
+from collections.abc import Callable
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Callable, get_args, NamedTuple, Optional, Union
-from typing_extensions import TypeAlias
+from typing import Any, get_args, NamedTuple, Optional, TypeAlias, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -603,7 +603,7 @@ class Tracer(TracerBase):
                             in inspect.signature(self.create_proxy).parameters
                         ):
                             kwargs["proxy_factory_fn"] = (
-                                # pyrefly: ignore  # unsupported-operation
+                                # pyrefly: ignore [unsupported-operation]
                                 None
                                 if not self.param_shapes_constant
                                 else lambda node: ParameterProxy(
@@ -709,7 +709,7 @@ class Tracer(TracerBase):
             root_fn = _patch_function(root_fn, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        if not all(child.is_leaf() for child in in_spec.children_specs):
+        if not all(child.is_leaf() for child in in_spec.children()):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
