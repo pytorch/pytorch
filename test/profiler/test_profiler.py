@@ -82,7 +82,7 @@ if TYPE_CHECKING:
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
 # threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
+# The work around is turning off monitoring thread when tqdm is loaded.
 # Since these are unit tests, it is safe to turn off monitor thread.
 try:
     import tqdm
@@ -529,7 +529,7 @@ class TestProfiler(TestCase):
                 found_mm = True
             if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "memcpy" in e.name.lower():
+            if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
                 found_memcpy = True
         if use_cuda:
             self.assertTrue(found_gemm)
