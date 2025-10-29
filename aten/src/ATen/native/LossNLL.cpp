@@ -655,17 +655,50 @@ Tensor cross_entropy_loss_symint(
 
     bool is_half_precision = (self.scalar_type() == ScalarType::Half ||
                               self.scalar_type() == ScalarType::BFloat16);
-    bool needs_fp32_compute = is_half_precision && reduction != Reduction::None;
 
-    auto compute_dtype = needs_fp32_compute ? std::optional<ScalarType>(ScalarType::Float)
-                                             : std::optional<ScalarType>(self.scalar_type());
-    auto log_probs = at::log_softmax(self, class_dim, compute_dtype);
+    // fp16/bf16 compute with fp32 reduction for numerical stability
+    bool needs_fp32_reduction = is_half_precision && reduction != Reduction::None;
 
-    ret = at::nll_loss_nd_symint(
-        log_probs, target, weight, reduction, std::move(ignore_index));
+    auto log_probs = at::log_softmax(self, class_dim, self.scalar_type());
 
-    if (needs_fp32_compute) {
-      ret = ret.to(self.scalar_type());
+    if (needs_fp32_reduction) {
+      // convert weight to match input dtype for element-wise operations
+      std::optional<Tensor> weight_half;
+      if (weight.has_value()) {
+        weight_half = weight.value().to(self.scalar_type());
+      }
+
+      auto unreduced_loss = at::nll_loss_nd_symint(
+          log_probs, target, weight_half, Reduction::None, ignore_index);
+
+      // upcast to FP32 only for the reduction step
+      auto loss_fp32 = unreduced_loss.to(ScalarType::Float);
+      auto sum_loss = loss_fp32.sum();
+
+      // perform reduction in FP32 to prevent overflow
+      if (reduction == Reduction::Mean) {
+        // compute normalization factor (sum of weights for non-ignored elements)
+        auto valid_mask = target.ne(ignore_index.as_int_unchecked());
+        Tensor norm_factor;
+
+        if (weight.has_value()) {
+          // when weights are provided, compute sum of weights for non-ignored elements
+          c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
+          const Tensor& weight_ = *weight_maybe_owned;
+          auto target_for_gather = target.masked_fill(~valid_mask, 0);
+          auto gathered_weights = weight_.gather(0, target_for_gather.flatten());
+          norm_factor = gathered_weights.masked_fill(~valid_mask.flatten(), 0).to(ScalarType::Float).sum();
+        } else {
+          // when no weights, normalize by count of non-ignored elements
+          norm_factor = valid_mask.sum().to(ScalarType::Float);
+        }
+        ret = (sum_loss / norm_factor).to(self.scalar_type());
+      } else { // reduction::Sum
+        ret = sum_loss.to(self.scalar_type());
+      }
+    } else {
+      ret = at::nll_loss_nd_symint(
+          log_probs, target, weight, reduction, std::move(ignore_index));
     }
   }
   return ret;
