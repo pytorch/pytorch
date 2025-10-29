@@ -549,7 +549,8 @@ explain = False
 #   1. The Unsupported exception is caught. If we cannot compile a partial graph (should_compile_partial_graph() is False),
 #      then propagate the exception upward. For unsupported step graph breaks, the condition to abort partial compilation is
 #      more restrictive (see InstructionTranslatorBase.step).
-#   2. If the Unsupported exception escapes symbolic_convert.py, then we are done. Otherwise, we want to attempt partial compilation.
+#   2. If the Unsupported exception escapes symbolic_convert.py, then we are done.
+#      Otherwise, we want to attempt partial compilation.
 #      Log the graph break via log_graph_break. If we're handling a data-dependent graph break (type 2.), then we can immediately
 #      codegen the compiled graph and resume function and we're done. This is because the jump instruction we graph break on is
 #      limited in how it can manipulate Python state (say, in comparison, to CALL, which can modify Python state arbitrarily).
