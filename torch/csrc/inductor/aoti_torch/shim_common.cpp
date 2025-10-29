@@ -1406,6 +1406,37 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   });
 }
 
+#include <aten/src/ATen/core/List.h>
+
+inline c10::impl::GenericList* list_handle_to_list_pointer(C10ListHandle handle) {
+  return reinterpret_cast<c10::impl::GenericList*>(handle);
+}
+
+inline C10ListHandle list_pointer_to_list_handle(c10::impl::GenericList* list) {
+  return reinterpret_cast<C10ListHandle>(list);
+}
+
+inline C10ListHandle new_list_handle(c10::impl::GenericList&& list) {
+  c10::impl::GenericList* new_list = new c10::impl::GenericList(std::move(list));
+  return list_pointer_to_list_handle(new_list);
+}
+
+AOTITorchError torch_new_list_handle(
+    C10ListHandle orig_handle,
+    C10ListHandle* new_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::impl::GenericList* l = list_handle_to_list_pointer(orig_handle);
+    *new_handle = new_list_handle(c10::impl::GenericList(*l));
+  });
+}
+
+AOTITorchError torch_delete_list_object(C10ListHandle list) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::impl::GenericList* l = list_handle_to_list_pointer(list);
+    delete l;
+  });
+}
+
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
     const c10::IValue& ivalue) {
@@ -1455,6 +1486,19 @@ static StableIValue from_ivalue(
       }
       StableIValue* sivp = new StableIValue(from_ivalue(inner_type, ivalue));
       return from(sivp);
+    }
+    case c10::TypeKind::ListType: {
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      auto ivalue_list = ivalue.toList();
+      c10::List<StableIValue> stableivalue_list;
+      stableivalue_list.reserve(ivalue_list.size());
+      // StableList* stablelist_ptr = new StableList(ivalue_list.size());  // We should write our own StableList that will contain StableIValues
+      for (const auto& elem : ivalue_list) {
+        stableivalue_list.emplace_back(from_ivalue(inner_type, elem));
+      }
+      // Now we need to figure out a SIV representation of StableList that we call from on.
+      auto nontemplated_list = new c10::impl::GenericList(c10::impl::toList(std::move(stableivalue_list)));
+      return from(list_pointer_to_list_handle(nontemplated_list));
     }
     default: {
       TORCH_CHECK(

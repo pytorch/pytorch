@@ -893,7 +893,7 @@ struct TORCH_API ListType
   // Given an inner type T and an identifier,
   // this function wil return the global singleton type pointer
   // the type List<T>.
-  // The extra "identifier" argument is needed beccause we have multiple container types
+  // The extra "identifier" argument is needed because we have multiple container types
   // that all re-use this function (List<T>, array<T, N>, etc.)
   static TypePtr get(const std::string& identifier, TypePtr inner);
 

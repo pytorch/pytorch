@@ -576,7 +576,10 @@ std::vector<Tensor> my__foreach_mul(HeaderOnlyArrayRef<Tensor> self, HeaderOnlyA
 }
 
 void boxed_my__foreach_mul(StableIValue* stack, uint64_t num_args, uint64_t) {
-  auto res = my__foreach_mul(to<HeaderOnlyArrayRef<Tensor>>(stack[0]), to<HeaderOnlyArrayRef<Tensor>>(stack[1]));
+  // Why is the following NOT to<HeaderOnlyArrayRef<Tensor>>(stack[0])? Because calling `to`
+  // on a StableIValue means that the result is owning its underlying data now! HeaderOnlyArrayRef
+  // is not owning, so it cannot safely steward the result of the to<>.
+  auto res = my__foreach_mul(to<std::vector<Tensor>>(stack[0]), to<std::vector<Tensor>>(stack[1]));
   stack[0] = from(res);
 }
 

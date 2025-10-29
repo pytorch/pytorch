@@ -59,6 +59,18 @@ using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
 
+struct C10ListOpaque;
+using C10ListHandle = C10ListOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError torch_new_list_handle(
+  C10ListHandle orig_handle,
+  C10ListHandle* new_handle
+);
+
+// Free the list object, decrements a reference
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_list_object(C10ListHandle list);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

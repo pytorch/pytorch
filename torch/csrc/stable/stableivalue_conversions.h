@@ -184,6 +184,20 @@ struct FromImpl<torch::stable::Tensor> {
   }
 };
 
+// Specialization for C10ListHandle => StableIValue
+// Returns a new owning reference of the underlying C10ListHandle.
+// Explicitly deletes the original handle.
+// I need to figure out if this matters tbh.
+template <>
+struct FromImpl<C10ListHandle> {
+  static StableIValue call(const C10ListHandle& val) {
+    C10ListHandle new_list_handle;
+    TORCH_ERROR_CODE_CHECK(torch_new_list_handle(val, &new_list_handle));
+    TORCH_ERROR_CODE_CHECK(torch_delete_list_object(val));
+    return from(new_list_handle);
+  }
+};
+
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
 // =============================================================================
