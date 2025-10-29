@@ -244,7 +244,8 @@ if(NOT __AOTRITON_INCLUDED)
   else()
     set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_SYSTEM_ROCM}" __AOTRITON_RUNTIME_INDEX)
-    if(${__AOTRITON_RUNTIME_INDEX} LESS 0)
+    # Always build aotriton runtime from source on Windows due to lack of pre-built binaries
+    if(${__AOTRITON_RUNTIME_INDEX} LESS 0 OR WIN32)
       message(STATUS "Cannot find AOTriton runtime for ROCM ${__AOTRITON_SYSTEM_ROCM}. \
       Build runtime from source")
       aotriton_build_from_source(ON aotriton_runtime)

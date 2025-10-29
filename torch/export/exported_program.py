@@ -391,7 +391,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # aot_export expect the return type to always be a tuple.
         assert out_spec is not None
         if out_spec.type not in (list, tuple):
-            out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+            out_spec = pytree.treespec_tuple([out_spec])
 
         mod.graph._codegen = _PyTreeCodeGen(
             _PyTreeInfo(
@@ -1500,7 +1500,7 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if transformed_gm is self.graph_module and not res.modified:
             return self
 
@@ -1579,7 +1579,7 @@ class ExportedProgram:
             verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
@@ -1684,7 +1684,8 @@ def _create_graph_module_for_export(root, graph):
             "Unable to execute the generated python source code from "
             "the graph. The graph module will no longer be directly callable, "
             "but you can still run the ExportedProgram, and if needed, you can "
-            "run the graph module eagerly using torch.fx.Interpreter."
+            "run the graph module eagerly using torch.fx.Interpreter.",
+            stacklevel=2,
         )
         gm = torch.fx.GraphModule(root, torch.fx.Graph())
         gm._graph = graph
