@@ -106,29 +106,6 @@ def compute_ancestors(graph):
     return node_ancestors
 
 
-# @requires_accelerator_dist_backend(["nccl", "xccl"])
-# @instantiate_parametrized_tests
-# class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
-#     """
-#     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
-#     """
-
-#     device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-#     def get_world_trs(self):
-#         return {
-#             "tag": "",
-#             "ranks": list(range(self.world_size)),
-#             "group_size": self.world_size,
-#         }
-
-#     @property
-#     def world_size(self) -> int:
-#         # hack: no matter whether we have 2 or 3 or 4 gpus, just run on 2
-#         # works around issue with skipif<2 and workers with unpredictable #s gpu
-#         return 2
-
-
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 @instantiate_parametrized_tests
