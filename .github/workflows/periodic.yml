@@ -181,6 +181,32 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
+  linux-jammy-cuda13_0-py3_10-gcc11-multigpu-build:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-multigpu
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "multigpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
+          { config: "multigpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_10-gcc11-multigpu-test:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-multigpu
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cuda13_0-py3_10-gcc11-multigpu-build
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-multigpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-multigpu-build.outputs.test-matrix }}
+    secrets: inherit
+
   linux-jammy-cuda12_8-py3-gcc11-slow-gradcheck-build:
     name: linux-jammy-cuda12.8-py3-gcc11-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml

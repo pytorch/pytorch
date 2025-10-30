@@ -57,6 +57,35 @@ jobs:
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
     secrets: inherit
 
+  inductor-build-cuda13:
+    name: inductor-build-cuda13
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      cuda-arch-list: '8.6'
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  inductor-test-cuda13:
+    name: inductor-test-cuda13
+    uses: ./.github/workflows/_linux-test.yml
+    needs: inductor-build-cuda13
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image: ${{ needs.inductor-build-cuda13.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-build-cuda13.outputs.test-matrix }}
+    secrets: inherit
+
   inductor-halide-build:
     name: inductor-halide-build
     uses: ./.github/workflows/_linux-build.yml

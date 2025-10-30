@@ -53,7 +53,7 @@ jobs:
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks,
-          pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
           pytorch-linux-jammy-py3.10-clang12,
           pytorch-linux-jammy-py3.11-clang12,
