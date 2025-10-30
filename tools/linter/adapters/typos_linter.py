@@ -78,10 +78,8 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
                 code=code,
                 severity=LintSeverity.ERROR,
                 name="Typos",
-                original=dic.get("typo", None),
-                replacement=dic.get("corrections", None)[0]
-                if dic.get("corrections", None)
-                else None,
+                original=None,
+                replacement=None,
                 description=f"{dic.get('typo', None)} should be replaced by {dic.get('corrections', None)}",
             )
         )
