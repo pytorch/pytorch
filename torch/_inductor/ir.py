@@ -8770,9 +8770,7 @@ class WhileLoop(ExternKernel):
         seen_buffers: OrderedSet[int] = OrderedSet()
         result: list[Union[IRNode, TensorBox, ShapeAsConstantBuffer]] = []
 
-        for i, (original_input, unwrapped_buffer) in enumerate(
-            zip(carried_inputs, unwrapped_buffers)
-        ):
+        for original_input, unwrapped_buffer in zip(carried_inputs, unwrapped_buffers):
             if id(unwrapped_buffer) in seen_buffers:
                 result.append(ExternKernel.copy_input(original_input))
             else:

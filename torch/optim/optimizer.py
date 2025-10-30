@@ -941,9 +941,7 @@ class Optimizer:
             )
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
-        if any(
-            p_len != s_len for p_len, s_len in zip(param_lens, saved_lens, strict=True)
-        ):
+        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
             raise ValueError(
                 "loaded state dict contains a parameter group "
                 "that doesn't match the size of optimizer's group"
@@ -954,7 +952,6 @@ class Optimizer:
             zip(
                 chain.from_iterable(g["params"] for g in saved_groups),
                 chain.from_iterable(g["params"] for g in groups),
-                strict=True,
             )
         )
 
@@ -1008,9 +1005,7 @@ class Optimizer:
                 new_group["param_names"] = group["param_names"]
             return new_group
 
-        param_groups = [
-            update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)
-        ]
+        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({"state": state, "param_groups": param_groups})
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():

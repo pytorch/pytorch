@@ -50,7 +50,7 @@ def get_ema_multi_avg_fn(decay=0.999):
         ):
             torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
         else:
-            for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
+            for p_ema, p_model in zip(ema_param_list, current_param_list):
                 p_ema.copy_(p_ema * decay + p_model * (1 - decay))
 
     return ema_update
@@ -264,7 +264,7 @@ class AveragedModel(Module):
         self_param_detached: list[Optional[Tensor]] = []
         model_param_detached: list[Optional[Tensor]] = []
         copy_param = bool(self.n_averaged == 0)
-        for p_averaged, p_model in zip(self_param, model_param, strict=True):
+        for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
@@ -297,14 +297,12 @@ class AveragedModel(Module):
                     else:
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
-                        for p_averaged, p_model in zip(  # type: ignore[assignment]
-                            self_params, model_params, strict=True
-                        ):
+                        for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
                             # pyrefly: ignore [missing-attribute]
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
                 for p_averaged, p_model in zip(  # type: ignore[assignment]
-                    self_param_detached, model_param_detached, strict=True
+                    self_param_detached, model_param_detached
                 ):
                     # pyrefly: ignore [missing-attribute]
                     n_averaged = self.n_averaged.to(p_averaged.device)
@@ -317,9 +315,7 @@ class AveragedModel(Module):
         if not self.use_buffers:
             # If not apply running averages to the buffers,
             # keep the buffers in sync with the source model.
-            for b_swa, b_model in zip(
-                self.module.buffers(), model.buffers(), strict=True
-            ):
+            for b_swa, b_model in zip(self.module.buffers(), model.buffers()):
                 b_swa.detach().copy_(b_model.detach().to(b_swa.device))
         self.n_averaged += 1
 
@@ -436,7 +432,7 @@ class SWALR(LRScheduler):
         last_epoch=-1,
     ):  # noqa: D107
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
-        for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
+        for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
             group["swa_lr"] = swa_lr
         if anneal_strategy not in ["cos", "linear"]:
             raise ValueError(
@@ -513,7 +509,7 @@ class SWALR(LRScheduler):
         alpha = self.anneal_func(t)
         return [
             group["swa_lr"] * alpha + lr * (1 - alpha)
-            for group, lr in zip(self.optimizer.param_groups, prev_lrs, strict=True)
+            for group, lr in zip(self.optimizer.param_groups, prev_lrs)
         ]
 
     def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):

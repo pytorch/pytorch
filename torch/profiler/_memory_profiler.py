@@ -254,9 +254,7 @@ class SchemaMatcher:
         def matches(schema) -> bool:
             return len(schema.arguments) == len(signature) and all(
                 cls._types_match(observed, schema_arg.type)
-                for observed, schema_arg in zip(
-                    signature, schema.arguments, strict=True
-                )
+                for observed, schema_arg in zip(signature, schema.arguments)
             )
 
         return tuple(s for s in cls.lookup_schemas(t.name) or () if matches(s))
@@ -379,9 +377,7 @@ class SizeMap:
         key = TensorKey.from_tensor(t)
         if key is not None and t is not None and t.layout == torch.strided:
             # Scalars are represented as zero dim Tensors
-            n = max(
-                i[0] * i[1] for i in zip(t.sizes or [1], t.strides or [1], strict=True)
-            )
+            n = max(i[0] * i[1] for i in zip(t.sizes or [1], t.strides or [1]))
 
             num_bytes = n * _element_size(t.dtype)
             assert num_bytes >= 0, f"{num_bytes}"
@@ -434,7 +430,7 @@ class DataFlowNode:
         mutable_by_key: dict[Optional[TensorKey], set[Optional[bool]]] = {}
         for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
             for op_input, mutable in zip(
-                op.inputs, SchemaMatcher.inputs_are_mutable(op), strict=True
+                op.inputs, SchemaMatcher.inputs_are_mutable(op)
             ):
                 # Tensor
                 if isinstance(op_input, _TensorMetadata):
