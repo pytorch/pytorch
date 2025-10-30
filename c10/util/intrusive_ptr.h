@@ -375,8 +375,6 @@ class intrusive_ptr final {
 
   TTarget* target_;
 
-  using target_traits = detail::TargetTraits<TTarget>;
-
   template <typename T>
   friend struct ExclusivelyOwnedTensorTraits;
   template <class TTarget2, class NullType2>
