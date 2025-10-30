@@ -40,7 +40,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
-    torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
+    torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN, TEST_WITH_UBSAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, MACOS_VERSION,
 )
@@ -6036,6 +6036,17 @@ def sample_inputs_repeat_interleave(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_input((2, 3, 4)), repeats=torch.arange(3, device=device), dim=1)
     yield SampleInput(make_input((4, 1)), repeats=torch.arange(4, device=device), dim=0, output_size=6)
 
+def error_inputs_repeat_interleave(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+
+    yield ErrorInput(
+        SampleInput(
+            make_input((7, 2, 6, 4, 8, 3)),
+            repeats=torch.tensor([6773413839565225984], device=device, dtype=torch.long)
+        ),
+        error_type=RuntimeError,
+        error_regex="cumulative sum values overflowed"
+    )
 
 def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
@@ -23261,6 +23272,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_repeat_interleave,
+        error_inputs_func=error_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -23272,6 +23284,11 @@ op_db: list[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.skipIf(TEST_WITH_UBSAN or TEST_WITH_ASAN, "Skip overflow test under ASAN/UBSAN"),
+                "TestCommon",
+                "test_errors",
             ),
         ),
     ),

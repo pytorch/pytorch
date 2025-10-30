@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
-    xfailIfS390X, set_warn_always_context, TEST_WITH_ASAN, TEST_WITH_UBSAN)
+    xfailIfS390X, set_warn_always_context)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -2146,14 +2146,6 @@ class TestTorchDeviceType(TestCase):
             )
             self.assertEqual(a_with_output.dtype, y.dtype)
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
-
-    @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_UBSAN, "Skip overflow test under ASAN/UBSAN")
-    @skipIfMPS
-    def test_repeat_interleave_overflow(self, device):
-        y = torch.rand((7, 2, 6, 4, 8, 3), device=device)
-        repeats = torch.tensor([6773413839565225984], device=device)
-        with self.assertRaises(RuntimeError):
-            torch.repeat_interleave(y, repeats)
 
     @dtypes(*floating_types())
     @dtypesIfCPU(*floating_types_and(torch.bfloat16, torch.half))
