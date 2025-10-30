@@ -1073,8 +1073,8 @@
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.sym_size(-2), LU_data.sym_size(-1))
   LU_pivots: non_differentiable
-  L: "LU_data_t.sym_size(-2) >= LU_data_t.sym_size(-1) ? LU_data_t.tril(-1) : LU_data_t.narrow_symint(-1, 0, LU_data_t.sym_size(-2)).tril(-1)"
-  U: "LU_data_t.sym_size(-1) >= LU_data_t.sym_size(-2) ? LU_data_t.triu() : LU_data_t.narrow_symint(-2, 0, LU_data_t.sym_size(-1)).triu()"
+  L: "LU_data_t.sym_size(-2) >= LU_data_t.sym_size(-1) ? LU_data_t.tril_symint(-1) : LU_data_t.narrow_symint(-1, 0, LU_data_t.sym_size(-2)).tril_symint(-1)"
+  U: "LU_data_t.sym_size(-1) >= LU_data_t.sym_size(-2) ? LU_data_t.triu_symint() : LU_data_t.narrow_symint(-2, 0, LU_data_t.sym_size(-1)).triu_symint()"
   output_differentiability: [False, True, True]
 
 - name: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
@@ -1782,12 +1782,12 @@
   self, B: linalg_solve_triangular_backward(grad, self, result, upper, left, unitriangular, grad_input_mask)
   result: linalg_solve_triangular_forward_AD(self_t, B_t, self_p, result, upper, left, unitriangular)
 
-- name: tril(Tensor self, int diagonal=0) -> Tensor
-  self: grad.tril(diagonal)
+- name: tril(Tensor self, SymInt diagonal=0) -> Tensor
+  self: grad.tril_symint(diagonal)
   result: auto_linear
 
-- name: triu(Tensor self, int diagonal=0) -> Tensor
-  self: grad.triu(diagonal)
+- name: triu(Tensor self, SymInt diagonal=0) -> Tensor
+  self: grad.triu_symint(diagonal)
   result: auto_linear
 
 - name: trunc(Tensor self) -> Tensor
