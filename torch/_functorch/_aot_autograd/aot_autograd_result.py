@@ -24,7 +24,7 @@ import logging
 from abc import ABC, abstractmethod
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.precompile_context import BackendCacheArtifact
@@ -47,13 +47,14 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
     SubclassMeta,
 )
-from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
+from .schemas import AOTAutogradCacheInfo  # noqa: F401
 from .utils import simple_wraps
 
 
 if TYPE_CHECKING:
-    from typing import Callable
     from torch._inductor.compile_fx import _CompileFxKwargs
+
+    from .schemas import AOTConfig, ViewAndMutationMeta
 
 log = logging.getLogger(__name__)
 
@@ -146,6 +147,7 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
 
     def load(self, example_inputs) -> CompiledFxGraph:
         from .autograd_cache import FXGraphCacheMiss
+
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
@@ -154,10 +156,8 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         # (This does not mean that the tensor values passed in are the same: only that their symints are).
         # That is, AOTAutograd and Inductor never create new guards based on symints with different sources
         # than those passed to it by inductor.
-
         # We pass the post compile function, which sets various fx_config boxed values,
         # so we can call it only after we're sure both forward and backward have
-
         # Clear CompiledTritonKernels before loading from FXGraphCache
         torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
         remote_cache = None
@@ -568,9 +568,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         return compiled_function
 
 
-class AOTAutogradResult(
-    GenericAOTAutogradResult[CompiledForward, CompiledBackward]
-):
+class AOTAutogradResult(GenericAOTAutogradResult[CompiledForward, CompiledBackward]):
     """
     Regular AOTAutogradResult: saves the forward/backward FxGraphCache keys
     and looks them up in FxGraphCache on load
