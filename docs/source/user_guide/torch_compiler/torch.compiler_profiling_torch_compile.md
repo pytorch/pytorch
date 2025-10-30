@@ -219,7 +219,7 @@ When an operator is launched, we expect to see a few events:
 2. The **kernel launch** should appear as cuLaunchKernel instead of cudaLaunchKernel (cudaLaunchKernel is typical for aten ops)
 3. The **GPU-side event** should appear, and how descriptive the name will be depends on the inductor config for unique_kernel_names
 
-```{figure} _static/img/profiling_torch_compile/triton_kernel_launch.png
+```{figure} ../../_static/img/profiling_torch_compile/triton_kernel_launch.png
 ```
 
 **Non-Inductor generated Triton kernels:**
