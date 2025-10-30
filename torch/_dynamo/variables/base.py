@@ -436,14 +436,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
-    def inspect_parameter_names(self) -> list[str]:
-        unimplemented_v2(
-            gb_type="Unsupported inspect call",
-            context=f"inspect_parameter_names {self}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[],
-        )
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
