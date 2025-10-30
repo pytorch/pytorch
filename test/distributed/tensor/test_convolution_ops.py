@@ -209,14 +209,14 @@ class DistConvolutionOpsTest(DTensorTestBase):
         model_copy = copy.deepcopy(model).to(device=self.device_type)
         dist_model = distribute_module(model, device_mesh, _conv_fn)
         arg_dt = DTensor.from_local(arg, device_mesh, [Replicate()])
-        out_dt = dist_model(arg_dt)
+        out_dt = dist_model(arg_dt.to(device=self.device_type))
         out = model_copy(arg)
         return (out_dt.full_tensor(), out)
 
     @with_comms
     def test_conv1d(self):
         model = nn.Conv1d(64, 64, 3, padding=1)
-        x = torch.randn(1, 64, 8)
+        x = torch.randn(1, 64, 8, device=self.device_type)
         out_dt, out = self._run_single_arg_fwd(model, x)
         self.assertEqual(out_dt.shape, out.shape)
 
