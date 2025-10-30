@@ -551,15 +551,26 @@ def register_onednn_fusion_ops():
             scalars,
             algorithm,
         ):
-            # To align with qlinear where x_scale and x_zp are converted to Tensor
-            assert type(x_scale) is float
-            x_scale = V.graph.add_tensor_constant(
-                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
-            )
-            assert type(x_zp) is int
-            x_zp = V.graph.add_tensor_constant(
-                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
-            )
+            if not isinstance(x_scale, ir.TensorBox):
+                assert type(x_scale) is float
+                x_scale = V.graph.add_tensor_constant(
+                    torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+                )
+
+            if x_zp is None:
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="x_zp"
+                )
+            if not isinstance(x_zp, ir.TensorBox):
+                assert type(x_zp) is int
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+                )
+
+            if w_zp is None:
+                w_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="w_zp"
+                )
 
             return TensorBox.create(
                 mkldnn_ir.QConvPointWisePT2E.create(
