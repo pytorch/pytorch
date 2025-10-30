@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/SparseTensorUtils.h>
@@ -192,5 +193,11 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   AT_CUDA_CHECK(cudaGetLastError());
   return dst;
 }
+
+Tensor view_as_complex_sparse_cuda(const Tensor& self) {
+  return self.clone();
+}
+
+REGISTER_CUDA_DISPATCH(view_as_complex_sparse_stub, &view_as_complex_sparse_cuda)
 
 } // namespace at::native
