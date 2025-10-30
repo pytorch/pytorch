@@ -57,6 +57,26 @@ inline c10::ScalarType scalar_type(c10::ScalarType s) {
     }                                                                       \
   }()
 
+// Headeronly API to DISPATCH V2 macros:
+
+#define _THO_NOOP(...)
+
+#define THO_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
+  AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(_THO_NOOP, enum_type, HINT, __VA_ARGS__)
+
+#define THO_DISPATCH_SWITCH(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH_TMPL(_THO_NOOP, STD_TORCH_CHECK, TYPE, NAME, __VA_ARGS__)
+
+#define THO_DISPATCH_CASE(enum_type, ...) \
+  AT_DISPATCH_CASE_TMPL(                  \
+      THO_PRIVATE_CASE_TYPE_USING_HINT, enum_type, __VA_ARGS__)
+
+#define THO_DISPATCH_V2(TYPE, NAME, BODY, ...) \
+  AT_DISPATCH_V2_TMPL(                         \
+      THO_DISPATCH_SWITCH, THO_DISPATCH_CASE, TYPE, NAME, BODY, __VA_ARGS__)
+
+// Type collection macros
+
 // This macro lets you pass an arbitrary expression that may contain internal
 // commas to another macro without having the commas causing the expression
 // to be interpreted as being multiple arguments
