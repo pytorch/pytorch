@@ -136,6 +136,7 @@ class CuteDSLTemplateKernel(Kernel):
             import cuda.bindings.driver as cuda
             from cutlass._mlir.dialects import math as mlir_math
             import operator
+            from torch._inductor.codegen.cutedsl._cutedsl_utils import ssa_to_indexable, result_to_ssa
             """
         )
         return imports.getvalue()
@@ -429,7 +430,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             idx_var = self._emit_scalar_fragment(
                 self.kernel.kexpr(renamed_index), "cutlass.Int32", torch.int32
             )
-            self.kernel.body.writeline(f"{index_frag}.store({index_str})")
 
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
             self.kernel.body.writeline(
