@@ -181,6 +181,7 @@ from .utils import (
     common_constant_types,
     dataclass_fields,
     dict_keys,
+    get_current_stream,
     get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -317,7 +318,7 @@ class GuardManagerWrapper:
             is_diff_guard_node = (
                 node.get_source() in self.diff_guard_sources or node.fail_count() > 0
             )
-            for idx, (key_mgr, val_mgr) in sorted(
+            for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
@@ -440,7 +441,7 @@ class GuardManagerWrapper:
             is_subtree_tag_safe = True
 
             # Recurse to get the tag safe roots from subtree.
-            for idx, (key_mgr, val_mgr) in sorted(
+            for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 if key_mgr is not None:
@@ -448,9 +449,7 @@ class GuardManagerWrapper:
                 if val_mgr is not None:
                     tag_safe_roots.extend(visit(val_mgr))
 
-            for idx, (key_mgr, val_mgr) in sorted(
-                node.get_key_value_managers().items()
-            ):
+            for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
 
@@ -644,7 +643,7 @@ class GuardManagerWrapper:
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
                         self.printed_relational_guards.add(guard)
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -705,7 +704,7 @@ class GuardManagerWrapper:
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         self.code_parts.extend(get_code_parts(guard))
                         relational_guards_seen.add(guard)
                 else:
@@ -722,7 +721,7 @@ def from_numpy(a: Any) -> torch.Tensor:
     # Re-enable torch function since we disable it on leaf guards
     # we need it to properly construct the tensor if a default device is set
     with torch.overrides._enable_torch_function():
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
@@ -736,7 +735,7 @@ def uninteresting_files() -> set[str]:
 
     from torch._dynamo.polyfills.loader import POLYFILLED_MODULES
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     mods.extend(POLYFILLED_MODULES)
 
     return {inspect.getfile(m) for m in mods}
@@ -761,6 +760,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___dataclass_fields": dataclass_fields,
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
+            "___get_current_stream": get_current_stream,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -2227,7 +2227,7 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         # Python math library doesn't support complex nan, so we need to use numpy
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if istype(val, complex) and np.isnan(val):
             code = [f"(type({ref}) is complex and __numpy_isnan({ref}))"]
             self._set_guard_export_info(guard, code)
@@ -2316,7 +2316,7 @@ class GuardBuilder(GuardBuilderBase):
         # Strictly only want user-defined functions
         if type(val) is types.FunctionType and hasattr(val, "__code__"):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
-            self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)  # type: ignore[arg-type]
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
             self.FUNCTION_MATCH(guard)
 
@@ -2534,7 +2534,7 @@ class GuardBuilder(GuardBuilderBase):
                 # sources for the corresponding tensor dimension.
                 return [
                     TensorPropertySource(source, TensorProperty.SIZE, dim)
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     for source in output_graph.tracked_fakes_id_to_source[t_id]
                 ]
 
@@ -2571,7 +2571,7 @@ class GuardBuilder(GuardBuilderBase):
                 equalities_inputs = None
 
             def _get_code_parts(langs: tuple[str, ...]) -> list[_ShapeGuardsHelper]:
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 return output_graph.shape_env.produce_guards_verbose(
                     [a.fake for a in fs],  # type: ignore[misc]
                     [a.source for a in fs],
@@ -2579,7 +2579,7 @@ class GuardBuilder(GuardBuilderBase):
                     equalities_inputs=equalities_inputs,
                     source_ref=self.source_ref,
                     # Export keeps static.
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     ignore_static=(not output_graph.export),
                     langs=langs,
                 )
@@ -2641,9 +2641,9 @@ class GuardBuilder(GuardBuilderBase):
         if not python_fallback:
             assert cpp_code_parts  # type: ignore[possibly-undefined]
             code_parts, source_to_symbol = (
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 cpp_code_parts.exprs,
-                # pyrefly: ignore  # unbound-name, missing-attribute
+                # pyrefly: ignore [unbound-name, missing-attribute]
                 cpp_code_parts.source_to_symbol,
             )
 
@@ -2674,9 +2674,9 @@ class GuardBuilder(GuardBuilderBase):
 
             assert cpp_code_parts  # type: ignore[possibly-undefined]
             code_parts, source_to_symbol = (
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 cpp_code_parts.exprs,
-                # pyrefly: ignore  # unbound-name, missing-attribute
+                # pyrefly: ignore [unbound-name, missing-attribute]
                 cpp_code_parts.source_to_symbol,
             )
 
@@ -3286,7 +3286,7 @@ class GuardsStatePickler(pickle.Pickler):
         assert _.__closure__ is not None
         return _.__closure__[0]
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: Any
     ) -> Union[tuple[Callable[..., Any], tuple[Any, ...]], Any]:
@@ -3651,7 +3651,7 @@ class CheckFunctionManager:
             # increase in compile time. We first do a cache flush to measure the
             # guard latency more accurately. This cache flush is expensive.
             # Note  - If you are working on a guard optimization, it might be a
-            # good idea to increase this number for more stabiilty during
+            # good idea to increase this number for more stability during
             # development.
             latency = profile_guard_manager(
                 self.guard_manager.root, output_graph.local_scope, 1

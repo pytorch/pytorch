@@ -101,7 +101,7 @@ from .exc import (
     unimplemented_v2,
     unimplemented_v2_with_warning,
 )
-from .graph_bytecode_inputs import has_user_objects, index_to_source
+from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
@@ -712,7 +712,7 @@ class OutputGraph(OutputGraphCommon):
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
@@ -1060,7 +1060,7 @@ class OutputGraph(OutputGraphCommon):
     def module_key_name(*names: Any) -> str:
         # create a new unique name
         name = "_".join(map(str, names))
-        # Strip _buffers[..]/_parmeters[..]/_modules[..] names
+        # Strip _buffers[..]/_parameters[..]/_modules[..] names
         name = re.sub(
             r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]", r".\2", name
         )
@@ -1160,7 +1160,7 @@ class OutputGraph(OutputGraphCommon):
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
 
                 assert "tensor_dict" not in vt.as_proxy().node.meta
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 vt.as_proxy().node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 return vt
@@ -1172,7 +1172,7 @@ class OutputGraph(OutputGraphCommon):
                 install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
                 def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     return NNModuleVariable(type(target), module_key, target, **options)
 
             else:
@@ -1539,9 +1539,19 @@ class OutputGraph(OutputGraphCommon):
                     "store_user_object_weakrefs",
                 )
             )
-            for source in reversed(index_to_source.values()):
-                codegen(source)
-            codegen.call_function(len(index_to_source), False)
+            tmp_vars = []
+            for constructor in reversed(index_to_bytecode_constructor.values()):
+                constructor(codegen)
+                var_name = (
+                    self.new_var()
+                )  # keep alive any temp objects for the rest of the frame
+                codegen.store(var_name)
+                tmp_vars.append(var_name)
+
+            for var_name in tmp_vars:
+                codegen.append_output(codegen.create_load(var_name))
+
+            codegen.call_function(len(index_to_bytecode_constructor), False)
             codegen.pop_top()
             self.add_output_instructions(codegen.get_instructions())
 
@@ -2207,7 +2217,7 @@ class OutputGraph(OutputGraphCommon):
                     backend_fake_mode = torch._subclasses.FakeTensorMode(
                         shape_env=old_fake_mode.shape_env,
                     )
-                # TODO(voz): Ostensibily, this should be scoped and
+                # TODO(voz): Ostensibly, this should be scoped and
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
@@ -2411,7 +2421,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -2747,12 +2757,14 @@ class DynamoTracerOutput:
     error_on_graph_break: bool
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
+    closure: Optional[tuple[Any, ...]]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
     ) -> None:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
+        self.closure = tracer.closure
         if error:
             self.output_graph = None
         else:
@@ -2831,7 +2843,7 @@ def check_pt2_compliant_op(
                 hints=[],
             )
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
@@ -2839,7 +2851,7 @@ def check_pt2_compliant_op(
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 f"which resolves to the overload ({overload}) that is "
                 f"not PT2 compliant.",
             )
@@ -2860,7 +2872,7 @@ class LazyProxy:
         **kwargs: P.kwargs,
     ) -> None:
         self.tracer = tracer
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
@@ -3402,7 +3414,7 @@ class SubgraphTracer(fx.Tracer):
         if proxy in self.lifted_freevars:
             return self.lifted_freevars[proxy]
 
-        # We first lift proxy to parent's graph then lift to current grpah's input
+        # We first lift proxy to parent's graph then lift to current graph's input
         # so that when we bind symints of the sizes in current graph, those symints
         # would already be lifted as inputs to parent graph.
         if proxy.tracer != self.parent:
@@ -3450,7 +3462,7 @@ class SubgraphTracer(fx.Tracer):
     def track_produced_symints(
         self, example_value: Any, e_proxy: Union[LazyProxy, torch.fx.Proxy]
     ) -> None:
-        # When binding the symbols in an exmaple_value, we bind the symbols
+        # When binding the symbols in an example_value, we bind the symbols
         # to the proxy's associated Tracer instead of current tracer.
         # This is because:
         # 1. We may be calling wrap_tensors during speculate_subgraph because

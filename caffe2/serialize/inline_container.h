@@ -76,7 +76,7 @@ typedef struct mz_zip_archive mz_zip_archive;
 // 2) Writing with 1-pass sequential access
 //      -> We must take care not to require updating values that have already
 //         been written. We place the variable-length index at the end and do
-//         not put any indicies into the header to fulfill this constraint.
+//         not put any index into the header to fulfill this constraint.
 
 // The model.json, which contains all the metadata information,
 // should be written as the last file. One reason is that the size of tensor
