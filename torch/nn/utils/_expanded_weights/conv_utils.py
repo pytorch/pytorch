@@ -28,7 +28,7 @@ def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
     kwargs = expanded_args_and_kwargs[
         len(expanded_args_and_kwargs) - len(kwarg_names) :
     ]
-    kwargs = dict(zip(kwarg_names, kwargs))
+    kwargs = dict(zip(kwarg_names, kwargs, strict=True))
 
     return conv_normalizer(*args, **kwargs)
 
@@ -237,7 +237,7 @@ def conv_unfold_weight_grad_sample(
     # n=batch_sz; o=num_out_channels; p=(num_in_channels/groups)*kernel_sz
     weight_grad_sample = torch.einsum("noq,npq->nop", grad_output, input)
     # rearrange the above tensor and extract diagonals.
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     weight_grad_sample = weight_grad_sample.view(
         n,
         groups,

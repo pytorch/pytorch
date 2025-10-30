@@ -58,6 +58,7 @@ from ..exc import (
     raise_observed_exception,
     unimplemented_v2,
 )
+from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -298,9 +299,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
             if isinstance(obj.__func__, property):
-                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
-                    tx, [self], {}
-                )
+                fget_vt = VariableTracker.build(tx, obj.__func__.fget)
+                return fget_vt.call_function(tx, [self], {})
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -810,14 +810,31 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
                 args = [stacked]
 
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+            if issubclass(self.value, torch.Stream):
+                # Register newly created stream for reconstruction
+                stream = self.value()
+                from ..graph_bytecode_inputs import register_graph_created_object
+                from .streams import StreamVariable
+
+                ind = register_graph_created_object(
+                    stream, StreamVariable.construct_in_graph_stream
+                )
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function", get_external_object_by_index, (ind,), {}
+                    ),
+                    user_obj_index=ind,
+                )
+            else:
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
 
             return tensor_variable
         elif self.value is random.Random:
@@ -871,9 +888,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
     def fn(self):
-        return self.value
-
-    def python_type(self):
         return self.value
 
 
@@ -1237,7 +1251,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif callable(self.value):
             if self.source:
                 source = AttrSource(self.cls_source, "__call__")
-                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
@@ -1815,7 +1829,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        fn_variable = VariableTracker.build(tx, self.value.forward.__func__)
         args = [self] + args
         return tx.inline_user_function_return(
             fn_variable,

@@ -35,7 +35,6 @@ from ..bytecode_transformation import (
     create_instruction,
     create_setup_with,
 )
-from ..device_interface import get_interface_for_device
 from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
@@ -51,7 +50,6 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
-from .streams import StreamVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -989,70 +987,6 @@ class ProfilerContextVariable(ContextWrappingVariable):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
-
-
-class StreamContextVariable(ContextWrappingVariable):
-    @staticmethod
-    def create(tx: "InstructionTranslator", target_value, **kwargs):
-        from .builder import wrap_fx_proxy_cls
-
-        current_stream_method = get_interface_for_device(
-            target_value.device
-        ).current_stream
-        current_stream = wrap_fx_proxy_cls(
-            StreamVariable,
-            tx,
-            tx.output.create_proxy(
-                "call_function",
-                current_stream_method,
-                (None,),
-                {},
-            ),
-        )
-        return StreamContextVariable(
-            target_values=[target_value],
-            initial_values=[current_stream],
-            device=target_value.device,
-            **kwargs,
-        )
-
-    def __init__(self, target_values, device, initial_values=None, **kwargs) -> None:
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
-        self.device = device
-        self.set_stream = get_interface_for_device(self.device).set_stream
-        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
-
-    def enter(self, tx):
-        # stream generated inside the traced function
-        if self.target_values[0].as_proxy() is not None:
-            tx.output.create_proxy(
-                "call_function",
-                self.set_stream,
-                (self.target_values[0].as_proxy(),),
-                {},
-            )
-        # stream passed from outside the traced function
-        else:
-            stream = self.target_values[0].value
-            tx.output.create_proxy(
-                "call_function",
-                self.set_stream_id,
-                (stream.stream_id, stream.device_index, stream.device_type),
-                {},
-            )
-        self.set_stream(self.target_values[0].value)
-        self.set_cleanup_hook(tx, lambda: self.set_stream(self.initial_values[0].value))
-
-    def exit(self, tx: "InstructionTranslator", *args):
-        tx.output.create_proxy(
-            "call_function",
-            self.set_stream,
-            (self.initial_values[0].as_proxy(),),
-            {},
-        )
-        self.cleanup_assert()
 
 
 class PreserveVersionContextVariable(ContextWrappingVariable):

@@ -11,7 +11,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
-from torch.distributed._pycute import is_int, suffix_product
+from torch.distributed._pycute import IntTuple, is_int, suffix_product
 from torch.utils._typing_utils import not_none
 
 
@@ -85,7 +85,8 @@ else:
             # We keep this function for backward compatibility.
             warnings.warn(
                 "This get_root_mesh API will be deprecated soon."
-                "Please use `get_root_mesh` inside DeviceMesh instead."
+                "Please use `get_root_mesh` inside DeviceMesh instead.",
+                stacklevel=2,
             )
             if not device_mesh:
                 return device_mesh
@@ -108,7 +109,8 @@ else:
         ) -> list["DeviceMesh"]:
             warnings.warn(
                 "This _get_all_submeshes API will be deprecated soon."
-                "Please use `_get_all_submeshes` inside DeviceMesh instead."
+                "Please use `_get_all_submeshes` inside DeviceMesh instead.",
+                stacklevel=2,
             )
             return device_mesh._get_all_submeshes(mesh_dim_name)
 
@@ -253,7 +255,7 @@ else:
                     )
 
                 if is_initialized() and get_backend() == "threaded":
-                    # pyrefly: ignore  # bad-assignment
+                    # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
 
                 if _rank is None:
@@ -267,7 +269,7 @@ else:
                 )
 
             # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
 
@@ -329,7 +331,8 @@ else:
                         "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
                         "the underlying communicator (i.e. NCCL) can be initialized properly. "
                         "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
-                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. "
+                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
+                        stacklevel=2,
                     )
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
@@ -443,7 +446,7 @@ else:
                         # We temporarily revert the reuse subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         if bound_device_id is None or not has_split_group:
                             dim_group = new_group(
                                 ranks=subgroup_ranks,
@@ -494,12 +497,11 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        self._flatten_mesh_list,
+                        self._flatten_rank_map,
                         self._layout,
                         self._device_type,
                         self._mesh_dim_names,
                         self._thread_id,
-                        self._root_mesh,
                     )
                 )
             return self._hash
@@ -510,12 +512,11 @@ else:
             if not isinstance(other, DeviceMesh):
                 return False
             return (
-                self._flatten_mesh_list == other._flatten_mesh_list
+                self._flatten_rank_map == other._flatten_rank_map
                 and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
-                and self._root_mesh == other._root_mesh
             )
 
         def __getitem__(
@@ -763,11 +764,6 @@ else:
             """
             slice_from_root = True
             if self != self._get_root_mesh():
-                warnings.warn(
-                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
-                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
-                    "If not, this may result in some ranks receiving the submesh while others encounter errors."
-                )
                 slice_from_root = False
 
             # The slice mesh_dim_names should consist either the current device_mesh's mesh_dim_names
@@ -803,7 +799,8 @@ else:
                 elif name in flatten_name_to_root_layout:
                     warnings.warn(
                         "Slicing a flattened dim from root mesh will be deprecated in PT 2.11. "
-                        "Users need to bookkeep the flattened mesh directly. "
+                        "Users need to bookkeep the flattened mesh directly. ",
+                        stacklevel=2,
                     )
                     layout_sliced.append(flatten_name_to_root_layout[name])
 
@@ -1177,6 +1174,41 @@ else:
                 mesh_dim_names,
                 backend_override_tuple,
             )
+
+        @staticmethod
+        def _concatenate(device_mesh_list: list["DeviceMesh"]) -> "DeviceMesh":
+            concat_dim_names: list[str] = []
+            concat_sizes: list[IntTuple] = []
+            concat_strides: list[IntTuple] = []
+            concat_dim_group_name: list[str] = []
+            flatten_rank_map = device_mesh_list[0]._flatten_rank_map
+            for dm in device_mesh_list:
+                for i in range(len(dm._layout)):
+                    concat_sizes.append(dm._layout[i].sizes)
+                    concat_strides.append(dm._layout[i].strides)
+                concat_dim_names.extend(not_none(dm.mesh_dim_names))
+                concat_dim_group_name.extend(not_none(dm._dim_group_names))
+                # Concatenate device mesh having different root mesh tensors are meaningless
+                # because the concatenated indices should be indexed by the same root mesh tensor.
+                if dm._flatten_rank_map != flatten_rank_map:
+                    raise RuntimeError(
+                        "Cannot concatenate DeviceMeshes derived from different device meshs"
+                    )
+            concat_mesh_layout = _MeshLayout(tuple(concat_sizes), tuple(concat_strides))
+            if not concat_mesh_layout.check_non_overlap():
+                raise RuntimeError(
+                    f"Cannot concatenate overlapping meshes: {device_mesh_list}"
+                )
+            res_mesh = DeviceMesh(
+                device_mesh_list[0].device_type,
+                _layout=concat_mesh_layout,
+                _rank_map=device_mesh_list[0]._rank_map,
+                mesh_dim_names=tuple(concat_dim_names),
+                _root_mesh=device_mesh_list[0]._get_root_mesh(),
+                _init_backend=False,
+            )
+            res_mesh._dim_group_names = concat_dim_group_name
+            return res_mesh
 
     def _normalize_backend_override(
         backend_override: dict[

@@ -658,6 +658,31 @@ graph():
         fn = torch.compile(f, backend="eager", dynamic=True, fullgraph=True)
         fn(torch.tensor([5]), 5)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cond_runtime_assert_generation(self):
+        def fn(x):
+            y = x.nonzero()  # unbacked binding u0
+            torch._check(y.shape[0] % 4 == 0)
+
+            return torch.randn(y.shape[0])
+
+        @torch.compile(dynamic=True, backend="aot_eager")
+        def foo(x):
+            b = torch.cond(
+                pred=(x.shape[0] % 4 == 0),
+                true_fn=lambda: fn(x),
+                false_fn=lambda: fn(x),
+            )
+
+            return b
+
+        foo(torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            RuntimeError, "Runtime assertion failed for expression Eq(Mod(u1, 4), 0)*"
+        ):
+            foo(torch.randn(5, 5))
+
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
         def f(x):
@@ -1246,6 +1271,20 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         r2 = opt_fn(d)
         self.assertEqual(r1, r2)
+
+    def test_tensor__iter__(self):
+        def fn(x):
+            it = x.__iter__()
+            for y in it:
+                y.add_(1.0)
+            return y
+
+        torch._dynamo.testing.standard_test(
+            self,
+            fn,
+            1,
+            expected_ops=20,
+        )
 
     def test_tensor_iter(self):
         def fn(x):
@@ -1935,6 +1974,15 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         res2, res3 = func()
         self.assertTrue(same(res2, torch.ones(2)))
         self.assertTrue(same(res3, torch.ones(3)))
+
+    def test_range___iter__(self):
+        def func(x):
+            it = range(3).__iter__()
+            return x + next(it)
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertTrue(same(func(x), opt_func(x)))
 
     def test_range_iter_side_effects(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -6945,7 +6993,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
         self.assertIn(
-            """len(x) == 10""",
+            """size mismatch at index 0. expected 10, actual 9""",
             guard_failure[0],
         )
 
@@ -9582,6 +9630,18 @@ def ___make_guard_fn():
         res, msg = fn(img1)
         self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1")
         self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str___iter__(self):
+        def fn(x):
+            s = "a"
+            if next(s.__iter__()) == "a":
+                return x + 1
+            else:
+                return x
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_str_format_return2(self):
         @torch.compile(backend="eager", fullgraph=True)
