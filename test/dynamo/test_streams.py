@@ -1,10 +1,18 @@
 # Owner(s): ["module: dynamo"]
+import functools
+import unittest
 import weakref
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
+
+
+requires_multigpu = functools.partial(
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
+)
 
 
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -113,6 +121,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self.assertEqual(s0, s1)
 
     @requires_cuda
+    @requires_multigpu
     def test_get_current_stream_return_different_device(self):
         def fn(x, s0, s1):
             with s1:
@@ -129,6 +138,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self.assertEqual(s_act, s_exp)
 
     @requires_cuda
+    @requires_multigpu
     def test_get_current_stream_return_no_index(self):
         def fn(x, s0, s1):
             with s1:
