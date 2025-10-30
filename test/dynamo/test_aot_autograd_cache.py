@@ -2007,8 +2007,12 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertGreater(final_hits, 0)
 
         # Cache misses and saves should not increase
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], initial_misses)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], initial_saves)
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_miss"], initial_misses
+        )
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_saved"], initial_saves
+        )
 
         # Results and gradients should be the same
         self.assertEqual(result1, result2)
