@@ -242,7 +242,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     # if we estimate too high there will be unnecessary compilation time increase.
     # TODO - finetune coefficient here. As a reference point, Triton mm model assumes
     # 80% of reads are in cache and cache is 4x faster than dram_gbps
-    machine_balance = machine_balance * 0.5
+    machine_balance = machine_balance * 0.4
 
     return arithmetic_intensity > machine_balance
 
