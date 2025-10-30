@@ -2,10 +2,12 @@
 import inspect
 from contextlib import contextmanager
 from typing import Any, Optional, TYPE_CHECKING, Union
+import logging
 
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._logging import trace_structured
+from torch._logging import LazyString
 from torch.hub import tqdm
 
 from . import config
@@ -21,6 +23,7 @@ from .proxy import Proxy
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+log = logging.getLogger(__name__)
 
 __all__ = ["Interpreter", "Transformer"]
 
@@ -249,6 +252,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
+        log.debug("run_node %s", LazyString(lambda: n.format_node()))
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
