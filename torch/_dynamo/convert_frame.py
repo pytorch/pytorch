@@ -828,6 +828,7 @@ def trace_frame(
             raise
         finally:
             tracer.output.call_cleanup_hooks()
+            tracer.f_locals = {}
 
     try:
         run_tracer()
