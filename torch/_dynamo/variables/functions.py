@@ -353,9 +353,6 @@ class BaseUserFunctionVariable(VariableTracker):
                 result = True
         return variables.ConstantVariable.create(result)
 
-    def inspect_parameter_names(self):
-        return list(inspect.signature(self.get_function()).parameters)
-
     def closure_vars(self, tx):
         return {}
 
@@ -1149,9 +1146,6 @@ class UserMethodVariable(UserFunctionVariable):
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
         return super().call_function(tx, args, kwargs)
-
-    def inspect_parameter_names(self):
-        return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name == "__self__":

@@ -4853,15 +4853,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
             )
         else:
-            # need the line below to make MyPy happy
-            assert not isinstance(func, LocalGeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
-                # pyrefly: ignore [bad-argument-type]
                 func,
             )
         return tracer
@@ -4944,7 +4941,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
-        funcvar: BaseUserFunctionVariable,
+        funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
     ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
         f_builtins = f_globals["__builtins__"]
