@@ -106,8 +106,71 @@ def check_pyrefly_installed(code: str) -> list[LintMessage]:
         ]
 
 
+def check_nightly_conda_run(code: str) -> list[LintMessage]:
+    """Check if nightly_conda.py has been run successfully.
+
+    This checks for the presence of pytorch-nightly.pth file that is created
+    by tools/nightly_conda.py when installing nightly binaries and type stubs.
+    """
+    import site
+    from pathlib import Path
+
+    try:
+        site_packages = Path(site.getsitepackages()[0])
+        pth_file = site_packages / "pytorch-nightly.pth"
+
+        if not pth_file.exists():
+            return [
+                LintMessage(
+                    path=None,
+                    line=None,
+                    char=None,
+                    code=code,
+                    severity=LintSeverity.WARNING,
+                    name="nightly-conda-not-run",
+                    original=None,
+                    replacement=None,
+                    description=(
+                        "pytorch-nightly.pth not found. "
+                        "You may need to run 'python tools/nightly_conda.py --prefix <conda_env>' "
+                        "to install nightly binaries and type stubs."
+                    ),
+                )
+            ]
+        return []
+    except Exception as e:
+        # If we can't check (e.g., site.getsitepackages() fails), return empty list
+        # to avoid blocking the linter
+        logging.debug("Could not check for nightly_conda.py run: %s", e)
+        return []
+
+
 def in_github_actions() -> bool:
     return bool(os.getenv("GITHUB_ACTIONS"))
+
+
+def is_git_repo() -> bool:
+    """Check if the current directory is a git repository."""
+    from pathlib import Path
+    current = Path.cwd()
+    # Check current and parent directories for .git
+    while current != current.parent:
+        if (current / ".git").exists():
+            return True
+        current = current.parent
+    return False
+
+
+def is_hg_repo() -> bool:
+    """Check if the current directory is a Mercurial (hg) repository."""
+    from pathlib import Path
+    current = Path.cwd()
+    # Check current and parent directories for .hg
+    while current != current.parent:
+        if (current / ".hg").exists():
+            return True
+        current = current.parent
+    return False
 
 
 def check_files(
@@ -247,8 +310,15 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    lint_messages = check_pyrefly_installed(args.code) + check_files(
-        args.code, args.config
+    # Only check for nightly_conda.py if it's an hg repo and NOT a git repo
+    nightly_check = []
+    if is_hg_repo() and not is_git_repo():
+        nightly_check = check_nightly_conda_run(args.code)
+
+    lint_messages = (
+        check_pyrefly_installed(args.code)
+        + nightly_check
+        + check_files(args.code, args.config)
     )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
