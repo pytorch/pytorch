@@ -56,10 +56,8 @@ def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
     return any(requires_grad(n) for n in inputs[num_score_mod_placeholders:])
 
 
-def is_trivial_graph(
-    graph_module: GraphModule, is_score_graph: bool, num_score_mod_placeholders: int
-):
-    """Check if the flex graphs are compatible with Flash Attention."""
+def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
+    """Mask graph is trivial when it only gates via the default full op."""
     graph = graph_module.graph
     nodes = list(graph.nodes)
     placeholders = [n for n in nodes if n.op == "placeholder"]
@@ -67,12 +65,14 @@ def is_trivial_graph(
     assert len(output) == 1, "Got graph w/ multiple outputs"
     output_val = output[0].args[0]
 
-    if is_score_graph:
-        if input_buffers_require_grads(graph_module, num_score_mod_placeholders):
-            return False
-        return True  # party on garth
     # mask mod graph is empty if we have 4 inputs and full_default output
     return len(placeholders) == 4 and output_val.target == torch.ops.aten.full.default
+
+
+@functools.lru_cache(maxsize=1)
+def _supports_nontrivial_mask_graphs() -> bool:
+    """Currently only supported on Hopper (SM90) GPUs."""
+    return torch.cuda.get_device_capability()[0] == 9
 
 
 def _can_use_flex_flash_attention(
@@ -91,32 +91,15 @@ def _can_use_flex_flash_attention(
             False,
             "Input buffers require gradients (not supported by flash attention)",
         )
+    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
 
-    score_trivial = is_trivial_graph(
-        subgraph.graph_module,
-        is_score_graph=True,
-        num_score_mod_placeholders=num_score_mod_placeholders,
-    )
-    mask_trivial = is_trivial_graph(
-        mask_graph.graph_module,
-        is_score_graph=False,
-        num_score_mod_placeholders=num_score_mod_placeholders,
-    )
+    if mask_trivial:
+        return True, ""
 
-    if not score_trivial and not mask_trivial:
+    if not _supports_nontrivial_mask_graphs():
         return (
             False,
-            "Both score and mask graphs are too complex for flash attention (require simple operations only)",
-        )
-    elif not score_trivial:
-        return (
-            False,
-            "Score modification captured tensors that require gradients (not supported by flash attention)",
-        )
-    elif not mask_trivial:
-        return (
-            False,
-            "A non None BlockMask was passed to flex attention (not supported by flash attention yet)",
+            "NYI: Non-trivial mask graphs only supported on Hopper (SM90) for flash attention",
         )
 
     return True, ""
@@ -154,6 +137,11 @@ def create_flex_flash_attention_kernel(
     mask_graph_buffer: SubgraphResults,
     score_mod_other_buffers: list[TensorBox],
     mask_mod_other_buffers: list[TensorBox],
+    kv_num_blocks: TensorBox | None,
+    kv_indices: TensorBox | None,
+    full_kv_num_blocks: TensorBox | None,
+    full_kv_indices: TensorBox | None,
+    mask_graph: Subgraph,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if not ensure_flash_available():
@@ -193,17 +181,34 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
+    # Used to check if we can skip block sparse impl
+    mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
+
+    needs_block_mask = not mask_graph_is_trivial
+    has_full_blocks = full_kv_num_blocks is not None
+
     choices: list[Any] = []
-    causal = kernel_options.get("causal", False)
     assert flash_attention_cutedsl_template is not None
+
+    input_nodes = [query, key, value, lse]
+    if has_full_blocks:
+        input_nodes.extend(
+            [kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices]
+        )
+
+    if needs_block_mask and not has_full_blocks:
+        raise NotImplementedError(
+            "Flash attention with block mask but without full blocks is not supported yet"
+        )
+
     error = flash_attention_cutedsl_template.maybe_append_choice(
         choices,
-        input_nodes=[query, key, value, lse],
+        input_nodes=input_nodes,
         layout=output_layout,
         mutated_inputs=[lse],
         subgraphs=[subgraph_buffer, mask_graph_buffer],
         SM_SCALE=scale,
-        CAUSAL=causal,
+        NEEDS_BLOCK_MASK=needs_block_mask,
     )
 
     if error or not choices:
