@@ -234,27 +234,6 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(IndexError):
             fn(torch.randn(10), 99)
 
-    def test_list_bad_weakref(self):
-        import weakref
-
-        a = torch.Event()
-        with self.assertRaises(TypeError):
-            weakref.ref(a)
-
-        @torch.compile(backend="eager")
-        class Mod(torch.nn.Module):
-            def __init__(self, event):
-                super().__init__()
-                self.event = event
-
-            def forward(self, x):
-                return x * int(self.event.query())
-
-        e = torch.Event()
-        m = Mod(e)
-        a = torch.randn(10)
-        self.assertEqual(m(a), a)
-
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good

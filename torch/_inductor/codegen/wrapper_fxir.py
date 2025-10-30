@@ -188,7 +188,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
-        # pyrefly: ignore  # missing-argument
+        # pyrefly: ignore [missing-argument]
         if V.aot_compilation and not self.is_subgraph:
             # AOT graphs must match the signature of the input module.
             return {
@@ -213,7 +213,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             graph_inputs=self.get_fx_graph_inputs(),
             graph_outputs=self.get_graph_outputs(),
             subgms=self.subgms,
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             is_subgraph=self.is_subgraph,
         ).generate()
 
@@ -1029,7 +1029,7 @@ class FxConverter:
             call_kwargs = {
                 key: val
                 for key, val in zip(signature, call_args)
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 if key not in constants and key not in cfg.kwargs
             }
 
@@ -1038,7 +1038,7 @@ class FxConverter:
             new_call_args = [
                 call_kwargs[key]
                 for key in signature
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 if key not in cfg.kwargs
             ]
 
@@ -1055,11 +1055,11 @@ class FxConverter:
         call_args = add_constants_to_call_args(call_args, kernel_config)
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(signature, call_args))
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         assert not any(kwarg in kernel_config.kwargs for kwarg in call_kwargs), (
             f"kwargs overlap config: {call_kwargs}"
         )
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         call_kwargs.update(kernel_config.kwargs)
 
         # Replace sympy.floor with FloorDiv, to make the expression traceable.
@@ -1112,11 +1112,15 @@ class FxConverter:
         # Get FX nodes corresponding to the call args.
         assert ir.is_node_sequence(kernel.inputs)
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
-        args = tensor_nodes + tuple(kernel.constant_args)
+        if hasattr(kernel, "unflatten_args"):
+            args, _ = kernel.unflatten_args(tensor_nodes, kernel.constant_args)
+        else:
+            args = tensor_nodes + tuple(kernel.constant_args)
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
         kwargs = kernel.kwargs.copy()
+
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):
             kwargs["out"] = self.buffer_to_node[out_ir_node.codegen_reference()]
