@@ -37,8 +37,7 @@ static StableIValue from_ivalue(
           ivalue.toScalarType(), extension_build_version);
     }
     case c10::TypeKind::DeviceObjType: {
-      const c10::Device& device = ivalue.toDevice();
-      c10::Device* new_device = new c10::Device(device);
+      c10::Device* new_device = new c10::Device(ivalue.toDevice());
       DeviceHandle dh = reinterpret_cast<DeviceHandle>(new_device);
       return torch::stable::detail::_from(dh, extension_build_version);
     }
@@ -95,20 +94,24 @@ static c10::IValue to_ivalue(
           ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
-      return c10::IValue(torch::stable::detail::_to<int64_t>(
-          stable_ivalue, extension_build_version));
+      return c10::IValue(
+          torch::stable::detail::_to<int64_t>(
+              stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::FloatType: {
-      return c10::IValue(torch::stable::detail::_to<double>(
-          stable_ivalue, extension_build_version));
+      return c10::IValue(
+          torch::stable::detail::_to<double>(
+              stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::BoolType: {
-      return c10::IValue(torch::stable::detail::_to<bool>(
-          stable_ivalue, extension_build_version));
+      return c10::IValue(
+          torch::stable::detail::_to<bool>(
+              stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::ScalarTypeType: {
-      return c10::IValue(torch::stable::detail::_to<c10::ScalarType>(
-          stable_ivalue, extension_build_version));
+      return c10::IValue(
+          torch::stable::detail::_to<c10::ScalarType>(
+              stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::DeviceObjType: {
       auto deleter = [](DeviceOpaque* device) { torch_delete_device(device); };
@@ -119,12 +122,14 @@ static c10::IValue to_ivalue(
       return c10::IValue(*reinterpret_cast<c10::Device*>(device_raii.get()));
     }
     case c10::TypeKind::LayoutType: {
-      return c10::IValue(torch::stable::detail::_to<c10::Layout>(
-          stable_ivalue, extension_build_version));
+      return c10::IValue(
+          torch::stable::detail::_to<c10::Layout>(
+              stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::MemoryFormatType: {
-      return c10::IValue(torch::stable::detail::_to<c10::MemoryFormat>(
-          stable_ivalue, extension_build_version));
+      return c10::IValue(
+          torch::stable::detail::_to<c10::MemoryFormat>(
+              stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
