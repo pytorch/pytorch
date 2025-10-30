@@ -895,7 +895,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
         def func(a, b, c, *, ranks):
             # Three all_gathers with different dtypes
             ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)  # float32
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)  # bfloat16
+            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)  # float16
             ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)  # float16
 
             # Use all results
@@ -908,7 +908,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             fake_pg=not at_least_x_gpu(2),
         ):
             a = torch.ones(4, 4, dtype=torch.float32, device=device_type)
-            b = torch.ones(4, 4, dtype=torch.bfloat16, device=device_type) * 2
+            b = torch.ones(4, 4, dtype=torch.float16, device=device_type) * 2
             c = torch.ones(4, 4, dtype=torch.float16, device=device_type) * 3
             ranks = list(range(self.world_size))
 
