@@ -18,8 +18,8 @@ from torch._inductor.fx_passes.memory_estimator import (
     MemoryTracker,
 )
 from torch.fx.operator_schemas import normalize_function
-from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import _disable_current_modes
 
 
 log = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ def benchmark_node_with_cache_key(
         key += f"T: {shape, stride, t.dtype} "
         return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]
 
-    with no_dispatch():
+    with _disable_current_modes():
         args, kwargs = torch.utils._pytree.tree_map_only(
             torch.Tensor,
             lambda t: to_real(t),

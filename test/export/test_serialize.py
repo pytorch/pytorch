@@ -2000,7 +2000,7 @@ class TestSaveLoad(TestCase):
 
     def test_save_load_with_multiple_empty_tensors(self) -> None:
         # Test scenario where models have multiple empty tensors
-        # but with differnt data types.
+        # but with different data types.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
