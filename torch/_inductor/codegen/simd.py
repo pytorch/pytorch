@@ -1641,9 +1641,11 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
 
+        # The autotuning is skipped in deterministic mode
         if (
-            config.triton.mix_order_reduction_autotune_split_size
+            not torch._inductor.config.deterministic
             and config.triton.mix_order_reduction_split_size is None
+            and config.triton.mix_order_reduction_autotune_split_size
         ):
 
             def _bench(candidate_split_size):
