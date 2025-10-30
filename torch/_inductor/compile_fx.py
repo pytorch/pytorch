@@ -971,9 +971,14 @@ def _compile_fx_inner(
                     else "FX cache disabled or key generation failed"
                 ),
             )
-            mb_compiled_graph = fx_codegen_and_compile(
-                gm, example_inputs, inputs_to_check, **graph_kwargs
-            )
+            try:
+                mb_compiled_graph = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                )
+            except Exception as e:
+                raise InductorError(e, currentframe()).with_traceback(
+                    e.__traceback__
+                ) from None
 
         # CACHE MISS: Compile the graph and save to cache
         elif cache_info["cache_state"] == "miss":
@@ -1312,12 +1317,12 @@ class _InProcessFxCompile(FxCompile):
                     include_device=True,
                     fast_sympy_print=True,
                 )
-                # "after_post_grad_graph" is used in inductor provenance
+                # "inductor_post_grad_graph" is used in inductor provenance
                 # tracking highlighter front-end.
                 trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
-                        "name": "after_post_grad_graph",
+                        "name": "inductor_post_grad_graph",
                         "encoding": "string",
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,

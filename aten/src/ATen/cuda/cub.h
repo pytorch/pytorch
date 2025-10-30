@@ -4,7 +4,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 
 // NOTE: These templates are intentionally not defined in this header,
-// which aviods re-compiling them for each translation unit. If you get
+// which avoids re-compiling them for each translation unit. If you get
 // a link error, you need to add an explicit instantiation for your
 // types in cub.cu
 

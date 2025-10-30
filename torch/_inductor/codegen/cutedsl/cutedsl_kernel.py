@@ -286,7 +286,7 @@ class CuteDSLTemplateKernel(Kernel):
             # Generate unpacking assignments: in_ptr4 = buffers[0], etc.
             unpacking_lines = []
             for i, buffer_name in enumerate(tensor_buffers):
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 unpacking_lines.append(f"{buffer_name} = {buffer_list_name}[{i}]")
 
             indent = " " * indent_width
@@ -495,7 +495,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:

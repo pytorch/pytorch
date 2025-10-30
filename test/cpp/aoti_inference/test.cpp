@@ -2,7 +2,9 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
 #include <queue>
@@ -27,6 +29,64 @@
 #define STRINGIZE(x) STR_VALUE(x)
 
 namespace {
+
+// Function to check if test data files exist and are valid
+bool testDataFilesExist() {
+  std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
+  std::array<std::string, 4> required_files = {
+      "data.pt",
+      "script_data.pt",
+      "script_model_cpu.pt",
+      "script_model_cuda.pt"};
+
+  for (const auto& filename : required_files) {
+    std::string filepath = bindir + "/" + filename;
+    std::ifstream file(filepath);
+    if (!file.good()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Function to ensure test data files are generated at runtime
+void ensureTestDataGenerated() {
+  static std::once_flag generated_flag;
+  std::call_once(generated_flag, []() {
+    // Only generate if files don't exist or are placeholders
+    if (testDataFilesExist()) {
+      return;
+    }
+
+    std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
+
+    // Calculate path to source directory: build/test_aoti_inference -> build ->
+    // pytorch
+    std::string pytorch_root = bindir.substr(0, bindir.find_last_of("/"));
+    pytorch_root = pytorch_root.substr(0, pytorch_root.find_last_of("/"));
+    std::string source_dir = pytorch_root + "/test/cpp/aoti_inference";
+
+    // Generate test data files (data.pt, etc.) by running test.py directly
+    std::string test_script = source_dir + "/test.py";
+    std::string test_data_cmd = "cd " + bindir + " && python " + test_script;
+    std::cout << "Generating test data: " << test_data_cmd << std::endl;
+    int result1 = std::system(test_data_cmd.c_str());
+    if (result1 != 0) {
+      std::cerr << "Warning: Test data generation failed with code " << result1
+                << std::endl;
+    }
+
+    // Generate model files (script_*.pt) by running compile_model.py directly
+    std::string compile_script = source_dir + "/compile_model.py";
+    std::string models_cmd = "cd " + bindir + " && python " + compile_script;
+    std::cout << "Generating model files: " << models_cmd << std::endl;
+    int result2 = std::system(models_cmd.c_str());
+    if (result2 != 0) {
+      std::cerr << "Warning: Model generation failed with code " << result2
+                << std::endl;
+    }
+  });
+}
 
 const std::unordered_map<std::string, at::Tensor> derefTensorConstantMap(
     torch::inductor::TensorConstantMap tensor_constant_map) {
@@ -855,7 +915,6 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
 }
 
-#if defined(USE_CUDA) || defined(USE_ROCM)
 void test_cuda_alloc_test() {
   torch::NoGradGuard no_grad;
 
@@ -895,8 +954,8 @@ void test_cuda_alloc_test() {
       runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
-#endif
 
+#ifdef USE_CUDA
 class ThreadPool {
  private:
   struct Task {
@@ -1037,86 +1096,96 @@ void test_multi_cuda_streams(const std::string& device) {
     ASSERT_TRUE(torch::allclose(ref_output_tensors[0], all_outputs[i][0]));
   }
 }
-#endif
+#endif // USE_CUDA
+#endif // USE_CUDA || USE_ROCM
 } // namespace
 
 namespace torch::aot_inductor {
 
-TEST(AotInductorTest, BasicTestCpu) {
+// Test fixture that ensures test data is generated once for all tests
+class AotInductorTest : public ::testing::Test {
+ public:
+  // This runs once before all tests in this test suite
+  static void SetUpTestSuite() {
+    ensureTestDataGenerated();
+  }
+};
+
+TEST_F(AotInductorTest, BasicTestCpu) {
   test_aoti("cpu", false);
 }
 
-TEST(AotInductorTest, BasicScriptTestCpu) {
+TEST_F(AotInductorTest, BasicScriptTestCpu) {
   test_aoti_script("cpu");
 }
 
-TEST(AotInductorTest, BasicPackageLoaderTestCpu) {
+TEST_F(AotInductorTest, BasicPackageLoaderTestCpu) {
   test_aoti_package_loader("cpu", false);
 }
 
-TEST(AotInductorTest, ExtractConstantsMapCpu) {
+TEST_F(AotInductorTest, ExtractConstantsMapCpu) {
   test_aoti_extract_constants_map("cpu");
 }
 
 #ifdef USE_CUDA
-TEST(AotInductorTest, BasicTestCuda) {
+TEST_F(AotInductorTest, BasicTestCuda) {
   test_aoti("cuda", true);
   test_aoti("cuda", false);
 }
 
-TEST(AotInductorTest, BasicScriptTestCuda) {
+TEST_F(AotInductorTest, BasicScriptTestCuda) {
   test_aoti_script("cuda");
 }
 
-TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
+TEST_F(AotInductorTest, BasicPackageLoaderTestCuda) {
   test_aoti_package_loader("cuda", false);
 }
 
-TEST(AotInductorTest, BasicPackageLoaderTestMultiGpuCuda) {
+TEST_F(AotInductorTest, BasicPackageLoaderTestMultiGpuCuda) {
   test_aoti_package_loader_multi_gpu("cuda", false);
 }
 
-TEST(AotInductorTest, UpdateUserManagedConstantsCuda) {
+TEST_F(AotInductorTest, UpdateUserManagedConstantsCuda) {
   test_aoti_user_managed_buffer();
 }
 
-TEST(AotInductorTest, RuntimeUpdateConstantsCuda) {
+TEST_F(AotInductorTest, RuntimeUpdateConstantsCuda) {
   test_aoti_constants_update("cuda", true);
 }
 
-TEST(AotInductorTest, UpdateConstantsCuda) {
+TEST_F(AotInductorTest, UpdateConstantsCuda) {
   test_aoti_constants_update("cuda", false);
 }
 
-TEST(AotInductorTest, ExtractConstantsMapCuda) {
+TEST_F(AotInductorTest, ExtractConstantsMapCuda) {
   test_aoti_extract_constants_map("cuda");
 }
 
-TEST(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {
+TEST_F(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {
   test_aoti_double_buffering("cuda", true);
 }
 
-TEST(AotInductorTest, UpdateInactiveConstantsCuda) {
+TEST_F(AotInductorTest, UpdateInactiveConstantsCuda) {
   test_aoti_double_buffering("cuda", false);
 }
 
-TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
+TEST_F(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
   test_aoti_double_buffering_with_tensor_constants();
 }
 
-TEST(AotInductorTest, FreeInactiveConstantBufferCuda) {
+TEST_F(AotInductorTest, FreeInactiveConstantBufferCuda) {
   test_aoti_free_buffer(false);
 }
 
-TEST(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
+TEST_F(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
   test_aoti_free_buffer(true);
 }
 
-TEST(AotInductorTest, MultiStreamTestCuda) {
+TEST_F(AotInductorTest, MultiStreamTestCuda) {
   test_multi_cuda_streams("cuda");
 }
 
-TEST(AotInductorTest, CudaAllocTestCuda) {
+TEST_F(AotInductorTest, CudaAllocTestCuda) {
   test_cuda_alloc_test();
 }
 #endif
