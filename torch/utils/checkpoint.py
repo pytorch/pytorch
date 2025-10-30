@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import platform
-import threading
 import uuid
 import warnings
 import weakref
@@ -1602,25 +1601,23 @@ class GraphExecGroup:
     Backward calls under the same instance of this context manager must execute
     over non-overlapping regions of the backward graph even if retain_graph=True.
     """
-    _tls = threading.local()
 
     def __enter__(self) -> "GraphExecGroup":
-        current = getattr(GraphExecGroup._tls, "current_group", None)
-        if current is not None:
+        if torch._C._get_graph_exec_group() is not None:
             raise RuntimeError(
                 "GraphExecGroup contexts cannot be nested. "
-                f"Already inside group {GraphExecGroup._tls._current_group}"
+                f"Already inside group {torch._C._get_graph_exec_group()}"
             )
-        GraphExecGroup._tls._current_group = self
+        torch._C._set_graph_exec_group(self)
         return self
 
     def __exit__(self, *args: object) -> None:
-        GraphExecGroup._tls._current_group = None
+        torch._C._set_graph_exec_group(None)
 
     @classmethod
     def _get_current_group(cls) -> Optional["GraphExecGroup"]:
         # Private API to be used by utils like AC
-        return getattr(GraphExecGroup._tls, "current_group", None)
+        return torch._C._get_graph_exec_group()
 
 
 # Note: [compiled autograd and checkpoint unpack hook]
