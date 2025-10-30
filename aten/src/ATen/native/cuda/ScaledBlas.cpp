@@ -796,7 +796,7 @@ void _check_deepseek_scale_stride(const Tensor& scale, const Tensor& t, const Sc
 
 void
 _check_deepseek_support() {
-#ifdef USE_CUDA
+#ifndef USE_ROCM
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (dprops->major != 9) {
     // Only on Hopper GPUs
@@ -820,7 +820,7 @@ _scaled_block1x128_block1x128(
           const c10::ScalarType out_dtype,
           const bool use_fast_accum,
           Tensor& out) {
-#ifdef USE_CUDA
+#ifndef USE_ROCM
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
   // CUDA: Only Hopper GPUs
@@ -859,7 +859,7 @@ _scaled_block128x128_block1x128(
           const c10::ScalarType out_dtype,
           const bool use_fast_accum,
           Tensor& out) {
-#ifdef USE_CUDA
+#ifndef USE_ROCM
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
   // CUDA: Only Hopper GPUs
@@ -898,7 +898,7 @@ _scaled_block1x128_block128x128(
           const c10::ScalarType out_dtype,
           const bool use_fast_accum,
           Tensor& out) {
-#ifdef USE_CUDA
+#ifndef USE_ROCM
   // Restrictions:
   // A, B are FP8, scales are fp32, A: shape K//128, B: K//128, N//128
   // CUDA: Only Hopper GPUs
