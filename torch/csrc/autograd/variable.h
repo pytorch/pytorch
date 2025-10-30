@@ -198,9 +198,21 @@ TORCH_API void create_cpp_hook(
     const at::TensorBase& /*self*/,
     bool is_retains_grad_hooks = false);
 
-TORCH_API bool is_tensor_stealable(
+inline bool is_tensor_stealable(
     const at::Tensor& new_grad,
-    size_t num_expected_refs = 1);
+    size_t num_expected_refs = 1) {
+  size_t use_count = new_grad.use_count();
+  if (use_count <= num_expected_refs) {
+    return true;
+  }
+  if (use_count >= 2 &&
+      new_grad.unsafeGetTensorImpl()->pyobj_slot()->has_unique_reference()) {
+    // The Python wrapper, if it exists, also has a reference to the Tensor.
+    num_expected_refs++;
+  }
+  return use_count <= num_expected_refs;
+}
+
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

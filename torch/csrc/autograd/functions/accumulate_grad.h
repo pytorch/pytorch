@@ -180,7 +180,9 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
           !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
-          impl::is_tensor_stealable(new_grad, num_expected_refs) &&
+          impl::is_tensor_stealable(
+              new_grad,
+              num_expected_refs + at::caching::is_cached_tensor(new_grad)) &&
           (new_grad.is_mkldnn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // See Case 1.1: Stealable dense new_grad

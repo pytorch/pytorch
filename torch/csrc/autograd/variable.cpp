@@ -432,22 +432,6 @@ DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase& self) {
   }
 }
 
-bool is_tensor_stealable(const at::Tensor& new_grad, size_t num_expected_refs) {
-  size_t use_count = new_grad.use_count();
-  if (use_count <= num_expected_refs) {
-    return true;
-  }
-  if (use_count >= 2 &&
-      new_grad.unsafeGetTensorImpl()->pyobj_slot()->has_unique_reference()) {
-    // The Python wrapper, if it exists, also has a reference to the Tensor.
-    num_expected_refs++;
-  }
-  if (at::caching::is_cached_tensor(new_grad)) {
-    num_expected_refs++; // cached tensors have an extra ref
-  }
-  return use_count <= num_expected_refs;
-}
-
 } // namespace impl
 
 using at::Tensor;
