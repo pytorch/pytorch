@@ -45,7 +45,7 @@ supported for complex tensors.
 ## Transition from the old representation
 
 Users who currently worked around the lack of complex tensors with real tensors of shape {math}`(..., 2)`
-can easily to switch using the complex tensors in their code using {func}`torch.view_as_complex`
+can easily switch to using the complex tensors in their code using {func}`torch.view_as_complex`
 and {func}`torch.view_as_real`. Note that these functions don’t perform any copy and return a
 view of the input tensor.
 
