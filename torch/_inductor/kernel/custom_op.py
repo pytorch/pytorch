@@ -5,7 +5,6 @@ import logging
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch import _ops
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -52,23 +51,17 @@ class CustomOpConfig:
         self, default_impl: Optional[Callable[..., Any]] = None
     ) -> Callable[..., Any]:
         """Return the decomposition function for this config.
-        When decomposition is not specified, return the default implementation
-        from the custom op's registration.
+        When decomposition is not specified, return the default implementation.
         """
         if self.decomposition is not None:
             return self.decomposition
 
-        # If no decomposition specified in config, get Python implementation from custom op registration
-        if default_impl and isinstance(default_impl, _ops.OpOverload):
-            from torch._library.custom_ops import _maybe_get_opdef
-
-            op_def = _maybe_get_opdef(default_impl)
-            if op_def is not None and hasattr(op_def, "_init_fn"):
-                return op_def._init_fn
+        if default_impl is not None and callable(default_impl):
+            return default_impl
 
         raise TypeError(
-            f"Could not extract Python implementation from {default_impl}. "
-            f"Please register customop or provide a decomposition function."
+            "No decomposition specified in config and no default implementation provided. "
+            "Please provide a decomposition function in CustomOpConfig."
         )
 
     def __repr__(self) -> str:
@@ -232,7 +225,7 @@ def autotune_custom_op(
     decompositions: list[Callable[..., Any]],
     inputs: list[Any],
     non_tensor_args: list[dict[str, Any]],
-    default_impl: Optional[Callable[..., Any]] = None,
+    op_overload: torch._ops.OpOverload,
     user_input_gen_fns: Optional[
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
@@ -250,7 +243,7 @@ def autotune_custom_op(
         decompositions: List of alternative implementation functions to benchmark
         inputs: Input tensor IR nodes from compilation (TensorBox/Buffer objects)
         non_tensor_args: List of kwargs dicts, paired with corresponding decompositions arg
-        default_impl: Original custom op implementation used as fallback
+        op_overload: OpOverload of the custom op, used as fallback implementation
         user_input_gen_fns: Optional custom input generators for benchmarking.
                            Maps input indices to functions that take fake tensors
                            and return real tensors for performance measurement.
@@ -285,7 +278,7 @@ def autotune_custom_op(
     )
 
     # Add default implementation as fallback
-    if default_impl and hasattr(default_impl, "_op"):
+    if op_overload and hasattr(op_overload, "_op"):
         fallback_name = f"{name}_fallback_default"
         from torch._inductor.select_algorithm import extern_kernels
 
@@ -294,10 +287,10 @@ def autotune_custom_op(
             with V.fake_mode:
                 fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
                 fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
-                fake_output = default_impl(*fake_inputs, **fallback_kwargs)
+                fake_output = op_overload(*fake_inputs, **fallback_kwargs)
 
             fallback_choice = _create_fallback_choice(
-                name, default_impl, fake_output, fallback_kwargs
+                name, op_overload, fake_output, fallback_kwargs
             )
             fallback_choice.maybe_append_choice(
                 choices=choices,
@@ -335,7 +328,7 @@ def autotune_custom_op(
 
 
 def register_custom_op_autotuning(
-    custom_op: torch._ops.OpOverload,
+    custom_op: torch._library.custom_ops.CustomOpDef,
     configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
@@ -344,18 +337,22 @@ def register_custom_op_autotuning(
     specifies a decomposition implementation function with its parameter values.
 
     Args:
-        custom_op: Custom operation to register
-        configs: List of CustomOpConfig objects or callable functions
+        custom_op: Custom operation (decorated function from @torch.library.custom_op)
+        configs: List of CustomOpConfig objects
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
 
     Examples:
+        @torch.library.custom_op("mylib::attention", mutates_args=())
+        def my_attention(query, key, value, head_dim=32):
+            ...
+
         register_custom_op_autotuning(
-            torch.ops.mylib.attention.default,
+            my_attention,
             configs=[
                 CustomOpConfig(attention_impl, head_dim=32, method='chunked'),
                 CustomOpConfig(attention_impl, head_dim=64, method='tiled'),
-                CustomOpConfig(fallback_impl),  # No params
+                CustomOpConfig(head_dim=128),  # No decomposition specified, use default
             ],
             input_gen_fns={
                 "query": lambda fake: torch.randn_like(fake, device='cuda'),
@@ -364,6 +361,17 @@ def register_custom_op_autotuning(
             }
         )
     """
+    from torch._library.custom_ops import CustomOpDef
+
+    if not isinstance(custom_op, CustomOpDef):
+        raise TypeError(
+            f"custom_op must be a CustomOpDef (decorated function from @torch.library.custom_op), "
+            f"got {type(custom_op)}."
+        )
+
+    op_overload = custom_op._opoverload
+    default_impl = custom_op._init_fn
+
     if not isinstance(configs, (list, tuple)):
         raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
@@ -380,20 +388,20 @@ def register_custom_op_autotuning(
         raise ValueError("At least one config must be provided")
 
     if name is None:
-        name = f"{custom_op._name}_autotuned"
+        name = f"{op_overload._name}_autotuned"
 
-    @functools.wraps(custom_op)
+    @functools.wraps(op_overload)
     def autotuning_lowering(*args: Any, **kwargs: Any) -> Any:
         """Inductor lowering function that replaces custom op calls with autotuned versions."""
         # Extract tensor inputs and non-tensor parameters (runtime kwargs)
         tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
 
-        # Prepare decompositions and kwargs by merging customop config params with runtime kwargs
+        # Prepare decompositions and kwargs by merging config params with runtime kwargs
         decompositions = []
         non_tensor_args = []
 
         for config in processed_configs:
-            decomp = config.get_decomposition(default_impl=custom_op)
+            decomp = config.get_decomposition(default_impl=default_impl)
             decompositions.append(decomp)
 
             # Merge config params with runtime kwargs (runtime takes precedence)
@@ -407,11 +415,11 @@ def register_custom_op_autotuning(
             decompositions=decompositions,
             inputs=tensor_inputs,
             non_tensor_args=non_tensor_args,
-            default_impl=custom_op,
+            op_overload=op_overload,
             user_input_gen_fns=input_gen_fns,
         )
 
         validate_ir(result)
         return result
 
-    lowerings[custom_op] = autotuning_lowering
+    lowerings[op_overload] = autotuning_lowering

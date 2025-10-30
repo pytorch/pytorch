@@ -403,10 +403,13 @@ class TestCustomOpAutoTune(TestCase):
         register_custom_op_autotuning(
             test_decompose_k_op,
             configs=[
+                CustomOpConfig(k_splits=2),
+                CustomOpConfig(k_splits=4),
+                CustomOpConfig(k_splits=8),
+                CustomOpConfig(k_splits=16),
                 CustomOpConfig(k_splits=32),
                 CustomOpConfig(k_splits=64),
                 CustomOpConfig(k_splits=128),
-                CustomOpConfig(k_splits=256),
             ],
             name="test_decompose_k_autotuned",
             input_gen_fns={
@@ -432,7 +435,7 @@ class TestCustomOpAutoTune(TestCase):
         Validates parametric tuning with multiple parameters (scale_mode and chunk_size)
         to test combinatorial exploration of the parameter space.
         """
-        op_name = f"test_lib::multi_param_{id(self)}"
+        test_op_name = f"test_lib::multi_param_{id(self)}"
 
         def multi_param_scaling(
             x: torch.Tensor,
@@ -457,7 +460,7 @@ class TestCustomOpAutoTune(TestCase):
                 # Using einsum for scaling
                 return torch.einsum("...i,i->...i", x, factor)
 
-        @torch.library.custom_op(op_name, mutates_args=())
+        @torch.library.custom_op(test_op_name, mutates_args=())
         def multi_param_op(
             x: torch.Tensor,
             factor: torch.Tensor,
