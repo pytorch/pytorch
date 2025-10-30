@@ -107,12 +107,15 @@ def _check_for_subclass_arg(x: object) -> bool:
 def _map_to_rank_local_val(val: Any, rank: int) -> Any:
     if isinstance(val, LocalTensor):
         return val._local_tensors[rank]
-    if isinstance(val, SymInt) and isinstance(val.node, LocalIntNode):
-        return val.node._local_ints[rank]
+    if isinstance(val, SymInt):
+        if isinstance(val.node, LocalIntNode):
+            return val.node._local_ints[rank]
+        if isinstance(val.node, ConstantIntNode):
+            return val.node.val
     return val
 
 
-def _collect_cuda_rng_states() -> list[torch.Tensor]:
+def _collect_cuda_rng_states() -> dict[int, torch.Tensor]:
     """
     Collects RNG state from all available CUDA devices.
 
@@ -121,20 +124,18 @@ def _collect_cuda_rng_states() -> list[torch.Tensor]:
         Returns empty list if CUDA is not available.
     """
     if not torch.cuda.is_available():
-        return []
+        return {}
 
-    num_devices = torch.cuda.device_count()
-    rng_states = []
+    if torch.cuda.is_available():
+        device_idx = torch.cuda.current_device()
 
-    for device_idx in range(num_devices):
         with torch.cuda.device(device_idx):
-            rng_state = torch.cuda.get_rng_state()
-            rng_states.append(rng_state)
+            return {device_idx: torch.cuda.get_rng_state()}
 
-    return rng_states
+    return {}
 
 
-def _set_cuda_rng_states(rng_states: list[torch.Tensor]) -> None:
+def _set_cuda_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
     """
     Sets RNG state for all CUDA devices from a list of states.
 
@@ -144,21 +145,21 @@ def _set_cuda_rng_states(rng_states: list[torch.Tensor]) -> None:
     if not torch.cuda.is_available():
         return
 
-    num_devices = min(len(rng_states), torch.cuda.device_count())
-
-    for device_idx in range(num_devices):
+    for device_idx, device_rng_state in rng_states.items():
         with torch.cuda.device(device_idx):
-            torch.cuda.set_rng_state(rng_states[device_idx])
+            torch.cuda.set_rng_state(device_rng_state)
 
 
-def _get_rng_state() -> tuple[torch.Tensor, list[torch.Tensor]]:
+def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """
     Gets CPU and CUDA rng states from all devices.
     """
     return (torch.get_rng_state(), _collect_cuda_rng_states())
 
 
-def _set_rng_state(cpu_state: torch.Tensor, cuda_states: list[torch.Tensor]) -> None:
+def _set_rng_state(
+    cpu_state: torch.Tensor, cuda_states: dict[int, torch.Tensor]
+) -> None:
     """
     Sets CPU and CUDA rng states for all devices. If the list of cuda states
     is shorter than the number of devices only the first len(cuda_states) devices
@@ -511,8 +512,9 @@ class LocalTensor(torch.Tensor):
         local_tensors_copy = {
             r: copy.deepcopy(t, memo) for r, t in self._local_tensors.items()
         }
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors_copy)
+        tensor_copy = LocalTensor(local_tensors_copy)
+        tensor_copy.requires_grad = self.requires_grad
+        return tensor_copy
 
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []

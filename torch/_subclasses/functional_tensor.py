@@ -8,6 +8,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Optional, Union
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
@@ -512,6 +513,30 @@ class FunctionalTensorMode(TorchDispatchMode):
                         torch.Tensor, wrap, outs_unwrapped
                     )
                 else:
+                    # Note: [Functionalization View Replay Annotation]
+                    # When functionalization encounters a mutation, it handles aliases by lazily regenerating the aliases
+                    # at the first time they are next used.
+                    # This is a problem when plumbing user annotations during tracing. We want the view ops from view replay
+                    # to have the same annotation that the user specified on the original views. But view replay in
+                    # functionalization happens the next time the alias is used (e.g. second_op(alias_with_pending_mutation)),
+                    # so when we regenerate views before calling into second_op, those views will end up getting the metadata
+                    # for second_op!
+                    #
+                    # Instead, we need to remember the node metadata from the original views, and ensure that this node metadata
+                    # is globally set when we lazily perform view replay.
+                    # The globally set metadata will be used to populate the fx node created for the replayed operation.
+                    if m := torch._C._get_dispatch_mode(
+                        torch._C._TorchDispatchModeKey.PROXY
+                    ):
+                        for a in pytree.tree_leaves([args, kwargs]):
+                            if not isinstance(a, FunctionalTensor):
+                                continue
+                            curr_node = m.tracer.tensor_tracker[
+                                torch._from_functional_tensor(a.elem)
+                            ].proxy.node
+                            with fx_traceback.set_current_replay_node(curr_node):
+                                torch._sync(a)
+
                     # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                     # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
