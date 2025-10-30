@@ -245,7 +245,7 @@ def replace_random(
         return
 
     # Fallback (e.g., randn) keeps existing inductor behavior
-    
+
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [size])
 

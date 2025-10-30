@@ -1599,7 +1599,7 @@ class TritonOverrides(OpOverrides):
         tid_trunc = f"(({tid_u32})%({denom}))"
 
         return f"triton_helpers.rand_eager_kernel({seed}, {base_offset}+{r}, {tid_trunc}, VEC={vec})"
-        
+
     @staticmethod
     def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
