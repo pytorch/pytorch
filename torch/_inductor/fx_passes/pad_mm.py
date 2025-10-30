@@ -225,8 +225,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
         dtype is torch.bfloat16
         and K > M
         and K > N
-        and torch.cuda.is_available()
-        and torch.cuda.get_device_capability() < (9, 0)
+        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
     ):  # doesn't repro on h100s:
         return True
 
@@ -382,7 +381,8 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
         and K > N
         and N % 2 == 1
         and K >= large_k_threshold_to_pad
-        and torch.cuda.get_device_capability() < (9, 0)
+        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
+
     ):  # doesn't repro on h100s:
         return True
     return False
