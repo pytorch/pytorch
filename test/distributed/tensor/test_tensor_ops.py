@@ -937,10 +937,13 @@ class DistTensorOpsTest(DTensorTestBase):
         This is a regression test for GitHub issue #157631 where einsum
         would fail with AssertionError in inference_mode because the
         operator was not properly registered in the DTensor sharding system.
+
+        Also tests multi-operand (3+) einsum which should fall back to
+        decomposition and use bmm_strategy for the pairwise operations.
         """
         device_mesh = self.build_device_mesh()
 
-        # Test 1: Basic einsum with Replicate placement
+        # Test 1: Basic 2-operand einsum with Replicate placement
         torch.manual_seed(42)
         X_local = torch.randn(3, 4, 5, device=self.device_type)
         Y_local = torch.randn(3, 6, 7, 5, device=self.device_type)
@@ -986,6 +989,24 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(C_dtensor.full_tensor(), C_local)
         # Output should be sharded on dim 0 since input A is sharded on free dim
         self.assertEqual(C_dtensor.placements, (Shard(0),))
+
+        # Test 4: Multi-operand (3+) einsum with Replicate placement
+        # This tests the NotImplementedError fallback mechanism
+        A_3op = torch.randn(2, 3, 4, device=self.device_type)
+        B_3op = torch.randn(2, 4, 5, device=self.device_type)
+        C_3op = torch.randn(2, 5, 6, device=self.device_type)
+
+        A_dt_3op = distribute_tensor(A_3op, device_mesh, [Replicate()])
+        B_dt_3op = distribute_tensor(B_3op, device_mesh, [Replicate()])
+        C_dt_3op = distribute_tensor(C_3op, device_mesh, [Replicate()])
+
+        # Test in inference_mode (fallback to decomposition)
+        with torch.inference_mode():
+            result_3op = torch.einsum("abc,acd,ade->abe", A_dt_3op, B_dt_3op, C_dt_3op)
+
+        expected_3op = torch.einsum("abc,acd,ade->abe", A_3op, B_3op, C_3op)
+        self.assertEqual(result_3op.full_tensor(), expected_3op)
+        self.assertEqual(result_3op.placements, (Replicate(),))
 
 
 class DistArgMaxArgMinTest(DTensorTestBase):

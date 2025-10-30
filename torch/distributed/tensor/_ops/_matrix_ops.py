@@ -476,8 +476,11 @@ def einsum_strategy(op_schema: OpSchema) -> OpStrategy:
     The needs_pytree=True flag is crucial because einsum accepts
     variable-length operands as torch.einsum(equation, *operands).
 
-    Note: Currently supports einsum with up to 2 tensor operands and single output.
-    Multi-operand einsum (3+ tensors) is not yet supported and will raise an assertion.
+    Note: This strategy is optimized for einsum with up to 2 tensor operands.
+    For 3+ operands, raises NotImplementedError to trigger fallback to
+    CompositeImplicitAutograd decomposition, which decomposes the operation
+    into pairwise operations (typically bmm), each handled by their respective
+    optimized strategies.
 
     See gen_einsum_strategies() in _einsum_strategy.py for details on supported
     sharding patterns.
@@ -487,12 +490,17 @@ def einsum_strategy(op_schema: OpSchema) -> OpStrategy:
     equation = cast(str, op_schema.args_schema[0])
     tensor_operands = cast(TupleStrategy, op_schema.args_schema[1])
 
-    # Validate number of operands (tensor inputs)
+    # Check number of operands
     num_operands = len(tensor_operands.children)
-    assert num_operands <= 2, (
-        f"Currently only support einsum with up to 2 tensor operands, got {num_operands}. "
-        f"Multi-operand einsum (3+ tensors) is not yet supported."
-    )
+    if num_operands > 2:
+        # For 3+ operands, fall back to CompositeImplicitAutograd decomposition.
+        # The decomposition will break down the N-operand einsum into pairwise
+        # operations (e.g., bmm), each of which will use its own optimized strategy.
+        raise NotImplementedError(
+            f"Einsum strategy is optimized for up to 2 operands (got {num_operands}). "
+            f"Falling back to decomposition which will use optimized strategies "
+            f"(e.g., bmm_strategy) for each pairwise operation."
+        )
 
     # Extract input strategies (following mm_strategy pattern)
     input_strategies = [cast(OpStrategy, child) for child in tensor_operands.children]
