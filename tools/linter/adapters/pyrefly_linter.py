@@ -247,11 +247,12 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    lint_messages = check_pyrefly_installed(args.code) + check_files(
-        args.code, args.config
-    )
-    for lint_message in lint_messages:
-        print(json.dumps(lint_message._asdict()), flush=True)
+    # TODO @maggiemoss Temporarily remove calls here until conda / non-git repo users are fixed
+    # lint_messages = check_pyrefly_installed(args.code) + check_files(
+    #     args.code, args.config
+    # )
+    # for lint_message in lint_messages:
+    #     print(json.dumps(lint_message._asdict()), flush=True)
 
 
 if __name__ == "__main__":
