@@ -764,12 +764,6 @@ else:
             """
             slice_from_root = True
             if self != self._get_root_mesh():
-                warnings.warn(
-                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
-                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
-                    "If not, this may result in some ranks receiving the submesh while others encounter errors.",
-                    stacklevel=2,
-                )
                 slice_from_root = False
 
             # The slice mesh_dim_names should consist either the current device_mesh's mesh_dim_names

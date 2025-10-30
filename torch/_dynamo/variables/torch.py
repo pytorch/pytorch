@@ -1619,7 +1619,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # take the conservative approach to graph break on size changes, and
             # assume other cases can fall through soundly.
             #
-            # Note that although these tensor variablels would hold different
+            # Note that although these tensor variables would hold different
             # proxies, the in-place mutation semantics is preserved in the FX
             # graph, so we won't have correctness issues.
             if isinstance(saved_out_shapes, list):

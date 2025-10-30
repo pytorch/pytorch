@@ -23,7 +23,7 @@ from ..utils import (
     np,
     raise_args_mismatch,
 )
-from .base import VariableTracker
+from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -168,6 +168,14 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
                 return super().call_method(tx, name, args, kwargs)
+        elif name == "__iter__" and istype(self.value, str):
+            # this could be some generic iterator to avoid the circular import,
+            # but ListIterator does what we want
+            from .lists import ListIteratorVariable
+
+            return ListIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
