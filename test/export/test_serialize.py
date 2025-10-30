@@ -676,9 +676,8 @@ def forward(self, x):
                 self.assertIsNotNone(args[i].as_tensor)
 
             self.assertEqual(args[3].as_int, 3)
-            kernel_name = kwargs[0].as_string
-            symbol_name = kernel_name.rpartition("_")[0]
-            self.assertEqual(symbol_name, "add_kernel")  # symbol name
+
+            self.assertEqual(kwargs[0].as_string, "add_kernel")  # name
             self.assertEqual(kwargs[1].as_ints, [1, 1, 1])  # grid
             self.assertEqual(kwargs[2].as_ints, [2])  # output indices
             self.assertEqual(
