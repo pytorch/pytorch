@@ -270,7 +270,7 @@ else:
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 backend_cache = self.get_backend_from_cache(
-                    layout, backend_override[dim][1]
+                    layout[dim], backend_override[dim][1]
                 )
                 if backend_cache is not None:
                     dim_group_names.append(backend_cache)
@@ -282,7 +282,7 @@ else:
                     )
                 if dim_group_names[-1] is not None:
                     self.update_backend_cache(
-                        layout, dim_group_names[-1], backend_override[dim][1]
+                        layout[dim], dim_group_names[-1], backend_override[dim][1]
                     )
             if any(n is None for n in dim_group_names):
                 assert all(n is None for n in dim_group_names)
