@@ -364,15 +364,11 @@ def register_dataclass(
 
     def _unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         flat_names, none_names = context
-        return cls(
-            **dict(zip(flat_names, values, strict=True)), **dict.fromkeys(none_names)
-        )
+        return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
     def _flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = _flatten_fn(obj)  # type: ignore[misc]
-        return [
-            (GetAttrKey(k), v) for k, v in zip(flat_names, flattened, strict=True)
-        ], flat_names
+        return [(GetAttrKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
     _private_register_pytree_node(
         cls,
@@ -792,11 +788,11 @@ def _dict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
     # pyrefly: ignore [bad-return]
-    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
+    return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
 def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
-    return dict(zip(context, values, strict=True))
+    return dict(zip(context, values))
 
 
 def _namedtuple_flatten(d: NamedTuple) -> tuple[list[Any], Context]:
@@ -809,10 +805,7 @@ def _namedtuple_flatten_with_keys(
     values, context = _namedtuple_flatten(d)
     # pyrefly: ignore [bad-return]
     return (
-        [
-            (GetAttrKey(field), v)
-            for field, v in zip(context._fields, values, strict=True)
-        ],
+        [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
         context,
     )
 
@@ -861,14 +854,14 @@ def _ordereddict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
     # pyrefly: ignore [bad-return]
-    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
+    return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
 def _ordereddict_unflatten(
     values: Iterable[T],
     context: Context,
 ) -> OrderedDict[Any, T]:
-    return OrderedDict((key, value) for key, value in zip(context, values, strict=True))
+    return OrderedDict((key, value) for key, value in zip(context, values))
 
 
 _odict_flatten = _ordereddict_flatten
@@ -886,9 +879,7 @@ def _defaultdict_flatten_with_keys(
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
     # pyrefly: ignore [bad-return]
-    return [
-        (MappingKey(k), v) for k, v in zip(dict_context, values, strict=True)
-    ], context
+    return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
 
 
 def _defaultdict_unflatten(
@@ -1206,7 +1197,7 @@ class TreeSpec:
                             f"expected {treespec.context!r}, but got {context!r}.",  # namedtuple type mismatch
                         )
 
-            for subtree, subspec in zip(children, treespec.children_specs, strict=True):
+            for subtree, subspec in zip(children, treespec.children_specs):
                 helper(subspec, subtree, subtrees)
 
         subtrees: list[PyTree] = []
@@ -1770,7 +1761,7 @@ def _broadcast_to_and_flatten(
 
     # Recursively flatten the children
     result: list[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children_specs, strict=True):
+    for child, child_spec in zip(child_pytrees, treespec.children_specs):
         flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
         if flat is not None:
             result += flat
@@ -2072,9 +2063,9 @@ def tree_map_with_path(
         ``xs`` is the tuple of values at corresponding nodes in ``rests``.
     """
     keypath_leaves, treespec = tree_flatten_with_path(tree, is_leaf)
-    keypath_leaves = list(zip(*keypath_leaves, strict=True))
+    keypath_leaves = list(zip(*keypath_leaves))
     all_keypath_leaves = keypath_leaves + [treespec.flatten_up_to(r) for r in rests]
-    return treespec.unflatten(func(*xs) for xs in zip(*all_keypath_leaves, strict=True))
+    return treespec.unflatten(func(*xs) for xs in zip(*all_keypath_leaves))
 
 
 def keystr(kp: KeyPath) -> str:

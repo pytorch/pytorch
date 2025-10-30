@@ -348,7 +348,7 @@ def _do_bench_using_profiling(
         ]
     ) as p:
         # Benchmark
-        for i in range(n_repeat):
+        for _ in range(n_repeat):
             # we clear the L2 cache before each run
             cache.zero_()
             # record time of `fn`
