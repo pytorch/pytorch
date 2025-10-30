@@ -443,10 +443,16 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.S(-1)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
-        self.assertEqual(cexpr(expr), "(-1LL)*s1") if sys.platform in [
-            "darwin",
-            "win32",
-        ] else "(-1L)*s1"
+        self.assertEqual(
+            cexpr(expr),
+            "(-1LL)*s1"
+            if sys.platform
+            in [
+                "darwin",
+                "win32",
+            ]
+            else "(-1L)*s1",
+        )
 
         s0 = sympy.Symbol("s0", integer=True)
         s2 = sympy.S(2)
