@@ -101,14 +101,6 @@ core_concepts
 :maxdepth: 1
 :hidden:
 
-
-export_concepts
-```
-
-```{toctree}
-:maxdepth: 1
-:hidden:
-
 performance
 ```
 

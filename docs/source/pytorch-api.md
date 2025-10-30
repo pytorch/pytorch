@@ -31,7 +31,7 @@ mtia
 mtia.memory
 meta
 torch.backends <backends>
-user_guide/torch_compiler/export
+user_guide/torch_compiler/export/api_reference
 torch.distributed <distributed>
 torch.distributed.tensor <distributed.tensor>
 torch.distributed.algorithms.join <distributed.algorithms.join>
@@ -44,7 +44,7 @@ torch.distributed.pipelining <distributed.pipelining>
 torch.distributed._symmetric_memory <symmetric_memory>
 torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
-user_guide/torch_compiler/torch.compiler
+torch.compiler_api
 torch.fft <fft>
 torch.func <func>
 futures
