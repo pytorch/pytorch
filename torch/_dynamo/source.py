@@ -1085,18 +1085,18 @@ class CurrentStreamSource(Source):
     device: device_type
 
     def name(self) -> str:
-        return f"___get_current_stream({self.device})"
+        return f"___get_current_stream(torch.device('{self.device.type}', {self.device.index}))"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        num_args = 1
         codegen.add_push_null(
             lambda: codegen.load_import_from(utils.__name__, "get_current_stream")
         )
-        num_args = 1
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "device"))
         codegen.extend_output([codegen.create_load_const(self.device.type)])
         if self.device.index is not None:
             num_args += 1
             codegen.extend_output([codegen.create_load_const(self.device.index)])
-        codegen.add_push_null(lambda: codegen.load_import_from("torch", "device"))
         codegen.extend_output(create_call_function(num_args, False))
         codegen.extend_output(create_call_function(1, False))
 

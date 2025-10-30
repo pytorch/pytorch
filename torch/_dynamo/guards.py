@@ -132,6 +132,7 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
     DictGetItemSource,
@@ -1448,6 +1449,13 @@ class GuardBuilder(GuardBuilderBase):
                 python_lambda=lambda _: get_torch_function_mode_stack_at(
                     source._get_index()
                 ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CurrentStreamSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: get_current_stream(source.device),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
