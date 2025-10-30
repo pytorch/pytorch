@@ -254,6 +254,11 @@ def _extract_arch_version(arch_string: str) -> int:
 
 
 class CompatInterval:
+    """
+    Defines a range of compute capabilities starting at a given
+    version and going up to the end of that major version. This
+    also allows excluding specific versions from the range.
+    """
     def __init__(self, start, exclude: Optional[set[int]] = None):
         self.major, self.minor = start // 10, start % 10
         self.exclude = set() if exclude is None else exclude
@@ -273,6 +278,10 @@ class CompatInterval:
 
 
 class CompatSet:
+    """
+    A set of compute capabilities. It exists primarily to support custom
+    printing logic and is otherwise equivalent to a plain python set().
+    """
     def __init__(self, values: set[int]):
         self.values = values
 
