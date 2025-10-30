@@ -720,11 +720,20 @@ def check_shape(
 ) -> None:
     backend = get_current_backend()
     assert shape is not None
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
+
+
+def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
+    backend = get_current_backend()
+    if backend == "triton":
+        msg = "NaN or Inf found"
+        buffer.writeline(
+            f"tl.device_assert(({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf')), '{msg}')"
+        )
 
 
 class DataTypePropagation:
@@ -2624,6 +2633,9 @@ class CSEProxy(DefaultHandler):
                 assert output_shape is not None
                 check_shape(V.kernel.compute, csevar, output_shape)
 
+            if config.runtime_triton_nan_asserts:
+                check_nan(V.kernel.compute, csevar)
+
             return csevar
 
         return pytree.tree_map(do_cse, value)
@@ -2773,6 +2785,7 @@ class CSEProxy(DefaultHandler):
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
 
+    # pyrefly: ignore [bad-override]
     def partial_accumulate(self, *args: Any) -> None:
         self.kernel.partial_accumulate(*args)
 

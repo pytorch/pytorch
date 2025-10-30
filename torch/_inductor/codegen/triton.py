@@ -3579,6 +3579,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value,
         )
 
+        logical_index = None
+        if reduction_type in ("argmin", "argmax"):
+            if isinstance(value, tuple):
+                value, logical_index = value
+
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
         root_op: str
 
@@ -3709,15 +3714,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if reduction_type in ("argmax", "argmin"):
                 assert isinstance(masked_value, CSEVariable)
                 accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-
-                accumulator_index = str(
-                    self.cse.generate(
-                        self.compute,
-                        f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=accumulator_dtype,
-                        shape=masked_value.shape,
+                if logical_index:
+                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(accumulator_dtype)})"
+                else:
+                    accumulator_index = str(
+                        self.cse.generate(
+                            self.compute,
+                            f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                            dtype=accumulator_dtype,
+                            shape=masked_value.shape,
+                        )
                     )
-                )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
@@ -3788,11 +3795,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
-
+                # Use logical_index if it was unpacked, otherwise fall back to physical index
+                index_var = (
+                    f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
+                    if logical_index is not None
+                    else f"{reduction_range_prefix}index"
+                )
                 self.compute.splice(
                     f"""\
                 {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
-                    {accumulator}, {accumulator_index}, {value}, {reduction_range_prefix}index
+                    {accumulator}, {accumulator_index}, {value}, {index_var}
                 )
                 {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
                 {accumulator_index} = {where_cond(f"{accumulator_index}_next", accumulator_index)}
@@ -4586,7 +4598,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         )
                     self.body.writeline(f"{name} = {updated}")
 
-            for idx, partial_accum in enumerate(self.saved_partial_accumulate):
+            for idx in range(len(self.saved_partial_accumulate)):
                 self.body.writeline(
                     f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )
