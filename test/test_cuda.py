@@ -1168,7 +1168,7 @@ print(t.is_pinned())
 
         stream_record = torch.cuda.Stream()
         with torch.cuda.stream(stream_record):
-            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+            torch.cuda._busy_wait_for_flag()
 
         view.record_stream(stream_record)
 
@@ -1181,6 +1181,7 @@ print(t.is_pinned())
 
         with torch.cuda.stream(stream_alloc):
             try_realloc = torch.cuda.FloatTensor([10, 10])
+        torch.cuda._clear_flag()
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
@@ -4389,7 +4390,7 @@ class TestCudaMallocAsync(TestCase):
                 torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._set_memory_metadata("metadata test")
-                torch.cuda.memory._record_memory_history(context="all")
+                torch.cuda.memory._record_memory_history(context=context)
                 x = torch.rand(3, 4, device="cuda")
                 del x
                 torch.cuda.memory.empty_cache()

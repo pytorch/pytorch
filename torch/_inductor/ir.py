@@ -5849,7 +5849,7 @@ class ExternKernel(InputsKernel):
         if shape_env := V.fake_mode.shape_env:
             node_meta_val = V.current_node.meta.get("val")
             ctx: AbstractContextManager[None] = nullcontext()
-            if V.current_node.target == torch._higher_order_ops.effects.with_effects:
+            if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
@@ -8770,9 +8770,7 @@ class WhileLoop(ExternKernel):
         seen_buffers: OrderedSet[int] = OrderedSet()
         result: list[Union[IRNode, TensorBox, ShapeAsConstantBuffer]] = []
 
-        for i, (original_input, unwrapped_buffer) in enumerate(
-            zip(carried_inputs, unwrapped_buffers)
-        ):
+        for original_input, unwrapped_buffer in zip(carried_inputs, unwrapped_buffers):
             if id(unwrapped_buffer) in seen_buffers:
                 result.append(ExternKernel.copy_input(original_input))
             else:
