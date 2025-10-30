@@ -124,6 +124,8 @@ class TestCase(TorchTestCase):
         return super().assertExpectedInline(*args, **kwargs)
 
 
+# NB: multiple inheritance with LoggingTestCase is possible - this should be fine
+# since there is no overlap in overridden methods.
 class TestCaseWithNestedGraphBreaks(TestCase):
     def setUp(self) -> None:
         super().setUp()

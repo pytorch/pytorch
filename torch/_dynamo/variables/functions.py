@@ -353,11 +353,14 @@ class BaseUserFunctionVariable(VariableTracker):
                 result = True
         return variables.ConstantVariable.create(result)
 
-    def inspect_parameter_names(self):
-        return list(inspect.signature(self.get_function()).parameters)
-
     def closure_vars(self, tx):
         return {}
+
+    # Override to set whether or not nested graph breaks should be allowed
+    # if we create an inlining tx for this BaseUserFunctionVariable.
+    # See symbolic_convert.py for where this function is called.
+    def should_allow_nested_graph_breaks(self):
+        return True
 
 
 class UserFunctionVariable(BaseUserFunctionVariable):
@@ -745,6 +748,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
+
+    # no nested graph breaks in generators
+    def should_allow_nested_graph_breaks(self):
+        return False
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
@@ -1149,9 +1156,6 @@ class UserMethodVariable(UserFunctionVariable):
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
         return super().call_function(tx, args, kwargs)
-
-    def inspect_parameter_names(self):
-        return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name == "__self__":
