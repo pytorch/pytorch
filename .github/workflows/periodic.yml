@@ -204,37 +204,6 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-build:
-    name: linux-jammy-rocm-py3.10
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
-      test-matrix: |
-        { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi250.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi250.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi250.4", owners: ["module:rocm", "oncall:distributed"] },
-        ]}
-    secrets: inherit
-
-  linux-jammy-rocm-py3_10-test:
-    permissions:
-      id-token: write
-      contents: read
-    name: linux-jammy-rocm-py3.10
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-jammy-rocm-py3_10-build
-      - target-determination
-    with:
-      build-environment: linux-jammy-rocm-py3.10
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
-    secrets: inherit
-
   linux-jammy-cuda12_8-py3-gcc11-slow-gradcheck-build:
     name: linux-jammy-cuda12.8-py3-gcc11-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
