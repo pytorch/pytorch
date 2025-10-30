@@ -142,10 +142,7 @@ class _ConvNd(Module):
             self._reversed_padding_repeated_twice = [0, 0] * len(kernel_size)
             if padding == "same":
                 for d, k, i in zip(
-                    dilation,
-                    kernel_size,
-                    range(len(kernel_size) - 1, -1, -1),
-                    strict=False,
+                    dilation, kernel_size, range(len(kernel_size) - 1, -1, -1)
                 ):
                     total_padding = d * (k - 1)
                     left_pad = total_padding // 2
