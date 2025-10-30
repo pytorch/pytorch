@@ -142,7 +142,6 @@ class ReplicateTest(MultiProcessTestCase):
             7. output
 
         In the layers we have Transformer Blocks
-
         1. Transformer Block
             2. attention_norm
             3. Attention
