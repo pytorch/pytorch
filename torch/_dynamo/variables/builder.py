@@ -178,7 +178,6 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    StreamContextVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -259,7 +258,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
@@ -1054,6 +1053,7 @@ class VariableBuilder:
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
+            # This refers to the device-agnostic torch.Stream
             self.install_guards(GuardBuilder.TYPE_MATCH)
             index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
@@ -1812,7 +1812,7 @@ class VariableBuilder:
         ]
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if isinstance(value, slice):
-            return SliceVariable(items, source=self.source)
+            return SliceVariable(items, self.tx, source=self.source)
         else:
             return RangeVariable(items, source=self.source)
 
@@ -2229,70 +2229,25 @@ class VariableBuilder:
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
             guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        is_dtensor = torch.distributed.is_available() and isinstance(
-            value, torch.distributed.tensor.DTensor
-        )
-        if not is_dtensor:
-            # We guard on the _local_tensor and the _spec, and therefore we dont
-            # have to guard on the outer DTensor.
-            self.install_guards(
-                functools.partial(
-                    guard_type,
-                    value=(
-                        value
-                        if isinstance(source, NumpyTensorSource)
-                        else TensorWeakRef(value)
-                    ),
-                )
+        self.install_guards(
+            functools.partial(
+                guard_type,
+                value=(
+                    value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value)
+                ),
             )
+        )
 
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
-            # Tensor subclass guards are very expensive because they are
-            # implemented in Python. Since DTensor is PyTorch-maintained class,
-            # we can skip a lot of these guards.
-            if is_dtensor:
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-
-                # The inner tensor name is always _local_tensor. If its not, we
-                # raise assertion to update the check accordingly.
-                inner_tensor_name = value.__tensor_flatten__()[0][0]
-                if inner_tensor_name != "_local_tensor":
-                    raise RuntimeError(
-                        "Expecting Dtensor inner tensor name to be _local_tensor"
-                    )
-
-                # Now selectively guard on the flattening context
-                flattening_ctx = value.__tensor_flatten__()[1]
-                # This is supposed to be (self._spec, self.requires_grad)
-                if not (
-                    len(flattening_ctx) == 2
-                    and flattening_ctx[0] == value._spec
-                    and flattening_ctx[1] == value.requires_grad
-                ):
-                    # If not, raise an assertion to update to the new guards
-                    raise RuntimeError(
-                        "Expecting Dtensor flattening ctx to be _spec, requires_grad"
-                    )
-                # Guard on the dtensor spec
-                install_guard(
-                    AttrSource(self.source, "_spec").make_guard(
-                        GuardBuilder.DTENSOR_SPEC_MATCH
-                    )
-                )
-                # Move this to C++
-                install_guard(
-                    AttrSource(self.source, "requires_grad").make_guard(
-                        GuardBuilder.EQUALS_MATCH
-                    )
-                )
-            else:
-                self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-                install_guard(
-                    SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
-                )
+            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            install_guard(
+                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
 
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
