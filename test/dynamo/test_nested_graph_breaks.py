@@ -874,6 +874,30 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.frame_count, 8)
         self.assertEqual(cnts.op_count, 10)
 
+    def test_functorch_with_nested_graph_break(self):
+        def f1(x):
+            x = x * 2
+            torch._dynamo.graph_break()
+            return x * 4
+
+        def f2(x):
+            return (f1(x * 8) * 16).sum()
+
+        def f3(x):
+            return torch.func.grad(f2)(x * 32) * 64
+
+        def f4(x):
+            return f3(x * 128) * 256
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        x = torch.randn(3)
+        actual = f4(x)
+        expected = torch.compile(f4, backend=cnts, fullgraph=False)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
