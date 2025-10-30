@@ -77,6 +77,8 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
+    from ..ir import ExternKernel
+    from ..scheduler import BaseSchedulerNode
     from .wrapper_fxir import FxConverter
 
 
@@ -416,6 +418,19 @@ class CommentLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class DynamicScalarLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.DynamicScalar
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_dynamic_scalar(self.node)
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_dynamic_scalar
+
+
+@dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
 
@@ -515,6 +530,7 @@ class ExternKernelOutLine(WrapperLine):
             node.output_view.codegen_reference() if node.output_view else None,
             args,
             device,
+            self.node.get_stack_traces(),
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1115,6 +1131,7 @@ class PythonWrapperCodegen(CodeGen):
         return PythonWrapperCodegen()
 
     def set_launcher_fn_name(self) -> None:
+        # pyrefly: ignore [bad-assignment]
         self.launcher_fn_name = "call"
 
     def write_constant(self, name: str, hashed: str) -> None:
@@ -1251,14 +1268,17 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
+        # pyrefly: ignore [bad-assignment]
         meta = repr(meta)
         if meta not in self._metas:
             var = f"meta{len(self._metas)}"
+            # pyrefly: ignore [unsupported-operation]
             self._metas[meta] = var
             self.header.writeline(f"{var} = {meta}")
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(f"{var} = {meta}")
                 self._meta_vars.add(var)
+        # pyrefly: ignore [index-error]
         return self._metas[meta]
 
     @cache_on_self
@@ -1537,6 +1557,7 @@ class PythonWrapperCodegen(CodeGen):
         out_view: Optional[str],
         args: list[str],
         device: str,
+        stack_traces: Optional[OrderedSet[str]] = None,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -1694,6 +1715,7 @@ class PythonWrapperCodegen(CodeGen):
             with self.set_writeline(self.wrapper_call.writeline):
                 for line in self.lines:
                     if isinstance(line, WrapperLine):
+                        # pyrefly: ignore [missing-attribute]
                         line.codegen(self.wrapper_call)
                     else:
                         self.wrapper_call.writeline(line)
@@ -2055,6 +2077,9 @@ class PythonWrapperCodegen(CodeGen):
         self.unbacked_symbol_decls.add(str(node.unbacked_size_symbol))
 
     def codegen_dynamic_scalar(self, node):
+        self.writeline(DynamicScalarLine(self, node))
+
+    def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         if len(node.keypath) == 0:
             self.writeline(f"{node.sym} = {data}.item()")
@@ -2311,8 +2336,10 @@ class PythonWrapperCodegen(CodeGen):
                 else:
                     add_to_signature(idx, arg)
 
-        for idx, key in enumerate(kernel.arg_names):
-            if idx in kernel.constexprs:
+        arg_names = [p.name for p in kernel.params]
+        constexprs = [p.num for p in kernel.params if p.is_constexpr]
+        for idx, key in enumerate(arg_names):
+            if idx in constexprs:
                 add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
                 continue
 
@@ -2626,7 +2653,6 @@ class PythonWrapperCodegen(CodeGen):
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
                         kernel.save_gpu_kernel(
-                            grid=(0, 0, 0),   # use dummy grid
                             stream="stream",  # use dummy stream
                             launcher=kernel.launchers[0],
                         )
@@ -2774,13 +2800,18 @@ class PythonWrapperCodegen(CodeGen):
                 self,
                 kernel_name=kernel_name,
                 call_args=call_args,
+                # pyrefly: ignore [bad-argument-type]
                 raw_keys=raw_keys,
+                # pyrefly: ignore [bad-argument-type]
                 raw_args=raw_args,
+                # pyrefly: ignore [bad-argument-type]
                 arg_types=arg_types,
                 triton=triton,
+                # pyrefly: ignore [bad-argument-type]
                 triton_meta=triton_meta,
                 device=device,
                 graph_name=V.graph.name,
+                # pyrefly: ignore [bad-argument-type]
                 original_fxnode_name=original_fxnode_name,
             )
         )
@@ -2901,6 +2932,7 @@ class PythonWrapperCodegen(CodeGen):
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
+                # pyrefly: ignore [no-matching-overload]
                 zip(call_args, arg_types, raw_keys, raw_args)
             ):
                 key = None
@@ -3572,16 +3604,12 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline("if not should_loop:")
         if stack_output:
             # Handle the case when loop never executes
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
                 self.writeline(ExitSubgraphLine(self))
         else:
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.clone()")
                 self.writeline(ExitSubgraphLine(self))
@@ -3662,6 +3690,29 @@ class PythonWrapperCodegen(CodeGen):
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
 
+    def write_kernel_context_guard(
+        self,
+        kernel_name: str,
+        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    ):
+        return
+
+    def write_kernel_context_guard_begin(
+        self,
+    ):
+        """
+        Mark the beginning of kernel context guard
+        """
+        return
+
+    def write_kernel_context_guard_end(
+        self,
+    ):
+        """
+        Mark the end of kernel context guard
+        """
+        return
+
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     """
@@ -3688,6 +3739,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
+        # pyrefly: ignore [bad-assignment]
         self.launcher_fn_name = self.subgraph_name
 
     def write_header(self) -> None:

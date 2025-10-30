@@ -20,8 +20,8 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/cuda/tunable/Tunable.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/StorageImpl.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -422,16 +422,6 @@ PyObject* THCPModule_cudaCachingAllocator_enable(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
-    PyObject* _unused,
-    PyObject* env) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::setAllocatorSettings(
-      THPUtils_unpackString(env));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
@@ -462,6 +452,24 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   {
     pybind11::gil_scoped_release no_gil;
     at::cuda::sleep(unpacked_cycles);
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::busy_wait_for_flag();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cudaClearFlag(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::clear_flag();
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -765,6 +773,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str frames_s = "frames";
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
+  py::str user_metadata_s = "user_metadata";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -882,6 +891,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       trace_entry[stream_s] = int64_t(te.stream_);
       trace_entry[time_us_s] = te.time_.t_;
       trace_entry[compile_context_s] = te.compile_context_;
+      trace_entry[user_metadata_s] = te.user_metadata_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -1025,7 +1035,7 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static void registerCudaDeviceProperties(PyObject* module) {
-  // Add _cudaDevicePropertires class to torch._C
+  // Add _cudaDeviceProperties class to torch._C
   auto m = py::handle(module).cast<py::module>();
   // CUuuid is defined in either cuda.h or driver_types.h
   // hipified to hipUUID which is defined in hip_runtime_api.h
@@ -1135,6 +1145,14 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
+
+  m.def("_cuda_setMemoryMetadata", [](const std::string& metadata) {
+    c10::cuda::CUDACachingAllocator::setUserMetadata(metadata);
+  });
+
+  m.def("_cuda_getMemoryMetadata", []() {
+    return c10::cuda::CUDACachingAllocator::getUserMetadata();
   });
 
   m.def("_cuda_get_conv_benchmark_empty_cache", []() {
@@ -2067,10 +2085,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaCachingAllocator_enable,
      METH_O,
      nullptr},
-    {"_cuda_cudaCachingAllocator_set_allocator_settings",
-     THCPModule_cudaCachingAllocator_set_allocator_settings,
-     METH_O,
-     nullptr},
     {"_cuda_getAllocatorBackend",
      THCPModule_getAllocatorBackend,
      METH_NOARGS,
@@ -2078,6 +2092,11 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
+    {"_cuda_busy_wait_for_flag",
+     THCPModule_cudaBusyWaitForFlag,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_clear_flag", THCPModule_cudaClearFlag, METH_NOARGS, nullptr},
     {"_cuda_lock_mutex", THCPModule_cudaLockMutex, METH_NOARGS, nullptr},
     {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS, nullptr},
     {"_cuda_set_sync_debug_mode",

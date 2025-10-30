@@ -706,7 +706,7 @@ def check_model_gpu(
     if check_lowp:
 
         def downcast_fn(x):
-            if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.float:
                 return x
             return torch.empty_strided(
                 x.size(), x.stride(), device=GPU_TYPE, dtype=torch.half
@@ -4694,7 +4694,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=False if torch.version.hip else True,
+            reference_in_float=not torch.version.hip,
         )
 
     def test_convolution2(self):
@@ -4728,7 +4728,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=False if torch.version.hip else True,
+            reference_in_float=not torch.version.hip,
         )
 
     @skip_if_gpu_halide
@@ -4779,7 +4779,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=False if torch.version.hip else True,
+            reference_in_float=not torch.version.hip,
         )
 
     def test_conv2d_channels_last(self):
@@ -12986,7 +12986,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         res = torch.compile(fn)(20)
-        self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
+        self.assertTrue(torch.all((res >= 0) & (res < 10)).item())
 
     @torch._inductor.config.patch(force_shape_pad=True)
     @skip_if_gpu_halide  # correctness issue
@@ -14285,6 +14285,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("'enable_fp_fusion': False" in code)
         torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
 
+    @requires_cuda_and_triton
+    @config.patch(runtime_triton_nan_asserts=True)
+    def test_nan_assert_inside_triton_kernel(self):
+        def fn(x):
+            x = x - 1
+            # Uncomment the following line can trigger the failure of
+            # the device size assertion
+            # x = torch.log(x)
+            return torch.where(x.isnan(), 3.14, x)
+
+        compiled = torch.compile(fn)
+        x = torch.randn(4096, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(compiled, x)
+        self.assertTrue("'NaN or Inf found'" in code)
+        torch.testing.assert_close(out, fn(x))
+
     @skip_if_cpp_wrapper("skip cpp wrapper")
     @requires_cuda_and_triton
     def test_repeat_interleave_decomposition_has_clamp(self):
@@ -14311,11 +14327,53 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(torch.all(result < 2560).item())
 
         code_str = "\n".join(code)
+        if torch.version.hip:
+            triton_str = "tl.minimum"
+        else:
+            triton_str = "triton_helpers.minimum"
         self.assertIn(
-            "triton_helpers.minimum",
+            triton_str,
             code_str,
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
+
+    @skip_if_halide
+    @requires_cuda_and_triton
+    @skip_if_cpp_wrapper("skip cpp wrapper")
+    def test_triton_argmin_argmax_transpose_logical_index(self):
+        def fn(x):
+            x.tan_()
+            x = x.t()
+            return x.argmin()
+
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
+
+        def fn(x):
+            return (x.t().argmin(), x.t().argmax())
+
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(128, 64, device=GPU_TYPE),))
+        self.common(fn, (torch.randn(8, 6, device=GPU_TYPE, dtype=torch.float16),))
+
+        def fn(x):
+            # Permute: (A, B, C) -> (C, A, B)
+            permuted = x.permute(2, 0, 1)
+            return (permuted.argmin(), permuted.argmax())
+
+        self.common(fn, (torch.randn(4, 6, 8, device=GPU_TYPE),))
+
+        def fn(x):
+            # sliced tensor with gaps in memory
+            sliced = x[:, :10]
+            return (sliced.argmin(), sliced.argmax())
+
+        self.common(fn, (torch.randn(10, 20, device=GPU_TYPE),))
+
+        # Test column major passed as input
+        def fn(x):
+            return (x.argmin(), x.argmax())
+
+        self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
 
     # end of class CommonTemplate - add new tests here
 

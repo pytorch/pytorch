@@ -414,6 +414,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model = Model().to(self.device)
+            model.emb.weight.requires_grad = False
             model_compiled = torch.compile(model)
             inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
             out = model_compiled(inp, self.world_size, **self.get_world_trs())
@@ -1340,13 +1341,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3  # It generates 2 getattr to unpack the array
         assert same(out, correct)
 
+    # This doesn't work in all cases, and now we properly loudly error.
+    # See: https://github.com/pytorch/pytorch/issues/151240
+    # When differentiable funcols are implemented can revert.
+    @unittest.expectedFailure
     def test_backwards(self):
-        """
-        It's probably not that common to need backwards support for collectives.
-
-        However, I wanted to at least see if it was possible to support it as a design goal.
-        """
-
         def func(inp):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
@@ -1802,6 +1801,63 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         out = compiled(*inputs, **self.get_world_trs())
         correct = f(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
+    def test_all_gather_bucket_multidtype(self, bucket_mode):
+        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+
+            ag_0_w = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0, group_size, group_name
+            )
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_w)
+            ag_0_out = ag_0_out * 2
+
+            ag_1_w = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1, group_size, group_name
+            )
+
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_w)
+
+            return y, ag_0_out, ag_1_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.bfloat16)
+        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1]
+        correct = func(*inputs, **self.get_world_trs())
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": bucket_mode,
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                    count=1,
+                    exactly=True,
+                )
+                .run(code)
+            )
+        out = compiled(*inputs, **self.get_world_trs())
+        _, y_ag0, y_ag1 = out
+        assert y_ag0.dtype == ag_0.dtype
+        assert y_ag1.dtype == ag_1.dtype
+
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

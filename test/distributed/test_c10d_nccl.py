@@ -2770,11 +2770,7 @@ class WorkHookTest(MultiProcessTestCase):
         # from rank0 to other ranks. However, this is DDP's internal implementation,
         # which is subject to change in future versions.
         self.assertTrue(num_hook_fired[OpType.BROADCAST] > 0)
-        ctor_allreduce = (
-            num_hook_fired[OpType.ALLREDUCE]
-            if OpType.ALLREDUCE in num_hook_fired
-            else 0
-        )
+        ctor_allreduce = num_hook_fired.get(OpType.ALLREDUCE, 0)
 
         x = torch.zeros(2, 1000).cuda(self.rank)
         ddp(x).sum().backward()
@@ -3820,27 +3816,6 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_into_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_noncontig(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        device = "cuda"
-        tensor = (
-            torch.arange(0, 16, device=torch.device(device))
-            .view(2, 2, 2, 2)
-            .to(memory_format=torch.channels_last)
-        )
-        tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
-        dist.all_gather(tensor_list, tensor)
-        for o in tensor_list:
-            self.assertEqual(o, tensor)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
@@ -4926,7 +4901,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             for p2p_op_idx, input_sizes in zip(
                 range(first_op, coalesced_op, 1), op_sizes_per_coalesce
             ):
-                # the indivudal ops inside the coalescing group the individual op metadata,
+                # the individual ops inside the coalescing group the individual op metadata,
                 # but not the timing info coming from the actual coalesced kernel
                 profiling_name = (
                     "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"
