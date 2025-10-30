@@ -45,7 +45,7 @@ See also the [general pytorch profiler guide](https://pytorch.org/tutorials/reci
 
 **Viewing chrome traces**: In the Chrome browser, open chrome://tracing and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
 
-```{figure}  _static/img/profiling_torch_compile/basic_chrome_trace.png
+```{figure} ../../_static/img/profiling_torch_compile/basic_chrome_trace.png
 :alt: Example of a basic chrome trace, visualized in the chrome://tracing viewer
 ```
 
@@ -59,7 +59,7 @@ Every kernel on the accelerator occurs after being launched by code running on t
 
 To view a flow connection, click on a GPU kernel and click “ac2g”:
 
-```{figure}  _static/img/profiling_torch_compile/ac2g.png
+```{figure}  ../../_static/img/profiling_torch_compile/ac2g.png
 :alt: Visualization in the chrome://trace viewer, showing an async flow between a kernel and its launching location.
 ```
 
@@ -121,7 +121,7 @@ See an example below:
     prof.export_chrome_trace("trace_compile.json")
 ```
 
-```{figure} _static/img/profiling_torch_compile/compilation_profiling.png
+```{figure} ../../_static/img/profiling_torch_compile/compilation_profiling.png
 :alt: A visualization in the chrome://trace viewer, showing dynamo and inductor compilation steps
 ```
 
@@ -198,7 +198,7 @@ See the synthetic example below for a demonstration:
     prof.export_chrome_trace("trace_break.json")
 ```
 
-```{figure} _static/img/profiling_torch_compile/graph_breaks_with_torch_compiled_region.png
+```{figure} ../../_static/img/profiling_torch_compile/graph_breaks_with_torch_compiled_region.png
 :alt: Visualization in the chrome://trace viewer, showing nested Torch-Compiled Region events and multiple CompiledFunction events - indicating graph breaks.
 ```
 
@@ -210,7 +210,7 @@ When an operator is launched, we expect to see a few events:
 2. Kernel launch (if dealing with a GPU kernel)
 3. GPU-side event
 
-```{figure} _static/img/profiling_torch_compile/kernel_launch_labeled.png
+```{figure} ../../_static/img/profiling_torch_compile/kernel_launch_labeled.png
 :alt: Visualization in the chrome://trace viewer, showing the three types of events - CPU-side event, kernel launch, and GPU-side event
 ```
 
@@ -228,7 +228,7 @@ When an operator is launched, we expect to see a few events:
 2. The **kernel launch** should appear s cuLaunchKernel instead of cudaLaunchKernel (cudaLaunchKernel is typical for aten ops)
 3. The **GPU-side** event should appear, named similarly to the triton kernel that was authored.
 
-```{figure} _static/img/profiling_torch_compile/noninductor_triton_kernel.png
+```{figure} ../../_static/img/profiling_torch_compile/noninductor_triton_kernel.png
 ```
 
 **Inductor-generated CPU kernels:**
@@ -243,7 +243,7 @@ When an operator is launched, we expect to see a few events:
 
 One common issue is bad GPU utilization. A quick way to identify this is if there are large gaps between kernels on the GPU:
 
-```{figure} _static/img/profiling_torch_compile/cpu_bound.png
+```{figure} ../../_static/img/profiling_torch_compile/cpu_bound.png
 :alt: Visualization in the chrome://trace viewer, showing large gaps between GPU kernels. This indicates that the model is CPU bound, likely due to overhead during kernel launches.
 ```
 

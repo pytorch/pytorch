@@ -86,7 +86,7 @@ In the output, you can notice the following:
 
    Loading the trace into Chrome (visit chrome://tracing in the chrome browser and load the file as the UI suggested) will show UI as follows:
 
-   ```{image} _static/img/inductor_profiling/trace.png
+   ```{image} ../../_static/img/inductor_profiling/trace.png
    ```
 
    You can zoom in and out to check the profile.
@@ -124,7 +124,7 @@ In the output, you can notice the following:
 * We also call zoom into a certain category of kernels. For example,
   let’s check reduction kernels:
 
-  ```{image} _static/img/inductor_profiling/kernel_breakdown.png
+  ```{image} ../../_static/img/inductor_profiling/kernel_breakdown.png
   ```
 
   We can see an ordered table of execution time for each individual
@@ -149,7 +149,7 @@ We can lookup the kernel name in the ``fwd.py``, and find comment like:
 **# kernel path:
 /tmp/torchinductor_shunting/jk/cjk2vm3446xrk7rth7hr6pun7xxo3dnzubwcn6ydrpifal4eykrz.py**
 
-```{image} _static/img/inductor_profiling/inductor_code.png
+```{image} ../../_static/img/inductor_profiling/inductor_code.png
 ```
 
 I’ll rename it k.py for convenience. Here is a paste for this [file](https://gist.github.com/shunting314/96a0afef9dce53d6357bf1633094f358).
@@ -159,7 +159,7 @@ benchmark.
 
 Run ``k.py`` directly will report its execution time and bandwidth:
 
- ```{image} _static/img/inductor_profiling/terminal_printout.png
+ ```{image} ../../_static/img/inductor_profiling/terminal_printout.png
  ```
 
 We can check if max-autotune helps this kernel, by running:
