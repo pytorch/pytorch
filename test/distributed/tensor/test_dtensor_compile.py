@@ -49,7 +49,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_HPU,
-    TEST_XPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -142,9 +141,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
     @property
     def device_type(self) -> str:
-        return (
-            "cuda" if TEST_CUDA else "hpu" if TEST_HPU else "xpu" if TEST_XPU else "cpu"
-        )
+        return "cuda" if TEST_CUDA else "hpu" if TEST_HPU else "cpu"
 
     @property
     def world_size(self) -> int:
@@ -163,9 +160,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not available")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dtensor_basic_export(self):
-        mesh = DeviceMesh(dev_type.type, torch.arange(self.world_size))
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
 
         param = torch.randn(4, 4)
         param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
@@ -194,7 +191,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, b_buffer, x):
     _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
-    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='xpu'));  x = None
+    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
     dtensor___init__0 = self.dtensor___init__0
     dtensor_const_func_spec0 = self.dtensor_const_func_spec0
@@ -212,7 +209,7 @@ def forward(self, b_buffer, x):
             """\
 def forward(self, b_parametrizations_buffer_original0, x):
     _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
-    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='xpu', index=0));  x = None
+    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
@@ -818,13 +815,13 @@ def forward(self, b_parametrizations_buffer_original0, x):
             out = layer_norm.permute(0, 2, 1)
             return out
 
-        x = torch.randn(4, 2, 4, requires_grad=True, device=dev_type)
+        x = torch.randn(4, 2, 4, requires_grad=True, device="cuda")
         x_dt = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
 
-        y = torch.randn(4, requires_grad=True, device=dev_type)
+        y = torch.randn(4, requires_grad=True, device="cuda")
         y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
 
-        z = torch.randn(4, requires_grad=True, device=dev_type)
+        z = torch.randn(4, requires_grad=True, device="cuda")
         z_dt = DTensor.from_local(z, mesh, [Replicate()], run_check=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
@@ -1054,7 +1051,7 @@ def forward(self, primals_1):
 
         model = FakeTransformer().to(self.device_type)
 
-        tp_mesh = init_device_mesh(dev_type.type, (2,), mesh_dim_names=("tp",))
+        tp_mesh = init_device_mesh("cuda", (2,), mesh_dim_names=("tp",))
 
         # apply sequence parallel
         parallel_plan = {

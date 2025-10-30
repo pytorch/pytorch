@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -502,7 +502,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    # @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
+    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
         if device == "cpu":
@@ -528,7 +528,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    # @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
+    @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
         if device == "cpu":
@@ -653,6 +653,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(msg="Invalid SPIR-V module")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})

@@ -270,7 +270,6 @@ class TestAOTInductorPackage(TestCase):
         TEST_CUDA and _get_torch_cuda_version() < (12, 6),
         "Test is only supported on CUDA 12.6+",
     )
-    # @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
@@ -317,7 +316,6 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(
         torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
->>>>>>> b488f39c425 (fix failed case)
         "Test is only supported on CUDA 12.6+",
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
@@ -364,8 +362,7 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(torch.allclose(actual, expected))
 
     @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different

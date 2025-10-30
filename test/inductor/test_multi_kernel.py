@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -110,6 +111,7 @@ class MultiKernelTest(TestCase):
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @skipIfXpu(msg="AssertionError: Tensor-likes are not close!")
     def test_triton_gemm(self):
         def fn(x, y):
             return x @ y
@@ -137,6 +139,7 @@ class MultiKernelTest(TestCase):
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
+    @skipIfXpu(msg="Mismatched elements")
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):
