@@ -1283,19 +1283,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="cpu"
             ),
-            # https://github.com/intel/torch-xpu-ops/issues/1950
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out_warning",
-                device_type="xpu",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="xpu",
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1459,21 +1446,6 @@ op_db: list[OpInfo] = [
             ),
             skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
-        skips=(
-            # https://github.com/intel/torch-xpu-ops/issues/1950
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out_warning",
-                device_type="xpu",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="xpu",
-            ),
-        ),
     ),
     OpInfo(
         "linalg.ldl_factor",
@@ -1601,6 +1573,7 @@ op_db: list[OpInfo] = [
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfXPU=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.int8, torch.uint8),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,
@@ -2031,19 +2004,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             skipCPUIfNoLapack,
-            # https://github.com/intel/torch-xpu-ops/issues/1950
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out_warning",
-                device_type="xpu",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="xpu",
-            ),
         ),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
         supports_forward_ad=True,
@@ -2224,7 +2184,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_svd",
         decomp_aten_name="_linalg_svd",
         dtypes=floating_and_complex_types(),
-        dtypesIfXPU=floating_types(),
         # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_fwgrad_bwgrad=True,
@@ -2311,7 +2270,6 @@ op_db: list[OpInfo] = [
         "linalg.tensorinv",
         ref=np.linalg.tensorinv,
         dtypes=floating_and_complex_types(),
-        dtypesIfXPU=floating_types(),
         sample_inputs_func=sample_inputs_tensorinv,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -2336,6 +2294,12 @@ op_db: list[OpInfo] = [
         decorators=[
             skipCUDAIfNoMagmaAndNoCusolver,
             skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="xpu",
+            ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                 "TestCommon",
