@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import platform
+import threading
 import uuid
 import warnings
 import weakref
@@ -32,6 +33,7 @@ __all__ = [
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
+    "GraphExecGroup",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -1069,7 +1071,7 @@ class _StopRecomputationError(Exception):
 
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, target_frame_ref: ReferenceType, gid: int):
+    def __init__(self, target_frame_ref: ReferenceType, gid: Union["GraphExecGroup", int]):
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
@@ -1140,10 +1142,14 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return holder
 
         def unpack_hook(holder):
-            gid = torch._C._current_graph_task_id()
-            if gid == -1:
-                # generate a temporary id if we trigger unpack outside of a backward call
-                gid = int(uuid.uuid4())
+            # First check if we're inside a GraphExecGroup context
+            gid: Union[GraphExecGroup, None, int] = GraphExecGroup._get_current_group()
+            if gid is None:
+                # Fallback to using the current graph task id
+                gid = torch._C._current_graph_task_id()
+                if gid == -1:
+                    # generate a temporary id if we trigger unpack outside of a backward call
+                    gid = int(uuid.uuid4())
 
             if not frame.is_recomputed[gid]:
                 ctx = frame.input_saver.grad_fn
@@ -1586,6 +1592,36 @@ def _checkpoint_without_reentrant_generator(
         )
 
     return
+
+
+class GraphExecGroup:
+    """Any checkpointed regions encountered by backward under the same instance
+    of this context manager will trigger recompute at most once, even if
+    there are multiple calls to backward.
+
+    Backward calls under the same instance of this context manager must execute
+    over non-overlapping regions of the backward graph even if retain_graph=True.
+    """
+    _tls = threading.local()
+
+    def __enter__(self) -> "GraphExecGroup":
+        current = getattr(GraphExecGroup._tls, "current_group", None)
+        if current is not None:
+            raise RuntimeError(
+                "GraphExecGroup contexts cannot be nested. "
+                f"Already inside group {GraphExecGroup._tls._current_group}"
+            )
+        GraphExecGroup._tls._current_group = self
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        GraphExecGroup._tls._current_group = None
+
+    @classmethod
+    def _get_current_group(cls) -> Optional["GraphExecGroup"]:
+        # Private API to be used by utils like AC
+        return getattr(GraphExecGroup._tls, "current_group", None)
+
 
 # Note: [compiled autograd and checkpoint unpack hook]
 # When tracing via compiled autograd, this hook will be visible to the

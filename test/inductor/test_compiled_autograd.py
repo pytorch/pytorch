@@ -5223,6 +5223,7 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_both_depths",  # queue_callback
         "test_reentrant_with_callbacks_depth_0",  # queue_callback
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
+        "test_checkpoint_graph_execution_group",  # Attempted to call function marked as skipped
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_post_accumulate_grad_hook_ordering",  # accuracy error

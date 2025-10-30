@@ -7362,6 +7362,60 @@ for shape in [(1,), ()]:
         ):
             checkpoint_sequential(modules_list, 3, a)
 
+    @skipIfTorchDynamo("GraphExecGroup does not support compile")
+    def test_checkpoint_graph_execution_group(self):
+        def run(use_graph_execution_group):
+            counter = [0]
+
+            def fn(x):
+                counter[0] += 1
+                y = x.sin().cos()
+                z = y.sin().cos()
+                return y, z
+
+            x = torch.randn(3, 3, requires_grad=True)
+
+            y, z = checkpoint(fn, x, use_reentrant=False)
+
+            group = torch.utils.checkpoint.GraphExecGroup()
+
+            ctx = contextlib.nullcontext()
+            if use_graph_execution_group:
+                ctx = group
+
+            with ctx:
+                (grad_y,) = torch.autograd.grad(
+                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3),)
+                )
+
+                (grad_x,) = torch.autograd.grad(
+                    y,
+                    inputs=(x,),
+                    grad_outputs=(grad_y,),
+                )
+
+            if use_graph_execution_group:
+                self.assertEqual(counter[0], 2)
+            else:
+                self.assertEqual(counter[0], 3)
+
+        run(use_graph_execution_group=True)
+        run(use_graph_execution_group=False)
+
+        # Test the not actually disjoint case (using retain_graph=True since
+        # otherwise autograd itself will catch this)
+        def fn(x):
+            return x.sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=True)
+        out = checkpoint(fn, x, use_reentrant=False)
+        with torch.utils.checkpoint.GraphExecGroup():
+            # Under this context, we will enforce that two backward are disjoint
+            # even if retain_graph=True.
+            out.sum().backward(retain_graph=True)
+            with self.assertRaisesRegex(RuntimeError, "was already unpacked once"):
+                out.sum().backward()
+
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
             out = x.sin().exp()
