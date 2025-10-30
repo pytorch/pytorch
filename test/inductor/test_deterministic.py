@@ -13,10 +13,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
 )
 
+from torch.testing._internal.common_utils import skipIfXpu
 
 @instantiate_parametrized_tests
 class DeterministicTest(TestCase):
@@ -38,6 +39,7 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
+    @skipIfXpu(msg="pad_mm is not enabled for XPU.")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -106,5 +108,5 @@ class DeterministicTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests()
