@@ -32,7 +32,6 @@ __all__ = [
     "define",
     "fallthrough_kernel",
     "impl_abstract",
-    "register_effectful_op",
     "register_autocast",
     "register_fake",
     "register_torch_dispatch",
