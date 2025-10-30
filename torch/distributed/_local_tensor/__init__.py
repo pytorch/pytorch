@@ -1049,3 +1049,114 @@ def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:
     """
     lm = local_tensor_mode()
     return lm.disable() if lm is not None else contextlib.nullcontext()
+
+
+import threading
+from queue import Queue
+
+
+_LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
+
+
+class LocalRunnerMode:
+    """
+    A class for running multiple SPMD functions concurrently.
+    """
+
+    runner_context = threading.local()
+
+    def __init__(
+        self, ranks: frozenset[int] | int, concurrency: int, fn: Callable[[], None]
+    ):
+        if isinstance(ranks, int):
+            ranks = frozenset(range(ranks))
+        self._ranks = ranks
+        self._fn = fn
+        self._run_lock = threading.Lock()
+        self._run_id = -1
+        self._run_cond = threading.Condition(self._run_lock)
+
+        self._recv_objects = {dst: {src: Queue() for src in ranks} for dst in ranks}
+        self._runners = [
+            threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
+            for i in range(concurrency)
+        ]
+
+    def __enter__(self) -> "LocalRunnerMode":
+        global _LOCAL_RUNNER_MODE
+        assert _LOCAL_RUNNER_MODE is None, "LocalRunnerMode is already running"
+        _LOCAL_RUNNER_MODE = self
+
+        for r in self._runners:
+            r.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        for r in self._runners:
+            r.join()
+        global _LOCAL_RUNNER_MODE
+        _LOCAL_RUNNER_MODE = None
+
+    def _run(self, id: int) -> None:
+        LocalRunnerMode.runner_context.id = id
+        # Only one thread can run at a time, hence must acquire the lock
+        try:
+            self._acquire_run_lock()
+            self._fn()
+        finally:
+            self._release_run_lock()
+
+    def _acquire_run_lock(self) -> None:
+        self._run_lock.acquire()
+        self._run_id = LocalRunnerMode.runner_context.id
+
+    def _release_run_lock(self) -> None:
+        self._run_id = -1
+        self._run_lock.release()
+
+    def _assert_holds_run_lock(self) -> None:
+        assert self._run_id == LocalRunnerMode.runner_context.id, (
+            "Calling thread does not hold the run lock"
+        )
+
+    def _get_recv_object(self, src: int, dst: int) -> object | None:
+        peers = [src] if src != -1 else list(self._ranks)
+        recv_objects = self._recv_objects[dst]
+
+        for p in peers:
+            if not recv_objects[p].empty():
+                return recv_objects[p].get()
+
+        return None
+
+    def signal_send(self, src: int, dst: int, obj: object) -> None:
+        assert obj is not None, "Cannot signal None"
+        self._assert_holds_run_lock()
+        # Only a single thread a time executes so it is safe to mutate
+        # read objects queue (executing thread is already holdin the lock)
+        self._recv_objects[dst][src].put(obj)
+        # Signal directly condition variable since the calling thread is already
+        # holding the lock
+        self._run_cond.notify_all()
+
+    def wait_recv(self, src: int, dst: int, post: Callable[[object], None]) -> None:
+        self._assert_holds_run_lock()
+        # Wait for the object to be available
+        while True:
+            obj = self._get_recv_object(src, dst)
+            if obj is not None:
+                post(obj)
+                # Note that we are not releasing the lock here, since the thread
+                # will continue to run and therefore must hold the lock
+            self._run_cond.wait()
+
+    @staticmethod
+    def current() -> "LocalRunnerMode":
+        global _LOCAL_RUNNER_MODE
+        assert _LOCAL_RUNNER_MODE is not None, "LocalRunnerMode is not enabled"
+        return _LOCAL_RUNNER_MODE

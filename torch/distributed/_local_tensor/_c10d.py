@@ -2,6 +2,7 @@ import functools
 import math
 import operator
 from collections.abc import Sequence
+from typing import Callable
 
 import torch
 from torch._C import ScriptObject
@@ -756,9 +757,6 @@ def _local_monitored_barrier_(
     return
 
 
-MAILBOX: dict[int, list[torch.Tensor]] = {}
-
-
 def _local_send(
     tensors: list[torch.Tensor],
     process_group_so: ScriptObject,
@@ -768,22 +766,38 @@ def _local_send(
     # "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int dst, int tag) -> __torch__.torch.classes.c10d.Work";
 
-    from . import LocalTensor
+    from . import LocalRunnerMode, LocalTensor
 
     assert len(tensors) == 1
     tensor = tensors[0]
 
     assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
-    src = getattr(tensor, "__rank__")
+    src = int(tensor.__rank__)
 
-    global MAILBOX
-    if dst not in MAILBOX:
-        MAILBOX[dst] = []
-    MAILBOX[dst].append(tensor._local_tensors[src])
+    LocalRunnerMode.current().signal_send(src, dst, tensor._local_tensors[src])
 
     work = FakeWork()
     work_so = Work.boxed(work)
     return work_so
+
+
+class RecvWork(Work):
+    def __init__(self, recv: Callable[[], None]):
+        super().__init__()
+        self._done = False
+        self._recv = recv
+
+    def is_completed(self) -> bool:
+        return self._done
+
+    def is_success(self):
+        return True
+
+    def wait(self, timeout=None):
+        if not self._done:
+            self._recv()
+            self._done = True
+        return self
 
 
 def _local_recv_(
@@ -794,8 +808,25 @@ def _local_recv_(
 ) -> ScriptObject:
     # "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int src, int tag) -> __torch__.torch.classes.c10d.Work";
+    from . import LocalRunnerMode, LocalTensor
 
-    return _local_recv_any_source_(tensors, process_group_so, tag)
+    assert len(tensors) == 1
+    tensor = tensors[0]
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+    dst = int(tensor.__rank__)
+
+    def _recv_and_store() -> None:
+        def _wait_and_store(obj: object) -> None:
+            assert isinstance(obj, torch.Tensor), "Expected to receive a Tensor"
+            assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+            tensor._local_tensors[dst] = obj
+
+        LocalRunnerMode.current().wait_recv(src, dst, _wait_and_store)
+
+    work = RecvWork(_recv_and_store)
+    work_so = Work.boxed(work)
+    return work_so
 
 
 def _local_recv_any_source_(
@@ -804,18 +835,4 @@ def _local_recv_any_source_(
     # "recv_any_source_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int tag) -> __torch__.torch.classes.c10d.Work";
 
-    from . import LocalTensor
-
-    assert len(tensors) == 1
-    tensor = tensors[0]
-
-    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
-
-    dst = getattr(tensor, "__rank__")
-
-    global MAILBOX
-    tensor._local_tensors[dst] = MAILBOX[dst].pop()
-
-    work = FakeWork()
-    work_so = Work.boxed(work)
-    return work_so
+    return _local_recv_(tensors, process_group_so, -1, tag)
