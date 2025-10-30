@@ -220,11 +220,15 @@ struct ExpandableSegment {
     // synchronization is unnecessary here because the memory is already safe to
     // release.
     for (const auto i : c10::irange(begin, end)) {
-      handles_.at(i) = std::nullopt;
+      // Note: physical_mem's destructor does NOT automatically unmap any mapped
+      // ranges. Users must explicitly call unmap on all ranges before
+      // destroying the physical_mem object.
       sycl::ext::oneapi::experimental::unmap(
           reinterpret_cast<void*>(ptr_ + segment_size_ * i),
           segment_size_,
           xpu::get_device_context());
+      // Here physical_mem object is being destructed.
+      handles_.at(i) = std::nullopt;
     }
     trimHandles();
   }
