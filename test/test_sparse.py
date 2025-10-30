@@ -1333,7 +1333,7 @@ class TestSparse(TestSparseBase):
         res_sparse = t.to_sparse().index_select(0, idx_empty)
         self.assertEqual(res_dense, res_sparse)
 
-        # non-contigous index
+        # non-contiguous index
         idx = torch.randint(low=0, high=5, size=(10, 2), device=device)[:, 0]
 
         def run_test(sizes):
