@@ -389,7 +389,8 @@ namespace detail {
 template <class T>
 struct TargetTraits<
     T,
-    std::enable_if_t<std::is_base_of_v<c10::StorageImpl, std::remove_cv_t<T>>>> {
+    std::enable_if_t<
+        std::is_base_of_v<c10::StorageImpl, std::remove_cv_t<T>>>> {
   static constexpr bool can_have_pyobject = true;
 
   static inline void incref_pyobject(c10::StorageImpl* self) noexcept {
