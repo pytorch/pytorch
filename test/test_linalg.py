@@ -7328,9 +7328,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         m2 = torch.randn(50, 25, device=device).to(dtype)
         self._test_addmm_addmv(func, M, m1, m2, activation=activation)
 
-        # vector-shaped bias and beta=1 result in epilogue fusion in CUDA
+        # vector-shaped bias (or with 1-len dims on the left from the leading dim)
+        # and beta=1 result in epilogue fusion in CUDA
         V = torch.randn(25, device=device).to(dtype)
         self._test_addmm_addmv(func, V, m1, m2, beta=1, activation=activation)
+        self._test_addmm_addmv(func, V.unsqueeze(0), m1, m2, beta=1, activation=activation)
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
@@ -7357,8 +7359,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self._test_addmm_addmv(func, M, m1, m2, transpose_out=t4, activation=activation)
 
             if t1:
-                # use vector V instead of matrix M for epilogue fusion in CUDA (doesn't depend on t1)
+                # use vector/(1 by k)-shaped V instead of matrix M for epilogue fusion in CUDA (doesn't depend on t1)
                 self._test_addmm_addmv(func, V, m1, m2, beta=1, transpose_out=t4, activation=activation,)
+                self._test_addmm_addmv(func, V.unsqueeze(0), m1, m2, beta=1, transpose_out=t4, activation=activation,)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
