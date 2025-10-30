@@ -87,7 +87,8 @@ import io
 import os
 
 import unittest
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
+from collections.abc import Callable
 
 import numpy as np
 import torch._dynamo as torchdynamo
@@ -809,7 +810,7 @@ class QuantizationTestCase(TestCase):
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
-        # weights_only=False as we sometimes get a ScriptObect here (weird)
+        # weights_only=False as we sometimes get a ScriptObject here (weird)
         loaded_dict = torch.load(b, weights_only=False)
         loaded_model.load_state_dict(loaded_dict)
         ref_out = ref_model(*x)
@@ -1246,7 +1247,7 @@ class QuantizationTestCase(TestCase):
                }
             """
             # TODO: make img_data a single example instead of a list
-            if type(inputs) == list:
+            if type(inputs) is list:
                 inputs = inputs[0]
 
             if quant_type == QuantType.QAT:
@@ -1286,7 +1287,7 @@ class QuantizationTestCase(TestCase):
                 prepare_custom_config=prepare_custom_config,
                 backend_config=backend_config,
             )
-            if not quant_type == QuantType.DYNAMIC:
+            if quant_type != QuantType.DYNAMIC:
                 prepared(*inputs)
 
             if print_debug_info:

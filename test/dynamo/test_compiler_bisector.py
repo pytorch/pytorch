@@ -218,7 +218,7 @@ class TestCompilerBisector(TestCase):
                 torch._dynamo.reset()
 
                 try:
-                    torch.testing.assert_allclose(torch.compile(op)(x), op(x))
+                    torch.testing.assert_close(torch.compile(op)(x), op(x))
                 except Exception:
                     return False
                 return True

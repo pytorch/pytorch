@@ -28,12 +28,7 @@ from torch.export.pt2_archive._package import (
     load_weights_to_pt2_contents,
 )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfRocm,
-    skipIfXpu,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -688,13 +683,13 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_duplicate_calls(self):
         options = {
             "aot_inductor.package": True,
         }
 
-        device = "cuda"
+        device = GPU_TYPE
 
         class Model1(torch.nn.Module):
             def __init__(self) -> None:
@@ -950,7 +945,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         class Bar(torch.nn.Module):
@@ -1034,7 +1029,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         # linear.weight's node name is linear_weight.

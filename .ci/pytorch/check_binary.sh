@@ -67,7 +67,7 @@ fi
 #       wheels with cxx11-abi
 
 echo "Checking that the gcc ABI is what we expect"
-if [[ "$(uname)" != 'Darwin' &&  "$(uname -m)" != "s390x" ]]; then
+if [[ "$(uname)" != 'Darwin' ]]; then
   # We also check that there are cxx11 symbols in libtorch
   #
   echo "Checking that symbols in libtorch.so have the right gcc abi"

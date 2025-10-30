@@ -12,12 +12,6 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(at::RecordScope)
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ProfilerState)
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ActiveProfilerType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ActivityType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::EventType)
-
 struct THPCapturedTraceback {
   PyObject_HEAD
   std::shared_ptr<torch::CapturedTraceback> data;
@@ -95,7 +89,7 @@ struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
       std::shared_ptr<torch::CapturedTraceback>,
       _("torch._C._profiler.CapturedTraceback"));
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     if (Py_TYPE(src.ptr()) == &THPCapturedTracebackType) {
       value = reinterpret_cast<THPCapturedTraceback*>(src.ptr())->data;
       return true;

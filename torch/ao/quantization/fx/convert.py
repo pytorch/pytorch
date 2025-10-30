@@ -3,7 +3,7 @@
 import copy
 import operator
 import warnings
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
@@ -60,6 +60,10 @@ from .utils import (
     graph_module_from_producer_nodes,
     node_arg_is_weight,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 __all__ = [
@@ -278,11 +282,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         # 2. insert choose_qparams op and update the qparams list
         with graph.inserting_before(node):
             input_node = node.args[0]
-            choose_qparams_op_inputs = [node.args[0]]
-            for key, value in qparams.items():
-                # we have quant_min, quant_max and dtype, all should be stored
-                # as literals
-                choose_qparams_op_inputs.append(value)
+            choose_qparams_op_inputs = [node.args[0]] + list(qparams.values())
             choose_qparams_node = graph.create_node(
                 "call_function", choose_qparams_op, tuple(choose_qparams_op_inputs), {}
             )
@@ -293,6 +293,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             zero_point_node = graph.create_node(
                 "call_function", operator.getitem, (choose_qparams_node, 1), {}
             )
+            # we have quant_min, quant_max and dtype, all should be stored
+            # as literals
             quant_min = qparams["_quant_min_"]
             quant_max = qparams["_quant_max_"]
             dtype = qparams["_dtype_"]
@@ -478,7 +480,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 quantize_op_inputs.append(value)
 
             quantized_node = graph.create_node(
@@ -494,7 +496,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
                 quantize_op_inputs.append(value)
@@ -593,7 +595,8 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     else:
         warnings.warn(
-            f"Unsupported node type in recursive remove dequantize: {type(arg)}"
+            f"Unsupported node type in recursive remove dequantize: {type(arg)}",
+            stacklevel=2,
         )
 
 
@@ -1193,7 +1196,8 @@ def convert(
                     _maybe_recursive_remove_dequantize(output, return_node, model.graph)
             else:
                 warnings.warn(
-                    f"Unsupported node type for output_quantized_idxs: {type(output)}"
+                    f"Unsupported node type for output_quantized_idxs: {type(output)}",
+                    stacklevel=2,
                 )
         elif node.op == "call_module":
             mod = _get_module(node, modules)

@@ -658,6 +658,7 @@ static void check_shape_forward(const at::Tensor& input,
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
   TORCH_CHECK(!params.is_dilation_neg(), "dilation should be greater than zero");
+  TORCH_CHECK(groups > 0, "expected groups to be greater than 0, but got groups=", groups);
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -688,6 +689,10 @@ static void check_shape_forward(const at::Tensor& input,
              ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
 
     for (const auto i : c10::irange(2, k)) {
+      // T could be int64_t or SymInt, Specialized numeric_limts<SymInt> in c10/core/SymInt.h
+      TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
+                  "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
+                  (std::numeric_limits<T>::max() / 2));
       input_shape.push_back(at::symint::size<T>(input, i) + 2 * padding[i-2]);
       // log new kernel size considering dilation
       kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
@@ -702,7 +707,7 @@ static void check_shape_forward(const at::Tensor& input,
       // If kernel size is incorrect
       std::ostringstream input_ss;
       std::ostringstream kernel_ss;
-      std::string separator = "";
+      std::string separator;
 
       for (int i = 0, len = input_shape.size(); i < len; ++i) {
         input_ss << separator << input_shape[i];
@@ -714,6 +719,11 @@ static void check_shape_forward(const at::Tensor& input,
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
+    for (const auto i : c10::irange(2, k)) {
+      TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
+                  "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
+                  (std::numeric_limits<T>::max() / 2));
+    }
     TORCH_CHECK(at::symint::size<T>(input, 1) == weight_sizes[0],
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],
@@ -1019,7 +1029,7 @@ static Tensor convolution_same(
 
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
-    SymDimVector output_padding(static_cast<size_t>(dim));
+    SymDimVector output_padding(dim);
     return at::convolution_symint(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
@@ -1039,7 +1049,7 @@ static Tensor convolution_same(
     }
   }
   auto padded_input = at::constant_pad_nd_symint(input, pad_nd, 0);
-  SymDimVector output_padding(static_cast<size_t>(dim));
+  SymDimVector output_padding(dim);
   return at::convolution_symint(padded_input, weight, bias, stride, padding_l,
                                 dilation, false, output_padding, groups);
 }

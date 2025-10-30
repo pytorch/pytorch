@@ -68,6 +68,7 @@ from .exc import (
 )
 from .fx_utils import count_flops_fx
 from .ir import (
+    assign_origin_node,
     Constant,
     DonatedBuffer,
     FixedLayout,
@@ -385,6 +386,9 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.device_idxs if const_module else OrderedSet()
         )
         self.device_type = "cpu"
+        self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
+            OrderedSet
+        )
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -508,7 +512,7 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
-        # state used by for Kernel.workspace
+        # state used by for KernelArgs.workspace
         self.workspace_id = itertools.count()
 
         # track the current placeholder index that we are processing
@@ -583,6 +587,7 @@ class GraphLowering(torch.fx.Interpreter):
             isinstance(node, ir.ComputedBuffer)
             and node.name in self.buffer_to_padded_size
         ):
+            # pyrefly: ignore [index-error]
             return self.buffer_to_padded_size[node.name]
         else:
             return node.get_size()
@@ -1113,6 +1118,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.constants[name].to(device_override),
             )
 
+    # pyrefly: ignore [bad-override]
     def placeholder(
         self,
         target: str,  # type: ignore[override]
@@ -1316,7 +1322,12 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+            if "should_fallback" in n.meta:
+                out = fallback_handler(target, add_to_fallback_set=False)(
+                    *args, **kwargs
+                )
+            else:
+                out = lowerings[target](*args, **kwargs)  # type: ignore[index]
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
@@ -1337,6 +1348,7 @@ class GraphLowering(torch.fx.Interpreter):
         """
         return len(t.shape) == 1 and t.shape[0] <= 8
 
+    # pyrefly: ignore [bad-override]
     def get_attr(
         self,
         target: str,  # type: ignore[override]
@@ -1394,6 +1406,7 @@ class GraphLowering(torch.fx.Interpreter):
     def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
         raise AssertionError
 
+    # pyrefly: ignore [bad-override]
     def output(
         self,
         target: str,  # type: ignore[override]
@@ -1638,7 +1651,12 @@ class GraphLowering(torch.fx.Interpreter):
                         inp_args = eager_input_vals[0]
                         inp_kwargs = eager_input_vals[1]
                         args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, inp_args, inp_kwargs
+                            # pyrefly: ignore [unbound-name]
+                            args,
+                            # pyrefly: ignore [unbound-name]
+                            kwargs,
+                            inp_args,
+                            inp_kwargs,
                         )
                     else:
                         args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
@@ -1734,7 +1752,9 @@ class GraphLowering(torch.fx.Interpreter):
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
                         if n.meta["val"]._is_view() or isinstance(
-                            result.data, ir.BaseView
+                            # pyrefly: ignore [missing-attribute]
+                            result.data,
+                            ir.BaseView,
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
@@ -1742,10 +1762,15 @@ class GraphLowering(torch.fx.Interpreter):
                                 allow_padding=allow_padding,
                             )
                         else:
-                            strides = [
-                                s.node.expr if isinstance(s, torch.SymInt) else s
-                                for s in strides
-                            ]
+                            # Fix for 0-d tensors: if result size is empty,
+                            # strides should also be empty
+                            if len(result.get_size()) == 0 and len(strides) > 0:
+                                strides = []
+                            else:
+                                strides = [
+                                    s.node.expr if isinstance(s, torch.SymInt) else s
+                                    for s in strides
+                                ]
                             result = ir.ExternKernel.require_exact_strides(
                                 result, strides, allow_padding=allow_padding
                             )
@@ -1812,6 +1837,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 ),
                             )
                     if user.op == "output":
+                        # pyrefly: ignore [missing-attribute]
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
@@ -1834,31 +1860,7 @@ class GraphLowering(torch.fx.Interpreter):
                     if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 
-        # This is not complete, but it doesn't have to be: origin_node
-        # tracking is best effort.  The logic here critically relies on direct
-        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
-        # to get views to work.  Feel free to add any extra cases as needed.
-        #
-        # Note: we can't YOLO tree_map over this result, because if there are
-        # buffers or a view involved, we might not be able to validly assign
-        # the origin_node here.
-        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
-            if isinstance(result.data.data, ir.Loops):
-                result.data.data._post_init_setattr("origin_node", n)
-            elif isinstance(result.data.data, ir.Buffer):
-                result.data.data._post_init_setattr("origin_node", n)
-                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
-                    result.data.data.data, ir.Loops
-                ):
-                    result.data.data.data._post_init_setattr("origin_node", n)
-                # Not really multi-output, can straightforwardly recurse in
-                elif (
-                    isinstance(result.data.data, ir.MultiOutput)
-                    and not result.data.data.indices
-                ):
-                    if isinstance(result.data.data.inputs[0], ir.Buffer):
-                        result.data.data.inputs[0]._post_init_setattr("origin_node", n)
-
+        assign_origin_node(result, n)
         self.register_users_of(result)
 
         new_unbacked_defs = OrderedSet[sympy.Symbol]()
@@ -2160,6 +2162,7 @@ class GraphLowering(torch.fx.Interpreter):
                             continue
                         dynamic_grid = True
                         new_grid.append(grid_outputs[visited_grids[val]])
+                    # pyrefly: ignore [bad-argument-type]
                     new_grids.append(tuple(new_grid))
 
                 if dynamic_grid:
@@ -2181,6 +2184,7 @@ class GraphLowering(torch.fx.Interpreter):
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor],
                 ) -> Union[int, float, torch.Tensor]:
                     if x is None:
+                        # pyrefly: ignore [bad-return]
                         return None
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
@@ -2383,8 +2387,9 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
-        V.debug.output_code(mod.__file__)
-        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
+        if isinstance(wrapper_code, FileBackedGraphModule):
+            V.debug.output_code(mod.__file__)
+            V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
 
         return mod
 
@@ -2420,6 +2425,9 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
+
+            V.debug.output_code(path)
+            V.debug.copy(os.path.splitext(path)[0] + ".debug")
         except Exception:
             trace_structured(
                 "inductor_output_code",
@@ -2453,11 +2461,11 @@ class GraphLowering(torch.fx.Interpreter):
 
         return mod
 
-    def get_output_names(self) -> list[str]:
+    def _get_output_names(self, graph_outputs: list[ir.IRNode]) -> list[str]:
         names = []
         shape_counter = itertools.count(0)
         none_counter = itertools.count(0)
-        for node in self.graph_outputs:
+        for node in graph_outputs:
             if isinstance(node, ir.NoneAsConstantBuffer):
                 names.append(f"{self.name}_none{next(none_counter)}")
             elif isinstance(node, ir.ShapeAsConstantBuffer):
@@ -2465,6 +2473,9 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 names.append(node.get_name())
         return names
+
+    def get_output_names(self) -> list[str]:
+        return self._get_output_names(self.graph_outputs)
 
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,

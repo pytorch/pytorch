@@ -40,6 +40,8 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    MI350_ARCH,
+    skipIfRocmArch,
     parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -221,6 +223,7 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -1541,7 +1544,7 @@ class CudaReproTests(TestCase):
                 t2 = a0.view(379, 165, 2).mean(dim=2)
                 t7 = ((((a1) - a2) - a3) - a2) - a4
                 t8 = t7.view(379, 165)
-                t11 = torch.nn.functional.gelu(a5).mean(dim=0)
+                t11 = torch.nn.functional.relu(a5).mean(dim=0)
                 t12 = t2 - t11
                 t13 = (((t2) / t8) / t11) / t12
                 return t13
@@ -2194,6 +2197,40 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(f(x_ref, y_ref), out)
 
+    def test_red_dtype_mismatch(self):
+        for per in (True, False):
+            torch._dynamo.reset()
+            if not per:
+                torch._inductor.config.triton.persistent_reductions = False
+
+            def f(arg0_1, arg1_1):
+                embedding = torch.ops.aten.embedding.default(arg1_1, arg0_1)
+                view = torch.ops.aten.view.default(embedding, [64, 3072])
+                unsqueeze = torch.ops.aten.unsqueeze.default(view, 0)
+                expand = torch.ops.aten.expand.default(unsqueeze, [576, -1, -1])
+                view_1 = torch.ops.aten.view.default(expand, [2, 8, 36, 64, 3072])
+                permute = torch.ops.aten.permute.default(view_1, [0, 1, 3, 2, 4])
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                view_2 = torch.ops.aten.view.default(clone, [2, 18432, 3072])
+                iota = torch.ops.prims.iota.default(
+                    36,
+                    start=0,
+                    step=1,
+                    dtype=torch.int64,
+                    device="cuda",
+                    requires_grad=False,
+                )
+                view_3 = torch.ops.aten.view.default(iota, [1, 36])
+                max_1 = torch.ops.aten.max.default(view_3)
+                return (max_1,)
+
+            x = torch.ones(1, 64, device="cuda", dtype=torch.int64)
+            y = torch.randn(64, 3072, device="cuda", dtype=torch.bfloat16)
+            out = f(x, y)
+            self.assertEqual(torch.compile(f)(x, y), out)
+
     @unittest.skipIf(
         not config.is_fbcode(),
         "bfloat16 atomic add is only supported in fbcode today #97016",
@@ -2600,6 +2637,53 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
 
+<<<<<<< HEAD
+    @config.patch({"emulate_divison_rounding": True})
+    def test_truediv_emulate_divison_rounding(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        @torch.compile
+        def compiled_divide(x, y):
+            return x / y
+
+        for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
+            for x_dtype in [
+                torch.float16,
+                torch.bfloat16,
+                torch.float32,
+                torch.float64,
+            ]:
+                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
+                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
+
+                torch._dynamo.reset()
+                compiled_div = Decimal(compiled_divide(x_ten, y_ten).item())
+                eager_div = Decimal((x_ten / y_ten).item())
+
+                self.assertEqual(eager_div, compiled_div)
+
+    @config.patch({"emulate_divison_rounding": False})
+    def test_truediv_base_not_bitwise_equivalent(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        y_ten = torch.tensor([y], dtype=torch.float32, device="cuda")
+        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
+
+        compile_out, code = run_and_get_code(
+            torch.compile(lambda x, y: x / y),
+            x_ten,
+            y_ten,
+        )
+        compiled_div = Decimal(compile_out.item())
+        eager_div = Decimal((x_ten / y_ten).item())
+
+        self.assertNotEqual(eager_div, compiled_div)
+        self.assertTrue("div_rn" not in code)
+=======
     @parametrize(
         "quantiles_shape,quantiles_strides,batch_size",
         [
@@ -2653,6 +2737,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             compiled = foo_compiled(x)
 
         self.assertEqual(eager, compiled)
+>>>>>>> 457da1adf408 (fix searchsorted non dense)
 
 
 if __name__ == "__main__":

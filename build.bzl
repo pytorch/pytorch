@@ -142,18 +142,6 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
     )
 
-    rules.genrule(
-        name = "version_h",
-        srcs = [
-            ":torch/csrc/api/include/torch/version.h.in",
-            ":version.txt",
-        ],
-        outs = ["torch/csrc/api/include/torch/version.h"],
-        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
-              "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
-              "--version-path $(location :version.txt) --output-path $@ ",
-        tools = ["//tools/setup_helpers:gen_version_header"],
-    )
 
 #
 # ATen generated code
