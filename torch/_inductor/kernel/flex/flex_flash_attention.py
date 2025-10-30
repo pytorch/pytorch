@@ -92,10 +92,8 @@ def patch_fixed_layout_indexer_for_cutedsl():
     Temporarily swap FixedLayout.make_indexer so CuteDSL sees colexicographic indexing.
     """
     original_make_indexer = FixedLayout.make_indexer
-    print("[CUTEDSL] Installing colexicographic FixedLayout.make_indexer override")
 
     def cutedsl_make_indexer(self):
-        print(f"[CUTEDSL] make_indexer invoked size={self.size} stride={self.stride}")
         return _fixed_indexer_cute(self.size, self.stride, self.offset)
 
     FixedLayout.make_indexer = cutedsl_make_indexer
@@ -103,7 +101,6 @@ def patch_fixed_layout_indexer_for_cutedsl():
         yield
     finally:
         FixedLayout.make_indexer = original_make_indexer
-        print("[CUTEDSL] Restored original FixedLayout.make_indexer")
 
 
 def create_placeholder_cutedsl(
@@ -144,9 +141,6 @@ def build_subgraph_buffer_cutedsl(
     index expressions match CuTe's expectations.
     """
     with patch_fixed_layout_indexer_for_cutedsl():
-        print(
-            f"[CUTEDSL] Lowering GraphModule {graph_module.__class__.__name__} with {len(args)} inputs"
-        )
         return build_subgraph_module_buffer(args, graph_module)
 
 
@@ -341,9 +335,6 @@ def create_flex_flash_attention_kernel(
             for buf in score_mod_other_buffers
         ]
 
-        print(
-            f"[CUTEDSL] Rebuilding score_mod subgraph with {len(score_mod_new_placeholders)} captured buffers"
-        )
         cutedsl_subgraph_buffer = build_subgraph_buffer_cutedsl(
             placeholder_inps + score_mod_new_placeholders, subgraph.graph_module
         )
@@ -364,17 +355,11 @@ def create_flex_flash_attention_kernel(
         for buf in mask_mod_other_buffers
     ]
 
-    print(
-        f"[CUTEDSL] Rebuilding mask_mod subgraph with {len(mask_mod_new_placeholders)} captured buffers"
-    )
     cutedsl_mask_graph_buffer = build_subgraph_buffer_cutedsl(
         mask_graph_placeholder_inps + mask_mod_new_placeholders, mask_graph.graph_module
     )
 
     with patch_fixed_layout_indexer_for_cutedsl():
-        print(
-            "[CUTEDSL] Invoking CuteDSL template.maybe_append_choice with patched indexer"
-        )
         error = flash_attention_cutedsl_template.maybe_append_choice(
             choices,
             input_nodes=input_nodes,
@@ -393,9 +378,6 @@ def create_flex_flash_attention_kernel(
 
             def render_with_patch():
                 with patch_fixed_layout_indexer_for_cutedsl():
-                    print(
-                        "[CUTEDSL] Rendering CuteDSL kernel with colexicographic indexer"
-                    )
                     return render()
 
             return render_kernel, render_with_patch
