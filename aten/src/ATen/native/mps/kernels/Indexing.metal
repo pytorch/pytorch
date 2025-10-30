@@ -31,12 +31,17 @@ OffsetT index_apply_indices(
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* strides,
-    uint num_indices) {
+    uint num_indices,
+    thread bool& error) {
   OffsetT rc = offs.x;
   for (uint i = 0; i < num_indices; i++) {
     auto idx = indices[i].indexArray[offs.y];
     if (idx < 0) {
       idx += sizes[i];
+    }
+    if (idx < 0 || idx >= sizes[i]) {
+      error = true;
+      break;
     }
     rc += idx * strides[i];
   }
@@ -55,6 +60,7 @@ kernel void index_select(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device int* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
@@ -65,8 +71,14 @@ kernel void index_select(
       indices_strides,
       ndim,
       thread_index);
+  bool error = false;
   auto input_offs = index_apply_indices<OffsetT>(
-      offs.yz, indices, index_sizes, index_strides, num_indices);
+      offs.yz, indices, index_sizes, index_strides, num_indices, error);
+  if (error) {
+    error_buffer[0] = 1;
+    output[offs.x / sizeof(T)] = 0;
+    return;
+  }
   output[offs.x / sizeof(T)] = input[input_offs / sizeof(T)];
 }
 
@@ -82,7 +94,9 @@ inline void index_put_impl(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device int* error_buffer,
     uint thread_index) {
+  bool error = false;
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
   const auto offs = index_get_offsets(
@@ -93,7 +107,11 @@ inline void index_put_impl(
       ndim,
       thread_index);
   auto output_offs = index_apply_indices<OffsetT>(
-      offs.xz, indices, index_sizes, index_strides, num_indices);
+      offs.xz, indices, index_sizes, index_strides, num_indices, error);
+  if (error) {
+    error_buffer[0] = 1;
+    return;
+  }
   output[output_offs / sizeof(T)] = input[offs.y / sizeof(T)];
 }
 
@@ -109,6 +127,7 @@ kernel void index_put(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device int* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   index_put_impl(
       output,
@@ -121,6 +140,7 @@ kernel void index_put(
       index_sizes,
       index_strides,
       ndim_nindices_numel,
+      error_buffer,
       thread_index);
 }
 
@@ -136,6 +156,7 @@ kernel void index_put_serial(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device int* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   (void)thread_index; // Suppress unused vairable varning
   for (uint idx = 0; idx < ndim_nindices_numel.z; ++idx) {
@@ -150,6 +171,7 @@ kernel void index_put_serial(
         index_sizes,
         index_strides,
         ndim_nindices_numel,
+        error_buffer,
         idx);
   }
 }
@@ -166,6 +188,7 @@ kernel void index_put_accumulate(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device int* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
@@ -176,8 +199,13 @@ kernel void index_put_accumulate(
       indices_strides,
       ndim,
       thread_index);
+  bool error = false;
   auto output_offs = index_apply_indices<OffsetT>(
-      offs.xz, indices, index_sizes, index_strides, num_indices);
+      offs.xz, indices, index_sizes, index_strides, num_indices, error);
+  if (error) {
+    error_buffer[0] = 1;
+    return;
+  }
   AtomicType<T>::atomic_add(
       reinterpret_cast<device AtomicType_t<T>*>(output),
       output_offs / sizeof(T),
@@ -197,6 +225,7 @@ kernel void index_put_accumulate(
           constant int64_t* index_sizes,                            \
           constant int64_t* index_strides,                          \
           constant uint4& ndim_nindices_numel,                      \
+          device int* error_buffer,                                 \
           uint thread_index [[thread_position_in_grid]])
 
 #define REGISTER_INDEX_OP_ALL_DTYPES(OP_NAME) \

@@ -30,6 +30,9 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   // Choose level which optimizes for GPU
   _compilationDescriptor.optimizationLevel = MPSGraphOptimizationLevel0;
   _executionDescriptor.compilationDescriptor = _compilationDescriptor;
+
+  _errorBuffer = [MPSDevice::getInstance()->device() newBufferWithLength:1024 options:MTLResourceStorageModeShared];
+  std::memset([_errorBuffer contents], 0, 1024);
 }
 
 MPSStream::~MPSStream() {
@@ -38,6 +41,8 @@ MPSStream::~MPSStream() {
   [_executionDescriptor release];
   [_compilationDescriptor release];
   _executionDescriptor = nil;
+  [_errorBuffer release];
+  _errorBuffer = nil;
   _compilationDescriptor = nil;
 
   assert(_commandBuffer == nil);
@@ -104,6 +109,7 @@ void MPSStream::commitAndWait() {
     [_prevCommandBuffer waitUntilCompleted];
     [_prevCommandBuffer release];
     _prevCommandBuffer = nil;
+    checkLastError();
   }
 
   if (_commandBuffer) {
@@ -111,6 +117,7 @@ void MPSStream::commitAndWait() {
     [_commandBuffer waitUntilCompleted];
     [_commandBuffer release];
     _commandBuffer = nil;
+    checkLastError();
   }
 }
 
@@ -264,6 +271,22 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       synchronize(_syncType);
     }
   });
+}
+
+id<MTLBuffer> MPSStream::getErrorBuffer() {
+  return _errorBuffer;
+}
+
+void MPSStream::checkLastError() {
+  auto ptr = reinterpret_cast<int*>([_errorBuffer contents]);
+  if (!ptr) {
+    return;
+  }
+  int rc = 0;
+  std::swap(rc, ptr[0]);
+  if (rc) {
+    throw c10::AcceleratorError({__func__, __FILE__, __LINE__}, rc, "Error occured on MPS device");
+  }
 }
 
 //-----------------------------------------------------------------
