@@ -5,6 +5,7 @@ import logging
 from typing import Any, Callable, Optional, Union
 
 import torch
+from torch._inductor import config
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -157,7 +158,6 @@ def _adapt_user_input_gen_fns(
 
     Uses V.graph.sizevars.size_hints() to guess best for dynamic shapes.
     """
-    from torch._inductor import config
 
     name_to_index = {name: i for i, name in enumerate(arg_names)}
     index_based_fns = {}
@@ -229,6 +229,7 @@ def autotune_custom_op(
     user_input_gen_fns: Optional[
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
+    enable_fusion: bool = False,
 ) -> Union[TensorBox, Any]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
@@ -237,6 +238,7 @@ def autotune_custom_op(
 
     This function generates multiple implementation choices for a custom operation and
     uses Inductor's autotuning system to select the best performing variant at runtime.
+    After selecting the best choice, optionally applies inline fusion.
 
     Args:
         name: Unique identifier for the autotuning operation
@@ -247,6 +249,7 @@ def autotune_custom_op(
         user_input_gen_fns: Optional custom input generators for benchmarking.
                            Maps input indices to functions that take fake tensors
                            and return real tensors for performance measurement.
+        enable_fusion: If True, apply inline fusion to the best choice
 
     Returns:
         IR node representing the optimized operation result
@@ -318,13 +321,127 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
-    return autotune_select_algorithm(
-        name=name,
-        choices=choices,
-        input_nodes=list(inputs),
-        layout=choices[0].layout,
-        input_gen_fns=input_gen_fns,
-    )
+    # Run autotuning to select the best choice
+    # Request both the result and the winning choice when epilogue fusion is enabled
+    winning_choice = None
+    if enable_fusion:
+        selected_result, winning_choice = autotune_select_algorithm(
+            name=name,
+            choices=choices,
+            input_nodes=list(inputs),
+            layout=choices[0].layout,
+            input_gen_fns=input_gen_fns,
+            return_choice=True,
+        )
+    else:
+        selected_result = autotune_select_algorithm(
+            name=name,
+            choices=choices,
+            input_nodes=list(inputs),
+            layout=choices[0].layout,
+            input_gen_fns=input_gen_fns,
+        )
+
+    # Apply inlining if epilogue fusion is enabled
+    if enable_fusion and isinstance(selected_result, TensorBox):
+        assert winning_choice is not None, (
+            "winning_choice must be set when enable_fusion is True"
+        )
+        # Only inline if the winning choice is a SubgraphChoiceCaller (has .gm attribute)
+        # ExternKernelCaller (fallback) doesn't support inlining
+        if hasattr(winning_choice, "gm"):
+            choice_desc = (
+                winning_choice.description
+                if hasattr(winning_choice, "description")
+                else str(type(winning_choice))
+            )
+            log.debug(
+                "Inlining winning choice for fusion: %s (name=%s)", choice_desc, name
+            )
+            inlined_result = _inline_custom_op_choice(winning_choice, inputs, name)
+            return inlined_result
+        else:
+            choice_name = (
+                winning_choice.name
+                if hasattr(winning_choice, "name")
+                else str(type(winning_choice))
+            )
+            log.debug(
+                "Winning choice does not support inlining (ExternKernelCaller/fallback): %s (name=%s)",
+                choice_name,
+                name,
+            )
+
+    return selected_result
+
+
+def _inline_custom_op_choice(
+    winning_choice: Any, inputs: list[Any], name: str
+) -> TensorBox:
+    """Inline the winning custom op choice by converting its FX operations to individual IR nodes.
+
+    This converts the custom op from a single ExternKernel (unfusable) to multiple ComputedBuffer
+    nodes (fusable), enabling epilogue fusion with subsequent operations.
+
+    Args:
+        winning_choice: The winning SubgraphChoiceCaller from autotuning
+        inputs: Original input nodes
+        name: Custom op name for debugging
+
+    Returns:
+        TensorBox containing the final operation result as individual IR nodes
+    """
+    from torch._inductor.lowering import lowerings
+
+    # Get the GraphModule containing the operations
+    gm = winning_choice.gm
+
+    # Create mapping from placeholder nodes to actual inputs
+    node_to_value = {}
+    placeholder_idx = 0
+
+    # Process each node in the winning choice's graph
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            # Map placeholder to actual input
+            if placeholder_idx < len(inputs):
+                node_to_value[node] = inputs[placeholder_idx]
+                placeholder_idx += 1
+            else:
+                raise RuntimeError(f"Not enough inputs for placeholder {node.name}")
+
+        elif node.op == "call_function":
+            # Convert FX operation to IR nodes using existing lowerings
+            target = node.target
+            args = [node_to_value.get(arg, arg) for arg in node.args]
+            kwargs = {k: node_to_value.get(v, v) for k, v in node.kwargs.items()}
+
+            # Call the appropriate lowering function
+            if target in lowerings:
+                result = lowerings[target](*args, **kwargs)
+                node_to_value[node] = result
+            else:
+                # Fallback: try calling the target directly
+                result = target(*args, **kwargs)
+                node_to_value[node] = result
+
+        elif node.op == "output":
+            # Return the final result
+            output_arg = node.args[0]
+            if isinstance(output_arg, (list, tuple)):
+                # Multi-output case (not yet supported)
+                raise RuntimeError(
+                    "Multi-output custom ops not yet supported for inlining"
+                )
+            else:
+                # Single output case
+                final_result = node_to_value[output_arg]
+                return final_result
+
+        else:
+            raise RuntimeError(f"Unsupported node type: {node.op}")
+
+    raise RuntimeError("No output node found in custom op graph")
 
 
 def register_custom_op_autotuning(
@@ -332,6 +449,7 @@ def register_custom_op_autotuning(
     configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
+    enable_fusion: bool = False,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
     specifies a decomposition implementation function with its parameter values.
@@ -341,6 +459,7 @@ def register_custom_op_autotuning(
         configs: List of CustomOpConfig objects
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
+        enable_fusion: Enable inlining and fusion for the best choice
 
     Examples:
         @torch.library.custom_op("mylib::attention", mutates_args=())
@@ -358,7 +477,8 @@ def register_custom_op_autotuning(
                 "query": lambda fake: torch.randn_like(fake, device='cuda'),
                 "key": lambda fake: torch.randn_like(fake, device='cuda'),
                 "value": lambda fake: torch.randn_like(fake, device='cuda'),
-            }
+            },
+            enable_fusion=True
         )
     """
     from torch._library.custom_ops import CustomOpDef
@@ -376,12 +496,12 @@ def register_custom_op_autotuning(
         raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
     processed_configs = []
-    for config in configs:
-        if isinstance(config, CustomOpConfig):
-            processed_configs.append(config)
+    for cfg in configs:
+        if isinstance(cfg, CustomOpConfig):
+            processed_configs.append(cfg)
         else:
             raise TypeError(
-                f"Each config must be a CustomOpConfig object, got {type(config)}"
+                f"Each config must be a CustomOpConfig object, got {type(cfg)}"
             )
 
     if not processed_configs:
@@ -400,14 +520,12 @@ def register_custom_op_autotuning(
         decompositions = []
         non_tensor_args = []
 
-        for config in processed_configs:
-            decomp = config.get_decomposition(default_impl=default_impl)
+        for cfg in processed_configs:
+            decomp = cfg.get_decomposition(default_impl=default_impl)
             decompositions.append(decomp)
 
             # Merge config params with runtime kwargs (runtime takes precedence)
-            merged_kwargs = _merge_config_and_runtime_kwargs(
-                config.params, runtime_kwargs
-            )
+            merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)
             non_tensor_args.append(merged_kwargs)
 
         result = autotune_custom_op(
@@ -417,6 +535,7 @@ def register_custom_op_autotuning(
             non_tensor_args=non_tensor_args,
             op_overload=op_overload,
             user_input_gen_fns=input_gen_fns,
+            enable_fusion=enable_fusion,
         )
 
         validate_ir(result)

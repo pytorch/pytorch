@@ -100,6 +100,9 @@ fx_graph_cache: bool = Config(
     default=True,
 )
 
+# Enable custom op inline fusion for decompositions
+enable_custom_op_inline_fusion: bool = False
+
 remote_gemm_autotune_cache: bool = False
 
 # use remote fx aot graph codegen cache
@@ -258,6 +261,11 @@ prologue_fusion = prologue_fusion_enabled()
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
+
+# enable custom op inline fusion support
+enable_custom_op_inline_fusion = (
+    os.environ.get("TORCHINDUCTOR_CUSTOM_OP_INLINE_FUSION", "1") == "1"
+)
 
 # enable pattern match+replace optimizations
 pattern_matcher = True

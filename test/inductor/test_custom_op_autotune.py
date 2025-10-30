@@ -235,6 +235,7 @@ class TestCustomOpAutoTune(TestCase):
             """MLP implementation with different computational approaches controlled by method parameter."""
 
             if method == 0:
+                # Separate matmuls: standard implementation with torch.matmul
                 gate_proj = torch.matmul(input_tensor, gate_weight)
                 up_proj = torch.matmul(input_tensor, up_weight)
                 gated = torch.relu(gate_proj) * up_proj
@@ -254,6 +255,19 @@ class TestCustomOpAutoTune(TestCase):
                 output_2d = torch.mm(gated, down_weight)
 
                 return output_2d.view(*batch_shape, output_dim)
+
+            elif method == 2:
+                fused_weight = torch.cat([gate_weight, up_weight], dim=1)
+                fused_proj = torch.matmul(input_tensor, fused_weight)
+
+                intermediate_dim = gate_weight.shape[1]
+                gate_proj, up_proj = fused_proj.split(
+                    [intermediate_dim, intermediate_dim], dim=-1
+                )
+
+                gated = torch.relu(gate_proj) * up_proj
+
+                return torch.matmul(gated, down_weight)
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_mlp_op(
@@ -281,12 +295,12 @@ class TestCustomOpAutoTune(TestCase):
                 dtype=input_tensor.dtype,
             )
 
-        # Use explicit config with method parameter as tuning knob
+        # Use explicit configs with method parameter as tuning knob
         register_custom_op_autotuning(
             test_mlp_op,
             configs=[
-                CustomOpConfig(method=0),
-                CustomOpConfig(method=1),
+                CustomOpConfig(method=1),  # Batched approach
+                CustomOpConfig(method=2),  # Fused weights
             ],
             name="test_mlp_autotuned",
             input_gen_fns={
@@ -309,7 +323,7 @@ class TestCustomOpAutoTune(TestCase):
             },
         )
 
-        # Create test inputs
+        # Create test inputs using the original helper method
         input_tensor, gate_weight, up_weight, down_weight = self._create_mlp_inputs()
 
         # Test that all method variants produce numerically equivalent results
@@ -317,7 +331,19 @@ class TestCustomOpAutoTune(TestCase):
             input_tensor, gate_weight, up_weight, down_weight, method=0
         )
 
-        # Test autotuning
+        for method in [1, 2]:
+            result = mlp_variants(
+                input_tensor, gate_weight, up_weight, down_weight, method=method
+            )
+            torch.testing.assert_close(
+                result,
+                expected,
+                rtol=1e-2,
+                atol=1e-2,
+                msg=f"Method {method} not equivalent to method 0",
+            )
+
+        # Test autotuning - all should be mathematically equivalent
         self._run_autotune_test(
             test_mlp_op,
             (input_tensor, gate_weight, up_weight, down_weight),
@@ -335,12 +361,12 @@ class TestCustomOpAutoTune(TestCase):
 
     @skipIfXpu
     def test_decompose_k_custom_op_autotune(self):
-        """Test decompose_k autotuning with parametric tuning for k_splits values.
+        """Test decompose_k autotuning with epilogue fusion (matmul + bias + relu + scale).
 
-        Validates numerical parameter sweep where k_splits controls how the K dimension
-        is decomposed for matrix multiplication (k_splits in [32, 64, 128, 256]).
+        Validates that the custom op encapsulates the entire fused operation with parametric
+        tuning for k_splits values controlling how the K dimension is decomposed.
         """
-        test_op_name = f"test_lib::decompose_k_{id(self)}"
+        test_op_name = f"test_lib::matmul_relu_epilogue_{id(self)}"
 
         def decompose_k_implementation(
             a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
@@ -363,19 +389,23 @@ class TestCustomOpAutoTune(TestCase):
             return torch.sum(result, dim=0)  # [m, n]
 
         @torch.library.custom_op(test_op_name, mutates_args=())
-        def test_decompose_k_op(
-            a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
+        def matmul_relu_epilogue_op(
+            a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor, k_splits: int = 4
         ) -> torch.Tensor:
-            """Matrix multiply with k-way decomposition - custom op using the decomposition."""
-            return decompose_k_implementation(a, b, k_splits)
+            """Matmul with decompose_k + bias + relu + scale (complete epilogue fusion)."""
+            matmul_result = decompose_k_implementation(a, b, k_splits)
+            biased = matmul_result + bias
+            activated = torch.relu(biased)
+            scaled = activated * 2.0
+            return scaled
 
-        @test_decompose_k_op.register_fake
-        def _(a: torch.Tensor, b: torch.Tensor, k_splits: int = 4):
+        @matmul_relu_epilogue_op.register_fake
+        def _(a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor, k_splits: int = 4):
             return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
 
-        # Register autotuning with different k_splits values using decomposition function
+        # Register autotuning with different k_splits values
         register_custom_op_autotuning(
-            test_decompose_k_op,
+            matmul_relu_epilogue_op,
             configs=[
                 CustomOpConfig(k_splits=2),
                 CustomOpConfig(k_splits=4),
@@ -385,7 +415,8 @@ class TestCustomOpAutoTune(TestCase):
                 CustomOpConfig(k_splits=64),
                 CustomOpConfig(k_splits=128),
             ],
-            name="test_decompose_k_autotuned",
+            name="matmul_relu_epilogue_autotuned",
+            enable_fusion=True,  # Enable inline fusion
             input_gen_fns={
                 "a": lambda fake_tensor: torch.randn_like(
                     fake_tensor, device=self.device
@@ -395,12 +426,46 @@ class TestCustomOpAutoTune(TestCase):
                     fake_tensor, device=self.device
                 )
                 * 0.1,
+                "bias": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
+                * 0.1,
             },
         )
 
+        # Create test inputs
         a, b = self._create_decompose_k_inputs()
-        expected = a @ b
-        self._run_autotune_test(test_decompose_k_op, (a, b), expected, "DecomposeK")
+        bias = torch.randn(b.shape[1], device=self.device, dtype=self.dtype) * 0.1
+
+        # Compile the model using the custom op
+        @torch.compile
+        def test_model(a, b, bias):
+            return matmul_relu_epilogue_op(a, b, bias)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            max_autotune=True,
+            enable_custom_op_inline_fusion=True,  # Enable inline fusion
+            benchmark_fusion=True,  # Enable fusion benchmarking
+        ):
+            compiled_result = test_model(a, b, bias)
+
+        def reference_model(a, b, bias):
+            matmul_result = a @ b
+            biased = matmul_result + bias
+            activated = torch.relu(biased)
+            scaled = activated * 2.0
+            return scaled
+
+        expected = reference_model(a, b, bias)
+
+        torch.testing.assert_close(
+            compiled_result,
+            expected,
+            rtol=2e-1,
+            atol=5e-1,
+        )
 
     @skipIfXpu
     def test_multi_parameter_tuning(self):
@@ -485,7 +550,7 @@ class TestCustomOpAutoTune(TestCase):
             (3, 16),  # einsum, chunk_size ignored
         ]
 
-        for scale_mode, chunk_size in configs:
+        for i, (scale_mode, chunk_size) in enumerate(configs):
             result = multi_param_scaling(
                 test_x, test_factor, scale_mode=scale_mode, chunk_size=chunk_size
             )
