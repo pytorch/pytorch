@@ -37,7 +37,7 @@ class _DeconstructedSymNode:
             node.pytype,
             node._hint,
             node.constant,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             node.fx_node,
         )
 

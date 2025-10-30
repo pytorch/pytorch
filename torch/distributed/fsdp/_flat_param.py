@@ -565,7 +565,7 @@ class FlatParamHandle:
         # Only align addresses for `use_orig_params=True` (for now)
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self.device = device
         self._device_handle = _FSDPDeviceHandle.from_device(self.device)
         self.process_group = process_group
@@ -1585,7 +1585,8 @@ class FlatParamHandle:
                 warnings.warn(
                     f"[Rank {self.rank}] Only some but not all ranks have a "
                     "`None` `FlatParameter` gradient, so FSDP is using zeros to "
-                    "approximate those ranks' sharded gradients being `None`"
+                    "approximate those ranks' sharded gradients being `None`",
+                    stacklevel=2,
                 )
             flat_param._saved_grad_shard = None  # type: ignore[assignment]
             sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)  # type: ignore[attr-defined]
@@ -2434,7 +2435,8 @@ class FlatParamHandle:
                 f"[Rank {rank}] {'Parameter' if is_param else 'Gradient'} needs "
                 f"writeback in {self._training_state}\n"
                 f"expected shape={expected_shape} shape={src_shape} "
-                f"expected device={dst_tensor.device} device={src_device}"
+                f"expected device={dst_tensor.device} device={src_device}",
+                stacklevel=2,
             )
         if src_tensor is not None and src_tensor.shape != expected_shape:
             # NOTE: Gradient shape mismatch is not possible in practice since
@@ -2495,6 +2497,7 @@ class FlatParamHandle:
     ###########
     def flat_param_to(self, *args, **kwargs):
         """Wrap an in-place call to ``.to()`` for ``self.flat_param``."""
+        # pyrefly: ignore [not-iterable]
         self.flat_param.data = self.flat_param.to(*args, **kwargs)
         if self._use_orig_params:
             # Refresh the views because their storage may have changed

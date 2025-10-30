@@ -41,7 +41,7 @@ from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -89,7 +89,6 @@ from .schemas import (
 )
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
-    _get_symint_hints,
     contain_metadata_mutation_ops,
     get_cuda_generator_meta_val,
     make_boxed_func,
@@ -538,7 +537,7 @@ def collect_bw_donated_buffer_idxs(
         fw_ins,
         user_fw_outs,
         bw_outs,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         saved_tensors,
     )
 
@@ -1274,17 +1273,8 @@ def maybe_inline_graph_saved_tensors_hooks(
         else:
             # Keep usages of bw_g_input in inserted unpacked hook graph.
             # Replace other usages of bw_g_input with unpack_saved_tensor_n.
-            from torch._C import _fx_map_arg
-
-            def maybe_replace_node(n):
-                return unpack_saved_tensor_n if n == bw_g_input else n
-
             for use_node in original_bw_g_input_users:
-                new_args = _fx_map_arg(use_node.args, maybe_replace_node)
-                new_kwargs = _fx_map_arg(use_node.kwargs, maybe_replace_node)
-                assert isinstance(new_args, tuple)
-                assert isinstance(new_kwargs, dict)
-                use_node._update_args_kwargs(new_args, new_kwargs)
+                use_node._replace_input_with(bw_g_input, unpack_saved_tensor_n)
         bw_g.erase_node(bw_unpack_out_n)
 
     # Changing forward graph outputs,
@@ -1532,7 +1522,7 @@ def _aot_stage2a_partition(
 
             # apply joint_gm callback here
             if callable(torch._functorch.config.joint_custom_pass):
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
@@ -1783,8 +1773,27 @@ def _aot_stage2b_bw_compile(
 
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
-                # value. Using the hints to avoid that.
-                if _get_symint_hints(ph_arg.stride()) != real_stride:
+                # value. Using suppress_guards and guard_or_true to avoid that.
+
+                stride_different = False
+                fake_mode = detect_fake_mode()
+                suppress_ctx = (
+                    fake_mode.shape_env.suppress_guards()
+                    if fake_mode is not None and fake_mode.shape_env is not None
+                    else nullcontext()
+                )
+
+                # Inductor can choose different strides for activations than
+                # what backward graph has. if we can't statically tell that
+                # strides are the same, we assume they are not.
+                with suppress_ctx:
+                    for k in range(len(ph_arg.stride())):
+                        # real_stride can't be symbolic.
+                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
+                            stride_different = True
+                            break
+
+                if stride_different:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
@@ -1802,16 +1811,8 @@ def _aot_stage2b_bw_compile(
                     # tensor which is wrong.
 
                     ph_size = ph_arg.size()
-                    # pyrefly: ignore  # bad-argument-type
-                    if len(ph_size) == 0 and len(real_stride) > 0:
-                        # Fix for 0-dimensional tensors: When a tensor becomes 0-d
-                        # (e.g., via squeeze), its stride should be () not (1,).
-                        # This mismatch can occur when dynamic shape operations produce
-                        # tensors that are later squeezed to 0-d. The stride metadata
-                        # may get preserved causing a dimension mismatch (#164814)
-                        real_stride = ()
 
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
             compiled_bw_func = None
             if (
@@ -2157,6 +2158,7 @@ def _aot_stage2b_compile_forward_or_inference(
     - FunctionalizedRngRuntimeWrapper
     - FakifiedOutWrapper
     """
+
     # Validation
     if not is_inference and num_fw_outs_saved_for_bw is None:
         raise ValueError(

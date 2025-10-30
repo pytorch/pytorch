@@ -364,11 +364,15 @@ def register_dataclass(
 
     def _unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         flat_names, none_names = context
-        return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
+        return cls(
+            **dict(zip(flat_names, values, strict=True)), **dict.fromkeys(none_names)
+        )
 
     def _flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = _flatten_fn(obj)  # type: ignore[misc]
-        return [(GetAttrKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
+        return [
+            (GetAttrKey(k), v) for k, v in zip(flat_names, flattened, strict=True)
+        ], flat_names
 
     _private_register_pytree_node(
         cls,
@@ -476,7 +480,8 @@ def _is_constant_holder(spec: "TreeSpec") -> bool:
 
 def _retrieve_constant(spec: "TreeSpec") -> Any:
     """Given a spec from a pytree registered with register_constant, retrieves the constant"""
-    assert _is_constant_holder(spec)
+    if not _is_constant_holder(spec):
+        raise AssertionError("spec does not correspond to a registered constant pytree")
     return tree_unflatten([], spec)
 
 
@@ -602,6 +607,7 @@ def _private_register_pytree_node(
             warnings.warn(
                 f"{cls} is already registered as pytree node. "
                 "Overwriting the previous registration.",
+                stacklevel=2,
             )
 
         node_def = NodeDef(cls, flatten_fn, unflatten_fn, flatten_with_keys_fn)
@@ -708,7 +714,7 @@ class structseq(tuple[_T_co, ...]):
     def __new__(
         cls: type[Self],
         sequence: Iterable[_T_co],
-        # pyrefly: ignore  # bad-function-definition
+        # pyrefly: ignore [bad-function-definition]
         dict: dict[str, Any] = ...,
     ) -> Self:
         raise NotImplementedError
@@ -755,7 +761,7 @@ def _tuple_flatten_with_keys(
     d: tuple[T, ...],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -769,7 +775,7 @@ def _list_flatten(d: list[T]) -> tuple[list[T], Context]:
 
 def _list_flatten_with_keys(d: list[T]) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _list_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -785,12 +791,12 @@ def _dict_flatten_with_keys(
     d: dict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
-    # pyrefly: ignore  # bad-return
-    return [(MappingKey(k), v) for k, v in zip(context, values)], context
+    # pyrefly: ignore [bad-return]
+    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
 
 
 def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
-    return dict(zip(context, values))
+    return dict(zip(context, values, strict=True))
 
 
 def _namedtuple_flatten(d: NamedTuple) -> tuple[list[Any], Context]:
@@ -801,9 +807,12 @@ def _namedtuple_flatten_with_keys(
     d: NamedTuple,
 ) -> tuple[list[tuple[KeyEntry, Any]], Context]:
     values, context = _namedtuple_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return (
-        [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
+        [
+            (GetAttrKey(field), v)
+            for field, v in zip(context._fields, values, strict=True)
+        ],
         context,
     )
 
@@ -851,15 +860,15 @@ def _ordereddict_flatten_with_keys(
     d: OrderedDict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
-    # pyrefly: ignore  # bad-return
-    return [(MappingKey(k), v) for k, v in zip(context, values)], context
+    # pyrefly: ignore [bad-return]
+    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
 
 
 def _ordereddict_unflatten(
     values: Iterable[T],
     context: Context,
 ) -> OrderedDict[Any, T]:
-    return OrderedDict((key, value) for key, value in zip(context, values))
+    return OrderedDict((key, value) for key, value in zip(context, values, strict=True))
 
 
 _odict_flatten = _ordereddict_flatten
@@ -876,8 +885,10 @@ def _defaultdict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
-    # pyrefly: ignore  # bad-return
-    return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
+    # pyrefly: ignore [bad-return]
+    return [
+        (MappingKey(k), v) for k, v in zip(dict_context, values, strict=True)
+    ], context
 
 
 def _defaultdict_unflatten(
@@ -899,17 +910,25 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
 
 
 def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
-    assert isinstance(dumpable_context, dict)
-    assert set(dumpable_context) == {
+    if not isinstance(dumpable_context, dict):
+        raise AssertionError("dumpable_context must be a dict")
+
+    expected_keys = {
         "default_factory_module",
         "default_factory_name",
         "dict_context",
     }
+    if set(dumpable_context) != expected_keys:
+        raise AssertionError(
+            f"dumpable_context keys must be {expected_keys}, got {set(dumpable_context)}"
+        )
 
     default_factory_module = dumpable_context["default_factory_module"]
     default_factory_name = dumpable_context["default_factory_name"]
-    assert isinstance(default_factory_module, str)
-    assert isinstance(default_factory_name, str)
+    if not isinstance(default_factory_module, str):
+        raise AssertionError("default_factory_module must be a string")
+    if not isinstance(default_factory_name, str):
+        raise AssertionError("default_factory_name must be a string")
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
@@ -925,7 +944,7 @@ def _deque_flatten_with_keys(
     d: deque[T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _deque_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -1187,7 +1206,7 @@ class TreeSpec:
                             f"expected {treespec.context!r}, but got {context!r}.",  # namedtuple type mismatch
                         )
 
-            for subtree, subspec in zip(children, treespec.children_specs):
+            for subtree, subspec in zip(children, treespec.children_specs, strict=True):
                 helper(subspec, subtree, subtrees)
 
         subtrees: list[PyTree] = []
@@ -1555,7 +1574,6 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1616,7 +1634,6 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1733,7 +1750,8 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert isinstance(treespec, TreeSpec)
+    if not isinstance(treespec, TreeSpec):
+        raise AssertionError("treespec must be a TreeSpec")
 
     if tree_is_leaf(tree, is_leaf=is_leaf):
         return [tree] * treespec.num_leaves
@@ -1752,7 +1770,7 @@ def _broadcast_to_and_flatten(
 
     # Recursively flatten the children
     result: list[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children_specs):
+    for child, child_spec in zip(child_pytrees, treespec.children_specs, strict=True):
         flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
         if flat is not None:
             result += flat
@@ -1829,7 +1847,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         return enum_cls[obj["name"]]
     return obj
 
@@ -2054,9 +2072,9 @@ def tree_map_with_path(
         ``xs`` is the tuple of values at corresponding nodes in ``rests``.
     """
     keypath_leaves, treespec = tree_flatten_with_path(tree, is_leaf)
-    keypath_leaves = list(zip(*keypath_leaves))
+    keypath_leaves = list(zip(*keypath_leaves, strict=True))
     all_keypath_leaves = keypath_leaves + [treespec.flatten_up_to(r) for r in rests]
-    return treespec.unflatten(func(*xs) for xs in zip(*all_keypath_leaves))
+    return treespec.unflatten(func(*xs) for xs in zip(*all_keypath_leaves, strict=True))
 
 
 def keystr(kp: KeyPath) -> str:
