@@ -89,7 +89,7 @@ std::string get_type_str<int32_t>() {
 static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, const Tensor& output) {
   MPSStream* stream = getCurrentMPSStream();
   id<MTLBuffer> output_buffer = getMTLBufferStorage(output);
-  size_t output_offset = 0;
+  size_t output_offset = output.storage_offset() * output.itemsize();
 
   for (const Tensor& input : inputs) {
     if (cat_should_skip_tensor(input)) {
@@ -97,11 +97,12 @@ static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, const Tens
     }
 
     id<MTLBuffer> input_buffer = getMTLBufferStorage(input);
+    size_t input_offset = input.storage_offset() * input.itemsize();
     auto nbytes = input.nbytes();
     auto profile_id =
         getMPSProfiler().beginProfileCopy(input_buffer, output_buffer, input, output, nbytes, /*non_blocking=*/true);
 
-    stream->copy(input_buffer, output_buffer, nbytes, 0, output_offset, profile_id, SyncType::NONE);
+    stream->copy(input_buffer, output_buffer, nbytes, input_offset, output_offset, profile_id, SyncType::NONE);
 
     output_offset += nbytes;
   }
@@ -274,7 +275,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
         return !cat_should_skip_tensor(t) && isTooLargeForMPSGraph(t);
       });
 
-  if (all_contiguous && all_same_dtype && (memory_format == MemoryFormat::Contiguous) && dimension == 0) {
+  if (all_contiguous && all_same_dtype && (memory_format == MemoryFormat::Contiguous) && (dimension == 0)) {
     return mps::cat_out_mps_contiguous_impl(materialized_inputs, out);
   } else if (has_large_tensor) {
     return mps::cat_out_mps_impl<int64_t>(materialized_inputs, dimension, out);
