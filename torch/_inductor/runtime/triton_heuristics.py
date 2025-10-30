@@ -530,7 +530,7 @@ class CachingAutotuner(KernelInterface):
                 #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
                 #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                 #   = max_threads_per_multi_processor / (32 * num_warps)
-                # Using a tigher upper bound can reveal more optimization opportunities.
+                # Using a tighter upper bound can reveal more optimization opportunities.
                 max_blocks_per_sm = max(
                     device_prop.regs_per_multiprocessor // nreg_per_block, 1
                 )
@@ -3550,24 +3550,13 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta, filename=None, inductor_meta=None):
+def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
     """
-    configs = []
-
-    # Naive autotuning path for num_warps
-    if not inductor_meta.get("autotune_pointwise", True) and not (
-        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
-    ):
-        configs.append(triton.Config({}, num_stages=1, num_warps=8))
-    else:
-        for warps in [1, 2, 4, 8]:
-            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
-
     return cached_autotune(
         None,
-        configs,
+        [triton.Config({}, num_stages=1, num_warps=num_warps)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,

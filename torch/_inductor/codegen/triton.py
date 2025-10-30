@@ -745,7 +745,12 @@ class TritonPrinter(PythonPrinter):
         )
 
     def _print_Float(self, expr: sympy.Expr) -> str:
-        if config.is_fbcode() and torch.version.hip:
+        if expr.is_integer:
+            # sympy considers 0.0 to be integer, but triton doesn't.
+            # this workaround prints the float as an integer
+            # xref: https://github.com/sympy/sympy/issues/26620
+            ret = str(int(expr))
+        elif config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
             ret = f"tl.full([], {expr}, tl.float64)"
@@ -801,6 +806,9 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
+        # work around for https://github.com/pytorch/pytorch/issues/165738
+        if torch.xpu.is_available():
+            return f"libdevice.sqrt(({self._print(expr)}).to(tl.float32))"
         return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
@@ -1212,6 +1220,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
+        # work around for https://github.com/pytorch/pytorch/issues/165738
+        if torch.xpu.is_available():
+            return f"libdevice.sqrt({x})"
         return f"tl.sqrt_rn({x})"
 
     @staticmethod
@@ -4593,7 +4604,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         )
                     self.body.writeline(f"{name} = {updated}")
 
-            for idx, partial_accum in enumerate(self.saved_partial_accumulate):
+            for idx in range(len(self.saved_partial_accumulate)):
                 self.body.writeline(
                     f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )
