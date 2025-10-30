@@ -1,4 +1,23 @@
 [[linter]]
+code = 'TYPOS'
+include_patterns = ['**/*.cpp']
+exclude_patterns = [
+    
+]
+command = [
+    'python3',
+    'tools/linter/adapters/typos_linter.py',
+    '--config=_typos.toml',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'typos==1.38.1',
+]
+[[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
 exclude_patterns = [
