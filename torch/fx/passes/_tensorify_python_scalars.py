@@ -211,16 +211,17 @@ def tensorify_python_scalars(
                 assert isinstance(node.args[0], fx.Node), node.args[0]
 
                 s = node.meta["val"].node.expr
-                expr_to_tensor_proxy[s] = MetaProxy(
-                    node.args[0], tracer=tracer, fake_mode=fake_mode
-                )
+      
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
                 )
 
                 if not dtype.is_floating_point:
                     continue
-
+                
+                expr_to_tensor_proxy[s] = MetaProxy(
+                    node.args[0], tracer=tracer, fake_mode=fake_mode
+                )
                 # Upcast the float tensor to torch.float64 to avoid precision problem
                 expr_to_tensor_proxy[s] = torch.ops.prims.convert_element_type.default(
                     expr_to_tensor_proxy[s], torch.float64
@@ -279,7 +280,6 @@ def tensorify_python_scalars(
                     ):
                         transform = True
                         try:
-                            # pyrefly: ignore  # unbound-name
                             proxy = _sympy_interp(zf.node.expr)
                         except NotImplementedError:
                             transform = False
@@ -306,7 +306,6 @@ def tensorify_python_scalars(
                         args.append(a)
 
                 if transform:
-                    # pyrefly: ignore  # unbound-name
                     replacement_proxy = replacement_op(*args)
 
                     # pyrefly: ignore  # missing-attribute

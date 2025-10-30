@@ -35,7 +35,7 @@ if TEST_NUMPY:
     import numpy as np
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 no_mkl_sparse = IS_WINDOWS or not TEST_MKL
 
@@ -135,7 +135,7 @@ class TestSparseCSRSampler(TestCase):
         index_dtype = torch.int32
         for n_rows in range(1, 10):
             for n_cols in range(1, 10):
-                for nnz in range(0, n_rows * n_cols + 1):
+                for nnz in range(n_rows * n_cols + 1):
                     crow_indices = self._make_crow_indices(
                         n_rows, n_cols, nnz,
                         device=device, dtype=index_dtype)

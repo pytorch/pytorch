@@ -110,6 +110,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 
     pytree_modules["cxx"] = cxx_pytree
+    pytree_modules["native_optree"] = cxx_pytree.optree
 else:
     cxx_pytree = None
 
@@ -656,6 +657,31 @@ graph():
 
         fn = torch.compile(f, backend="eager", dynamic=True, fullgraph=True)
         fn(torch.tensor([5]), 5)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cond_runtime_assert_generation(self):
+        def fn(x):
+            y = x.nonzero()  # unbacked binding u0
+            torch._check(y.shape[0] % 4 == 0)
+
+            return torch.randn(y.shape[0])
+
+        @torch.compile(dynamic=True, backend="aot_eager")
+        def foo(x):
+            b = torch.cond(
+                pred=(x.shape[0] % 4 == 0),
+                true_fn=lambda: fn(x),
+                false_fn=lambda: fn(x),
+            )
+
+            return b
+
+        foo(torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            RuntimeError, "Runtime assertion failed for expression Eq(Mod(u1, 4), 0)*"
+        ):
+            foo(torch.randn(5, 5))
 
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
@@ -12862,6 +12888,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12876,6 +12905,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12893,6 +12925,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12910,6 +12945,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12931,6 +12969,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -13032,7 +13073,13 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 torch.ones(3, 2),
                 1,
             ]
-            new_tree = pytree.tree_unflatten(new_leaves, treespec)
+            if pytree.__name__ == "optree":
+                # `None` is a internal node rather than leaf in default OpTree / JAX PyTree
+                new_leaves.pop()
+                # The treespec argument comes first in OpTree / JAX PyTree
+                new_tree = pytree.tree_unflatten(treespec, new_leaves)
+            else:
+                new_tree = pytree.tree_unflatten(new_leaves, treespec)
             return leaves, new_tree
 
         x = torch.randn(3, 2)
@@ -13087,6 +13134,10 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
     @parametrize_pytree_module
     def test_pytree_tree_map_only(self, pytree):
+        if not callable(getattr(pytree, "tree_map_only", None)):
+            # OpTree and JAX PyTree do not have `tree_map_only`
+            return
+
         def fn(xs):
             def mapper(x):
                 return x.clone()
