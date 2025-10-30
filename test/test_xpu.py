@@ -72,6 +72,8 @@ _xpu_computation_ops = [
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpu(TestCase):
+    expandable_segments = False
+
     def test_device_behavior(self):
         current_device = torch.xpu.current_device()
         torch.xpu.set_device(current_device)
@@ -584,6 +586,8 @@ if __name__ == "__main__":
                 self.assertTrue(b"libsycl.so" in result)
 
     def test_dlpack_conversion(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
         if IS_WINDOWS and int(torch.version.xpu) < 20250000:
             with self.assertRaisesRegex(

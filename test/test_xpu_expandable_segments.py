@@ -24,5 +24,6 @@ if __name__ == "__main__":
         get_disabled_tests(".")
 
         torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
+        TestXpu.expandable_segments = True
 
         run_tests()
