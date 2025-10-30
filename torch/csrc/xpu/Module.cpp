@@ -261,7 +261,7 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
-  // Add _xpuDevicePropertires class to torch._C
+  // Add _xpuDeviceProperties class to torch._C
   using namespace c10::xpu;
   auto get_device_type = [](const DeviceProp& prop) {
     std::ostringstream stream;

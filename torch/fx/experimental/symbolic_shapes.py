@@ -4522,7 +4522,7 @@ class ShapeEnv:
 
     # The order of checking the guards matters. In this specific example:
     # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
-    # we may have an unnecessary shape speciliazation for y.
+    # we may have an unnecessary shape specialization for y.
     def _maybe_specialize_sym_int_with_hint(
         self, maybe_sym: IntLikeType
     ) -> IntLikeType:
@@ -5830,7 +5830,7 @@ class ShapeEnv:
         def issue_guard(guard: ShapeGuard) -> None:
             expr = self.simplify(guard.expr)
 
-            # Avoid re-issueing the same guard.
+            # Avoid re-issuing the same guard.
             if expr in issued:
                 return
 

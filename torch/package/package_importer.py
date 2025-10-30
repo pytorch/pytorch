@@ -40,7 +40,7 @@ __all__ = ["PackageImporter"]
 # This is a list of imports that are implicitly allowed even if they haven't
 # been marked as extern. This is to work around the fact that Torch implicitly
 # depends on numpy and package can't track it.
-# https://github.com/pytorch/multipy/issues/46  # codespell:ignore multipy
+# https://github.com/pytorch/multiply/issues/46  # codespell:ignore multiply
 IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     "numpy",
     "numpy.core",

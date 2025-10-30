@@ -632,7 +632,7 @@ std::string generateKernel(
   }
 
   // Includes headers
-  // Note: CUDA kernels support Halfs and random generation, CPU kernels do not
+  // Note: CUDA kernels support Halves and random generation, CPU kernels do not
   if (has_half_tensor) {
     env.s("HalfHeader", cuda::half_support_literal);
   } else {

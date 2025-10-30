@@ -1213,7 +1213,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         boundaries_new_histogram = torch.linspace(
             update_min, update_max, self.bins + 1, device=update_min.device
         ).to(histogram.device)
-        # this maps the mid-poits of the histogram to the new histogram's space
+        # this maps the mid-points of the histogram to the new histogram's space
         bucket_assignments = (
             torch.bucketize(mid_points_histogram, boundaries_new_histogram, right=True)
             - 1

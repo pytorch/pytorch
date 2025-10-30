@@ -298,7 +298,7 @@ void initDispatchBindings(PyObject* module) {
           },
           "")
       // Some of these APIs are only for testing and do not work in
-      // multipy environment  // codespell:ignore multipy
+      // multiply environment  // codespell:ignore multiply
       .def(
           "def_",
           [](py::object self, const char* schema, const char* alias) {

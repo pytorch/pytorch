@@ -3155,7 +3155,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    # Unbacked semnatics: if validty of in-place flattening is undecided we copy.
+    # Unbacked semantics: if validity of in-place flattening is undecided we copy.
     new_shape, _new_strides = prims._collapse_view_helper(
         a, start_dim, end_dim, must_be_valid=None
     )

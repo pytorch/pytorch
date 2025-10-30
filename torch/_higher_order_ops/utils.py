@@ -708,7 +708,7 @@ def _stack_pytree(pytrees):
 # is partitioned into in order to recover it in saved_tensors_and_symints.
 #
 # In saved_tensors_and_symints, we can recover the original args by:
-# iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
+# iterating over the pos list and pop one item from the front of partitioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
     assert all(

@@ -85,7 +85,7 @@ class OperatorBase:
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
-        # ordinary C++ configured behavior.  This is the raison d'etre of  # codespell:ignore
+        # ordinary C++ configured behavior.  This is the reason d'etre of  # codespell:ignore
         # Python dispatcher: to let you program the dispatcher from Python
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
@@ -530,7 +530,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
-    # NOTE [HigherOrderOprator Schema]
+    # NOTE [HigherOrderOperator Schema]
     # Each invocation of a HigherOrderOperator (hop) should have its own schema because
     # the subgraphs and the arguments can be different even for the same hop.
     #

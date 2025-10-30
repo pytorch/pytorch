@@ -326,7 +326,7 @@ void initLazyBindings(PyObject* module) {
   });
 
   // GetPythonFramesFunction() has not ever worked with
-  // torchdeploy/multipy possibly because  // codespell:ignore multipy
+  // torchdeploy/multiply possibly because  // codespell:ignore multiply
   // GetPythonFrames resolves to external cpython rather than embedded cpython.
   // So far this problem has only been observed internally, so we will just
   // block it off there.
