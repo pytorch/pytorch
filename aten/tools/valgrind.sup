@@ -11,6 +11,13 @@
 }
 
 {
+   ignore_empty_generic_uninitialised_conditional_jump
+   Memcheck:Cond
+   fun:_ZN2at6detail13empty_genericEN3c108ArrayRefIlEEPNS1_9AllocatorENS1_14DispatchKeySetENS1_10ScalarTypeESt8optionalINS1_12MemoryFormatEE
+   ...
+}
+
+{
    Cond_cuda
    Memcheck:Cond
    obj:*libcuda.so*
