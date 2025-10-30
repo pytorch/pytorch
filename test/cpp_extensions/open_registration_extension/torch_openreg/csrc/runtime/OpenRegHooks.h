@@ -71,19 +71,20 @@ struct OPENREG_EXPORT OpenRegHooksInterface : public at::PrivateUse1HooksInterfa
     auto err = orPointerGetAttributes(&attr, data);
     if (err == orSuccess && attr.type == orMemoryTypeDevice) {
       return at::Device(at::DeviceType::PrivateUse1, static_cast<int>(attr.device));
+    } else {
+      TORCH_CHECK(false, "failed to get device from pointer");
     }
-    // Fallback to CPU device for host/unmanaged pointers
-    return at::Device(at::DeviceType::CPU, 0);
+    return at::Device(at::DeviceType::PrivateUse1, current_device());
   }
   // LITERALINCLUDE START: OPENREG HOOK EXAMPLES
   const at::Generator& getDefaultGenerator(DeviceIndex device_index) const override {
     return getDefaultOpenRegGenerator(device_index);
   }
+  // LITERALINCLUDE END: OPENREG HOOK EXAMPLES
 
   at::Generator getNewGenerator(DeviceIndex device_index) const override {
     return at::make_generator<OpenRegGeneratorImpl>(device_index);
   }
-  // LITERALINCLUDE END: OPENREG HOOK EXAMPLES
 };
 
 } // namespace c10::openreg
