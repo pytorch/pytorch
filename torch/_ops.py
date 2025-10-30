@@ -437,7 +437,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 subclass_type = type(arg)
                 if (
                     subclass_type.__torch_dispatch__
-                    == torch._C._disabled_torch_dispatch_impl
+                    is torch._C._disabled_torch_dispatch_impl
                 ):
                     continue
 
