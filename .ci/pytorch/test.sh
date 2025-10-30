@@ -864,13 +864,13 @@ test_dynamo_benchmark() {
   shift
 
   # Exclude torchrec_dlrm for CUDA 13 as FBGEMM is not compatible
-  local extra_args=""
+  local extra_args=()
   if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
-    extra_args="--exclude-exact torchrec_dlrm"
+    extra_args=(--exclude-exact torchrec_dlrm)
   fi
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
-    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp $extra_args "$@"
+    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "${extra_args[@]}" "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # TODO (huydhn): Just smoke test some sample models
     if [[ "${TEST_CONFIG}" == *b200* ]]; then
@@ -882,7 +882,7 @@ test_dynamo_benchmark() {
         export TORCHBENCH_ONLY_MODELS="BERT_pytorch"
       fi
     fi
-    test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" $extra_args "$@"
+    test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "${extra_args[@]}" "$@"
   else
     if [[ "${TEST_CONFIG}" == *cpu* ]]; then
       local dt="float32"
@@ -890,17 +890,17 @@ test_dynamo_benchmark() {
         dt="amp"
       fi
       if [[ "${TEST_CONFIG}" == *freezing* ]]; then
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" --freezing $extra_args "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" --freezing "${extra_args[@]}" "$@"
       else
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" $extra_args "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "${extra_args[@]}" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 $extra_args "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
     elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 $extra_args "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
     else
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 $extra_args "$@"
-      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp $extra_args "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
+      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "${extra_args[@]}" "$@"
     fi
   fi
 }
