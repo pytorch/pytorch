@@ -343,9 +343,7 @@ def _single_tensor_adagrad(
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
-    for param, grad, state_sum, step_t in zip(
-        params, grads, state_sums, state_steps, strict=True
-    ):
+    for param, grad, state_sum, step_t in zip(params, grads, state_sums, state_steps):
         # update step
         step_t += 1
         step = _get_value(step_t)
