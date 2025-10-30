@@ -2871,7 +2871,7 @@ class TestSDPACudaOnly(NNTestCase):
                 attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
                 attn_output.backward(grad_attn_output)
 
-            for x, x_ref in zip((q, k, v), (q_ref, k_ref, v_ref)):
+            for x, x_ref in zip((q, k, v), (q_ref, k_ref, v_ref), strict=True):
                 self.assertEqual(x.grad, x_ref.grad, atol=10.0, rtol=0.05)
 
 
