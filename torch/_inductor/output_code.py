@@ -88,6 +88,9 @@ class OutputCode:
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError(type(self))
 
+    def prepare_for_serialization(self) -> None:
+        raise NotImplementedError(type(self))
+
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
@@ -783,6 +786,9 @@ class CompiledAOTI(OutputCode):
     ) -> None:
         pass
 
+    def prepare_for_serialization(self) -> None:
+        pass
+
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
 
@@ -807,3 +813,97 @@ class MockFXGraphCacheOutput(OutputCode):
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
+
+
+@dataclasses.dataclass
+class RegionalOutputCode(OutputCode):
+    """
+    OutputCode for regional inductor compilation results.
+
+    Regional inductor returns a torch.fx.GraphModule that contains both
+    compiled regions (via standalone_compile) and eager regions. This needs
+    special serialization using GraphPickler instead of standard pickle.
+
+    The serialization strategy stores the GraphModule as bytes using
+    GraphPickler.dumps(), which handles FakeTensors, AOTCompiledArtifacts,
+    and other special objects that standard pickle cannot handle.
+    """
+
+    # The serialized graph module as bytes (using GraphPickler)
+    _serialized_graph_module: Optional[bytes] = dataclasses.field(
+        default=None, init=False
+    )
+
+    # The actual graph module (cleared during serialization)
+    _graph_module: Optional[torch.fx.GraphModule] = dataclasses.field(
+        default=None, init=False
+    )
+
+    def __init__(self, graph_module: torch.fx.GraphModule):
+        """
+        Args:
+            graph_module: The torch.fx.GraphModule returned by regional_inductor
+        """
+        super().__init__()
+        self._graph_module = graph_module
+        self._serialized_graph_module = None
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        """Execute the regional compiled graph."""
+        if self._graph_module is None:
+            raise RuntimeError(
+                "RegionalOutputCode has no graph module loaded. "
+                "Did you forget to call post_compile()?"
+            )
+        return self._graph_module(*inputs)
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
+    ) -> None:
+        """
+        Post-compile processing for regional inductor.
+
+        This deserializes the GraphModule from bytes using GraphPickler,
+        extracting the fake_mode from example_inputs.
+        """
+        if self._graph_module is not None:
+            return
+        assert self._serialized_graph_module is not None
+        # Get fake mode from example inputs
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(example_inputs)
+        if fake_mode is None:
+            raise RuntimeError(
+                "Could not detect fake mode from example inputs. "
+                "Regional inductor requires fake mode for deserialization."
+            )
+
+        # Deserialize the graph module
+        from torch.fx._graph_pickler import GraphPickler
+
+        gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
+        assert isinstance(gm, torch.fx.GraphModule)
+        gm.recompile()
+        self._graph_module = gm
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        """Regional inductor doesn't use triton bundles directly."""
+
+    def prepare_for_serialization(self) -> None:
+        """
+        Prepare for serialization by converting the GraphModule to bytes.
+
+        This uses GraphPickler to serialize the graph module since it contains
+        special objects like FakeTensors and AOTCompiledArtifacts that need
+        custom pickling.
+        """
+        if self._graph_module is not None:
+            from torch.fx._graph_pickler import GraphPickler
+
+            self._serialized_graph_module = GraphPickler.dumps(self._graph_module)
+            # Clear the graph module to avoid pickling it with standard pickle
+            self._graph_module = None

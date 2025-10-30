@@ -524,45 +524,61 @@ class InductorOutput(ABC, Generic[TOut]):
     def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut: ...
 
 
+TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
+
+
 @dataclass
-class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
+class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode]):
     """
-    A full compiled fx graph that doesn't need to lookup the FxGraphCache
-    to run
+    A generic wrapper for OutputCode objects that are bundled directly in the cache
+    (rather than looked up via FxGraphCache).
+
+    This works for any OutputCode subclass (CompiledFxGraph, RegionalOutputCode, etc.)
     """
 
-    result: CompiledFxGraph
+    result: TOutputCode
 
     def pre_save(self) -> None:
-        disk_compiled_graph = copy(self.result)
-        disk_compiled_graph.prepare_for_serialization()
-        self.result = disk_compiled_graph
+        disk_result = copy(self.result)
+        disk_result.prepare_for_serialization()
+        self.result = disk_result
         return
 
-    def load(self, example_inputs) -> CompiledFxGraph:
+    def load(self, example_inputs) -> TOutputCode:
         self.example_inputs = example_inputs
-
         return self.result
 
     def post_compile(
-        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
-    ) -> CompiledFxGraph:
+        self, result: TOutputCode, fx_config: _CompileFxKwargs
+    ) -> TOutputCode:
         constants = CompiledFxGraphConstants()
-        # Cache hit specific post compile
-        graph, cache_info = FxGraphCache.cache_hit_post_compile(result, {}, constants)
-        if graph is None:
-            raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "fx_graph_bundled_cache_hit",  # always a hit
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(cache_info),
-        )
+
+        # Special handling for CompiledFxGraph - needs FxGraphCache.cache_hit_post_compile
+        if isinstance(result, CompiledFxGraph):
+            graph, cache_info = FxGraphCache.cache_hit_post_compile(
+                result, {}, constants
+            )
+            if graph is None:
+                raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "fx_graph_bundled_cache_hit",  # always a hit
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(cache_info),
+            )
+            result = graph  # type: ignore[assignment]
+
         # Run normal post compile
-        graph.post_compile(self.example_inputs, constants, fx_config)
-        return graph
+        result.post_compile(self.example_inputs, constants, fx_config)
+        return result
+
+
+# Backwards compatibility alias
+CompiledFxGraphLoadable: type[BundledOutputCodeLoadable[CompiledFxGraph]] = (
+    BundledOutputCodeLoadable[CompiledFxGraph]
+)
 
 
 @dataclass
@@ -689,18 +705,31 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
         )
 
 
-# Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
-class BundledCompiledForward(CompiledFxGraphLoadable):
-    pass
+# Generic bundled forward/backward classes that work with any OutputCode type
+@dataclass
+class BundledCompiledForward(
+    BundledOutputCodeLoadable[TOutputCode], Generic[TOutputCode]
+):
+    """
+    Generic forward function for bundled compilation.
+    Works with any OutputCode type (CompiledFxGraph, RegionalOutputCode, etc.)
+    """
 
 
 @dataclass
 class BundledCompiledBackward(
-    GenericCompiledBackward[CompiledFxGraph], CompiledFxGraphLoadable
+    GenericCompiledBackward[TOutputCode],
+    BundledOutputCodeLoadable[TOutputCode],
+    Generic[TOutputCode],
 ):
+    """
+    Generic backward function for bundled compilation.
+    Works with any OutputCode type (CompiledFxGraph, RegionalOutputCode, etc.)
+    """
+
     def post_compile(
-        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
-    ) -> CompiledFxGraph:
+        self, result: TOutputCode, fx_config: _CompileFxKwargs
+    ) -> TOutputCode:
         compiled_bw = super().post_compile(result, fx_config)
         # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
@@ -990,11 +1019,44 @@ class AOTAutogradCacheEntry(
 
 
 class BundledAOTAutogradCacheEntry(
-    GenericAOTAutogradCacheEntry[BundledCompiledForward, BundledCompiledBackward]
+    GenericAOTAutogradCacheEntry[
+        BundledCompiledForward[TOutputCode], BundledCompiledBackward[TOutputCode]
+    ],
+    Generic[TOutputCode],
 ):
     """
-    AOTAutogradCacheEntry where we save the entire CompiledFxGraph instead
-    of relying on cache keys from FxGraphCache
+    Generic AOTAutogradCacheEntry where we bundle the entire OutputCode directly
+    (rather than looking it up via FxGraphCache).
+
+    This works with any OutputCode type:
+    - CompiledFxGraph: Traditional inductor compilation
+    - RegionalOutputCode: Regional inductor compilation with GraphPickler serialization
+    - Any future OutputCode subclasses
+
+    Type parameter:
+        TOutputCode: The OutputCode subclass (e.g., CompiledFxGraph, RegionalOutputCode)
+
+    Usage with CompiledFxGraph:
+        entry = BundledAOTAutogradCacheEntry[CompiledFxGraph](
+            compiled_fw=BundledCompiledForward(result=CompiledFxGraph(...)),
+            compiled_bw=BundledCompiledBackward(
+                result=CompiledFxGraph(...),
+                backward_state_indices=[...],
+                num_symints_saved_for_bw_=...,
+            ),
+            ...
+        )
+
+    Usage with RegionalOutputCode:
+        entry = BundledAOTAutogradCacheEntry[RegionalOutputCode](
+            compiled_fw=BundledCompiledForward(result=RegionalOutputCode(gm)),
+            compiled_bw=BundledCompiledBackward(
+                result=RegionalOutputCode(gm),
+                backward_state_indices=[...],
+                num_symints_saved_for_bw_=...,
+            ),
+            ...
+        )
     """
 
 
@@ -1469,8 +1531,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
 
     @staticmethod
     def make_entry(
-        compiled_fw_func: CompiledFxGraph,
-        compiled_bw_func: Optional[CompiledFxGraph],
+        compiled_fw_func: OutputCode,
+        compiled_bw_func: Optional[OutputCode],
         aot_joint_graph_str: Optional[str],
         aot_forward_graph_str: Optional[str],
         aot_backward_graph_str: Optional[str],
@@ -1490,19 +1552,19 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
             # They get reapplied on cache load
-            def unwrap_compiled_fx_graph(obj):
+            def unwrap_output_code(obj):
                 while hasattr(obj, "__wrapped__"):
                     obj = obj.__wrapped__
-                assert isinstance(obj, CompiledFxGraph)
+                assert isinstance(obj, OutputCode)
                 return obj
 
-            compiled_fw_graph = unwrap_compiled_fx_graph(compiled_fw_func)
+            compiled_fw_graph = unwrap_output_code(compiled_fw_func)
             bundled_compiled_forward = BundledCompiledForward(compiled_fw_graph)
             bundled_compiled_backward = None
             if compiled_bw_func is not None:
                 assert backward_state_indices is not None
                 assert num_symints_saved_for_bw is not None
-                compiled_bw_graph = unwrap_compiled_fx_graph(compiled_bw_func)
+                compiled_bw_graph = unwrap_output_code(compiled_bw_func)
                 bundled_compiled_backward = BundledCompiledBackward(
                     compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
                 )
