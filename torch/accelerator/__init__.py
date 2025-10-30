@@ -170,7 +170,7 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
         >>> capabilities = torch.accelerator.get_device_capability("cuda:0")
         >>> print("Supported dtypes:", capabilities["supported_dtypes"])
     """
-    device_index = _get_device_index(device, optional=False)
+    device_index = _get_device_index(device, optional=True)
     return torch._C._accelerator_getDeviceCapability(device_index)
 
 
