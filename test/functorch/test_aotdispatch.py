@@ -2665,27 +2665,32 @@ def forward(self, primals_1, primals_2):
         out.sum().backward()
         self.assertEqual(inps_ref[0].grad, inps[0].grad)
 
-    #         # important bit: there are 2 mutations in the fw
-    #         self.assertExpectedInline(
-    #             fw_graph[0].code.strip(),
-    #             """\
-    # def forward(self, primals_1, primals_2):
-    #     _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
-    #     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    #     _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
-    #     mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
-    #     return (mul, add)""",
-    #         )
+        # important bit: there are 2 mutations in the fw
+        self.assertExpectedInline(
+            fw_graph[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    clone = torch.ops.aten.clone.default(mul)
+    sin_ = torch.ops.aten.sin_.default(mul);  mul = None
+    clone_1 = torch.ops.aten.clone.default(sin_);  sin_ = None
+    return (clone_1, add, clone)""",
+        )
 
-    #         # important bit: there is 1 mutation in the bw
-    #         self.assertExpectedInline(
-    #             bw_graph[0].code.strip(),
-    #             """\
-    # def forward(self, add, tangents_1):
-    #     _foreach_mul__2 = torch.ops.aten._foreach_mul_.ScalarList([add], [4]);  _foreach_mul__2 = None
-    #     mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
-    #     return (mul_1, None)""",
-    #         )
+        # important bit: there is 1 mutation in the bw
+        self.assertExpectedInline(
+            bw_graph[0].code.strip(),
+            """\
+def forward(self, add, clone, tangents_1):
+    cos = torch.ops.aten.cos.default(clone);  clone = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
+    _foreach_mul__2 = torch.ops.aten._foreach_mul_.ScalarList([add], [4]);  _foreach_mul__2 = None
+    mul_2 = torch.ops.aten.mul.Tensor(mul_1, add);  mul_1 = add = None
+    return (mul_2, None)""",
+        )
 
     def test_fw_bw_mutation_no_functionalization2(self):
         class FwBwMutation(torch.autograd.Function):
