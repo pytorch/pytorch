@@ -4,7 +4,7 @@
 import functools
 import importlib
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, Sequence, Union
+from typing import Any, Callable, Optional, Sequence
 
 import sympy
 from sympy import Expr, Integer
@@ -15,13 +15,7 @@ from torch.utils._sympy.functions import Identity
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
-from ...virtualized import V
-from .common import (
-    build_subgraph_module_buffer,
-    infer_dense_strides,
-    load_flex_template,
-    SubgraphResults,
-)
+from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
 
 aten = torch.ops.aten
@@ -103,45 +97,13 @@ def patch_fixed_layout_indexer_for_cutedsl():
         FixedLayout.make_indexer = original_make_indexer
 
 
-def create_placeholder_cutedsl(
-    name: str,
-    dtype: torch.dtype,
-    device: torch.device,
-    size: list[int],
-) -> TensorBox:
-    """
-    Create a placeholder with colexicographic (column-major) strides for CuteDSL.
+def with_cutedsl_indexer(fn: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with patch_fixed_layout_indexer_for_cutedsl():
+            return fn(*args, **kwargs)
 
-    Unlike create_placeholder which uses row-major strides, this creates placeholders
-    with column-major strides to match CuTe's coordinate space interpretation.
-    """
-    from ...ir import FlexibleLayout, InputBuffer, TensorBox
-
-    input_buffer = InputBuffer(
-        name=name,
-        layout=FixedLayout(
-            device,
-            dtype,
-            size,
-            FlexibleLayout.contiguous_strides(size),
-        ),
-    )
-    return TensorBox.create(input_buffer)
-
-
-def build_subgraph_buffer_cutedsl(
-    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
-    graph_module: GraphModule,
-) -> SubgraphResults:
-    """
-    Build subgraph with colexicographic indexing for CuteDSL.
-
-    Temporarily patches FixedLayout.make_indexer to use colexicographic indexing
-    instead of the default lexicographic indexing. This ensures the generated
-    index expressions match CuTe's expectations.
-    """
-    with patch_fixed_layout_indexer_for_cutedsl():
-        return build_subgraph_module_buffer(args, graph_module)
+    return wrapper
 
 
 def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
@@ -306,69 +268,19 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
-    # Rebuild subgraphs with colexicographic indexing for CuteDSL
+    # Reuse prebuilt subgraphs
     cutedsl_subgraph_buffer = subgraph_buffer
     cutedsl_mask_graph_buffer = mask_graph_buffer
-    if subgraph is not None:
-        # Reconstruct args for score_mod subgraph
-        from .common import create_placeholder
 
-        placeholder_inps = [
-            create_placeholder(name, dtype_val, device)
-            for name, dtype_val in [
-                ("score", dtype),
-                ("b", torch.int32),
-                ("h", torch.int32),
-                ("m", torch.int32),
-                ("n", torch.int32),
-            ]
-        ]
-
-        # Create NEW placeholders for score_mod_other_buffers with colexicographic strides
-        score_mod_new_placeholders = [
-            create_placeholder_cutedsl(
-                buf.get_name(),
-                buf.get_dtype(),
-                buf.get_device(),
-                [V.graph.sizevars.size_hint(s) for s in buf.get_size()],
-            )
-            for buf in score_mod_other_buffers
-        ]
-
-        cutedsl_subgraph_buffer = build_subgraph_buffer_cutedsl(
-            placeholder_inps + score_mod_new_placeholders, subgraph.graph_module
-        )
-
-    # Rebuild mask_mod subgraph
-    mask_graph_placeholder_inps = [
-        create_placeholder(name, torch.int32, device) for name in ["b", "h", "m", "n"]
-    ]
-
-    # Create NEW placeholders for mask_mod_other_buffers with colexicographic strides
-    mask_mod_new_placeholders = [
-        create_placeholder_cutedsl(
-            buf.get_name(),
-            buf.get_dtype(),
-            buf.get_device(),
-            [V.graph.sizevars.size_hint(s) for s in buf.get_size()],
-        )
-        for buf in mask_mod_other_buffers
-    ]
-
-    cutedsl_mask_graph_buffer = build_subgraph_buffer_cutedsl(
-        mask_graph_placeholder_inps + mask_mod_new_placeholders, mask_graph.graph_module
+    error = flash_attention_cutedsl_template.maybe_append_choice(
+        choices,
+        input_nodes=input_nodes,
+        layout=output_layout,
+        mutated_inputs=[lse],
+        subgraphs=[cutedsl_subgraph_buffer, cutedsl_mask_graph_buffer],
+        SM_SCALE=scale,
+        NEEDS_BLOCK_MASK=needs_block_mask,
     )
-
-    with patch_fixed_layout_indexer_for_cutedsl():
-        error = flash_attention_cutedsl_template.maybe_append_choice(
-            choices,
-            input_nodes=input_nodes,
-            layout=output_layout,
-            mutated_inputs=[lse],
-            subgraphs=[cutedsl_subgraph_buffer, cutedsl_mask_graph_buffer],
-            SM_SCALE=scale,
-            NEEDS_BLOCK_MASK=needs_block_mask,
-        )
 
     def wrap_choice_render(choice):
         original_make_kernel_render = choice.make_kernel_render
@@ -376,9 +288,9 @@ def create_flex_flash_attention_kernel(
         def make_kernel_render_with_patch(*args, **kwargs):
             render_kernel, render = original_make_kernel_render(*args, **kwargs)
 
+            @with_cutedsl_indexer
             def render_with_patch():
-                with patch_fixed_layout_indexer_for_cutedsl():
-                    return render()
+                return render()
 
             return render_kernel, render_with_patch
 
