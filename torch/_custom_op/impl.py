@@ -36,6 +36,7 @@ __all__ = ["custom_op", "CustomOp", "get_ctx"]
 SUPPORTED_DEVICE_TYPE_TO_KEY = {
     "cpu": "CPU",
     "cuda": "CUDA",
+    "xpu": "XPU",
 }
 
 # We will not let users register CustomOps with anything that could look like

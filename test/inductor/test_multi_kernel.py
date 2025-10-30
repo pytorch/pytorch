@@ -17,7 +17,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -70,7 +69,6 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     """
 
     @config.patch("cpp_wrapper", True)
-    @skipIfXpu(msg="cpp wrapper doesn't currently work on the XPU stack")
     def fn(self):
         # The same kernel may have been compiled by previous tests with
         # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
@@ -111,7 +109,6 @@ class MultiKernelTest(TestCase):
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
-    @skipIfXpu
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_gemm(self):
         def fn(x, y):
@@ -140,7 +137,6 @@ class MultiKernelTest(TestCase):
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
-    @skipIfXpu
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):
