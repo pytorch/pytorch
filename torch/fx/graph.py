@@ -933,25 +933,24 @@ class _PyTreeCodeGen(CodeGen):
             return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
     def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
-        in_spec = self.pytree_info.in_spec
         # when kwargs is present, in_spec is tuple(args, kwargs)
         has_args_kwargs_tuple = (
-            in_spec.type is tuple
-            and in_spec.num_children == 2
-            and in_spec.child(0).type is tuple
-            and in_spec.child(1).type is dict
+            self.pytree_info.in_spec.type is tuple
+            and self.pytree_info.in_spec.num_children == 2
+            and self.pytree_info.in_spec.children_specs[0].type is tuple
+            and self.pytree_info.in_spec.children_specs[1].type is dict
         )
         fn_kwargs = "{}"
         fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
         if has_args_kwargs_tuple:
-            count_args = in_spec.child(0).num_children
+            count_args = self.pytree_info.in_spec.children_specs[0].num_children
             fn_args = self.pytree_info.orig_args[:count_args]
             fn_kwargs = (
                 "{"
                 + ", ".join(
                     f"'{k}':{v}"
                     for k, v in zip(
-                        in_spec.child(1).context,
+                        self.pytree_info.in_spec.children_specs[1].context,
                         self.pytree_info.orig_args[count_args:],
                     )
                 )
@@ -1380,7 +1379,7 @@ class Graph:
                 f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
@@ -1941,7 +1940,7 @@ class Graph:
                             "a str is expected"
                         )
                 if node.op in ["get_attr", "call_module"]:
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     target_atoms = node.target.split(".")
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
