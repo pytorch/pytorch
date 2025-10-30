@@ -23,7 +23,7 @@ constexpr size_t NUMBER_OF_DEVICE_CAPABILITIES = NumScalarTypes;
  * - Enable device-specific optimizations based on supported capabilities
  *
  * Contract
- * 
+ *
  * Supported data types:
  * - Each bitfield represents support for one device capability
  * - Bit value 1 means the capability is supported, 0 means not supported
@@ -32,11 +32,8 @@ constexpr size_t NUMBER_OF_DEVICE_CAPABILITIES = NumScalarTypes;
  * @note Adding New Capabilities
  *
  * 1. Define the new capability in the `DeviceCapability` struct
- * 2. Update the support of the new capability in each accelerator
- * implementation
- * 3. Create a new method to check if the capability is supported
- * 4. Update to length of NUMBER_OF_DEVICE_CAPABILITIES
- * 5. Add the new capability to the returned PyObject Dictionary
+ * 2. Update the support of the new capability in each accelerator implementation
+ * 3. Add the new capability to the returned PyObject Dictionary
  */
 struct C10_API DeviceCapability {
   union {
