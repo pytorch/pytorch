@@ -45,7 +45,7 @@ class EinsumDims:
         for input_dim in input_dims:
             dim_char_set.update(input_dim)
 
-        # get a determinisitc order of all dim chars
+        # get a deterministic order of all dim chars
         all_dim_chars = sorted(dim_char_set)
 
         # parse input and output dimensions

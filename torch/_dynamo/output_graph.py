@@ -1060,7 +1060,7 @@ class OutputGraph(OutputGraphCommon):
     def module_key_name(*names: Any) -> str:
         # create a new unique name
         name = "_".join(map(str, names))
-        # Strip _buffers[..]/_parmeters[..]/_modules[..] names
+        # Strip _buffers[..]/_parameters[..]/_modules[..] names
         name = re.sub(
             r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]", r".\2", name
         )
@@ -2217,7 +2217,7 @@ class OutputGraph(OutputGraphCommon):
                     backend_fake_mode = torch._subclasses.FakeTensorMode(
                         shape_env=old_fake_mode.shape_env,
                     )
-                # TODO(voz): Ostensibily, this should be scoped and
+                # TODO(voz): Ostensibly, this should be scoped and
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
@@ -3414,7 +3414,7 @@ class SubgraphTracer(fx.Tracer):
         if proxy in self.lifted_freevars:
             return self.lifted_freevars[proxy]
 
-        # We first lift proxy to parent's graph then lift to current grpah's input
+        # We first lift proxy to parent's graph then lift to current graph's input
         # so that when we bind symints of the sizes in current graph, those symints
         # would already be lifted as inputs to parent graph.
         if proxy.tracer != self.parent:
@@ -3462,7 +3462,7 @@ class SubgraphTracer(fx.Tracer):
     def track_produced_symints(
         self, example_value: Any, e_proxy: Union[LazyProxy, torch.fx.Proxy]
     ) -> None:
-        # When binding the symbols in an exmaple_value, we bind the symbols
+        # When binding the symbols in an example_value, we bind the symbols
         # to the proxy's associated Tracer instead of current tracer.
         # This is because:
         # 1. We may be calling wrap_tensors during speculate_subgraph because

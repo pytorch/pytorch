@@ -2089,7 +2089,7 @@ class InstructionTranslatorBase(
     def _raise_exception_variable(self, val: VariableTracker) -> NoReturn:
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
-        #   2) raise exception instance - raise NotImplemetedError("foo")
+        #   2) raise exception instance - raise NotImplementedError("foo")
 
         # 1) when user raises exception type
         val = self._create_exception_type(val)
@@ -2140,7 +2140,7 @@ class InstructionTranslatorBase(
             try:
                 self._raise_exception_variable(val)
             finally:
-                # Update __cause__/__supppress_context__ in the raised exception
+                # Update __cause__/__suppress_context__ in the raised exception
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 cause = self._create_exception_type(from_vt)
                 curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
@@ -2417,8 +2417,8 @@ class InstructionTranslatorBase(
 
         # Users can check exception in 3 ways
         # 1) except NotImplementedError --> BuiltinVariable
-        # 2) except CustomException --> UserDefinedExceptionClasVariable
-        # 3) except (NotImplemetedError, AttributeError) -> TupleVariable
+        # 2) except CustomException --> UserDefinedExceptionClassVariable
+        # 3) except (NotImplementedError, AttributeError) -> TupleVariable
 
         if not isinstance(
             expected_exc_types,
