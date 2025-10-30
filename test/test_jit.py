@@ -3153,7 +3153,7 @@ class TestScript(JitTestCase):
             eplan = get_execution_plan(dstate)
             num_bailouts = eplan.code.num_bailouts()
 
-            for i in range(0, num_bailouts):
+            for i in range(num_bailouts):
                 eplan.code.request_bailout(i)
                 self.assertEqual(jitted(x), expected)
 
@@ -5950,7 +5950,7 @@ a")
             # type: (int) -> int
             prev = 1
             v = 1
-            for i in range(0, x):
+            for i in range(x):
                 save = v
                 v = v + prev
                 prev = save
@@ -6723,7 +6723,7 @@ a")
         @torch.jit.script
         def testNoThrows(t):
             c1 = 1
-            if (False and bool(t[1])) or (True or bool(t[1])):
+            if (False and bool(t[1])) or (True or bool(t[1])):  # noqa: SIM222,SIM223
                 c1 = 0
             return c1
 
@@ -10005,7 +10005,7 @@ dedent """
         def tensor_unifying(x, y, z):
             # testing dynamic is appropriately set for y and z
             if bool(x):
-                x, y, z = x + 1, y, z
+                x, y, z = x + 1, y, z  # noqa: PLW0127
             else:
                 x, y, z = x + 1, x, y
 
@@ -10938,7 +10938,7 @@ dedent """
 
             # Test symbolic differentiation
             # Run Forward and Backward thrice to trigger autodiff graph
-            for i in range(0, 3):
+            for i in range(3):
                 y = jit_module(x)
                 y.backward(grad)
             x.grad.zero_()
@@ -11802,7 +11802,7 @@ dedent """
         def fn_zip_enumerate(x, y):
             # type: (List[int], List[int]) -> int
             sum = 0
-            for (i, (j, v), k) in zip(x, enumerate(y), range(0, 100)):
+            for (i, (j, v), k) in zip(x, enumerate(y), range(100)):
                 sum += i * j * v * k
 
             return sum
@@ -15758,7 +15758,7 @@ dedent """
         def fn(d):
             # type: (Dict[str, int]) -> List[int]
             out = [1]
-            for i in range(d["hi"] if "hi" in d else 6):
+            for i in range(d.get("hi", 6)):
                 out.append(i)  # noqa: PERF402
             return out
 
@@ -16104,7 +16104,7 @@ M = 10
 S = 5
 
 def add_nn_module_test(*args, **kwargs):
-    no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
+    no_grad = kwargs.get('no_grad', False)
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests

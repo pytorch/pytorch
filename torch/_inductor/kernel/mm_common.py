@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import sympy_product
+from torch._inductor.utils import get_current_backend, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
@@ -145,7 +145,10 @@ def use_native_matmul(mat1, mat2):
         raise AssertionError("native matmul doesn't support block_ptr codegen yet")
 
     # Currently only enable native matmul for triton on GPU.
-    if not (mat1.get_device().type == "cuda" and config.cuda_backend == "triton"):
+    device_type = mat1.get_device().type
+    if not (
+        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
+    ):
         return False
 
     # Currently, tl.dot only supports following dtypes
