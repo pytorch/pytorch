@@ -470,8 +470,8 @@ def _should_pad_bench(
         if not has_triton():
             return False
 
-        if not is_mm_compute_bound(m, k, n, mat1.dtype):
-            return False
+        # if not is_mm_compute_bound(m, k, n, mat1.dtype):
+        #     return False
 
         # We don't want to look up the cache for cases that are trivially false
         # since it does file io
