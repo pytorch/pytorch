@@ -332,9 +332,10 @@ def prune_conv2d_pool_flatten_linear(
         linear_ic = linear.weight.shape[1]
 
     conv2d_oc = len(mask)
-    assert linear_ic % conv2d_oc == 0, (
-        f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
-    )
+    if linear_ic % conv2d_oc != 0:
+        raise AssertionError(
+            f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+        )
 
     flatten_scale = linear_ic // conv2d_oc
     flattened_mask = torch.tensor(
