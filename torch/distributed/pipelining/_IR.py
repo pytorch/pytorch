@@ -189,7 +189,7 @@ def _insert_stage_symbolic_backward(
                 output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
                 if node in tuples:
                     stage_output = tuples[node]
-                    output_grads = tuple(val_to_grad.get(n, None) for n in tuples[node])
+                    output_grads = tuple(val_to_grad.get(n) for n in tuples[node])
                     outputs_with_grads_idxs = [
                         i for i, n in enumerate(tuples[node]) if n in live_nodes
                     ]
@@ -282,7 +282,7 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)
@@ -924,7 +924,7 @@ class Pipe(torch.nn.Module):
                 pass
 
         # This is done by (1) `_sink_params` at each submodule;
-        for name, submod in split.named_children():
+        for submod in split.children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()

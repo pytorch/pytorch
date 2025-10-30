@@ -174,7 +174,7 @@ class MaskedTensor(torch.Tensor):
                 UserWarning,
                 stacklevel=2,
             )
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
 
     def _preprocess_data(self, data, mask):
@@ -244,12 +244,12 @@ class MaskedTensor(torch.Tensor):
 
         class Constructor(torch.autograd.Function):
             @staticmethod
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def forward(ctx, data, mask):
                 return MaskedTensor(data, mask)
 
             @staticmethod
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def backward(ctx, grad_output):
                 return grad_output, None
 
@@ -322,7 +322,7 @@ class MaskedTensor(torch.Tensor):
             "In the case that the semantics for the operator are not trivial, it would be appreciated "
             "to also include a proposal for the semantics."
         )
-        warnings.warn(msg)
+        warnings.warn(msg, stacklevel=2)
         return NotImplemented
 
     def __lt__(self, other):
@@ -336,12 +336,12 @@ class MaskedTensor(torch.Tensor):
     def get_data(self):
         class GetData(torch.autograd.Function):
             @staticmethod
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def forward(ctx, self):
                 return self._masked_data.detach()
 
             @staticmethod
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def backward(ctx, grad_output):
                 if is_masked_tensor(grad_output):
                     return grad_output

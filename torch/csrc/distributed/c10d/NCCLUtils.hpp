@@ -90,6 +90,10 @@ static_assert(
 #define NCCL_HAS_NVLS_CTAS
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_SHRINK
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
@@ -293,6 +297,14 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config);
 #endif // NCCL_HAS_COMM_SPLIT
+
+#ifdef NCCL_HAS_COMM_SHRINK
+  static std::shared_ptr<NCCLComm> shrink(
+      NCCLComm* source,
+      std::vector<int>& ranks_to_exclude,
+      ncclConfig_t* config,
+      int shrinkFlags = 0);
+#endif // NCCL_HAS_COMM_SHRINK
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();

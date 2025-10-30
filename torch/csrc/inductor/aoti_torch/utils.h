@@ -93,14 +93,10 @@ inline void assert_inf_and_nan(
     at::Tensor& check_tensor) {
   auto isnan_tensor = check_tensor.isnan();
   TORCH_CHECK(
-      isnan_tensor.any().item<bool>() == false,
-      "At least one NaN in ",
-      tensor_name);
+      !isnan_tensor.any().item<bool>(), "At least one NaN in ", tensor_name);
   auto isinf_tensor = check_tensor.isinf();
   TORCH_CHECK(
-      isinf_tensor.any().item<bool>() == false,
-      "At least one INF in ",
-      tensor_name);
+      !isinf_tensor.any().item<bool>(), "At least one INF in ", tensor_name);
 }
 
 // utility functions to convert a pointer to an optional value
