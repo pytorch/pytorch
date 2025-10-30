@@ -1092,7 +1092,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if name in ("__weakref__", "__dict__"):
             raise_observed_exception(AttributeError, tx)
 
-        # Properties witout setters are read-only
+        # Properties without setters are read-only
         try:
             desc = inspect.getattr_static(type(self.value), name)
         except AttributeError:
