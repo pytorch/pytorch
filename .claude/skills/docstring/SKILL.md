@@ -1,3 +1,8 @@
+---
+name: docstring
+description: Write docstrings for PyTorch functions and methods following PyTorch conventions. Use when writing or updating docstrings in PyTorch code.
+---
+
 # PyTorch Docstring Writing Guide
 
 This skill describes how to write docstrings for functions and methods in the PyTorch project, following the conventions in `torch/_tensor_docs.py` and `torch/nn/functional.py`.
