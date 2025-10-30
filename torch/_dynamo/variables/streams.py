@@ -93,6 +93,7 @@ class StreamContextVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        # pyrefly: ignore [read-only]
         self.device = device
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
