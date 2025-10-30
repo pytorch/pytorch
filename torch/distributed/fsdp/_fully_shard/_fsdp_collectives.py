@@ -473,6 +473,12 @@ def foreach_reduce(
     autograd, so clearing the list frees the gradients.
     """
 
+    # # resort by FQNs
+    # idxs = sorted(range(len(fsdp_params)), key=lambda i: fsdp_params[i]._param_fqn)
+    # fsdp_params = [fsdp_params[i] for i in idxs]
+    # unsharded_grads = [unsharded_grads[i] for i in idxs]
+    # print(fsdp_params)
+
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
         # Check this at runtime since it could be a real runtime error if e.g.

@@ -400,7 +400,22 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 grouped_collectives[key].add(node)
 
         for key, nodes in grouped_collectives.items():
-            self._bucket_group(list(nodes))
+            # resort by "FQNs"
+            nodes_ = list(nodes)
+            # fqns = [
+            #     (
+            #         list(node.meta["nn_module_stack"].values())[-2][0]
+            #         if "nn_module_stack" in node.meta
+            #         else list(node.meta["fwd_nn_module_stack"].values())[-2][0]
+            #         # else ""  # only hit this for embedding layer, which is a 1-param bucket
+            #     )
+            #     for node in nodes
+            # ]
+            # idxs = sorted(range(len(fqns)), key=lambda i: fqns[i])
+            # nodes_ = [nodes_[i] for i in idxs]
+            # fqns = [fqns[i] for i in idxs]
+            # print(fqns)
+            self._bucket_group(nodes_)
 
 
 class ManualOverlapScheduler(OverlapScheduler):
