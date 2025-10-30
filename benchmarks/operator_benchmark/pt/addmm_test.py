@@ -54,7 +54,7 @@ class AddmmBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_test(addmm_short_configs + addmm_long_configs, AddmmBenchmark)
-op_bench.generate_pt_gradient_test(addmm_short_configs + addmm_long_configs, AddmmBenchmark)
+op_bench.generate_pt_gradient_test(addmm_long_configs, AddmmBenchmark)
 
 """Mircobenchmark for addbmm operator."""
 
@@ -105,9 +105,7 @@ addbmm_short_configs = op_bench.cross_product_configs(
 )
 
 op_bench.generate_pt_test(addbmm_long_configs + addbmm_short_configs, AddbmmBenchmark)
-op_bench.generate_pt_gradient_test(
-    addbmm_long_configs + addbmm_short_configs, AddbmmBenchmark
-)
+op_bench.generate_pt_gradient_test(addbmm_long_configs, AddbmmBenchmark)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
