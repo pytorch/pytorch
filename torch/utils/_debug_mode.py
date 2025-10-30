@@ -188,7 +188,6 @@ class DebugMode(TorchDispatchMode):
         record_realtensor=True,
         record_tensor_attributes=None,
         record_nn_module=False,
-        analyze_aliases_for_custom_ops=False,
     ):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -198,7 +197,6 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
         self.record_tensor_attributes = record_tensor_attributes or []
-        self.analyze_aliases_for_custom_ops = analyze_aliases_for_custom_ops
 
         self.record_nn_module = record_nn_module
 
@@ -249,16 +247,6 @@ class DebugMode(TorchDispatchMode):
                 self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
 
         result = func(*args, **kwargs)
-        if self.analyze_aliases_for_custom_ops:
-            # If there is a custom op, make sure inp/out don't alias
-            if func.namespace not in ["aten", "prim"]:
-                torch._library.utils._c_check_aliasing_constraint(
-                    func.name,
-                    args,
-                    kwargs,
-                    result,
-                )
-
         return result
 
     def __enter__(self):

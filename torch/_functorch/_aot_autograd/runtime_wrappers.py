@@ -43,8 +43,10 @@ from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._debug_mode import DebugMode
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
@@ -249,9 +251,48 @@ def _should_disable_saved_tensors_hooks():
     return False
 
 
+blocklisted_ops = [
+    torch.ops._c10d_functional.wait_tensor.default,
+    torch.ops._c10d_functional.all_reduce_.default,
+]
+
+
+class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
+    """
+    Checks if inp/out of custom ops alias each other
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.supports_higher_order_operators = True
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        res = func(*args, **kwargs)
+        # Only check aliasing for custom ops (non-aten/prim)
+        if (
+            not isinstance(func, torch._ops.HigherOrderOperator)
+            and func.namespace not in ["aten", "prim"]
+            and func not in blocklisted_ops
+        ):
+            torch._library.utils._c_check_aliasing_constraint(
+                func.name,
+                args,
+                kwargs,
+                res,
+            )
+        return res
+
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
+
 class _FirstInvocationContext:
     """
-    Context manager that tracks first invocation and conditionally enables DebugMode.
+    Context manager that tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
     This is useful when we have a custom op where we want to analyze its' input
     and output during cold start.
     """
@@ -261,14 +302,15 @@ class _FirstInvocationContext:
 
     def __call__(self):
         """
-        Returns a context manager: DebugMode on first invocation, nullcontext thereafter.
+        Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
         Automatically updates state after first use.
         """
+        if not torch._functorch.config.check_custom_op_mode:
+            return nullcontext()
+
         if self._is_first:
             self._is_first = False
-            return DebugMode(
-                record_realtensor=False, analyze_aliases_for_custom_ops=True
-            )
+            return _AnalyzeCustomOpInputOutputMode()
         return nullcontext()
 
 
@@ -354,7 +396,7 @@ def _create_runtime_wrapper(
             )
             torch.autograd.graph.increment_version(mutated_args)
 
-        # Enable DebugMode on first invocation to check aliasing constraints for custom ops
+        # Enable _AnalyzeCustomOpInputOutputMode on first invocation to check aliasing constraints for custom ops
         with first_invocation_ctx():
             if trace_joint:
                 args_ = list(args)
