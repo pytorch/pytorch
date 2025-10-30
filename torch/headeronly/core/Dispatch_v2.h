@@ -59,13 +59,13 @@ inline c10::ScalarType scalar_type(c10::ScalarType s) {
 
 // Headeronly API to DISPATCH V2 macros:
 
-#define _THO_NOOP(...)
+#define THO_EMPTY(...)
 
 #define THO_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
-  AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(_THO_NOOP, enum_type, HINT, __VA_ARGS__)
+  AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(THO_EMPTY, enum_type, HINT, __VA_ARGS__)
 
 #define THO_DISPATCH_SWITCH(TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH_TMPL(_THO_NOOP, STD_TORCH_CHECK, TYPE, NAME, __VA_ARGS__)
+  AT_DISPATCH_SWITCH_TMPL(THO_EMPTY, STD_TORCH_CHECK, TYPE, NAME, __VA_ARGS__)
 
 #define THO_DISPATCH_CASE(enum_type, ...) \
   AT_DISPATCH_CASE_TMPL(                  \
