@@ -1501,7 +1501,7 @@ def _checkpoint_without_reentrant_generator(
     unpack_error_cb = None
 
     if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
-        if context_fn != noop_context_fn:
+        if context_fn is not noop_context_fn:
             raise ValueError(
                 "debug=True is incompatible with non-default context_fn"
             )

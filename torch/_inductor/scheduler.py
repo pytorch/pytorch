@@ -25,8 +25,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from types import ModuleType
 
-import weakref
-
 import sympy
 
 import torch
@@ -68,6 +66,7 @@ from .utils import (
     cache_on_self,
     cmp,
     device_need_guard,
+    get_current_backend,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
@@ -95,28 +94,6 @@ compute_dependencies_log = torch._logging.getArtifactLogger(
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
-
-
-_custom_should_partition_fns: weakref.WeakKeyDictionary[
-    torch._ops.OpOverload, Callable[..., bool]
-] = weakref.WeakKeyDictionary()
-
-
-def register_should_partition_rule(
-    op: torch._ops.OpOverload,
-    func: Callable[..., bool],
-) -> None:
-    """Register a function that says if Inductor should partition the graph on this op.
-
-    The function should be have the same signature as the operator.
-    Inductor will invoke the function with FakeTensors when it needs to decide
-    if the graph should be partitioned.
-
-    `register_should_partition_rule` is currently private and experimental.
-    Use at your own risk.
-    """
-    assert isinstance(op, torch._ops.OpOverload)
-    _custom_should_partition_fns[op] = func
 
 
 class MixOrderReduction:
@@ -196,7 +173,11 @@ class MixOrderReduction:
             return False
         if not node1.is_gpu() or not node2.is_gpu():
             return False
-        if node1.get_device().type != "cuda" or config.cuda_backend != "triton":  # type: ignore[union-attr]
+        device_type = node1.get_device().type  # type: ignore[union-attr]
+        if (
+            device_type not in ("cuda", "xpu")
+            or get_current_backend(device_type) != "triton"
+        ):
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
@@ -2869,7 +2850,7 @@ class Scheduler:
         # NB: None means that the dependency is on an input.  Don't actually
         # generate a dependency because if we do, Inductor will start trying
         # to free the unbacked int but that's pointless
-        for name, val in V.graph.graph_inputs.items():
+        for val in V.graph.graph_inputs.values():
             if isinstance(val, sympy.Expr):
                 for fs in val.free_symbols:
                     unbacked_symbol_to_origin_node[fs] = None
@@ -3569,9 +3550,7 @@ class Scheduler:
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             for hint_override in config.multi_kernel_hints:
                 choice_timings = multi_node.choice_timings(hint_override)
-                for choice, unfused_time in sorted(
-                    choice_timings.items(), key=lambda x: x[1]
-                ):
+                for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
                     if not isinstance(
                         choice, torch._inductor.select_algorithm.TritonTemplateCaller
                     ):
@@ -4996,21 +4975,21 @@ class Scheduler:
         # Allow users to manually specify if a node should be partitioned
         # Can only do this for FallbackKernels
         ir_node = node.node
-        if isinstance(ir_node, torch._inductor.ir.FallbackKernel):
-            operator = ir_node.op_overload
-            if operator is not None and operator in _custom_should_partition_fns:
-                assert isinstance(operator, torch._ops.OpOverload)
-                should_partition_fn = _custom_should_partition_fns[operator]
-                fx_node = ir_node.get_origin_node()
-                assert fx_node is not None
-                success, fake_args, fake_kwargs = (
-                    torch._inductor.fx_utils.get_fake_args_kwargs(fx_node)
-                )
-                assert success, (
-                    "If this op came from a custom inductor pass, make sure to run FakeTensorUpdator"
-                )
-                should_partition = should_partition_fn(*fake_args, **fake_kwargs)
-                return should_partition
+        if isinstance(ir_node, torch._inductor.ir.FallbackKernel) and (
+            op := ir_node.op_overload
+        ):
+            op_overload_packet_name = op.name()
+            op_overload_name = (
+                f"{op_overload_packet_name}.{op._overloadname}"
+                if isinstance(op, torch._ops.OpOverload)
+                else op_overload_packet_name
+            )
+            if (
+                op_overload_packet_name in config.custom_should_partition_ops
+                or op_overload_name in config.custom_should_partition_ops
+            ):
+                assert isinstance(op, torch._ops.OpOverload)
+                return True
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
