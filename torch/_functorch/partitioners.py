@@ -1019,8 +1019,6 @@ def default_partition(
     #     cse_graph = fx_graph_cse(fx_g)
     #     joint_module.graph = cse_graph
 
-    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
