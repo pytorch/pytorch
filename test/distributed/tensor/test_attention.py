@@ -52,7 +52,9 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 
@@ -800,10 +802,46 @@ class TestSharding(DTensorTestBase):
         chunks = freqs_cis.chunk(self.world_size * 2)
         self.assertEqual(
             freqs_cis_shard,
-            torch.cat(
-                [chunks[self.rank], chunks[self.world_size * 2 - self.rank - 1]], dim=0
+            map_local_tensor_for_rank(
+                chunks,
+                self.rank,
+                lambda chunks, rank: torch.cat(
+                    [chunks[rank], chunks[self.world_size * 2 - rank - 1]],
+                    dim=0,
+                ),
             ),
         )
+
+
+RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
+    RingAttentionTest,
+    skipped_tests=[
+        # Need to make attention implementation local tensor friendly, e.g.
+        # rewrite "rank local" logic
+        "test_ring_attention_sdpa",
+    ],
+)
+
+CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
+    CPFlexAttentionTest,
+    skipped_tests=[
+        # Missing support for batched tensors
+        "test_cp_flex_attention_causal_mask",
+        "test_cp_flex_attention_document_mask",
+    ],
+)
+
+TestCPCustomOpsWithLocalTensor = create_local_tensor_test_class(
+    TestCPCustomOps,
+    skipped_tests=[
+        # Missing support for fake tensors
+        "test_flex_cp_custom_op",
+    ],
+)
+
+TestShardingWithLocalTensor = create_local_tensor_test_class(
+    TestSharding,
+)
 
 
 if __name__ == "__main__":

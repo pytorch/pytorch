@@ -3342,7 +3342,7 @@ class DimConstraints:
         # alter derivations that depend on old root, to unify to new root
         # e.g. dx=3*_dx+1, dy=dx+1 -> dy=3*_dx+2
         for old_root in introduced_roots.values():
-            for k, c in list(results.items()):
+            for c in results.values():
                 if (
                     "eq" in c
                     and isinstance(c["eq"], sympy.Expr)
@@ -4522,7 +4522,7 @@ class ShapeEnv:
 
     # The order of checking the guards matters. In this specific example:
     # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
-    # we may have an unnecessary shape speciliazation for y.
+    # we may have an unnecessary shape specialization for y.
     def _maybe_specialize_sym_int_with_hint(
         self, maybe_sym: IntLikeType
     ) -> IntLikeType:
@@ -5830,7 +5830,7 @@ class ShapeEnv:
         def issue_guard(guard: ShapeGuard) -> None:
             expr = self.simplify(guard.expr)
 
-            # Avoid re-issueing the same guard.
+            # Avoid re-issuing the same guard.
             if expr in issued:
                 return
 
@@ -6899,9 +6899,6 @@ class ShapeEnv:
                 self._maybe_guard_rel(arg)
             return
         elif not isinstance(expr, sympy.Rel):
-            log.warning(
-                "_maybe_guard_rel() was called on non-relation expression %s", expr
-            )
             return
 
         # A good example of what goes wrong if you don't do this is
