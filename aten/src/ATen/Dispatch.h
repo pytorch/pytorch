@@ -6,6 +6,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/complex.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
 
 #ifdef __CUDACC__
 #include <cuda.h> // For CUDA_VERSION
@@ -94,14 +95,6 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     [[maybe_unused]] int64_t quant_max = qmax;                              \
     return __VA_ARGS__();                                                   \
   }
-
-namespace detail {
-
-inline at::ScalarType scalar_type(at::ScalarType s) {
-  return s;
-}
-
-} // namespace detail
 
 // The AT_DISPATCH_* family of macros provides the ability to
 // conveniently generate specializations of a kernel over all of the
