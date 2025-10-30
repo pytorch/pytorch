@@ -25,6 +25,7 @@ from pathlib import Path
 from platform import system as platform_system
 from typing import Any, NamedTuple
 
+
 REPO_ROOT = Path(__file__).absolute().parent.parent
 PACKAGES_TO_INSTALL = (
     "torch",
@@ -330,7 +331,9 @@ def parse_dependencies(python: Path, wheel_site_dir: Path) -> list[str]:
     return [dep.strip() for dep in dependencies]
 
 
-def install_dependencies(python: Path, dependencies: list[str], packages: list[str]) -> None:
+def install_dependencies(
+    python: Path, dependencies: list[str], packages: list[str]
+) -> None:
     """Install dependencies and additional packages."""
     all_packages = [p for p in packages if p != "torch"] + dependencies
     all_packages = list(dict.fromkeys(all_packages))  # Remove duplicates
@@ -406,7 +409,9 @@ def main() -> None:
             pip_source = PIP_SOURCES[source_name]
         else:
             print(f"Error: CUDA version {args.cuda} not available")
-            print(f"Available versions: {[k.replace('cuda-', '') for k in PIP_SOURCES if k.startswith('cuda-')]}")
+            print(
+                f"Available versions: {[k.replace('cuda-', '') for k in PIP_SOURCES if k.startswith('cuda-')]}"
+            )
             sys.exit(1)
     elif args.rocm:
         source_name = f"rocm-{args.rocm}"
@@ -414,7 +419,9 @@ def main() -> None:
             pip_source = PIP_SOURCES[source_name]
         else:
             print(f"Error: ROCm version {args.rocm} not available")
-            print(f"Available versions: {[k.replace('rocm-', '') for k in PIP_SOURCES if k.startswith('rocm-')]}")
+            print(
+                f"Available versions: {[k.replace('rocm-', '') for k in PIP_SOURCES if k.startswith('rocm-')]}"
+            )
             sys.exit(1)
 
     if PLATFORM not in pip_source.supported_platforms:
@@ -455,10 +462,10 @@ def main() -> None:
         # Write .pth file
         write_pth_file(python)
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("PyTorch nightly binaries installed successfully!")
-    print("="*70)
-    print(f"\nActivate your environment with:")
+    print("=" * 70)
+    print("\nActivate your environment with:")
     print(f"  conda activate {prefix}")
 
 
