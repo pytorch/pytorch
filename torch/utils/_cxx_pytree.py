@@ -931,7 +931,10 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert _is_pytreespec_instance(treespec)
+    if not _is_pytreespec_instance(treespec):
+        raise AssertionError(
+            f"_broadcast_to_and_flatten: Expected `treespec` to be instance of PyTreeSpec but got {type(treespec)}"
+        )
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
@@ -1074,7 +1077,7 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
 
 
 with python_pytree._NODE_REGISTRY_LOCK:
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     python_pytree._cxx_pytree_imported = True
     args, kwargs = (), {}  # type: ignore[var-annotated]
     for args, kwargs in python_pytree._cxx_pytree_pending_imports:

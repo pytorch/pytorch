@@ -178,7 +178,6 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    StreamContextVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -259,7 +258,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
@@ -629,7 +628,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
                     source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
             (torch.__version__, lambda self, value: TorchVersionVariable()),
@@ -866,7 +865,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
         elif isinstance(value, logging.Logger):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
@@ -918,13 +917,19 @@ class VariableBuilder:
         elif trace_rules.is_numpy(value):
             assert np
             if istype(value, types.MethodType):
-                install_guard(
-                    AttrSource(self.source, "__func__").make_guard(
-                        GuardBuilder.CLOSURE_MATCH
+                # Dont guard on cython functions as they dont change ids
+                if inspect.isfunction(value.__func__):
+                    install_guard(
+                        AttrSource(self.source, "__func__").make_guard(
+                            GuardBuilder.CLOSURE_MATCH
+                        )
                     )
-                )
+            elif inspect.isclass(value):
+                self.install_guards(GuardBuilder.CLASS_MATCH)
+            elif inspect.isfunction(value):
+                self.install_guards(GuardBuilder.CLOSURE_MATCH)
             elif callable(value):
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+                self.install_guards(GuardBuilder.ID_MATCH)
             else:
                 self.install_guards(GuardBuilder.TYPE_MATCH)
             return NumpyVariable(value, source=self.source)
@@ -941,14 +946,14 @@ class VariableBuilder:
             return NumpyTypeInfoVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return CollectiveFunctionRewriteVariable.create(
                 self.tx,
                 value,
                 source=self.source,
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLASS_MATCH)
             return AutogradFunctionVariable(
                 value,
                 source=self.source,
@@ -1010,7 +1015,7 @@ class VariableBuilder:
             value
             is torch._dynamo.external_utils.FakeCompiledAutogradEngine._exec_final_callbacks_stub
         ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return LambdaVariable(
                 lambda: UserFunctionVariable(
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
@@ -1048,6 +1053,7 @@ class VariableBuilder:
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
+            # This refers to the device-agnostic torch.Stream
             self.install_guards(GuardBuilder.TYPE_MATCH)
             index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
@@ -1124,7 +1130,7 @@ class VariableBuilder:
             id(value) in ITERTOOLS_TYPE_IDS
             and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
         ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLASS_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, _DynamicScalar):
             is_int = isinstance(value, DynamicInt)
@@ -1258,7 +1264,10 @@ class VariableBuilder:
                 source=self.source,
             )
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            if inspect.isclass(value):
+                self.install_guards(GuardBuilder.CLASS_MATCH)
+            elif inspect.isfunction(value):
+                self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
         elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1321,7 +1330,7 @@ class VariableBuilder:
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.MODULE_MATCH)
             result = PythonModuleVariable(
                 value,
                 source=self.source,
@@ -1364,7 +1373,7 @@ class VariableBuilder:
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
-            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
@@ -1382,7 +1391,7 @@ class VariableBuilder:
                     value, source=self.source
                 )
             if value is torch.autograd._unsafe_preserve_version_counter:
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+                self.install_guards(GuardBuilder.CLASS_MATCH)
                 return PreserveVersionContextVariable.constructor(self.tx)
             if (
                 # `value` must be a strict subclass of `torch.Tensor`
@@ -1406,7 +1415,7 @@ class VariableBuilder:
                 # self.__class__ manually.
                 # For other cases, this is a userdefined class, so install an
                 # ID_MATCH even if its a global variable.
-                self.install_guards(GuardBuilder.ID_MATCH)
+                self.install_guards(GuardBuilder.CLASS_MATCH)
 
             return UserDefinedClassVariable(
                 value,
@@ -1803,7 +1812,7 @@ class VariableBuilder:
         ]
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if isinstance(value, slice):
-            return SliceVariable(items, source=self.source)
+            return SliceVariable(items, self.tx, source=self.source)
         else:
             return RangeVariable(items, source=self.source)
 
