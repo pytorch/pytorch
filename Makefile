@@ -57,15 +57,6 @@ setup-env-cuda:
 setup-env-rocm:
 	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --rocm"
 
-.PHONY: setup-env-hg
-setup-env-conda:
-	@if [ -z "$(CONDA_PREFIX)" ]; then \
-		echo "Error: No conda environment activated."; \
-		echo "Please activate a conda environment first with: conda activate <env-name>"; \
-		exit 1; \
-	fi
-	$(PYTHON) tools/nightly_hg.py --prefix "$(CONDA_PREFIX)"
-
 .PHONY: setup-lint
 setup-lint .lintbin/.lintrunner.sha256: requirements.txt pyproject.toml .lintrunner.toml
 	@echo "Setting up lintrunner..."
