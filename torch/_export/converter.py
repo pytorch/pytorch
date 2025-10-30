@@ -765,7 +765,7 @@ class TS2FXGraphConverter:
             raise ValueError(f"Unsupported JitType ({input_type}) when get device")
 
     def convert_prim_GetAttr(self, node: torch._C.Node):
-        # Build fully qulified name
+        # Build fully qualified name
         attr_fqn = get_attribute_fqn_from_ts_node(self.name_to_attribute_fqn, node)
         output_name = node.output().debugName()
         self.name_to_attribute_fqn[output_name] = attr_fqn
@@ -1455,7 +1455,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         )
         gm = graph_converter.convert()
 
-        # Post-proccessing step to deal with quantized operators.
+        # Post-processing step to deal with quantized operators.
         replace_quantized_ops_with_standard_ops(gm)
         log.info("GraphModule: %s", gm.print_readable(print_output=False))
 
