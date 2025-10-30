@@ -384,7 +384,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         self.dispatch_table: dict
         self.dispatch_table.update(
             {
@@ -800,7 +800,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
     maybe_subclass_meta: Optional[SubclassMeta]
     num_fw_outs_saved_for_bw: Optional[int]
 
-    # Used by RuntimeWrapepr
+    # Used by RuntimeWrapper
     indices_of_inps_to_detach: list[int]
 
     # Time taken to trace/compile the forward

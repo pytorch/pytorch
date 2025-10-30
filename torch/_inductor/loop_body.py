@@ -132,6 +132,14 @@ class LoopBody:
 
         self.indexing = None
 
+    def extract_pw_from_reduction(self):
+        self.root_block = self.root_block.extract_pw_from_reduction()
+        self.has_partial_accumulate = True
+        self.iter_vars = self.iter_vars + self.reduce_vars
+        self.reduce_vars = []
+        self.sizes = (self.sizes[0] + self.sizes[1], tuple())
+        return self
+
     def _init_with_tracing(self, fn, args):
         """Do an FX trace of an arbitrary callable to construct self"""
         self.indexing_exprs = {}
@@ -143,6 +151,9 @@ class LoopBody:
         self.memory_usage = {t: [] for t in MemoryUsageType}
         self.op_counts = collections.Counter()
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
+        self.has_partial_accumulate = self.root_block.graph.find_nodes(
+            op="call_method", target="partial_accumulate"
+        )
         del self.indexing_exprs_name  # not used after _init_with_tracing
 
     def _init_with_copy(self, other: LoopBody, args, allow_same_symbol_in_index):
@@ -162,6 +173,7 @@ class LoopBody:
         self.memory_usage = other.memory_usage
         self.op_counts = other.op_counts
         self.root_block = other.root_block.clone(self)
+        self.has_partial_accumulate = other.has_partial_accumulate
 
         submodules = {**other.submodules}
         submodules.pop("get_index")
@@ -523,6 +535,31 @@ class LoopBodyBlock:
             # unwrap the return value.
             ops.output(fn(*args))
         self.graph = tracer.graph
+
+    def extract_pw_from_reduction(self):
+        red = None
+        store = None
+        for node in self.graph.nodes:
+            if node.target == "reduction":
+                assert not red
+                red = node
+            if node.target == "store_reduction":
+                assert not store
+                store = node
+        assert red
+        assert store
+        reduction_type = red.args[-2]
+        red_arg = red.args[-1]
+        buf = store.args[1]
+        ops = store.args[0]
+
+        with self.graph.inserting_after(store):
+            self.graph.call_method(
+                "partial_accumulate", (ops, buf, reduction_type, red_arg)
+            )
+        self.graph.erase_node(store)
+        self.graph.erase_node(red)
+        return self
 
     def __call__(self):
         graph = self.graph

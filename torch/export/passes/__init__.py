@@ -81,7 +81,7 @@ def move_to_device_pass(
                     and node.target == torch.ops.aten.to.device
                 ):
                     args = list(node.args)
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     args[1] = _get_new_device(args[1], location)
                     node.args = tuple(args)
 
