@@ -283,6 +283,19 @@ def allgather_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> f
     return latency + bw * 1e6  # rescale to us
 
 
+def alltoall_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+    mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
+    num_hops = num_devices_on_mesh_dim - 1
+
+    latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]  # us
+    # Communication time: alltoall is more expensive, as all links are used
+    # Each device sends (bytes_gb / num_devices_on_mesh_dim) to each peer, but all in parallel
+    # So, total communication time is (bytes_gb / mesh_dim_bandwidth)
+    bw = bytes_gb / mesh_dim_bandwidth  # s
+    return latency + bw * 1e6  # rescale to us
+
+
 def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
     mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
@@ -333,39 +346,54 @@ def redistribute_cost(
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0
-    comm_bytes_gb = (
-        spec_to_bytes(current_spec) / current_spec.num_shards / 1024 / 1024 / 1024
-    )
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    for i, (current, target) in enumerate(
-        zip(current_spec.placements, target_spec.placements)
-    ):
+    from torch.distributed.tensor._redistribute import (
+        _gen_transform_infos,
+    )
+    from torch.utils._debug_mode import DebugMode
+
+    with DebugMode(record_torchfunction=False) as debug_mode:
+        transform_infos = _gen_transform_infos(current_spec, target_spec)
+        print(debug_mode.debug_string())
+
+    for transform_info in transform_infos:
+        assert current_spec.tensor_meta is not None, (
+            "spec should have tensor meta defined!"
+        )
+        comm_bytes_gb = (
+            current_spec.tensor_meta.dtype.itemsize
+            * math.prod(transform_info.logical_shape)
+            / current_spec.num_shards
+            / 1024
+            / 1024
+            / 1024
+        )
+        current = transform_info.src_dst_placements[0]
+        target = transform_info.src_dst_placements[1]
         if current == target:
             continue
-
-        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]
+        mesh_dim = transform_info.mesh_dim
+        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
         if current.is_shard() and target.is_replicate():
             # allgather gives larger comm bytes
             comm_bytes_gb *= num_devices_on_mesh_dim
             # add up allgather comm cost
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i)
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_shard() and target.is_shard():
-            # should be alltoall comm, since we haven't implement it yet, add penalty
-            # to favor allgather instead
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i) + 1.0
+            # add up alltoall comm cost
+            cost += alltoall_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_partial() and target.is_replicate():
             # add up allreduce comm cost
-            cost += allreduce_cost(comm_bytes_gb, mesh_topo, i)
+            cost += allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_partial() and target.is_shard():
             # add up reduce_scatter comm cost
-            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, i)
+            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, mesh_dim)
             # after reduce_scatter the comm bytes for further collectives halved.
             comm_bytes_gb /= num_devices_on_mesh_dim
         elif current.is_shard() and target.is_partial():
             # ban shard -> partial as it does not make sense to perform
             # this redistribute
             return float("inf")
-
     return cost
