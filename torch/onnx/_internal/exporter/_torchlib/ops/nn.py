@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Sequence, TYPE_CHECKING
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
@@ -60,7 +60,7 @@ def aten_group_norm(
 @onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
 def aten_rms_norm(
     input: TFloat,
-    normalized_shape: list[int],
+    normalized_shape: Sequence[int],
     weight: Optional[TFloat] = None,
     eps: Optional[float] = None,
 ) -> TFloat:
