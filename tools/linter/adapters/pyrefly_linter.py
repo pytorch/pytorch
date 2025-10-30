@@ -107,7 +107,7 @@ def check_pyrefly_installed(code: str) -> list[LintMessage]:
 
 
 def check_nightly_run(code: str) -> list[LintMessage]:
-    """Check if make setup-env or make setup-env-conda has been run successfully.
+    """Check if make setup-env or make setup-env-hg has been run successfully.
 
     This checks for the presence of pytorch-nightly.pth file that is created
     when installing nightly binaries and type stubs.
@@ -132,7 +132,7 @@ def check_nightly_run(code: str) -> list[LintMessage]:
                     replacement=None,
                     description=(
                         "pytorch-nightly.pth not found. "
-                        "You may need to run make setup-env or make setup-env-conda "
+                        "You may need to run make setup-env or make setup-env-hg "
                         "to install nightly binaries and type stubs."
                     ),
                 )
@@ -141,7 +141,7 @@ def check_nightly_run(code: str) -> list[LintMessage]:
     except Exception as _e:
         # If we can't check (e.g., site.getsitepackages() fails), return empty list
         # to avoid blocking the linter
-        logging.debug("Could not check for nightly_conda.py run")
+        logging.debug("Could not check for pytorch-nightly")
         return []
 
 
