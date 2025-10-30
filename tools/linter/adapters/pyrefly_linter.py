@@ -138,11 +138,20 @@ def check_nightly_run(code: str) -> list[LintMessage]:
                 )
             ]
         return []
-    except Exception as _e:
-        # If we can't check (e.g., site.getsitepackages() fails), return empty list
-        # to avoid blocking the linter
-        logging.debug("Could not check for pytorch-nightly")
-        return []
+    except Exception as e:
+        return [
+            LintMessage(
+                path=None,
+                line=None,
+                char=None,
+                code=code,
+                severity=LintSeverity.ERROR,
+                name="command-failed",
+                original=None,
+                replacement=None,
+                description=(f" Could not check for pytorch-nightly {e.__class__.__name__}:\n{e}"),
+            )
+        ]
 
 
 def in_github_actions() -> bool:
