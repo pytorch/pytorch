@@ -791,6 +791,9 @@ def merge_reduce_scatter_bucket(
     # This prevents divergence between FSDP2 and SimpleFSDP due to different concatenation orders
     print("pre-sorted reduce scatter", [node.name for node in rs_nodes])
     rs_nodes_sorted = sorted(rs_nodes, key=lambda n: n.name)[::-1]
+    # randomly order
+    idx = len(rs_nodes_sorted) // 2
+    rs_nodes_sorted = rs_nodes[idx:] + rs_nodes[:idx]
     print("post-sorted reduce scatter", [node.name for node in rs_nodes])
 
     # Validate bucket consistency
