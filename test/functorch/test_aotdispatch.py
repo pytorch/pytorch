@@ -1424,8 +1424,8 @@ def forward(self, primals_1):
     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
     copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
     add = torch.ops.aten.add.Tensor(copy, 1)
-    copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = copy_ = None
-    return (add,)""",
+    copy_ = torch.ops.aten.copy_.default(primals_1, copy);  copy = copy_ = None
+    return (add, primals_1)""",
         )
 
     def test_input_mutation_storage_resize_down(self):

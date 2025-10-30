@@ -1028,11 +1028,14 @@ def default_partition(
     # the backward. That is problematic if the node has an arg which is mutated
     # later in the forward. This can occur when an in-place op saves its input for backward,
     # e.g. sin_. See https://github.com/pytorch/pytorch/pull/164577 for more context.
-    not_backward_nodes = [
-        x for x in joint_module.graph.nodes if not _has_tag_is_backward(x)
-    ]
+    #
+    forward_nodes = []
+    for node in joint_module.graph.nodes:
+        forward_nodes.append(node)
+        if node.meta.get("is_last_forward_node", False):
+            break
     forward_node_names = OrderedSet(
-        node.name for node in not_backward_nodes if node.op != "output"
+        node.name for node in forward_nodes if node.op != "output"
     )
     saved_values = []
     saved_sym_nodes = []
@@ -1117,8 +1120,10 @@ def default_partition(
     fw_module = raise_getitems(fw_module)
     bw_module = raise_getitems(bw_module)
 
-    fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
-    bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
+    # Failing for  python test/functorch/test_aotdispatch.py -k test_some_output_requires_grad_input_doesnt
+    # last_input = next(reversed(module.graph.find_nodes(op="placeholder"))  # StopIteration
+    # fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
+    # bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
 
     return fw_module, bw_module
 
