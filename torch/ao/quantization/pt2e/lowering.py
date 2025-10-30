@@ -12,7 +12,7 @@ def lower_pt2e_quantized_to_x86(
     model: torch.fx.GraphModule,
     example_inputs: tuple[torch.Tensor, ...],
 ) -> torch.fx.GraphModule:
-    """Lower a PT2E-qantized model to x86 backend.
+    """Lower a PT2E-quantized model to x86 backend.
 
     Args:
     * `model` (torch.fx.GraphModule): a model quantized by PT2E quantization flow.

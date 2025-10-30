@@ -4695,6 +4695,10 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
+def get_current_stream(device: torch.device) -> torch.Stream:
+    return torch.accelerator.current_stream(device)
+
+
 # call from C dynamo in order to inspect values in pdb
 def _breakpoint_for_c_dynamo(*args: Any) -> None:
     breakpoint()
