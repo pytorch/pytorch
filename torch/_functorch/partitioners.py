@@ -1012,6 +1012,13 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
+    # Should we run CSE?
+    # fx_g = joint_module.graph
+    # if config.cse:
+    #     assert_functional_graph(joint_module.graph)
+    #     cse_graph = fx_graph_cse(fx_g)
+    #     joint_module.graph = cse_graph
+
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
@@ -1030,7 +1037,6 @@ def default_partition(
     forward_node_names = OrderedSet(
         node.name for node in not_backward_nodes if node.op != "output"
     )
-    order = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = []
     saved_sym_nodes = []
 
@@ -1108,6 +1114,14 @@ def default_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # raise all getitem ops to as early as possible
+    # this is helpful for memory, especially in the case of aot_eager backend
+    fw_module = raise_getitems(fw_module)
+    bw_module = raise_getitems(bw_module)
+
+    fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
+    bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
 
     return fw_module, bw_module
 
@@ -2917,7 +2931,7 @@ def min_cut_rematerialization_partition(
             fw_module, bw_module = functionalize_rng_ops(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
-    bw_module: GraphModule = reordering_to_mimic_autograd_engine(bw_module)
+    bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend
