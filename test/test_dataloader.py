@@ -3684,7 +3684,6 @@ class TestPinMemory(TestCase):
         assert y.is_pinned()
         assert torch.allclose(x, y)
 
-
     def test_pin_memory_on_nested_structure(self):
         nested = {
             "a": torch.zeros(5),
@@ -3702,13 +3701,11 @@ class TestPinMemory(TestCase):
         assert out["d"][0] == b"bytes"
         assert out["d"][1] is None
 
-
     def test_pin_memory_with_empty_containers(self):
         assert pm.pin_memory([]) == []
         assert pm.pin_memory({}) == {}
         # Note: implementation normalizes empty tuple -> empty list
         assert pm.pin_memory(()) == []
-
 
     def test_dataloader_pin_memory_enabled(self):
         ds = TensorDataset(torch.randn(8, 4))
@@ -3717,7 +3714,6 @@ class TestPinMemory(TestCase):
         for (batch,) in dl:
             assert batch.is_pinned()
 
-
     def test_dataloader_pin_memory_disabled(self):
         ds = TensorDataset(torch.randn(8, 4))
         dl = DataLoader(ds, batch_size=2, pin_memory=False, num_workers=0)
@@ -3725,13 +3721,14 @@ class TestPinMemory(TestCase):
         for (batch,) in dl:
             assert not batch.is_pinned()
 
-
     def test_pin_memory_does_not_accept_device_arg(self):
         import pytest
+
         # The deprecated device arg should now raise
         x = torch.randn(2, 2)
         with pytest.raises(TypeError):
             pm.pin_memory(x, device="cuda:0")
+
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
