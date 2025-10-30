@@ -77,7 +77,7 @@ inductor_decompositions = get_decompositions(
         aten.leaky_relu,
         aten.linalg_vector_norm,
         aten._log_softmax,
-        # aten.max_pool2d_with_indices_backward,  # Removed: use custom scatter backend lowering
+        # aten.max_pool2d_with_indices_backward,  # Removed: use custom lowering (scatter + traditional Triton backends)
         aten._native_batch_norm_legit,
         aten._native_batch_norm_legit_functional,
         aten._native_batch_norm_legit_no_training,
