@@ -2041,7 +2041,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
         assert len(meta.attrs) == len(runtime_subclass_keys)
         leaves = []
-        for i, (attr, attr_meta) in enumerate(meta.attrs.items()):
+        for attr, attr_meta in meta.attrs.items():
             elem = getattr(x, attr)
             new_elem, elem_leaves = AOTDispatchAutograd.process_runtime_tangent(
                 elem, attr_meta
