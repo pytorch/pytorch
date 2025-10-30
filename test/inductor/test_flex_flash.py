@@ -330,6 +330,40 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_with_doc_mask(self, device, dtype):
+        """Test flash attention with a document-aware mask_mod."""
+        # Use shorter sequences to make the document layout explicit.
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=2, num_heads=4, seq_len=seq_len, dtype=dtype, device=device
+        )
+        lengths_per_batch = (
+            (16, 31, 25, 56),  # batch 0
+            (40, 9, 23, 56),  # batch 1 uses a different document arrangement
+        )
+        document_ids = []
+        for lengths in lengths_per_batch:
+            assert sum(lengths) == seq_len
+            doc_tokens = []
+            for doc_id, length in enumerate(lengths):
+                doc_tokens.extend([doc_id] * length)
+            document_ids.append(doc_tokens)
+        document_ids = torch.tensor(document_ids, device=device, dtype=torch.long)
+
+        print("shape of document_ids:", document_ids.shape)
+        print("doc_ids is row_major:", document_ids.is_contiguous())
+
+        def document_mask(b, _h, q_idx, kv_idx):
+            doc_id_q = document_ids[b, q_idx]
+            doc_id_kv = document_ids[b, kv_idx]
+            return doc_id_q == doc_id_kv
+
+        block_mask = create_block_mask(
+            document_mask, 2, 1, seq_len, seq_len, device=device
+        )
+        flash_vs_triton(q, k, v, block_mask=block_mask)
+
+    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_mask_mod_with_dual_buffers(self, device, dtype):
         """Mask modifier should support multiple captured buffers."""
         batch_size, num_heads, seq_len = 2, 4, 512
