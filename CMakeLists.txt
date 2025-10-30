@@ -374,7 +374,7 @@ cmake_dependent_option(
   "Build the lazy Torchscript backend, not compatible with mobile builds" ON
   "NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
-cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
+cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)

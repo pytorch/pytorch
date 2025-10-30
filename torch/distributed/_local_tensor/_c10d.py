@@ -126,6 +126,7 @@ def _local_functional_all_gather_into_tensor(
         for rank in group_ranks:
             output_local_tensors[rank] = gathered_tensor.clone()
 
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
     output = LocalTensor(output_local_tensors)
 
     return output
@@ -165,6 +166,7 @@ def _local_functional_reduce_scatter_tensor(
             else:
                 output_local_tensors[rank] = _zero_sized_like(reduced_tensor, 0)
 
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
     output = LocalTensor(output_local_tensors)
 
     return output
@@ -206,6 +208,7 @@ def _local_functional_shard_dim_alltoall(
                     gathered_tensor, shard_dim
                 )
 
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
     output = LocalTensor(output_local_tensors)
 
     return output

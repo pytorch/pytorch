@@ -810,7 +810,7 @@ class QuantizationTestCase(TestCase):
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
-        # weights_only=False as we sometimes get a ScriptObect here (weird)
+        # weights_only=False as we sometimes get a ScriptObject here (weird)
         loaded_dict = torch.load(b, weights_only=False)
         loaded_model.load_state_dict(loaded_dict)
         ref_out = ref_model(*x)
