@@ -199,7 +199,7 @@ def _extract_graph_with_inputs_outputs(
         new_node = new_graph.placeholder(node.name)
         # Can't use node_copy here as we may be turning previous call_function into placeholders
         new_node.meta = node.meta
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         env[node] = new_node
 
     for node in joint_graph.nodes:
@@ -228,10 +228,10 @@ def _extract_graph_with_inputs_outputs(
             if any(all_args):
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
-            # pyrefly: ignore  # unsupported-operation, bad-argument-type
+            # pyrefly: ignore [unsupported-operation, bad-argument-type]
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
-            # pyrefly: ignore  # unsupported-operation, bad-argument-type
+            # pyrefly: ignore [unsupported-operation, bad-argument-type]
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "output":
             pass
@@ -628,7 +628,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
         position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:
@@ -1234,7 +1234,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             # critical path first.
             cur_nodes += node.all_input_nodes
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
         for node in insertable_nodes:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -1463,14 +1463,14 @@ def functionalize_rng_ops(
     devices = OrderedSet(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     devices.discard(torch.device("cpu"))
     # multiple cuda devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 
     # this changes numerics, so if fallback_random is set we will not use it
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
@@ -2902,7 +2902,7 @@ def min_cut_rematerialization_partition(
         node_info,
         memory_budget=memory_budget,
     )
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
@@ -2913,7 +2913,7 @@ def min_cut_rematerialization_partition(
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,

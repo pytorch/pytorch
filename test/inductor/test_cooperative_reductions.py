@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class TestingHeuristics(InductorChoices):
@@ -176,7 +176,7 @@ class CooperativeReductionTests(TestCase):
             return reduction_fn(x + y, dim=-1)
 
         reduction_fn = getattr(torch, name)
-        args = [torch.randn(1, 1024**2, device="cuda", dtype=dtype) for _ in range(2)]
+        args = [torch.randn(1, 1024**2, device=GPU_TYPE, dtype=dtype) for _ in range(2)]
         self.run_and_check(fn, args, dtype)
 
     def test_bool_reduction_fns(self):
@@ -190,7 +190,7 @@ class CooperativeReductionTests(TestCase):
                 torch.all(x > y),
             ]
 
-        args = [torch.randn(1024, device="cuda") for _ in range(2)]
+        args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
         source_code = self.run_and_check(fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
@@ -204,7 +204,7 @@ class CooperativeReductionTests(TestCase):
         def fn(x):
             return x.mean(), x.std() + x.min()
 
-        args = [torch.randn([bs, count], device="cuda")]
+        args = [torch.randn([bs, count], device=GPU_TYPE)]
         self.run_and_check(fn, args)
 
     def test_chained_reductions(self):
@@ -213,18 +213,19 @@ class CooperativeReductionTests(TestCase):
                 x = x + torch.softmax(x, 1)
             return x
 
-        args = [torch.randn(4, 100000, device="cuda")]
+        args = [torch.randn(4, 100000, device=GPU_TYPE)]
         source_code = self.run_and_check(fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
 
         # With online softmax, the computation of max and sum are done
         # jointly and they share a single barrier call.
-        expected_num_barrier = 8 if config.online_softmax else 16
+        # XPU doesn't support online softmax yet.
+        expected_num_barrier = 8 if config.online_softmax and GPU_TYPE != "xpu" else 16
         self.assertEqual(
             source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
         )
-        self.assertEqual(source_code.count("empty_strided_cuda"), 5)
+        self.assertEqual(source_code.count(f"empty_strided_{GPU_TYPE}"), 5)
 
     def test_reduce_split(self):
         def fn(a, b):
@@ -233,8 +234,8 @@ class CooperativeReductionTests(TestCase):
             return a1, b1
 
         inps = [
-            torch.rand(2048, 512, device="cuda"),
-            torch.rand(20, 20, device="cuda"),
+            torch.rand(2048, 512, device=GPU_TYPE),
+            torch.rand(20, 20, device=GPU_TYPE),
         ]
         self.run_and_check(fn, inps, expect_kernel_count=2)
 
@@ -290,7 +291,7 @@ class TestFixedConfigs(TestCase):
         def fn(x):
             return torch.softmax(x + 1, dim=-1) + x
 
-        args = [torch.randn(8, 8000, device="cuda")]
+        args = [torch.randn(8, 8000, device=GPU_TYPE)]
         self._check(fn, args, persistent=persistent, cooperative=cooperative, cfg=cfg)
 
     @parametrize(
@@ -315,7 +316,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 64, "RSPLIT": rsplit, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 64
-        args = [torch.randn(x, r, device="cuda")]
+        args = [torch.randn(x, r, device=GPU_TYPE)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
     @parametrize("persistent", [True, False])
@@ -335,8 +336,8 @@ class TestFixedConfigs(TestCase):
         args = [
             torch.stack(
                 [
-                    torch.arange(10, 4096, device="cuda"),
-                    -torch.arange(10, 4096, device="cuda"),
+                    torch.arange(10, 4096, device=GPU_TYPE),
+                    -torch.arange(10, 4096, device=GPU_TYPE),
                 ]
             )
         ]
@@ -346,12 +347,12 @@ class TestFixedConfigs(TestCase):
                 [
                     torch.tensor(
                         [0.0] * 150 + [float("inf")] * 150,
-                        device="cuda",
+                        device=GPU_TYPE,
                         dtype=torch.float32,
                     ),
                     torch.tensor(
                         [0.0] * 150 + [-float("inf")] * 150,
-                        device="cuda",
+                        device=GPU_TYPE,
                         dtype=torch.float32,
                     ),
                 ]
@@ -374,12 +375,12 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 128, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
         if not persistent:
             cfg["R0_BLOCK"] = 64
-        args = [torch.randn(1024, device="cuda") for _ in range(2)]
+        args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU:
         run_tests(needs="filelock")
