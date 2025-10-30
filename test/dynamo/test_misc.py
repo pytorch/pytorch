@@ -4347,6 +4347,21 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_tying_union_new_syntax(self):
+        def fn(x):
+            def inner1(y: torch.Tensor | None):
+                return y
+
+            def inner2(y: None | torch.Tensor):
+                return y
+
+            def inner3(y: torch.Tensor | list[int]):
+                return y
+
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=False)(torch.ones(3))
+
     def test_optimize_on_module(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
