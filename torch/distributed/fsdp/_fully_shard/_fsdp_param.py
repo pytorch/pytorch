@@ -832,9 +832,7 @@ class FSDPParam:
             if mesh.mesh_dim_names is None:
                 raise AssertionError("Expected mesh_dim_names to not be None")
             shard_dim_name = mesh.mesh_dim_names[-1]
-
-            root_mesh = mesh._get_root_mesh()
-            return root_mesh[shard_dim_name]
+            return mesh[shard_dim_name]
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
