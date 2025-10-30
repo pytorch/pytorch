@@ -53,10 +53,8 @@ class AddmmBenchmark(op_bench.TorchBenchmarkBase):
         return torch.addmm(input_one, mat1, mat2)
 
 
-op_bench.generate_pt_test(addmm_long_configs + addmm_long_configs, AddmmBenchmark)
-op_bench.generate_pt_gradient_test(
-    addmm_long_configs + addmm_long_configs, AddmmBenchmark
-)
+op_bench.generate_pt_test(addmm_short_configs + addmm_long_configs, AddmmBenchmark)
+op_bench.generate_pt_gradient_test(addmm_short_configs + addmm_long_configs, AddmmBenchmark)
 
 """Mircobenchmark for addbmm operator."""
 
