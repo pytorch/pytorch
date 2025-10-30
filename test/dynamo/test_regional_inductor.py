@@ -215,6 +215,150 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         # flex in forward and flex_backward in backward
         self.assertEqual(len(codes), 2)
 
+    @parametrize("serialize", [False, True])
+    def test_max_autotune_no_cudagraphs(self, serialize):
+        """Test that max-autotune-no-cudagraphs options are properly applied via annotations."""
+        import torch._inductor.config as inductor_config
+
+        def fn(x, y):
+            sin = torch.sin(x)
+
+            # Use annotation API to specify inductor configs
+            with fx_traceback.annotate(
+                {
+                    "compile_with_inductor": {
+                        "inductor_configs": {
+                            "max_autotune": True,
+                            "triton.cudagraphs": False,
+                        }
+                    }
+                }
+            ):
+                mul = sin * y
+                add = mul + 1
+
+            return torch.sin(add)
+
+        # Hook to verify options
+        original_compile = torch._inductor.standalone_compile
+        captured_options = []
+
+        def verify_options(*args, **kwargs):
+            options = kwargs.get("options", {})
+            captured_options.append(options)
+
+            # Verify config is set as expected from explicit options
+            assert inductor_config.max_autotune, "max_autotune should be True"
+            assert not inductor_config.triton.cudagraphs, (
+                "triton.cudagraphs should be False"
+            )
+
+            return original_compile(*args, **kwargs)
+
+        torch._inductor.standalone_compile = verify_options
+
+        try:
+            # Use backend without options - they come from annotations
+            backend = aot_eager_regional_inductor(serialize=serialize)
+
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            x = torch.randn(10, requires_grad=True)
+            y = torch.randn(10, requires_grad=True)
+
+            # Run and check that options were passed
+            _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
+            self.assertEqual(len(codes), 2)
+
+            # Verify that compilation happened
+            self.assertTrue(
+                len(captured_options) > 0, "Compilation should have occurred"
+            )
+
+        finally:
+            torch._inductor.standalone_compile = original_compile
+
+    def test_annotation_inductor_configs(self):
+        """Test that inductor_configs can be passed through annotation API."""
+        import torch._inductor.config as inductor_config
+
+        def fn_with_annotation_configs(x, y):
+            # New annotation format with inductor_configs
+            with fx_traceback.annotate(
+                {
+                    "compile_with_inductor": {
+                        "inductor_configs": {
+                            "max_autotune": True,
+                            "triton.cudagraphs": False,
+                        }
+                    }
+                }
+            ):
+                return torch.matmul(x, y) + 1
+
+        # Capture config during compilation
+        config_snapshots = []
+
+        original_compile = torch._inductor.standalone_compile
+
+        def capture_config(*args, **kwargs):
+            config_snapshots.append(
+                {
+                    "max_autotune": inductor_config.max_autotune,
+                    "triton.cudagraphs": inductor_config.triton.cudagraphs,
+                }
+            )
+            return original_compile(*args, **kwargs)
+
+        torch._inductor.standalone_compile = capture_config
+
+        try:
+            backend = aot_eager_regional_inductor()
+
+            opt_fn = torch.compile(
+                fn_with_annotation_configs, backend=backend, fullgraph=True
+            )
+            x = torch.randn(32, 32, requires_grad=True)
+            y = torch.randn(32, 32, requires_grad=True)
+
+            # Run forward and backward
+            result = opt_fn(x, y)
+            result.sum().backward()
+
+            self.assertTrue(len(config_snapshots) > 0, "No compilation occurred")
+
+            for snapshot in config_snapshots:
+                self.assertEqual(snapshot["max_autotune"], True)
+                self.assertEqual(snapshot["triton.cudagraphs"], False)
+
+        finally:
+            torch._inductor.standalone_compile = original_compile
+
+    def test_invalid_inductor_config(self):
+        """Test that invalid inductor config keys are caught with a clear error."""
+
+        def fn(x, y):
+            with fx_traceback.annotate(
+                {
+                    "compile_with_inductor": {
+                        "inductor_configs": {
+                            "invalid_config_key": True,
+                        }
+                    }
+                }
+            ):
+                return x * y + 1
+
+        backend = aot_eager_regional_inductor()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Invalid inductor config key 'invalid_config_key'",
+        ):
+            opt_fn(x, y)
+
     @requires_cuda_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
