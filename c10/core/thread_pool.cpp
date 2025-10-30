@@ -87,9 +87,7 @@ bool ThreadPool::inThreadPool() const {
 }
 
 void ThreadPool::run(std::function<void()> func) {
-  if (threads_.empty()) {
-    throw std::runtime_error("No threads to run a task");
-  }
+  TORCH_CHECK(threads_.size() > 0, "No threads to run a task");
   std::unique_lock<std::mutex> lock(mutex_);
 
   // Set task and signal condition variable so that a worker thread will
