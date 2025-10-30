@@ -149,7 +149,9 @@ def check_nightly_run(code: str) -> list[LintMessage]:
                 name="command-failed",
                 original=None,
                 replacement=None,
-                description=(f" Could not check for pytorch-nightly {e.__class__.__name__}:\n{e}"),
+                description=(
+                    f" Could not check for pytorch-nightly {e.__class__.__name__}:\n{e}"
+                ),
             )
         ]
 
