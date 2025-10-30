@@ -721,10 +721,12 @@ def get_alias_info(func) -> SchemaInfo:
             if is_read_only_alias_match:
                 read_only_alias_match_indexes.append((arg_idx, return_idx))
 
-    outs_write_aliases_list: list[Optional[str]] = [_get_write_alias(r) for r in out_schemas]
+    outs_write_aliases_list: list[Optional[str]] = [
+        _get_write_alias(r) for r in out_schemas
+    ]
     non_nones = sum(x is not None for x in outs_write_aliases_list)
     if non_nones == 0:
-        outs_write_aliases : Optional[list[str]] = None
+        outs_write_aliases: Optional[list[str]] = None
     elif non_nones != len(outs_write_aliases_list):
         # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
         raise RuntimeError("Unsupported schema: " + str(func._schema))
