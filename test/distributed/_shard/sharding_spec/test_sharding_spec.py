@@ -650,7 +650,10 @@ class GridShardingSpec(ShardingSpec):
 
 if torch.accelerator.is_available():
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
-    BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
+else:
+    # use cuda as default device type for testing when accelerator is not available
+    DEVICE_TYPE = "cuda"
+BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 
 class TestCustomShardingSpec(ShardedTensorTestBase):
