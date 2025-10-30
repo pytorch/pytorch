@@ -117,12 +117,12 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
     def __init__(
         self,
-        stream: "StreamVariable",
+        stream: Optional["StreamVariable"],
         **kwargs: dict[str, Any],
     ) -> None:
         self.stream = stream
         super().__init__(
-            target_values={"stream": stream.user_object_index},
+            target_values={"stream": self.get_stream().user_object_index},
             initial_values=None,
             **kwargs,
         )
@@ -132,7 +132,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     ) -> "VariableTracker":
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
-        tx.symbolic_stream_state.enter_stream(self.stream)
+        tx.symbolic_stream_state.enter_stream(self.get_stream())
         return super().enter(tx)
 
     def exit(self, tx: "InstructionTranslator", *args: tuple[Any]) -> "VariableTracker":
@@ -143,6 +143,10 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
     def supports_graph_breaks(self) -> bool:
         return True
+
+    def get_stream(self) -> "StreamVariable":
+        assert self.stream, "Stream context should have a separate stream"
+        return self.stream
 
 
 class StreamVariable(StreamContextVariable):
@@ -166,7 +170,7 @@ class StreamVariable(StreamContextVariable):
         self.device = value.device
         # pyrefly: ignore [read-only]
         self.user_object_index = user_object_index
-        super().__init__(self, **kwargs)
+        super().__init__(None, **kwargs)
 
     def python_type(self) -> type:
         return torch.Stream
@@ -251,6 +255,9 @@ class StreamVariable(StreamContextVariable):
             prefix = f"_stream_{self.device}"
             name = codegen.tx.output.install_global_by_id(prefix, self.value)
             codegen.append_output(codegen.create_load_global(name, add=True))
+
+    def get_stream(self) -> "StreamVariable":
+        return self
 
     @staticmethod
     def construct_in_graph_stream(index: int, codegen: "PyCodegen") -> None:
