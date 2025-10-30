@@ -22,7 +22,11 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    BlockMask,
+    create_block_mask,
+    flex_attention,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -32,6 +36,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._pytree import register_pytree_node
 
 
 class SimpleModel(torch.nn.Module):
@@ -174,6 +179,15 @@ def aot_export_joint_with_descriptors_alone(model, args, kwargs=None):
 
 def _count_op(gm, target):
     return sum(1 for node in gm.graph.nodes if node.target == target)
+
+
+register_pytree_node(
+    BlockMask,
+    BlockMask._flatten,
+    BlockMask._unflatten,
+    flatten_with_keys_fn=BlockMask._flatten_with_keys,
+    serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+)
 
 
 @requires_cuda
