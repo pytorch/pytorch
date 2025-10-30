@@ -2871,9 +2871,9 @@ class TestSDPACudaOnly(NNTestCase):
                 attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
                 attn_output.backward(grad_attn_output)
 
-            self.assertEqual(q.grad, q_ref.grad, atol=10.0, rtol=0.05)
-            self.assertEqual(k.grad, k_ref.grad, atol=10.0, rtol=0.05)
-            self.assertEqual(v.grad, v_ref.grad, atol=10.0, rtol=0.05)
+            for x, x_ref in zip((q, k, v), (q_ref, k_ref, v_ref)):
+                self.assertEqual(x.grad, x_ref.grad, atol=10.0, rtol=0.05)
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
