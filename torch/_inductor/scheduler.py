@@ -247,6 +247,12 @@ class MixOrderReduction:
         if not V.graph.sizevars.statically_known_geq(nrow, ncol * 2):
             return False
 
+        # When nrow is small, ncol should also be small (due to the check
+        # above). Thus the entire tensor should be well cached in L2.
+        # Mix order reduction is less beneficial.
+        if not V.graph.sizevars.statically_known_geq(nrow, 4096):
+            return False
+
         contiguous_node, other_node = (
             (node1, node2) if g1[1] == ncol else (node2, node1)
         )
