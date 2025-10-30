@@ -5000,6 +5000,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
+            if not self.funcvar.should_allow_nested_graph_breaks():
+                return False
             if not self.parent.should_compile_partial_graph():
                 return False
             return super().should_compile_partial_graph()
