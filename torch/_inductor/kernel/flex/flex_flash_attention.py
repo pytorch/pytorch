@@ -30,7 +30,7 @@ def ensure_flash_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("flash_attn.cute") is not None
+        return importlib.util.find_spec("flash_attn.cute") is not None  # type: ignore[attr-defined]
     except ImportError:
         return False
 
@@ -90,11 +90,11 @@ def patch_fixed_layout_indexer_for_cutedsl():
     def cutedsl_make_indexer(self):
         return _fixed_indexer_cute(self.size, self.stride, self.offset)
 
-    FixedLayout.make_indexer = cutedsl_make_indexer
+    FixedLayout.make_indexer = cutedsl_make_indexer  # type: ignore[assignment]
     try:
         yield
     finally:
-        FixedLayout.make_indexer = original_make_indexer
+        FixedLayout.make_indexer = original_make_indexer  # type: ignore[assignment]
 
 
 def with_cutedsl_indexer(fn: Callable[..., Any]) -> Callable[..., Any]:

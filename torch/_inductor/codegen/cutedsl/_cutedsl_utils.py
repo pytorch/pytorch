@@ -1,8 +1,8 @@
 import cutlass.cute as cute
 
 
-@cute.jit
-def ssa_to_indexable(ssa_value: cute.TensorSSA, dtype) -> cute.Numeric:
+@cute.jit  # type: ignore[misc]
+def ssa_to_indexable(ssa_value: cute.TensorSSA, dtype: str) -> cute.Numeric:
     """
     Convert SSA form to indexable non-SSA form.
 
@@ -14,8 +14,8 @@ def ssa_to_indexable(ssa_value: cute.TensorSSA, dtype) -> cute.Numeric:
     return frag[0]
 
 
-@cute.jit
-def result_to_ssa(value: cute.Numeric, dtype) -> cute.TensorSSA:
+@cute.jit  # type: ignore[misc]
+def result_to_ssa(value: cute.Numeric, dtype: str) -> cute.TensorSSA:
     """
     Convert non-SSA result back to SSA form.
 

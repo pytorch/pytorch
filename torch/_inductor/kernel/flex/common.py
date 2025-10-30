@@ -214,18 +214,18 @@ def create_placeholder(
 
 
 def construct_strides(
-    sizes: Sequence[int],
+    sizes: Sequence[Union[int, sympy.Expr]],
     fill_order: Sequence[int],
-) -> Sequence[int]:
+) -> Sequence[Union[int, sympy.Expr]]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
     assert len(sizes) == len(fill_order), (
         "Length of sizes must match the length of the fill order"
     )
-    strides = [0] * len(sizes)
+    strides: list[Union[int, sympy.Expr]] = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
-    current_stride = 1
+    current_stride: Union[int, sympy.Expr] = 1
 
     # Iterate through the fill order populating strides
     for dim in fill_order:
@@ -235,7 +235,10 @@ def construct_strides(
     return strides
 
 
-def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
+def infer_dense_strides(
+    size: Sequence[Union[int, sympy.Expr]],
+    orig_strides: Sequence[Union[int, sympy.Expr]],
+):
     """This is a mirror of the same function in aten/src/ATen/ExpandUtils.cpp
 
     Args:
