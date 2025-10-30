@@ -2851,5 +2851,13 @@
         "Move the Placement usage outside the compiled region"
       ]
     }
+  ],
+  "GB0283": [
+    {
+      "Gb_type": "Failed to make weakref to graph-created external object",
+      "Context": "user_object: {example_value}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    }
   ]
 }
