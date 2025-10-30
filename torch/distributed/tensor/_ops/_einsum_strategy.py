@@ -170,7 +170,7 @@ def gen_einsum_strategies(
     # linearity strategy
     if linearity:
         linearity_placement_list: list[Placement] = [Partial()]
-        for input_dim in input_dims:
+        for _ in input_dims:
             linearity_placement_list.append(Partial())
         strategies_over_one_mesh_dim.append(linearity_placement_list)
 

@@ -101,11 +101,11 @@ def broadcast_types(t1, t2):
         # We make the types the same length which is the first requirement
         # for consistency
         if s1 > s2:
-            for i in range(s1 - s2):
+            for _ in range(s1 - s2):
                 new_t2.insert(0, 1)
 
         elif s2 > s1:
-            for i in range(s2 - s1):
+            for _ in range(s2 - s1):
                 new_t1.insert(0, 1)
 
         # we replace occurrences of "1" with each tensor with
