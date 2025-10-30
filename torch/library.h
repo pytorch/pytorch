@@ -89,7 +89,7 @@ struct NoInferSchemaTag {};
 
 #define HAS_PT2_COMPLIANT_TAG
 
-// For multiply/torchdeploy use case  // codespell:ignore multiply
+// For multipy/torchdeploy use case  // codespell:ignore multipy
 enum class _RegisterOrVerify { REGISTER, VERIFY };
 
 template <class CurClass>
