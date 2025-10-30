@@ -530,7 +530,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
-    # NOTE [HigherOrderOprator Schema]
+    # NOTE [HigherOrderOperator Schema]
     # Each invocation of a HigherOrderOperator (hop) should have its own schema because
     # the subgraphs and the arguments can be different even for the same hop.
     #

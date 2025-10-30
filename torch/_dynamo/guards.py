@@ -132,6 +132,7 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
     DictGetItemSource,
@@ -181,6 +182,7 @@ from .utils import (
     common_constant_types,
     dataclass_fields,
     dict_keys,
+    get_current_stream,
     get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -761,6 +763,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___dataclass_fields": dataclass_fields,
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
+            "___get_current_stream": get_current_stream,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1446,6 +1449,13 @@ class GuardBuilder(GuardBuilderBase):
                 python_lambda=lambda _: get_torch_function_mode_stack_at(
                     source._get_index()
                 ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CurrentStreamSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: get_current_stream(source.device),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -2148,19 +2158,6 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker, get_verbose_code_parts(global_name, guard)
-        )
-
-    def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
-        # Copied from DTensor __metadata_guard__
-        # TODO - Consider moving this to C++ if stable
-        value = deepcopy(self.get(guard.name))
-
-        def guard_fn(x: Any) -> bool:
-            return x._check_equals(value, skip_shapes=True)
-
-        code = f"__dtensor_spec_{id(guard_fn)}"
-        self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts(code, guard)
         )
 
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:

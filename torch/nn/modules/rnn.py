@@ -196,7 +196,7 @@ class RNNBase(Module):
                     param_names += ["weight_hr_l{}{}"]
                 param_names = [x.format(layer, suffix) for x in param_names]
 
-                for name, param in zip(param_names, layer_params):
+                for name, param in zip(param_names, layer_params, strict=True):
                     setattr(self, name, param)
                 self._flat_weights_names.extend(param_names)
                 self._all_weights.append(param_names)
@@ -352,7 +352,9 @@ class RNNBase(Module):
         # Returns True if the weight tensors have changed since the last forward pass.
         # This is the case when used with torch.func.functional_call(), for example.
         weights_changed = False
-        for ref, name in zip(self._flat_weight_refs, self._flat_weights_names):
+        for ref, name in zip(
+            self._flat_weight_refs, self._flat_weights_names, strict=True
+        ):
             weight = getattr(self, name) if hasattr(self, name) else None
             if weight is not None and ref is not None and ref() is not weight:
                 weights_changed = True
