@@ -348,7 +348,7 @@ def _scatter_fused_allreduce_waits(
         # Some descendant users of the orig_comm_blocks may be scheduled before
         # the fused all_reduce. For example, the user nodes of the very first
         # all_reduce may be scheduled before the second all_reduce. Since the
-        # fused all_reduce is inserted right after the last all_reudce, the
+        # fused all_reduce is inserted right after the last all_reduce, the
         # order can be wrong.
         # `incorrect_order_nodes` records these nodes.
 
