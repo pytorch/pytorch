@@ -2534,6 +2534,7 @@ def pointwise(
                     # triton_poi_fused_index_put_new_zeros_45 
                     # triton_poi_fused_index_put_new_zeros_49
                     # triton_poi_fused_index_put_new_zeros_54
+                    triton_config_with_settings(size_hints, 128, num_warps=1, num_stages=1), # wri0: 56 us: triton_poi_fused_cat_mul_sigmoid_view_51
                 ]
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
@@ -2575,6 +2576,8 @@ def pointwise(
                         Config({"XBLOCK": 512, "YBLOCK": 8}, num_warps=8), # wrt1/t21 # triton_poi_fused__unsafe_view_add_addmm_cat_clone_permute_split_with_sizes_view_19
                         Config({"XBLOCK": 32, "YBLOCK": 128}, num_warps=4), # wrt2: 570us : triton_poi_fused_add_transpose_view_52
                         Config({"XBLOCK":64, "YBLOCK": 32}, num_warps=8), # wrt3: 150us: triton_poi_fused__to_copy_add_native_layer_norm_native_layer_norm_backward_permute_view_103
+                        Config({"XBLOCK":64, "YBLOCK": 256}, num_warps=4), # wri0: 70us: triton_poi_fused_clone_tanh_transpose_19
+                        Config({"XBLOCK":512, "YBLOCK": 64}, num_warps=8), # wri0: 58us: triton_poi_fused_clone_53
                     ]
 
     if len(size_hints) == 3:
