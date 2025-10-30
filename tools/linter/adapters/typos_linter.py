@@ -27,7 +27,6 @@ RESULTS_RE = re.compile(
 )
 
 
-
 def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
