@@ -4,6 +4,8 @@ import itertools
 import logging
 from typing import Callable, TYPE_CHECKING
 
+from torch.utils._ordered_set import OrderedSet
+
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
 
@@ -53,6 +55,7 @@ class CoordescTuner:
         name="unknown",
         size_hints=None,
         inductor_meta=None,
+        frozen_fields=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
 
@@ -65,6 +68,9 @@ class CoordescTuner:
         self.name = name
         self.size_hints = size_hints
         self.inductor_meta = inductor_meta or {}
+        self.frozen_fields: OrderedSet[str] = (
+            OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
+        )
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -116,7 +122,7 @@ class CoordescTuner:
             out.append("num_stages")
             out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
 
-        return out
+        return [f for f in out if f not in self.frozen_fields]
 
     def value_too_large(self, name: str, val: int) -> bool:
         block_suffix = "BLOCK"
