@@ -19,13 +19,13 @@ class LintMessage(NamedTuple):
     code: str | None
 
 
-RESULTS_RE: re.Pattern[str] = re.compile(
-    r"""(?mx)
-    ^error:\s+(?P<message>`.*?`\s+should\s+be\s+`.*?`)\s*$
-    (?:.*\n)*?
-    [^:\n]*?(?P<filename>\.{0,2}/[^\s:]+):(?P<line>\d+):(?P<column>\d+)
+RESULTS_RE = re.compile(
+    r"""(?msx)
+    ^error:\s+(?P<message>`[^`]+`\s+should\s+be\s+`[^`]+`(?:,\s*`[^`]+`)*)\s*\n
+    [^\n]*?╭▸\s*(?P<filename>[^\s:]+):(?P<line>\d+):(?P<column>\d+)
     """,
 )
+
 
 
 def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -44,10 +44,10 @@ def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
 def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMessage]:
     filenames = [os.path.relpath(f) for f in filenames]
     try:
-        print("debug")
         proc = run_command(
             ["typos", "--config", f"{config}"] + filenames,
         )
+        # print(["typos", "--config", f"{config}"] + filenames)
     except OSError:
         return [
             LintMessage(
@@ -59,17 +59,6 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
-    stderr = str(proc.stderr, "utf-8").strip()
-    if proc.returncode not in (0, 1):
-        return [
-            LintMessage(
-                message=stderr,
-                filename=None,
-                line=None,
-                column=None,
-                code=code,
-            )
-        ]
 
     rc = [
         LintMessage(
@@ -128,10 +117,10 @@ def main() -> None:
         help="paths to lint",
     )
     args = parser.parse_args()
-    print(args.filenames)
+    # print(args.filenames)
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
-        level=logging.NOTSET if args.verbose else logging.INFO,
+        level=logging.INFO,
         stream=sys.stderr,
     )
     lint_messages = check_typos_installed(args.code) + check_run_typos(
