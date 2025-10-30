@@ -483,6 +483,11 @@ graph_partition: bool = (
     == "1"
 )
 
+# register ops upon which inductor should partition the graph. name format should be
+# "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
+# "namespace::kernel_name.overload" (e.g., aten::mm.default).
+custom_should_partition_ops: list[str] = []
+
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
@@ -2085,6 +2090,17 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 write_are_deterministic_algorithms_enabled = (
     os.getenv("TORCHINDUCTOR_WRITE_ARE_DETERMINISTIC_ALGORITHMS_ENABLED", "1") == "1"
 )
+
+
+class lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False, no
+    # hash checking is performed.
+    check_src_hash: bool = True
 
 
 class test_configs:
