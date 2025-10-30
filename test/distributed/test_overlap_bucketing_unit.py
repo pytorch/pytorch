@@ -408,6 +408,92 @@ class TestOverlapPreservingBucketing(InductorTestCase):
                 "%all_gather_into_tensor_out", 1, exactly=False
             ).run(graph_str)
 
+    def test_can_bucket_multidtype_collectives(self):
+        """
+        Test that all_gathers with different dtypes CAN bucket together.
+
+        Graph structure:
+        ag1_float32 -> mm1 (hides ag1) -> ag1_wait
+        ag2_bfloat16 -> mm2 (hides ag2) -> ag2_wait
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            # Start both collectives with different dtypes
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a,
+                group_size,
+                group_name,  # float32
+            )
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                b,
+                group_size,
+                group_name,  # bfloat16
+            )
+
+            # Independent compute that can hide both
+            mm1 = torch.mm(a, a)
+            mm2 = torch.mm(b.float(), b.float())
+
+            # Wait for both
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            return ag1_out.sum() + ag2_out.sum() + mm1.sum() + mm2.sum()
+
+        # Use fake mode to trace without executing
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device, dtype=torch.float32)
+            b = torch.ones(4, 4, device=self.device, dtype=torch.bfloat16)
+
+            # Trace with make_fx
+            traced = make_fx(func)(a, b)
+
+        # Find nodes using find_nodes
+        ag1, ag2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        mm_nodes = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+        mm1 = mm_nodes[0]
+        mm2 = mm_nodes[1]
+
+        # Manually annotate hiding relationships
+        hiding_annotations = {
+            ag1: mm1,  # mm1 hides ag1
+            ag2: mm2,  # mm2 hides ag2
+        }
+
+        # Build collective info and ancestors
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        # Run bucketing with multidtype mode
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            node_ancestors,
+            scheduled,
+            bucket_mode="custom_ops_multidtype",
+        )
+        bucketer.bucket_collectives()
+
+        # Verify: should have 1 bucketed collective (all_gather_into_tensor_out)
+        # even though dtypes are different
+        graph_str = str(traced.graph)
+        FileCheck().check_count("all_gather_into_tensor_out", 1, exactly=False).run(
+            graph_str
+        )
+
 
 if __name__ == "__main__":
     run_tests()

@@ -8,6 +8,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
     bucket_key,
+    BucketMode,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
     is_wait_tensor,
@@ -132,6 +133,7 @@ class OverlapPreservingBucketer:
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
+        bucket_mode: BucketMode = "custom_ops_multidtype",
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -142,6 +144,7 @@ class OverlapPreservingBucketer:
         self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
+        self.bucket_mode = bucket_mode
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
 
@@ -242,7 +245,7 @@ class OverlapPreservingBucketer:
                 OrderedSet
             )
             for start in collectives:
-                key = bucket_key(start)
+                key = bucket_key(start, self.bucket_mode)
                 if key is not None:
                     grouped_collectives[key].add(start)
 
