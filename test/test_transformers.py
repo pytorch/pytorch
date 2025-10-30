@@ -2861,12 +2861,7 @@ class TestSDPACudaOnly(NNTestCase):
 
             grad_attn_output = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
 
-            q_ref = q.detach().clone()
-            q_ref.requires_grad = True
-            k_ref = k.detach().clone()
-            k_ref.requires_grad = True
-            v_ref = v.detach().clone()
-            v_ref.requires_grad = True
+            q_ref, k_ref, v_ref = (x.detach().clone().requires_grad_() for x in [q, k, v])
 
             with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
                 attn_output_ref = torch.nn.functional.scaled_dot_product_attention(q_ref, k_ref, v_ref)
