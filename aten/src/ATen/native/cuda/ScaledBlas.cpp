@@ -1030,17 +1030,19 @@ _scaled_mxfp4_mxfp4(
   // NOTE(slayton58): fbgemm_gpu::f4f4bf16 does *not* allow passing an output tensor,
   //                  but we have one we need to use. Two clear options are to copy into
   //                  our output (slow), or use a move-assignment-operator (faster).
+  //                  However, the compiler can complain about the explicit move preventing
+  //                  copy elision because the return from f4f4bf16 is a temporary object.
+  //                  So we don't explicitly move, and trust the compiler here...
   //                  In the longer term this should be fixed on the FBGemm side.
-  out = std::move(
-    fbgemm_gpu::f4f4bf16(
+  out = fbgemm_gpu::f4f4bf16(
       mat_a,
       mat_b.transpose(-2, -1),
       scale_a,
       scale_b,
       std::nullopt, /* global_scale */
       true          /* use_mx */
-    )
   );
+
   return out;
 #endif
 }
