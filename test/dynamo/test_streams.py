@@ -26,6 +26,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         e = torch.Event()
         weakref.ref(e)
 
+    @requires_cuda
     def test_stream_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -44,6 +45,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inp)
         self.assertEqual(expected, actual)
 
+    @requires_cuda
     def test_stream_context_graph_break(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -64,6 +66,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inp)
         self.assertEqual(expected, actual)
 
+    @requires_cuda
     def test_stream_input(self):
         def fn(x, y, s):
             z = torch.add(x, y)
@@ -76,6 +79,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inp)
         self.assertEqual(expected, actual)
 
+    @requires_cuda
     def test_local_stream_return(self):
         def fn(x, y):
             s = torch.Stream()
@@ -93,6 +97,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         # Stream should be newly allocated on each call
         self.assertNotEqual(s0, s1)
 
+    @requires_cuda
     def test_get_current_stream_return(self):
         def fn(x, s):
             with s:
@@ -107,6 +112,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self.assertEqual(s_inp, s0)
         self.assertEqual(s0, s1)
 
+    @requires_cuda
     def test_get_current_stream_return_different_device(self):
         def fn(x, s0, s1):
             with s1:
@@ -122,6 +128,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
+    @requires_cuda
     def test_get_current_stream_return_no_index(self):
         def fn(x, s0, s1):
             with s1:
