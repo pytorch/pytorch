@@ -810,6 +810,8 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Update losses if there is a container passed in
         self._update_losses(self._stage, losses)
 
+        self._stage.perform_reduce_grad(self._n_microbatches if self.scale_grads else 1)
+
     def _get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
         """
         Returns the pipeline order for GPipe schedule.
@@ -838,9 +840,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
             for mb_idx in range(self._n_microbatches):
                 actions.append(_Action(rank, _ComputationType.FULL_BACKWARD, mb_idx))
 
-            pipeline_order[rank] = actions
+            pipeline_order[rank] = _add_reduce_grad(actions)
 
-        return pipeline_order
+        return pipeline_order  # type: ignore[return-value]
 
 
 class Schedule1F1B(PipelineScheduleSingle):
@@ -991,6 +993,8 @@ class Schedule1F1B(PipelineScheduleSingle):
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
 
+        self._stage.perform_reduce_grad(self._n_microbatches if self.scale_grads else 1)
+
     def _get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
         """
         Returns the pipeline order for 1F1B schedule.
@@ -1056,7 +1060,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                     backward_mb += 1
                     remaining_backward -= 1
 
-            pipeline_order[rank] = actions
+            pipeline_order[rank] = _add_reduce_grad(actions)
         return pipeline_order
 
 
@@ -1064,7 +1068,7 @@ def _requires_reduce_grad(action_type: _ComputationType) -> bool:
     return action_type in (I, W, B)
 
 
-def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[_Action]:
+def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[Optional[_Action]]:
     """
     REDUCE_GRAD refers to joint across minibatches grad reduction.
     reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
@@ -1084,7 +1088,7 @@ def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[_Action]:
         else:
             _count_leaf_action(a)
 
-    actions_with_reduce_grad: list[_Action] = []
+    actions_with_reduce_grad: list[Optional[_Action]] = []
     cnt: dict[int, int] = defaultdict(int)
 
     def _leaf_action(a, to_schedule):
@@ -1962,7 +1966,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
                     actions[rank]
                 )
-                self.pipeline_order_with_comms[rank] = _add_reduce_grad(
+                self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
                     self.pipeline_order_with_comms[rank]  # type: ignore[arg-type]
                 )
 
@@ -2076,8 +2080,6 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 REDUCE_GRAD,
             ), f"{action=} missing mb_index"
             stage_idx = action.stage_index
-            if stage_idx not in stage_index_to_stage:
-                torch.distributed.breakpoint()
             stage = stage_index_to_stage[stage_idx]
             stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
             # see [Note: V-schedule special case]

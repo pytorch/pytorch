@@ -1001,7 +1001,8 @@ class _PipelineStageBase(ABC):
             distributed_state._root_post_backward_final_callback()
         # Call gradient scaling at the end of the backward pass
         # NOTE: this must happen after FSDP post_backward is FSDP is enabled
-        self.scale_grads(grad_scale_factor)
+        if grad_scale_factor != 1:
+            self.scale_grads(grad_scale_factor)
 
 
 class _PipelineStage(_PipelineStageBase):
