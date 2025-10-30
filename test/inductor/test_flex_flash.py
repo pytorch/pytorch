@@ -354,7 +354,7 @@ class TestFlexFlash(InductorTestCase):
         print("doc_ids is row_major:", document_ids.is_contiguous())
 
         def document_mask(b, _h, q_idx, kv_idx):
-            doc_id_q = document_ids[b, q_idx]
+            doc_id_q = document_ids[b, q_idx // 2]
             doc_id_kv = document_ids[b, kv_idx]
             return doc_id_q == doc_id_kv
 

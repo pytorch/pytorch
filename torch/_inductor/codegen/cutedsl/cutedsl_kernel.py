@@ -122,8 +122,6 @@ class CuteDSLTemplateKernel(Kernel):
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
-        # For CuteDSL, we use standard Python string conversion
-        # since CuteDSL uses Python syntax for expressions
         return str(expr)
 
     def gen_imports(self) -> str:
@@ -419,51 +417,33 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
         if name not in self.fixed_inputs:
-            renamed_index = self.kernel.rename_indexing(index)
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
 
-            # Get the CuteDSL dtype mapping
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
+            # breakpoint()
+            renamed_index = self.kernel.rename_indexing(index)
 
-            structured_indices = self._try_get_structured_indices(buffer, renamed_index)
-            index_exprs = (
-                structured_indices
-                if structured_indices is not None
-                else [renamed_index]
+            idx_var = self._emit_scalar_fragment(
+                self.kernel.kexpr(renamed_index), "cutlass.Int32", torch.int32
             )
 
-            # Workaround for lack of gather support:
-            # 1. Convert SSA indices to indexable scalars (via ssa_to_indexable)
-            index_vars: list[str] = []
-            for expr in index_exprs:
-                expr_str = self.kernel.kexpr(expr)
-                idx_var = self._emit_scalar_fragment(
-                    expr_str, "cutlass.Int32", torch.int32
-                )
-                index_vars.append(idx_var)
-
-            # 2. Load into fragment using indexable scalars
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
             self.kernel.body.writeline(
                 f"{val_frag} = cute.make_fragment(1, {cute_dtype})"
             )
 
-            indices_str = ", ".join(index_vars)
-            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{indices_str}])")
+            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{idx_var}])")
 
-            # 3. Convert result back to SSA form
             final_expr = f"{val_frag}.load()"
 
-            # Handle upcast to fp32 if needed
             if (
                 var_dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
             ):
-                # Apply dtype conversion after fragment load
                 final_expr = f"({final_expr}).to(cutlass.Float32)"
                 var_dtype = torch.float32
 
@@ -478,7 +458,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
-        # ensure CSE wrapping
         return self.kernel.cse.generate(
             self.kernel.body, value, bounds=ValueRanges.unknown(), dtype=dtype
         )
@@ -497,58 +476,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"
         )
         return str(result)
-
-    def _try_get_structured_indices(
-        self, buffer: Buffer, index_expr: sympy.Expr
-    ) -> Optional[list[sympy.Expr]]:
-        """Attempt to recover per-dimension indices from a flattened expression."""
-        layout = buffer.get_layout()
-        if not hasattr(layout, "as_fixed"):
-            return None
-        fixed_layout = layout.as_fixed()
-        sizes = list(fixed_layout.size)
-        strides = list(fixed_layout.stride)
-
-        offset = fixed_layout.offset
-        expanded = sympy.expand(index_expr - offset)
-
-        terms = sympy.Add.make_args(expanded)
-        coeff_map: dict[sympy.Expr, sympy.Expr] = {}
-        const_term = sympy.Integer(0)
-        for term in terms:
-            if term.is_Number:
-                const_term += term
-                continue
-            coeff, base = term.as_coeff_Mul()
-            if base == 1:
-                const_term += coeff
-                continue
-            coeff_map[base] = coeff_map.get(base, sympy.Integer(0)) + coeff
-
-        if not sympy.simplify(const_term) == 0:
-            return None
-
-        indices: list[sympy.Expr] = []
-        remaining_map = dict(coeff_map)
-        for size, stride in zip(sizes, strides):
-            if size == 1 or sympy.simplify(size - 1) == 0:
-                indices.append(sympy.Integer(0))
-                continue
-
-            candidate_base = None
-            for base, coeff in list(remaining_map.items()):
-                if coeff == stride or sympy.simplify(coeff - stride) == 0:
-                    candidate_base = base
-                    del remaining_map[base]
-                    break
-            if candidate_base is None:
-                return None
-            indices.append(candidate_base)
-
-        if remaining_map:
-            return None
-
-        return indices
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""

@@ -3,16 +3,25 @@
 
 import functools
 import importlib
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Callable, Optional, Sequence, Union
 
 import sympy
+from sympy import Expr, Integer
 
 import torch
 from torch.fx import GraphModule
+from torch.utils._sympy.functions import Identity
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
-from .common import infer_dense_strides, load_flex_template, SubgraphResults
+from ...virtualized import V
+from .common import (
+    build_subgraph_module_buffer,
+    infer_dense_strides,
+    load_flex_template,
+    SubgraphResults,
+)
 
 
 aten = torch.ops.aten
@@ -38,6 +47,107 @@ from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 flash_attention_cutedsl_template = CuteDSLTemplate(
     name="flash_attention_cutedsl", source=load_flex_template("flash_attention")
 )
+
+
+def _fixed_indexer_cute(
+    size: Sequence[int],
+    stride: Optional[Sequence[int]] = None,
+    offset: Expr = Integer(0),
+) -> Callable[[Sequence[Expr]], Expr]:
+    """
+    Colexicographic indexer for CuteDSL - matches CuTe's coordinate interpretation.
+
+    CuTe interprets linear indices in colexicographic (column-major) order,
+    whereas Inductor's default _fixed_indexer uses lexicographic (row-major) order.
+
+    For size=[2, 128] with index=[b, q_idx]:
+    - Lexicographic:    b*128 + q_idx*1
+    - Colexicographic:  b*1 + q_idx*2
+
+    CuTe then applies the tensor's actual memory strides to get the correct offset.
+    """
+
+    def indexer(index: Sequence[Expr]) -> Expr:
+        assert offset == Integer(0), "Offset not supported for colexicographic indexing"
+        if not index:
+            return Integer(0)
+
+        base = index[0]
+        terms: list[Expr] = [base]
+        runner = size[0]
+
+        for idx, sz in zip(index[1:], size[1:]):
+            term = sympy.Mul(runner, Identity(idx), evaluate=False)
+            terms.append(term)
+            runner = sympy.Mul(runner, sz, evaluate=True)
+
+        return sympy.Add(*terms, evaluate=False)
+
+    return indexer
+
+
+@contextmanager
+def patch_fixed_layout_indexer_for_cutedsl():
+    """
+    Temporarily swap FixedLayout.make_indexer so CuteDSL sees colexicographic indexing.
+    """
+    original_make_indexer = FixedLayout.make_indexer
+    print("[CUTEDSL] Installing colexicographic FixedLayout.make_indexer override")
+
+    def cutedsl_make_indexer(self):
+        print(f"[CUTEDSL] make_indexer invoked size={self.size} stride={self.stride}")
+        return _fixed_indexer_cute(self.size, self.stride, self.offset)
+
+    FixedLayout.make_indexer = cutedsl_make_indexer
+    try:
+        yield
+    finally:
+        FixedLayout.make_indexer = original_make_indexer
+        print("[CUTEDSL] Restored original FixedLayout.make_indexer")
+
+
+def create_placeholder_cutedsl(
+    name: str,
+    dtype: torch.dtype,
+    device: torch.device,
+    size: list[int],
+) -> TensorBox:
+    """
+    Create a placeholder with colexicographic (column-major) strides for CuteDSL.
+
+    Unlike create_placeholder which uses row-major strides, this creates placeholders
+    with column-major strides to match CuTe's coordinate space interpretation.
+    """
+    from ...ir import FlexibleLayout, InputBuffer, TensorBox
+
+    input_buffer = InputBuffer(
+        name=name,
+        layout=FixedLayout(
+            device,
+            dtype,
+            size,
+            FlexibleLayout.contiguous_strides(size),
+        ),
+    )
+    return TensorBox.create(input_buffer)
+
+
+def build_subgraph_buffer_cutedsl(
+    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
+    graph_module: GraphModule,
+) -> SubgraphResults:
+    """
+    Build subgraph with colexicographic indexing for CuteDSL.
+
+    Temporarily patches FixedLayout.make_indexer to use colexicographic indexing
+    instead of the default lexicographic indexing. This ensures the generated
+    index expressions match CuTe's expectations.
+    """
+    with patch_fixed_layout_indexer_for_cutedsl():
+        print(
+            f"[CUTEDSL] Lowering GraphModule {graph_module.__class__.__name__} with {len(args)} inputs"
+        )
+        return build_subgraph_module_buffer(args, graph_module)
 
 
 def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
@@ -142,6 +252,7 @@ def create_flex_flash_attention_kernel(
     full_kv_num_blocks: TensorBox | None,
     full_kv_indices: TensorBox | None,
     mask_graph: Subgraph,
+    subgraph: Subgraph | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if not ensure_flash_available():
@@ -201,15 +312,98 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
-    error = flash_attention_cutedsl_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[lse],
-        subgraphs=[subgraph_buffer, mask_graph_buffer],
-        SM_SCALE=scale,
-        NEEDS_BLOCK_MASK=needs_block_mask,
+    # Rebuild subgraphs with colexicographic indexing for CuteDSL
+    cutedsl_subgraph_buffer = subgraph_buffer
+    cutedsl_mask_graph_buffer = mask_graph_buffer
+    if subgraph is not None:
+        # Reconstruct args for score_mod subgraph
+        from .common import create_placeholder
+
+        placeholder_inps = [
+            create_placeholder(name, dtype_val, device)
+            for name, dtype_val in [
+                ("score", dtype),
+                ("b", torch.int32),
+                ("h", torch.int32),
+                ("m", torch.int32),
+                ("n", torch.int32),
+            ]
+        ]
+
+        # Create NEW placeholders for score_mod_other_buffers with colexicographic strides
+        score_mod_new_placeholders = [
+            create_placeholder_cutedsl(
+                buf.get_name(),
+                buf.get_dtype(),
+                buf.get_device(),
+                [V.graph.sizevars.size_hint(s) for s in buf.get_size()],
+            )
+            for buf in score_mod_other_buffers
+        ]
+
+        print(
+            f"[CUTEDSL] Rebuilding score_mod subgraph with {len(score_mod_new_placeholders)} captured buffers"
+        )
+        cutedsl_subgraph_buffer = build_subgraph_buffer_cutedsl(
+            placeholder_inps + score_mod_new_placeholders, subgraph.graph_module
+        )
+
+    # Rebuild mask_mod subgraph
+    mask_graph_placeholder_inps = [
+        create_placeholder(name, torch.int32, device) for name in ["b", "h", "m", "n"]
+    ]
+
+    # Create NEW placeholders for mask_mod_other_buffers with colexicographic strides
+    mask_mod_new_placeholders = [
+        create_placeholder_cutedsl(
+            buf.get_name(),
+            buf.get_dtype(),
+            buf.get_device(),
+            [V.graph.sizevars.size_hint(s) for s in buf.get_size()],
+        )
+        for buf in mask_mod_other_buffers
+    ]
+
+    print(
+        f"[CUTEDSL] Rebuilding mask_mod subgraph with {len(mask_mod_new_placeholders)} captured buffers"
     )
+    cutedsl_mask_graph_buffer = build_subgraph_buffer_cutedsl(
+        mask_graph_placeholder_inps + mask_mod_new_placeholders, mask_graph.graph_module
+    )
+
+    with patch_fixed_layout_indexer_for_cutedsl():
+        print(
+            "[CUTEDSL] Invoking CuteDSL template.maybe_append_choice with patched indexer"
+        )
+        error = flash_attention_cutedsl_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=output_layout,
+            mutated_inputs=[lse],
+            subgraphs=[cutedsl_subgraph_buffer, cutedsl_mask_graph_buffer],
+            SM_SCALE=scale,
+            NEEDS_BLOCK_MASK=needs_block_mask,
+        )
+
+    def wrap_choice_render(choice):
+        original_make_kernel_render = choice.make_kernel_render
+
+        def make_kernel_render_with_patch(*args, **kwargs):
+            render_kernel, render = original_make_kernel_render(*args, **kwargs)
+
+            def render_with_patch():
+                with patch_fixed_layout_indexer_for_cutedsl():
+                    print(
+                        "[CUTEDSL] Rendering CuteDSL kernel with colexicographic indexer"
+                    )
+                    return render()
+
+            return render_kernel, render_with_patch
+
+        choice.make_kernel_render = make_kernel_render_with_patch
+
+    for choice in choices:
+        wrap_choice_render(choice)
 
     if error or not choices:
         # Fallback to original implementation
