@@ -172,15 +172,13 @@ class PartitionState:
 
 
 class ComboKernel(Kernel):
-    MAX_NUM_ARGS = 250  # number where I would no longer get triton errors
-
     @staticmethod
     def _update_partition(
         partition_state: PartitionState,
         node_rw_count: int,
         node_info: BaseSchedulerNode,
     ) -> None:
-        if partition_state.cur_count + node_rw_count > ComboKernel.MAX_NUM_ARGS:
+        if partition_state.cur_count + node_rw_count > config.combo_kernel_max_num_args:
             partition_state.partitions.append(partition_state.cur_partition)
             partition_state.cur_partition = [node_info]
             partition_state.cur_count = node_rw_count
@@ -628,7 +626,7 @@ class ComboKernel(Kernel):
         if heuristics == "foreach":
             heuristics_line = f"""
                 @triton_heuristics.foreach(
-                    filename=__file__,
+                    num_warps={self.num_warps},
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},
                 )
