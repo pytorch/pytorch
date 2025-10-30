@@ -4507,6 +4507,8 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 @aten.matmul.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 @out_wrapper(pass_is_out=True)
 def matmul(tensor1, tensor2, *, is_out=False):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
     assert dim_tensor1 != 0 and dim_tensor2 != 0
@@ -4575,11 +4577,11 @@ def matmul(tensor1, tensor2, *, is_out=False):
         if (
             dim_tensor1 == 3
             and dim_tensor2 == 3
-            and batch_tensor1[0] != batch_tensor2[0]
+            and guard_or_true(batch_tensor1[0] != batch_tensor2[0])
         ):
-            if batch_tensor1[0] == 1 and tensor1.requires_grad:
+            if guard_or_false(batch_tensor1[0] == 1) and tensor1.requires_grad:
                 return matmul(tensor1.squeeze(0), tensor2)
-            if batch_tensor2[0] == 1 and tensor2.requires_grad:
+            if guard_or_false(batch_tensor2[0] == 1) and tensor2.requires_grad:
                 return matmul(tensor1, tensor2.squeeze(0))
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
