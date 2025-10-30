@@ -218,7 +218,6 @@ def main() -> None:
     for args in _SANITY_CHECK_ARGS:
         if sys.version_info >= (3, 14):
             warnings.warn("Dynamo not yet supported in Python 3.14. Skipping check.")
-            continue
         check_dynamo(*args)
     print("All required checks passed")
 
