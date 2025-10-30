@@ -356,8 +356,7 @@ else:
             dim_name: str,
             backend_override: BackendConfig,
         ) -> Optional[str]:
-            # swap the current dim to the last dim
-            # then reshape to flatten out other dims
+            # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
             # We need to explicitly pass in timeout when specified in option, otherwise
@@ -367,20 +366,41 @@ else:
 
             # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
             # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
-            # If the mesh doesn't not have a mesh_dim_names, then the group description of the
+            # If the mesh doesn't have a mesh_dim_names, then the group description of the
             # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
             group_desc = f"mesh_{dim_name}"
+
+            dim_group = None
+            default_group = _get_default_group()
+
+            # Early return if there is only one sub_layout in the mesh layout.
+            if sub_layout.numel() == get_world_size() and backend_override == (
+                None,
+                None,
+            ):
+                # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
+                # Otherwise, create new pg.
+                ranks = list(range(get_world_size()))
+                dim_group = (
+                    new_group(
+                        backend="cpu:gloo,cuda:nccl",
+                        ranks=ranks,
+                        group_desc="mesh_default",
+                    )
+                    if torch.cuda.is_available()
+                    and get_backend(default_group) == "gloo"
+                    else default_group
+                )
+                return dim_group.group_name  # type: ignore[union-attr]
 
             # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
             # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
             # In this case, we only need to make one API call (`split_group``) for the subgroup creation
-            # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
+            # for each mesh dimension. In a 2 * 4 mesh, we only need to make two API calls per ranks to create
             # all the subgroups.
             # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
-            # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
-            dim_group = None
-            default_group = _get_default_group()
+            # mesh, we need to make two API calls per ranks to create all the subgroups.
             if (
                 getattr(default_group, "bound_device_id", None) is not None
                 and torch.cuda.is_available()
@@ -433,38 +453,18 @@ else:
         ) -> list[str]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
-            #
             dim_group_names: list[str] = []
-            default_group = _get_default_group()
-
-            if (
-                len(layout) == 1
-                and layout.numel() == get_world_size()
-                and backend_override[0] == (None, None)
-            ):
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
-                # Otherwise, create new pg.
-                ranks = list(range(get_world_size()))
-                dim_group = (
-                    new_group(
-                        backend="cpu:gloo,cuda:nccl",
-                        ranks=ranks,
-                        group_desc="mesh_default",
-                    )
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
-                )
-                dim_group_names.append(dim_group.group_name)
-            else:
-                # create sub pgs base on the mesh argument specified
-                for dim in range(len(layout)):
-                    dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
-                    pg_name = DeviceMesh._init_one_process_group(
+            # create sub pgs base on the mesh argument specified
+            for dim in range(len(layout)):
+                dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
+                dim_group_names.append(
+                    DeviceMesh._init_one_process_group(  # type: ignore[arg-type]
                         layout[dim], rank_map, dim_name, backend_override[dim]
                     )
-                    if pg_name is not None:
-                        dim_group_names.append(pg_name)
+                )
+            if any(n is None for n in dim_group_names):
+                assert all(n is None for n in dim_group_names)
+                return []
             return dim_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
