@@ -547,6 +547,7 @@ def propagate_shape_and_sharding(
     ) -> tuple[Optional[int], Optional[Shard]]:
         # if input_dim is sharded, return the mesh_dim and shard placement
         for i, placement in enumerate(input_src_placements):
+            # does not work for (_StridedShard(dim=0, sf=6), _StridedShard(dim=0, sf=12))
             if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
                 return i, placement
         return None, None
@@ -603,9 +604,12 @@ def propagate_shape_and_sharding(
                     )
                 return cmd.input_dims[0]
         elif isinstance(cmd, Split):
+            import fbvscode
+            fbvscode.set_trace()
             in_dim = get_in_dim_to_shard(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
             if in_dim is not None:
+                # fix (_StridedShard(dim=0, sf=6), _StridedShard(dim=0, sf=12))
                 shard_mesh_dim, input_src_placement = (
                     maybe_get_shard_mesh_dim_and_placement(in_dim)
                 )
