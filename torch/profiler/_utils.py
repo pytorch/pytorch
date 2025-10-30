@@ -336,7 +336,7 @@ class BasicEvaluation:
             event_list = [
                 event
                 for _, event in sorted(
-                    zip(heuristic_score_list, event_list, strict=True),
+                    zip(heuristic_score_list, event_list),
                     key=operator.itemgetter(0),
                     reverse=True,
                 )
