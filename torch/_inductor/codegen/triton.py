@@ -272,14 +272,6 @@ class TritonSymbols:
 
         assert expr_shape is not None
 
-        # Below logic handles when index symbols does not match with convention range tree order.
-        # Mainly, it is for TMA template where TMA indices are expected to be in (x,y), not (y,x).
-        # so in such case, the get_block_shape(yindex) should be (1,YBLOCK), not (YBLOCK,1).
-        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
-            out_shape = V.kernel.template_out_shape
-            if out_shape == ("XBLOCK", "YBLOCK") and V.kernel.tma_store:
-                expr_shape = (expr_shape[1], expr_shape[0], *expr_shape[2:])
-
         return expr_shape
 
     @classmethod
