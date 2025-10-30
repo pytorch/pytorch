@@ -2586,15 +2586,6 @@ def _persistent_reduction_configs(
             )
 
     # defer to more autotuning, initially
-    if "y" in size_hints:
-        pass
-    # TODO(jansel): we should be able to improve these heuristics
-    if not max_autotune_enabled: # Don't filter if tuning enabled
-        if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-            configs = configs[:1]
-        elif reduction_hint == ReductionHint.OUTER:
-            configs = configs[-1:]
-
     tiny_configs = [
         triton_config_reduction(
             size_hints,
@@ -2603,13 +2594,22 @@ def _persistent_reduction_configs(
         )
     ]
 
-    if max_autotune_enabled:
-        for conf in tiny_configs:
-            if conf not in configs:
-                configs.append(conf)
-    elif reduction_hint == ReductionHint.OUTER_TINY:
-        configs = tiny_configs
-
+    if "y" in size_hints:
+        pass
+    # TODO(jansel): we should be able to improve these heuristics
+    elif not max_autotune_enabled: # Don't filter if tuning enabled
+        if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+            configs = configs[:1]
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            configs = tiny_configs
+    else:
+        if max_autotune_enabled:
+            for conf in tiny_configs:
+                if conf not in configs:
+                    configs.append(conf)
+    
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
         for prefix in size_hints:
