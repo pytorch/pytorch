@@ -464,7 +464,9 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
         reason="ONNX Runtime does not support zero sized inputs for GroupNorm",
         matcher=lambda sample: sample.input.numel() == 0,
     ),
-    TorchLibOpInfo("nn.functional.rms_norm", nn_ops.aten_rms_norm, opset_introduced=23).skip(
+    TorchLibOpInfo(
+        "nn.functional.rms_norm", nn_ops.aten_rms_norm, opset_introduced=23
+    ).skip(
         reason="ONNX Runtime does not support <1d inputs for RMSNorm",
         matcher=lambda sample: len(sample.input.shape) < 2,
     ),
