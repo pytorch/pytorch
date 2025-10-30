@@ -1011,69 +1011,35 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    if has_recomputable_ops(joint_module):
-        return min_cut_rematerialization_partition(
-            joint_module,
-            _joint_inputs,
-            num_fwd_outputs=num_fwd_outputs,
-            static_lifetime_input_indices=static_lifetime_input_indices,
-        )
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
-    forward_only_graph = _extract_graph_with_inputs_outputs(
-        joint_module.graph, inputs, fwd_outputs, fwd_outputs_descs, "forward"
-    )
+    # It is NOT sufficient to extract some forward-only graph because can DCE some nodes
+    # that may be important to save. TODO: link to Brian's PR.
+    not_backward_nodes = [
+        x for x in joint_module.graph.nodes if not _has_tag_is_backward(x)
+    ]
     forward_node_names = OrderedSet(
-        node.name for node in forward_only_graph.nodes if node.op != "output"
+        node.name for node in not_backward_nodes if node.op != "output"
     )
     order = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = []
     saved_sym_nodes = []
 
-    def is_mutated_later_in_fw(node):
-        if _has_tag_is_backward(node):
-            return False
-        tensor_arg_aliases = [
-            x
-            for x in node.args
-            if isinstance(x, fx.Node)
-            and "val" in x.meta
-            and isinstance(x.meta["val"], torch.Tensor)
-        ]
-        while len(tensor_arg_aliases) > 0:
-            a = tensor_arg_aliases.pop()
-            for u in a.users:
-                if not isinstance(u.target, torch._ops.OpOverload):
-                    continue
-                # If we witness a mutation on our node later, and that mutation is not "must be in backward",
-                # then our node needs to be computed in the forward (otherwise we will compute it on the mutated values)
-                if (
-                    # one of the args was mutated
-                    u.target._schema.is_mutable
-                    # and the mutation happens "later"
-                    and order[u] > order[node]
-                    # and the mutation happened during the forward
-                    and not (_has_tag_is_backward(u) or _has_tag_must_be_in_backward(u))
-                ):
-                    for idx, alias_info in enumerate(u.target._schema.arguments):
-                        if alias_info.is_write and u.args[idx] is a:
-                            return True
-                elif u.target.is_view:
-                    tensor_arg_aliases.append(u)
-        return False
+    graph_has_recomputable_ops = has_recomputable_ops(joint_module)
+    graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
+    if graph_has_recomputable_ops:
+        # TODO: require functionalization here
+        # Insert save between adjacent AC regions.
+        # Interesting existing behavior is that we do NOT save the inputs to the very
+        # first AC region!
+        joint_module = cleanup_recompute_tags(joint_module)
 
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
-            # if a node isn't "required" to be in the forward, but any of its arguments
-            # are later mutated in the forward, then it must have been run in the forward
-            # (if not, and the node's arg was saved for backward, we would have mutated a saved value)
-            # NB: doesn't handle nodes where the input is a list of tensors and one of those tensors is later mutated
-            if is_mutated_later_in_fw(node):
-                saved_values.append(node)
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
@@ -1087,14 +1053,15 @@ def default_partition(
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
-            saved_values.extend(users)
+            if not must_recompute(node):
+                saved_values.extend(users)
         else:
             backward_usages = [
                 n for n in node.users if n.name not in forward_node_names
             ]
             if "tensor_meta" in node.meta and all(
                 is_sym_node(n) for n in backward_usages
-            ):
+            ) and len(backward_usages) > 0:
                 # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
                 # and not the actual tensor data,
                 # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
@@ -1103,19 +1070,39 @@ def default_partition(
                 # If the user mutated an input in the forward and uses its sizes/strides in the backward,
                 # then we would be obligated to clone the input before saving it to appease autograd.
                 # (This is how we originally found this bug).
+                #
+                # The "all" condition is vacuously true when len(backward_usage) == 0. This means that
+                # this unconditionally skips saving of any tensors that don't have a backward user.
+                # Without the "len(backward_usages) > 0" condition this would break SAC because I may
+                # want to save tensors that don't have backward user since they can still be needed
+                # for recomputation of other saved activations.
+                # TODO: We should understand the original failure case here, because the current state is
+                # still that if there exists some sym_node backward usage, SAC will not be able to save.
+                # Maybe fine for now since that seems rare.
                 saved_sym_nodes.extend(backward_usages)
             else:
-                saved_values.append(node)
+                if not must_recompute(node):
+                    saved_values.append(node)
+
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
-    return _extract_fwd_bwd_modules(
+    fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
+
+    if graph_has_recomputable_ops:
+        if graph_has_recomputable_rng_ops:
+            fw_module, bw_module = functionalize_rng_ops(
+                joint_module, fw_module, bw_module, len(saved_sym_nodes)
+            )
+        bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    return fw_module, bw_module
 
 
 INT_INF = int(1e6)
@@ -2923,7 +2910,7 @@ def min_cut_rematerialization_partition(
             fw_module, bw_module = functionalize_rng_ops(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
-    bw_module = reordering_to_mimic_autograd_engine(bw_module)
+    bw_module: GraphModule = reordering_to_mimic_autograd_engine(bw_module)
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend

@@ -13,7 +13,7 @@ import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
-from functorch.compile import min_cut_rematerialization_partition
+from functorch.compile import min_cut_rematerialization_partition, default_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
@@ -715,9 +715,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 ),
             )
 
-        def _test(context_fn, bw_compiler):
+        def _test(context_fn, bw_compiler, partitioner):
             def gn(x):
-                return torch.sigmoid(torch.matmul(x, x))
+                return torch.cos(torch.sin(torch.matmul(x, x) @ x))
 
             def fn(x):
                 return torch.utils.checkpoint.checkpoint(
@@ -731,33 +731,39 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
             fw_compiler = functools.partial(
                 count_ops,
-                freq=1,
+                freq=2,
                 op=torch.ops.aten.mm.default,
             )
 
             backend = aot_autograd(
                 fw_compiler=fw_compiler,
                 bw_compiler=bw_compiler,
-                partition_fn=min_cut_rematerialization_partition,
+                partition_fn=partitioner,
             )
             self._validate(fn, backend, x)
 
-        _test(
-            context_fn=context_fn_must_recompute_mm,
-            bw_compiler=functools.partial(
-                count_ops,
-                freq=3,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 1 + 2 * 1 = 3)
-                op=torch.ops.aten.mm.default,
-            ),
-        )
-        _test(
-            context_fn=context_fn_no_recompute_mm,
-            bw_compiler=functools.partial(
-                count_ops,
-                freq=2,  # 2 bwd mm ops per fwd matmul
-                op=torch.ops.aten.mm.default,
-            ),
-        )
+        for partitioner in (
+            min_cut_rematerialization_partition,
+            default_partition,
+        ):
+            _test(
+                context_fn=context_fn_must_recompute_mm,
+                bw_compiler=functools.partial(
+                    count_ops,
+                    freq=6,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 2 + 2 * 2 = 6)
+                    op=torch.ops.aten.mm.default,
+                ),
+                partitioner=partitioner,
+            )
+            _test(
+                context_fn=context_fn_no_recompute_mm,
+                bw_compiler=functools.partial(
+                    count_ops,
+                    freq=4,  # 2 bwd mm ops per fwd matmul
+                    op=torch.ops.aten.mm.default,
+                ),
+                partitioner=partitioner,
+            )
 
     def test_sac_with_partial_context_fn(self):
         class CustomPolicy:
