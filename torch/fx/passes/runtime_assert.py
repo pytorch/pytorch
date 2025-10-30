@@ -360,7 +360,7 @@ def insert_deferred_runtime_asserts(
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
                 def has_new_untracked_symbols():
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     for symbol in sym_expr.free_symbols:
                         if symbol not in expr_to_proxy:
                             return True
@@ -376,7 +376,7 @@ def insert_deferred_runtime_asserts(
                 assert resolved_unbacked_bindings is not None
 
                 def has_new_unbacked_bindings():
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     for key in resolved_unbacked_bindings.keys():
                         if key not in expr_to_proxy:
                             return True
