@@ -2176,12 +2176,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return &pyobj_slot_;
   }
 
-  void incref_pyobject() const override {
+  void incref_pyobject() const override final {
     PyObject* obj = pyobj_slot_._unchecked_untagged_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->incref(obj);
   }
 
-  void decref_pyobject() const override {
+  void decref_pyobject() const override final {
     PyObject* obj = pyobj_slot_._unchecked_untagged_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->decref(obj, false);
   }
@@ -3091,6 +3091,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       size_t ptr_size>
   friend class C10_TensorImpl_Size_Check_Dummy_Class;
 };
+
+namespace detail {
+
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10::TensorImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+
+  static inline void incref_pyobject(c10::TensorImpl* self) noexcept {
+    self->incref_pyobject();
+  }
+  static inline void decref_pyobject(c10::TensorImpl* self) noexcept {
+    self->decref_pyobject();
+  }
+};
+
+} // namespace detail
 
 // Note [TensorImpl size constraints]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

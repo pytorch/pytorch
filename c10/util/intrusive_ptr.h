@@ -99,6 +99,47 @@ inline uint32_t atomic_weakcount_decrement(
       combined_refcount, kWeakReferenceCountOne));
 }
 
+template <class T, class = void>
+struct TargetTraits {
+  static constexpr bool can_have_pyobject = false;
+  static inline void incref_pyobject(T* self) = delete;
+  static inline void decref_pyobject(T* self) = delete;
+};
+
+template <class T>
+inline void maybe_incref_pyobject(T* self, uint64_t combined) {
+  if constexpr (TargetTraits<T>::can_have_pyobject) {
+    // If the refcount transitioned from 1 to 2, we need to incref the PyObject.
+    // In other words, we need to ensure that the PyObject stays alive if
+    // we have a non-Python reference to this object.
+    // (The PyObject holds one reference to the C++ object.)
+    if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 2)) {
+      TargetTraits<T>::incref_pyobject(self);
+    }
+  } else {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !has_pyobject(combined),
+        "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
+  }
+}
+
+template <class T>
+inline void maybe_decref_pyobject(T* self, uint64_t combined) {
+  if constexpr (TargetTraits<T>::can_have_pyobject) {
+    // If the refcount transitioned from 2 to 1, we need to decref the PyObject.
+    // In other words, we don't want to keep the PyObject alive if there are
+    // no C++ references to this object anymore.
+    // (The PyObject holds one reference to the C++ object.)
+    if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 1)) {
+      TargetTraits<T>::decref_pyobject(self);
+    }
+  } else {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !has_pyobject(combined),
+        "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
+  }
+}
+
 } // namespace detail
 
 /**
@@ -177,6 +218,9 @@ class C10_API intrusive_ptr_target {
 
   template <typename T>
   friend struct ExclusivelyOwnedTensorTraits;
+
+  template <typename T>
+  friend struct detail::TargetTraits;
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -284,6 +328,22 @@ class C10_API intrusive_ptr_target {
   }
 };
 
+namespace detail {
+template <>
+struct TargetTraits<c10::intrusive_ptr_target> {
+  // A generic intrusive_ptr<intrusive_ptr_target> may actually be a TensorImpl
+  // or StorageImpl, so we have to allow for PyObject support.
+  static constexpr bool can_have_pyobject = true;
+
+  static inline void incref_pyobject(c10::intrusive_ptr_target* self) noexcept {
+    self->incref_pyobject();
+  }
+  static inline void decref_pyobject(c10::intrusive_ptr_target* self) noexcept {
+    self->decref_pyobject();
+  }
+};
+} // namespace detail
+
 template <class TTarget, class NullType>
 class weak_intrusive_ptr;
 
@@ -315,6 +375,8 @@ class intrusive_ptr final {
 
   TTarget* target_;
 
+  using target_traits = detail::TargetTraits<TTarget>;
+
   template <typename T>
   friend struct ExclusivelyOwnedTensorTraits;
   template <class TTarget2, class NullType2>
@@ -339,9 +401,8 @@ class intrusive_ptr final {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
-      if (C10_UNLIKELY(detail::has_pyobject(combined) && new_refcount == 2)) {
-        target_->incref_pyobject();
-      }
+
+      detail::maybe_incref_pyobject<TTarget>(target_, combined);
     }
   }
 
@@ -379,8 +440,8 @@ class intrusive_ptr final {
         if (should_delete) {
           delete target_;
         }
-      } else if (detail::has_pyobject(combined_refcount) && new_refcount == 1) {
-        target_->decref_pyobject();
+      } else {
+        detail::maybe_decref_pyobject<TTarget>(target_, combined_refcount);
       }
     }
   }
@@ -973,10 +1034,8 @@ class weak_intrusive_ptr final {
 
       // FIXME(sgross): this isn't thread-safe if the Python wrapper is the
       // only reference and may be deallocated concurrently.
-      if (detail::has_pyobject(combined_refcount) &&
-          detail::refcount(combined_refcount) + 1 == 2) {
-        target_->incref_pyobject();
-      }
+      detail::maybe_incref_pyobject<TTarget>(
+          target_, combined_refcount + detail::kReferenceCountOne);
 
       return intrusive_ptr<TTarget, NullType>(
           target_, raw::DontIncreaseRefcount{});
@@ -1094,11 +1153,7 @@ inline void incref(intrusive_ptr_target* self) {
   if (self) {
     uint64_t new_refcount = detail::atomic_combined_refcount_increment(
         self->combined_refcount_, detail::kReferenceCountOne);
-    if (C10_UNLIKELY(
-            detail::has_pyobject(new_refcount) &&
-            detail::refcount(new_refcount) == 2)) {
-      self->incref_pyobject();
-    }
+    detail::maybe_incref_pyobject(self, new_refcount);
   }
 }
 

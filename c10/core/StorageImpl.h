@@ -105,12 +105,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
   }
 
-  void incref_pyobject() const override {
+  void incref_pyobject() const override final {
     PyObject* obj = pyobj_slot_._unchecked_untagged_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->incref(obj);
   }
 
-  void decref_pyobject() const override {
+  void decref_pyobject() const override final {
     PyObject* obj = pyobj_slot_._unchecked_untagged_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->decref(obj, false);
   }
@@ -384,5 +384,21 @@ C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     c10::Allocator* allocator,
     bool resizable,
     std::optional<at::Device> device_opt);
+
+namespace detail {
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10::StorageImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+
+  static inline void incref_pyobject(c10::StorageImpl* self) noexcept {
+    self->incref_pyobject();
+  }
+  static inline void decref_pyobject(c10::StorageImpl* self) noexcept {
+    self->decref_pyobject();
+  }
+};
+} // namespace detail
 
 } // namespace c10
