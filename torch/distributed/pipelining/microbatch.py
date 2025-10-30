@@ -249,8 +249,12 @@ def _shard_dict_of_args(
     )
     assert args_chunk_spec is not None  # Should have been set by caller
 
-    values, tree_spec = tree_flatten(args_dict)
-    chunk_specs, _ = tree_flatten(args_chunk_spec)
+    values, tree_spec = tree_flatten(
+        args_dict, is_leaf=lambda x: isinstance(x, BlockMask)
+    )
+    chunk_specs, _ = tree_flatten(
+        args_chunk_spec, is_leaf=lambda x: isinstance(x, BlockMask)
+    )
 
     # First check and find the actual number of chunks
     split_sizes = []
@@ -369,10 +373,14 @@ def split_args_kwargs_into_chunks(
             return _Replicate()
 
     if args_chunk_spec is None:
-        args_chunk_spec = tree_map(default_spec, args)
+        args_chunk_spec = tree_map(
+            default_spec, args, is_leaf=lambda v: isinstance(v, BlockMask)
+        )
 
     if kwargs_chunk_spec is None:
-        kwargs_chunk_spec = tree_map(default_spec, kwargs)
+        kwargs_chunk_spec = tree_map(
+            default_spec, kwargs, is_leaf=lambda v: isinstance(v, BlockMask)
+        )
 
     args_split_dict = _shard_dict_of_args(
         dict(enumerate(args)),

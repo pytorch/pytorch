@@ -59,14 +59,14 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 ### Backends that come with PyTorch
 
-PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+PyTorch distributed package supports Linux (stable), macOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
 distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
 included if you build PyTorch from source. (e.g. building PyTorch on a host that has MPI
 installed.)
 
 :::{note}
-As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+As of PyTorch v1.8, Windows supports all collective communications backends but NCCL,
 If the `init_method` argument of {func}`init_process_group` points to a file it must adhere
 to the following schema:
 
@@ -392,6 +392,10 @@ an opaque group handle that can be given as a `group` argument to all collective
 
 ```{eval-rst}
 .. autofunction:: new_group
+```
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.shrink_group
 ```
 
 ```{eval-rst}
