@@ -1181,7 +1181,7 @@ def special_pattern_replacement(model: GraphModule):
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
         q_node = n
-        is_quantize = q_node.target == torch.quantize_per_tensor
+        is_quantize = q_node.target is torch.quantize_per_tensor
         is_to_fp16 = (
             q_node.op == "call_method"
             and q_node.target == "to"
