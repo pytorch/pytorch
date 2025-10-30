@@ -219,7 +219,7 @@ class C10_API intrusive_ptr_target {
   template <typename T>
   friend struct ExclusivelyOwnedTensorTraits;
 
-  template <typename T>
+  template <class, class>
   friend struct detail::TargetTraits;
 
  protected:
