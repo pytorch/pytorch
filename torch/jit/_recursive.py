@@ -749,7 +749,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
             if method_overloads is None:
                 continue
 
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             if item.__func__ in method_overloads:
                 raise RuntimeError(
                     _jit_internal.get_overload_no_implementation_error_message(
