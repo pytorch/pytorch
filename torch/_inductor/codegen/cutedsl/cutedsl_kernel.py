@@ -424,7 +424,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
-            # breakpoint()
             renamed_index = self.kernel.rename_indexing(index)
 
             idx_var = self._emit_scalar_fragment(

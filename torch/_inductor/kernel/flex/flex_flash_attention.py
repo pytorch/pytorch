@@ -268,16 +268,12 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
-    # Reuse prebuilt subgraphs
-    cutedsl_subgraph_buffer = subgraph_buffer
-    cutedsl_mask_graph_buffer = mask_graph_buffer
-
     error = flash_attention_cutedsl_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=output_layout,
         mutated_inputs=[lse],
-        subgraphs=[cutedsl_subgraph_buffer, cutedsl_mask_graph_buffer],
+        subgraphs=[subgraph_buffer, mask_graph_buffer],
         SM_SCALE=scale,
         NEEDS_BLOCK_MASK=needs_block_mask,
     )
