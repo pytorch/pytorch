@@ -2,6 +2,7 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -219,7 +220,15 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
-  virtual void init(int device_count) = 0;
+
+  // any classes overriding init should call CUDAAllocator::init
+  virtual void init(int device_count) {
+    for (int i{0}; i < device_count; ++i)
+      setMemoryFraction(
+          CUDAAllocatorConfig::per_process_memory_fraction(),
+          c10::DeviceIndex(i));
+  }
+
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
   virtual std::vector<StreamSegmentSize> getExpandableSegmentSizes(

@@ -619,6 +619,10 @@ Available options:
   and reallocate buffers across multiple streams, especially when the capture DAG frequently
   reaches joined frontiers.
 
+* ``per_process_memory_fraction`` option limits the amount of memory that can be allocated
+  on all the CUDA devices to a specified fraction of the available memory. This is a value
+  between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
+
 .. note::
 
     Some stats reported by the
