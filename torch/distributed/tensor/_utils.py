@@ -163,7 +163,7 @@ def _compute_local_shape_and_global_offset(
     # However, a single dim can be sharded multiple times, so we will end up
     # doing a Sum(size*stride) like computation to determine the location of our
     # shard for each of the shardings on that dim.
-    global_offset = [0] * len(global_shape)
+    global_offset: list[int | None] = [0] * len(global_shape)
 
     for mesh_dim, placement in ordered_placements:
         mesh_dim_size = mesh_shape[mesh_dim]
