@@ -289,12 +289,16 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(4, 4, device=device, requires_grad=True)
             y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+            fw_compiler = functools.partial(
+                count_ops, freq=1, op=torch.ops.aten.mm.default
+            )
             bw_compiler = functools.partial(
                 count_ops, freq=3, op=torch.ops.aten.mm.default
             )  # mm recomputed in the bwd
             backend = aot_autograd(
-                fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partitioner
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                partition_fn=partitioner,
             )
             self._validate(fn, backend, x, y)
 
@@ -314,12 +318,16 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(4, 4, device=device, requires_grad=True)
             y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+            fw_compiler = functools.partial(
+                count_ops, freq=1, op=torch.ops.aten.mm.default
+            )
             bw_compiler = functools.partial(
                 count_ops, freq=3, op=torch.ops.aten.mm.default
             )  # mm recomputed in the bwd
             backend = aot_autograd(
-                fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partitioner
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                partition_fn=partitioner,
             )
             self._validate(fn, backend, x, y)
 
@@ -340,12 +348,16 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(4, 4, device=device, requires_grad=True)
             y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+            fw_compiler = functools.partial(
+                count_ops, freq=1, op=torch.ops.aten.mm.default
+            )
             bw_compiler = functools.partial(
                 count_ops, freq=3, op=torch.ops.aten.mm.default
             )  # mm recomputed in the bwd
             backend = aot_autograd(
-                fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partitioner
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                partition_fn=partitioner,
             )
             self._validate(fn, backend, x, y)
 
@@ -369,14 +381,18 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         ):
             x = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(count_ops, freq=6, op=torch.ops.aten.mm.default)
+            fw_compiler = functools.partial(
+                count_ops, freq=6, op=torch.ops.aten.mm.default
+            )
             bw_compiler = functools.partial(
                 count_ops,
                 freqs=[2, 18],
                 ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
             )  # mm recomputed in the bwd
             backend = aot_autograd(
-                fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partitioner
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                partition_fn=partitioner,
             )
             self._validate(fn, backend, x)
 
@@ -399,12 +415,16 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(4, 4, device=device, requires_grad=True)
             y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+            fw_compiler = functools.partial(
+                count_ops, freq=2, op=torch.ops.aten.mm.default
+            )
             bw_compiler = functools.partial(
                 count_ops, freq=6, op=torch.ops.aten.mm.default
             )  # mm recomputed in the bwd
             backend = aot_autograd(
-                fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partitioner
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                partition_fn=partitioner,
             )
             self._validate(fn, backend, x, y)
 
@@ -438,7 +458,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 count_ops, freq=1, op=torch.ops.aten.sigmoid.default
             )
             backend = aot_autograd(
-                fw_compiler=fw_compiler, bw_compiler=bw_compiler, partition_fn=partitioner
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                partition_fn=partitioner,
             )
             self._validate(fn, backend, x)
 
