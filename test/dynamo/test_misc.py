@@ -4360,7 +4360,19 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
             return x + 1
 
-        torch.compile(fn, backend="eager", fullgraph=False)(torch.ones(3))
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+    @unittest.expectedFailure
+    def test_typing_union_new_syntax_reconstruct(self):
+        def fn(x):
+            return (
+                x + 1,
+                torch.Tensor | None,
+                None | torch.Tensor,
+                torch.Tensor | list[int],
+            )
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
 
     def test_optimize_on_module(self):
         class MockModule(torch.nn.Module):

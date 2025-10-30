@@ -3745,7 +3745,9 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(value, types.GenericAlias) or is_typing(value):
+        elif isinstance(value, types.GenericAlias) or isinstance(
+            value, types.UnionType
+        ):
             return TypingVariable(value)
         elif is_namedtuple(value):
             output = [
