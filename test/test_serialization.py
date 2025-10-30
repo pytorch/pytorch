@@ -295,7 +295,7 @@ class SerializationMixin:
             5,
             6
         ]
-        for i in range(0, 100):
+        for i in range(100):
             data.append(0)
         t = torch.tensor(data, dtype=torch.uint8)
 
@@ -4801,6 +4801,18 @@ class TestSerialization(TestCase, SerializationMixin):
                 y = torch.load(checkpoint)
 
             assert x.dtype == y.dtype
+
+    @skipIfTorchDynamo("getrefcount does not work in dynamo")
+    def test_serializaion_no_storage_leak(self):
+        # Test https://github.com/pytorch/pytorch/issues/149846
+        t = torch.rand(10, 10)
+        state_dict = {'a': 1, 'b': 2, 'c': t}
+        storage = t.untyped_storage()
+        ref1 = sys.getrefcount(storage)
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            torch.save(state_dict, checkpoint)
+        ref2 = sys.getrefcount(storage)
+        self.assertEqual(ref1, ref2)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

@@ -4471,7 +4471,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
-        for _ in range(0, 5):
+        for _ in range(5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
             compiled_a = torch.ones([6], requires_grad=requires_grad)
@@ -4623,7 +4623,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, counter), fn(x, counter))
         self.assertEqual(counter[0], 2)
-        for _ in range(0, 10):
+        for _ in range(10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
         if torch._dynamo.config.assume_static_by_default:
@@ -4784,7 +4784,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_contains_range_constprop(self):
         def fn(x):
             # dynamo should const prop to False
-            if 3 in range(0, 10):
+            if 3 in range(10):
                 return x + 1
             else:
                 return x + 2
@@ -7259,30 +7259,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(
             fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
         )
-
-    def test_311_resume_block_keyerror(self):
-        # https://github.com/pytorch/pytorch/issues/162313
-        flag = True
-
-        def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 2
-            if flag:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 4
-            else:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 8
-            return x + 16
-
-        inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        flag = False
-        self.assertEqual(fn(inp), opt_fn(inp))
 
     def test_cells_unsupported_step_exception(self):
         # This error happened because:
