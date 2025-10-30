@@ -77,7 +77,7 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
-class CtxManagerTests(torch._dynamo.test_case.TestCase):
+class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
@@ -1706,7 +1706,7 @@ class GraphModule(torch.nn.Module):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnts)
         opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
     # test sdpa_kernel graph break with 2 arguments
     def test_sdpa_kernel_ctx_manager3(self):
@@ -1835,15 +1835,72 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    def test_311_resume_block_keyerror(self):
+        # https://github.com/pytorch/pytorch/issues/162313
+        flag = True
 
-class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            if flag:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 4
+            else:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 8
+            return x + 16
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        flag = False
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_311_resume_block_keyerror2(self):
+        # https://github.com/pytorch/pytorch/issues/166176
+        def fn(x):
+            torch._dynamo.graph_break()
+            with torch.no_grad():
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+            return x + 1
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_store_attr_graph_break_key_error(self):
+        # STORE_ATTR on dummy should result in graph break
+        def dummy():
+            pass
+
+        def fn(x):
+            x = x + 2
+            with torch.no_grad():
+                dummy.attr1 = x
+            return x + 4
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        self.assertGreater(len(counters["graph_break"]), 0)
+
+
+class ContextlibContextManagerTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.enable_trace_contextlib
         self._u_prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_contextlib = True
         torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.enable_trace_contextlib = self._prev
         torch._dynamo.config.enable_trace_unittest = self._u_prev
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -48,6 +49,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     const std::string backend;
     std::string group_name;
     std::vector<uint64_t> global_ranks_in_group;
+
+    bool operator==(const Options& other) const noexcept {
+      return timeout == other.timeout && backend == other.backend &&
+          group_name == other.group_name &&
+          global_ranks_in_group == other.global_ranks_in_group;
+    }
   };
 
   explicit Backend(int rank, int size);
@@ -511,3 +518,24 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 };
 
 } // namespace c10d
+
+// small helper
+inline void hash_combine(std::size_t& seed, std::size_t value) noexcept {
+  seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+}
+
+namespace std {
+
+template <>
+struct hash<c10d::Backend::Options> {
+  std::size_t operator()(const c10d::Backend::Options& o) const noexcept {
+    std::size_t h = 0;
+    hash_combine(h, std::hash<long long>{}(o.timeout.count()));
+    hash_combine(h, std::hash<std::string>{}(o.backend));
+    hash_combine(h, std::hash<std::string>{}(o.group_name));
+    for (auto x : o.global_ranks_in_group)
+      hash_combine(h, std::hash<uint64_t>{}(x));
+    return h;
+  }
+};
+} // namespace std

@@ -260,6 +260,23 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
+
+    bool operator==(const Options& other) const noexcept {
+      // 1) compare base first
+      if (!static_cast<const Backend::Options&>(*this).operator==(other))
+        return false;
+
+      // 2) compare devices by identity
+      if (devices.size() != other.devices.size())
+        return false;
+      for (size_t i = 0; i < devices.size(); ++i) {
+        if (devices[i].get() != other.devices[i].get()) // pointer identity
+          return false;
+      }
+
+      // 3) compare added scalar fields
+      return threads == other.threads;
+    }
   };
 
   const std::string getBackendName() const override {
@@ -493,5 +510,25 @@ class TORCH_API ProcessGroupGloo : public Backend {
 };
 
 } // namespace c10d
+
+namespace std {
+template <>
+struct hash<c10d::ProcessGroupGloo::Options> {
+  std::size_t operator()(
+      const c10d::ProcessGroupGloo::Options& o) const noexcept {
+    std::size_t h = 0;
+    // reuse base hash
+    hash_combine(
+        h,
+        std::hash<c10d::Backend::Options>{}(
+            static_cast<const c10d::Backend::Options&>(o)));
+    // add derived fields
+    for (auto const& dev : o.devices)
+      hash_combine(h, std::hash<const void*>{}(dev.get()));
+    hash_combine(h, std::hash<int>{}(o.threads));
+    return h;
+  }
+};
+} // namespace std
 
 #endif // USE_C10D_GLOO

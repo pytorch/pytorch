@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copy
 import logging
 import os
 import threading
@@ -133,54 +132,162 @@ else:
 
         _rank_map: torch.Tensor
         _root_mesh: Optional["DeviceMesh"]
-        _backend_cache: dict[_MeshLayout, str]
+        _backend_cache: dict[tuple[_MeshLayout, Optional[C10dBackend.Options]], str]
 
         def __init__(
             self, rank_map: torch.Tensor, root_mesh: Optional["DeviceMesh"] = None
         ) -> None:
             self._rank_map = rank_map
             self._root_mesh = root_mesh
-            self._backend_cache: dict[_MeshLayout, str] = {}
-            self._lock = threading.Lock()
-
-        def __getstate__(self):
-            state = self.__dict__.copy()
-            state.pop(
-                "_lock"
-            )  # locks aren't picklable, so we will recreate during load.
-            return state
-
-        def __setstate__(self, state):
-            self._lock = threading.Lock()
-            self.__dict__.update(state)
-
-        def __deepcopy__(self, obj):
-            cls = self.__class__
-            new = cls.__new__(cls)
-            obj[id(self)] = new
-            for k, v in self.__dict__.items():
-                if k == "_lock":
-                    new._lock = threading.Lock()  # fresh lock
-                else:
-                    setattr(new, k, copy.deepcopy(v, obj))
-            return new
+            self._backend_cache: dict[
+                tuple[_MeshLayout, Optional[C10dBackend.Options]], str
+            ] = {}
 
         def get_rank_map(self) -> torch.Tensor:
-            with self._lock:
-                return self._rank_map
+            return self._rank_map
 
         def get_root_mesh(self) -> Optional["DeviceMesh"]:
-            with self._lock:
-                return self._root_mesh
+            return self._root_mesh
 
-        def update_backend_cache(self, layout: _MeshLayout, backend: str) -> None:
-            with self._lock:
-                if layout not in self._backend_cache:
-                    self._backend_cache[layout] = backend
+        def update_backend_cache(
+            self,
+            layout: _MeshLayout,
+            backend: str,
+            pg_option: Optional[C10dBackend.Options],
+        ) -> None:
+            if (layout, pg_option) not in self._backend_cache:
+                self._backend_cache[(layout, pg_option)] = backend
 
-        def get_backend_from_cache(self, layout: _MeshLayout) -> Optional[str]:
-            with self._lock:
-                return self._backend_cache.get(layout, None)
+        def get_backend_from_cache(
+            self, layout: _MeshLayout, pg_option: Optional[C10dBackend.Options]
+        ) -> Optional[str]:
+            return self._backend_cache.get((layout, pg_option), None)
+
+        def _init_one_process_group(
+            self,
+            sub_layout: _MeshLayout,
+            dim_name: str,
+            backend_override: BackendConfig,
+        ) -> Optional[str]:
+            # Generate a 2D global mesh tensor for the current dim for PG creation.
+            pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(self._rank_map)
+            backend, pg_options = backend_override
+            # We need to explicitly pass in timeout when specified in option, otherwise
+            # the default timeout will be used to override the timeout set in option.
+            # TODO: remove this once we have fixed inside c10d level.
+            timeout = pg_options._timeout if pg_options else None
+
+            # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
+            # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
+            # If the mesh doesn't have a mesh_dim_names, then the group description of the
+            # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
+            group_desc = f"mesh_{dim_name}"
+
+            dim_group = None
+            default_group = _get_default_group()
+
+            # Early return if there is only one sub_layout in the mesh layout.
+            if sub_layout.numel() == get_world_size() and backend_override == (
+                None,
+                None,
+            ):
+                # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
+                # Otherwise, create new pg.
+                ranks = list(range(get_world_size()))
+                dim_group = (
+                    new_group(
+                        backend="cpu:gloo,cuda:nccl",
+                        ranks=ranks,
+                        group_desc="mesh_default",
+                    )
+                    if torch.cuda.is_available()
+                    and get_backend(default_group) == "gloo"
+                    else default_group
+                )
+                return dim_group.group_name  # type: ignore[union-attr]
+
+            # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
+            # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
+            # In this case, we only need to make one API call (`split_group``) for the subgroup creation
+            # for each mesh dimension. In a 2 * 4 mesh, we only need to make two API calls per ranks to create
+            # all the subgroups.
+            # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
+            # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
+            # mesh, we need to make two API calls per ranks to create all the subgroups.
+            if (
+                getattr(default_group, "bound_device_id", None) is not None
+                and torch.cuda.is_available()
+                and (
+                    backend is None
+                    or default_group._get_backend(torch.device("cuda")).name()
+                    == backend
+                )
+            ):
+                dim_group = split_group(
+                    parent_pg=default_group,
+                    timeout=timeout,
+                    pg_options=pg_options,
+                    split_ranks=pg_ranks_by_dim.tolist(),
+                    group_desc=group_desc,
+                )
+                return dim_group.group_name  # type: ignore[union-attr]
+
+            # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
+            # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
+            # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
+            # along with appending information to the `dim_group_names` list whenever necessary.
+            pg_name = None
+            for dim_mesh in pg_ranks_by_dim:
+                subgroup_ranks = dim_mesh.tolist()
+                dim_group = new_group(
+                    ranks=subgroup_ranks,
+                    timeout=timeout,
+                    backend=backend,
+                    pg_options=pg_options,
+                    group_desc=group_desc,
+                )
+
+                # only add to dim_groups if the current rank in the subgroup
+                if get_rank() in subgroup_ranks:
+                    if pg_name is not None:
+                        raise RuntimeError(
+                            f"Each device mesh dimension should get only one process group, but got {get_rank()} "
+                            f"in {subgroup_ranks}!"
+                        )
+                    pg_name = dim_group.group_name
+            return pg_name
+
+        def _init_process_groups(
+            self,
+            layout: _MeshLayout,
+            mesh_dim_names: Optional[tuple[str, ...]],
+            backend_override: tuple[BackendConfig, ...],
+        ) -> list[str]:
+            # group_name associated with each mesh dimension, each
+            # mesh dimension should have one sub-group per rank
+            dim_group_names: list[str] = []
+            # create sub pgs base on the mesh argument specified
+            for dim in range(len(layout)):
+                dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
+                backend_cache = self.get_backend_from_cache(
+                    layout, backend_override[dim][1]
+                )
+                if backend_cache is not None:
+                    dim_group_names.append(backend_cache)
+                else:
+                    dim_group_names.append(
+                        self._init_one_process_group(  # type: ignore[arg-type]
+                            layout[dim], dim_name, backend_override[dim]
+                        )
+                    )
+                if dim_group_names[-1] is not None:
+                    self.update_backend_cache(
+                        layout, dim_group_names[-1], backend_override[dim][1]
+                    )
+            if any(n is None for n in dim_group_names):
+                assert all(n is None for n in dim_group_names)
+                return []
+            return dim_group_names
 
     torch.serialization.add_safe_globals([_SharedState])
 
@@ -307,9 +414,8 @@ else:
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
                     self._setup_world_group_and_device()
-                    self._dim_group_names = self._init_process_groups(
+                    self._dim_group_names = self._shared_state._init_process_groups(
                         self._layout,
-                        self._shared_state,
                         self._mesh_dim_names,
                         backend_override,
                     )
@@ -408,140 +514,6 @@ else:
                     device_handle.set_device(get_rank() % num_devices_per_host)
 
             return _get_default_group()
-
-        @staticmethod
-        def _init_process_groups(
-            layout: _MeshLayout,
-            shared_state: _SharedState,
-            mesh_dim_names: Optional[tuple[str, ...]],
-            backend_override: tuple[BackendConfig, ...],
-        ) -> list[str]:
-            # group_name associated with each mesh dimension, each
-            # mesh dimension should have one sub-group per rank
-            #
-            dim_group_names: list[str] = []
-            default_group = _get_default_group()
-
-            if (
-                len(layout) == 1
-                and layout.numel() == get_world_size()
-                and backend_override[0] == (None, None)
-            ):
-                backend_cache = shared_state.get_backend_from_cache(layout)
-                if backend_cache is not None:
-                    dim_group_names.append(backend_cache)
-                else:
-                    # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
-                    # Otherwise, create new pg.
-                    ranks = list(range(get_world_size()))
-                    dim_group = (
-                        new_group(
-                            backend="cpu:gloo,cuda:nccl",
-                            ranks=ranks,
-                            group_desc="mesh_default",
-                        )
-                        if torch.cuda.is_available()
-                        and get_backend(default_group) == "gloo"
-                        else default_group
-                    )
-                    shared_state.update_backend_cache(layout, dim_group.group_name)
-                    dim_group_names.append(dim_group.group_name)
-            else:
-                # create sub pgs base on the mesh argument specified
-                for dim in range(len(layout)):
-                    # swap the current dim to the last dim
-                    # then reshape to flatten out other dims
-                    pg_ranks_by_dim = (
-                        layout[dim].nest().remap_to_tensor(shared_state.get_rank_map())
-                    )
-                    # PG Cache check here.
-                    backend_cache = shared_state.get_backend_from_cache(layout[dim])
-                    if backend_cache is not None:
-                        dim_group_names.append(backend_cache)
-                        continue
-
-                    backend, pg_options = backend_override[dim]
-                    # We need to explicitly pass in timeout when specified in option, otherwise
-                    # the default timeout will be used to override the timeout set in option.
-                    # TODO: remove this once we have fixed inside c10d level.
-                    timeout = pg_options._timeout if pg_options else None
-
-                    # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
-                    # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
-                    # If the mesh doesn't not have a mesh_dim_names, then the group description of the
-                    # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
-                    group_desc = (
-                        f"mesh_{mesh_dim_names[dim]}"
-                        if mesh_dim_names
-                        else f"mesh_dim_{dim}"
-                    )
-
-                    # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
-                    # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
-                    # In this case, we only need to make one API call (`split_group``) for the subgroup creation
-                    # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
-                    # all the subgroups.
-                    # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
-                    # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
-                    # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
-                    dim_group = None
-                    has_split_group = False
-                    if (
-                        (
-                            bound_device_id := getattr(
-                                default_group, "bound_device_id", None
-                            )
-                        )
-                        is not None
-                        and torch.cuda.is_available()
-                        and (
-                            backend is None
-                            or default_group._get_backend(torch.device("cuda")).name()
-                            == backend
-                        )
-                    ):
-                        dim_group = split_group(
-                            parent_pg=default_group,
-                            timeout=timeout,
-                            pg_options=pg_options,
-                            split_ranks=pg_ranks_by_dim.tolist(),
-                            group_desc=group_desc,
-                        )
-                        has_split_group = True
-
-                    # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
-                    # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
-                    # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
-                    # along with appending information to the `dim_group_names` list whenever necessary.
-                    for dim_mesh in pg_ranks_by_dim:
-                        subgroup_ranks = dim_mesh.tolist()
-
-                        # We temporarily revert the reuse subgroup, since it breaks two internal tests.
-                        # Temporarily reverting to resolve test timeout while root-causing.
-                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        # pyrefly: ignore [unbound-name]
-                        if bound_device_id is None or not has_split_group:
-                            dim_group = new_group(
-                                ranks=subgroup_ranks,
-                                timeout=timeout,
-                                backend=backend,
-                                pg_options=pg_options,
-                                group_desc=group_desc,
-                            )
-
-                        # only add to dim_groups if the current rank in the subgroup
-                        if get_rank() in subgroup_ranks:
-                            if len(dim_group_names) > dim:
-                                raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {get_rank()} "
-                                    f"in {subgroup_ranks}!"
-                                )
-                            shared_state.update_backend_cache(
-                                layout[dim],
-                                dim_group.group_name,  # type: ignore[union-attr]
-                            )
-                            dim_group_names.append(dim_group.group_name)  # type: ignore[union-attr]
-            return dim_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
             root_mesh = self._shared_state.get_root_mesh()
@@ -1182,11 +1154,12 @@ else:
             # per dim backend init.
             if hasattr(self, "_dim_group_names"):
                 dim_group_names = self._dim_group_names.copy()
-                dim_group_names[dim : dim + 1] = self._init_process_groups(
-                    partial_layout,
-                    root_mesh._shared_state,
-                    mesh_dim_names,
-                    backend_override,
+                dim_group_names[dim : dim + 1] = (
+                    root_mesh._shared_state._init_process_groups(
+                        partial_layout,
+                        mesh_dim_names,
+                        backend_override,
+                    )
                 )
                 res_mesh._dim_group_names = dim_group_names
 

@@ -550,6 +550,33 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
     int split_color{-2};
 #endif
+
+    bool operator==(const Options& other) const noexcept {
+      // 1) compare base first
+      if (!static_cast<const Backend::Options&>(*this).operator==(other))
+        return false;
+
+      // 2) simple fields
+      if (is_high_priority_stream != other.is_high_priority_stream) {
+        return false;
+      }
+      if (split_color != other.split_color) {
+        return false;
+      }
+
+      // 3) split_from: compare by identity
+      if (split_from.get() != other.split_from.get()) {
+        return false;
+      }
+
+#ifdef NCCL_HAS_CONFIG
+      // 4) config
+      if (std::memcmp(&config, &other.config, sizeof(ncclConfig_t)) != 0) {
+        return false;
+      }
+#endif
+      return true;
+    }
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -1503,5 +1530,47 @@ typedef bool (*gil_checker_t)();
 
 TORCH_API gil_checker_t& get_gil_checker();
 } // namespace c10d
+
+#ifdef NCCL_HAS_CONFIG
+inline std::size_t hash_nccl_config(const ncclConfig_t& cfg) noexcept {
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(&cfg);
+  std::size_t h = 0;
+  for (std::size_t i = 0; i < sizeof(cfg); ++i) {
+    hash_combine(h, static_cast<std::size_t>(p[i]));
+  }
+  return h;
+}
+#endif
+
+namespace std {
+
+template <>
+struct hash<c10d::ProcessGroupNCCL::Options> {
+  std::size_t operator()(
+      const c10d::ProcessGroupNCCL::Options& o) const noexcept {
+    std::size_t h = 0;
+
+    // 1) base
+    hash_combine(
+        h,
+        std::hash<c10d::Backend::Options>{}(
+            static_cast<const c10d::Backend::Options&>(o)));
+
+    // 2) trivial extras
+    hash_combine(h, std::hash<bool>{}(o.is_high_priority_stream));
+    hash_combine(h, std::hash<int>{}(o.split_color));
+
+    // 3) pointer identity for split_from
+    hash_combine(h, std::hash<const void*>{}(o.split_from.get()));
+
+#ifdef NCCL_HAS_CONFIG
+    // 4) config — option A: hash bytes
+    hash_combine(h, hash_nccl_config(o.config));
+#endif
+    return h;
+  }
+};
+
+} // namespace std
 
 #endif // USE_C10D_NCCL
