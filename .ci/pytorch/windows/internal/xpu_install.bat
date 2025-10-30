@@ -13,9 +13,9 @@ if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
 :xpu_bundle_install_start
 
 set XPU_BUNDLE_PARENT_DIR=C:\Program Files (x86)\Intel\oneAPI
-set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/75d4eb97-914a-4a95-852c-7b9733d80f74/intel-deep-learning-essentials-2025.1.3.8_offline.exe
+set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/9d6d6c17-ca2d-4735-9331-99447e4a1280/intel-deep-learning-essentials-2025.0.1.28_offline.exe
 set XPU_BUNDLE_PRODUCT_NAME=intel.oneapi.win.deep-learning-essentials.product
-set XPU_BUNDLE_VERSION=2025.1.3+5
+set XPU_BUNDLE_VERSION=2025.0.1+20
 set XPU_BUNDLE_INSTALLED=0
 set XPU_BUNDLE_UNINSTALL=0
 set XPU_EXTRA_URL=NULL
@@ -25,8 +25,8 @@ set XPU_EXTRA_INSTALLED=0
 set XPU_EXTRA_UNINSTALL=0
 
 if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2025.2] (
-    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/24751ead-ddc5-4479-b9e6-f9fe2ff8b9f2/intel-deep-learning-essentials-2025.2.1.25_offline.exe
-    set XPU_BUNDLE_VERSION=2025.2.1+20
+    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/75d4eb97-914a-4a95-852c-7b9733d80f74/intel-deep-learning-essentials-2025.1.3.8_offline.exe
+    set XPU_BUNDLE_VERSION=2025.1.3+5
 )
 
 :: Check if XPU bundle is target version or already installed
