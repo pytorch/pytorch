@@ -94,11 +94,11 @@ struct PinnedReserveSegment {
 struct TORCH_API HostStats {
   // COUNT: total allocations (active)
   Stat active_requests;
-  // SUM: bytes allocated/reserved by this memory alocator. (active)
+  // SUM: bytes allocated/reserved by this memory allocator. (active)
   Stat active_bytes;
   // COUNT: total allocations (active + free)
   Stat allocations;
-  // SUM: bytes allocated/reserved by this memory alocator. This accounts
+  // SUM: bytes allocated/reserved by this memory allocator. This accounts
   // for both free and in-use blocks.
   Stat allocated_bytes;
 
@@ -127,7 +127,7 @@ struct alignas(hardware_destructive_interference_size) HostStatsStaged {
   // COUNT: total allocations (active + free)
   // LOCK: access to this stat is protected by the allocator's blocks_mutex_
   Stat allocations;
-  // SUM: bytes allocated/reserved by this memory alocator. This accounts
+  // SUM: bytes allocated/reserved by this memory allocator. This accounts
   // for both free and in-use blocks.
   Stat allocated_bytes;
   // COUNT: number of allocations per bucket (active)
@@ -455,7 +455,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetAccumulatedStats() {
-    // Reseting accumulated memory stats requires concurrently holding both the
+    // Resetting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < free_list_.size(); ++i) {
@@ -482,7 +482,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetPeakStats() {
-    // Reseting peak memory stats requires concurrently holding both the
+    // Resetting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < free_list_.size(); ++i) {
@@ -677,8 +677,8 @@ struct CachingHostAllocatorImpl {
   // size. This allows us to quickly find a free block of the right size.
   // We use deque to store per size free list and guard the list with its own
   // mutex.
-  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>> free_list_ =
-      std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
+  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>>
+      free_list_{MAX_SIZE_INDEX};
 
   alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
