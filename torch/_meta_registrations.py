@@ -3695,10 +3695,8 @@ def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    if "xpu" in w.fake_device.type:
-        torch._check(w.dim() == 2, lambda: "w must be a 2D tensor on XPU")
-    else:
-        torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
+    expected_dim = 2 if "xpu" in w.fake_device.type else 4
+    torch._check(w.dim() == expected_dim, lambda: f"w must be a {expected_dim}D tensor")
     torch._check(
         x.dtype in [torch.float32, torch.float16, torch.bfloat16],
         lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
@@ -3707,10 +3705,8 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    if w.dim() == 4:
-        return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
-    elif w.dim() == 2:
-        return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
+    dim_n = w.size(0) if "xpu" in w.fake_device.type else w.size(0) * 8
+    return x.new_empty(x.size(0), dim_n, dtype=x.dtype)
 
 
 @register_meta([aten._weight_int4pack_mm_for_cpu])
