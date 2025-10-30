@@ -7,15 +7,27 @@ import os
 import subprocess
 import sys
 import time
+from enum import Enum
 from typing import NamedTuple
 
 
+class LintSeverity(str, Enum):
+    ERROR = "error"
+    WARNING = "warning"
+    ADVICE = "advice"
+    DISABLED = "disabled"
+
+
 class LintMessage(NamedTuple):
-    message: str | None
-    filename: str | None
+    path: str | None
     line: int | None
-    column: int | None
-    code: str | None
+    char: int | None
+    code: str
+    severity: LintSeverity
+    name: str
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -41,11 +53,15 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
     except OSError:
         return [
             LintMessage(
-                message=None,
-                filename=None,
+                path=None,
                 line=None,
-                column=None,
+                char=None,
                 code=code,
+                severity=LintSeverity.ERROR,
+                name="Typos",
+                original=None,
+                replacement=None,
+                description=None,
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
@@ -56,11 +72,17 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
         dic = json.loads(line)
         rc.append(
             LintMessage(
-                message=f"{dic['typo']} should be replaced by {dic['corrections']}",
-                filename=dic["path"],
-                line=dic["line_num"],
-                column=dic["byte_offset"],
+                path=dic.get("path", None),
+                line=dic.get("line_num", None),
+                char=dic.get("byte_offset", None),
                 code=code,
+                severity=LintSeverity.ERROR,
+                name="Typos",
+                original=dic.get("typo", None),
+                replacement=dic.get("corrections", None)[0]
+                if dic.get("corrections", None)
+                else None,
+                description=f"{dic.get('typo', None)} should be replaced by {dic.get('corrections', None)}",
             )
         )
     return rc
@@ -75,11 +97,15 @@ def check_typos_installed(code: str) -> list[LintMessage]:
         msg = e.stderr.decode(errors="replace")
         return [
             LintMessage(
-                message=f"Could not run '{' '.join(cmd)}': {msg}",
-                filename=None,
+                path=None,
                 line=None,
-                column=None,
+                char=None,
                 code=code,
+                severity=LintSeverity.ERROR,
+                name="Typos",
+                original=None,
+                replacement=None,
+                description=msg,
             )
         ]
 
@@ -119,7 +145,6 @@ def main() -> None:
     lint_messages = check_typos_installed(args.code) + check_run_typos(
         args.filenames, args.config, args.code
     )
-    # print(lint_messages)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 
