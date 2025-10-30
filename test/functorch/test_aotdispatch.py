@@ -6399,7 +6399,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         # Important pieces of the graph:
         # - 4 total dense outputs.
-        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   This corresponds to the fact that each user fwd input (a, b)
         #   will get a gradient that is a TwoTensor subclass,
         #   so (mul_2, mul_3) will be wrapped into a.grad
         #   and (div_1, div_2) will be wrapped into b.grad
@@ -8395,7 +8395,7 @@ aot_autograd_module_failures = set(
         # implementation not traceable or that there is a bug in AOTAutograd.
         torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
-        # for TrnasformerEncoder layers, MHA and sdp custom kernels
+        # for TransformerEncoder layers, MHA and sdp custom kernels
         torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
         # for TransformerEncoder layers, MHA and sdp custom kernels
