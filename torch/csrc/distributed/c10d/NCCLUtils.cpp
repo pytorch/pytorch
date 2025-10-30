@@ -259,6 +259,65 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 }
 #endif
 
+#ifdef NCCL_HAS_COMM_SHRINK
+std::shared_ptr<NCCLComm> NCCLComm::shrink(
+    NCCLComm* source,
+    std::vector<int>& ranks_to_exclude,
+    ncclConfig_t* config,
+    int shrinkFlags) {
+  // Preconditions are validated in ProcessGroupNCCL::shrink
+
+  LOG(INFO) << "Rank " << source->rank_ << ": shrinking comm " << source->repr()
+            << " excluding " << ranks_to_exclude.size() << " ranks";
+
+  at::cuda::OptionalCUDAGuard gpuGuard(source->deviceIndex_);
+  auto comm = std::make_shared<NCCLComm>();
+
+  // This call will block until the source communicator is initialized
+  auto sourceComm = source->getNcclComm();
+
+  C10D_NCCL_CHECK_NONBLOCKING(
+      ncclCommShrink(
+          sourceComm,
+          ranks_to_exclude.data(),
+          ranks_to_exclude.size(),
+          reinterpret_cast<ncclComm_t*>(&(comm->ncclComm_)),
+          config,
+          shrinkFlags),
+      source->getNcclCommFailureReason());
+
+  // Wait for the child communicator to be ready
+  source->waitReady(true);
+  comm->initialized_ = true;
+
+  // NCCL automatically assigns rank during shrink - query it efficiently
+  int assigned_rank;
+  try {
+    C10D_NCCL_CHECK(
+        ncclCommUserRank(comm->ncclComm_, &assigned_rank), std::nullopt);
+    comm->rank_ = assigned_rank;
+  } catch (const std::exception& e) {
+    // Fallback: if ncclCommUserRank fails, we can't determine the rank
+    LOG(ERROR) << "Failed to query NCCL-assigned rank: " << e.what();
+    throw;
+  }
+
+  // Child comm should be on the same device as parent comm
+  comm->deviceIndex_ = source->deviceIndex_;
+  if (config != nullptr) {
+    comm->nonBlocking_ = config->blocking == 0;
+  } else {
+    // Inherit parent behavior if no config provided
+    comm->nonBlocking_ = source->nonBlocking_;
+  }
+
+  LOG(INFO) << "Rank " << source->rank_ << ": created shrunken comm "
+            << comm->repr() << " with NCCL-assigned rank " << assigned_rank;
+
+  return comm;
+}
+#endif
+
 void NCCLComm::finalize() {
   LockType lock(mutex_);
   if (aborted_) {
