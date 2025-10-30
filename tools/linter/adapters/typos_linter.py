@@ -8,8 +8,6 @@ import re
 import subprocess
 import sys
 import time
-from enum import Enum
-from pathlib import Path
 from typing import NamedTuple
 
 
@@ -20,17 +18,17 @@ class LintMessage(NamedTuple):
     column: int | None
     code: str | None
 
+
 RESULTS_RE: re.Pattern[str] = re.compile(
     r"""(?mx)
     ^error:\s+(?P<message>`.*?`\s+should\s+be\s+`.*?`)\s*$
-    (?:.*\n)*?                                                 
+    (?:.*\n)*?
     [^:\n]*?(?P<filename>\.{0,2}/[^\s:]+):(?P<line>\d+):(?P<column>\d+)
     """,
 )
 
-def run_command(
-    args: list[str]
-) -> subprocess.CompletedProcess[bytes]:
+
+def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -47,10 +45,10 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
     filenames = [os.path.relpath(f) for f in filenames]
     try:
         print("debug")
-        proc =  run_command(
-        ["typos", "."] + filenames,
-    )
-    except OSError as err:  
+        proc = run_command(
+            ["typos", "--config", f"{config}"] + filenames,
+        )
+    except OSError:
         return [
             LintMessage(
                 message=None,
@@ -85,6 +83,7 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
     ]
     return rc
 
+
 def check_typos_installed(code: str) -> list[LintMessage]:
     cmd = ["typos", "-V"]
     try:
@@ -101,7 +100,7 @@ def check_typos_installed(code: str) -> list[LintMessage]:
                 code=code,
             )
         ]
-    
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -132,19 +131,14 @@ def main() -> None:
     print(args.filenames)
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
-        level=logging.NOTSET
-        if args.verbose
-        else logging.INFO,
+        level=logging.NOTSET if args.verbose else logging.INFO,
         stream=sys.stderr,
     )
     lint_messages = check_typos_installed(args.code) + check_run_typos(
-         args.filenames, args.config, args.code
+        args.filenames, args.config, args.code
     )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
-
-   
-
 
 
 if __name__ == "__main__":

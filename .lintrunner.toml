@@ -2,7 +2,7 @@
 code = 'TYPOS'
 include_patterns = ['**/*.cpp']
 exclude_patterns = [
-    
+
 ]
 command = [
     'python3',
@@ -1223,6 +1223,7 @@ exclude_patterns = [
     'aten/src/ATen/native/[a-pA-P]*/**',
     'aten/src/ATen/[a-mA-M]*/**',
     'test/**',
+    '_typos.toml',
 ]
 init_command = [
     'python3',
