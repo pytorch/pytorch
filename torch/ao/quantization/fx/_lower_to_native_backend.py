@@ -523,7 +523,7 @@ def fold_weight(
                 del original_weights_lookup[str(lookup_counter)]
                 lookup_counter += 1
         elif prepack_node is not None:
-            # remove the foled node
+            # remove the fold node
             continue
         else:
             # copy other nodes
