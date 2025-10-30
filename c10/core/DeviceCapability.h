@@ -23,6 +23,8 @@ constexpr size_t NUMBER_OF_DEVICE_CAPABILITIES = NumScalarTypes;
  * - Enable device-specific optimizations based on supported capabilities
  *
  * Contract
+ * 
+ * Supported data types:
  * - Each bitfield represents support for one device capability
  * - Bit value 1 means the capability is supported, 0 means not supported
  * - The struct is initialized with all capabilities enabled by default
