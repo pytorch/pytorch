@@ -738,7 +738,7 @@ class BlockMask:
             (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
             if isinstance(i, int)
             else i
-            for i, n in zip(padded, sizes, strict=True)
+            for i, n in zip(padded, sizes)
         )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]

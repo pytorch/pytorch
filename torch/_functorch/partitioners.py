@@ -1481,9 +1481,7 @@ def functionalize_rng_ops(
         )
     )
 
-    for rng_count, (base_node, node_pair) in enumerate(
-        recomputable_rng_ops_map.items()
-    ):
+    for rng_count, node_pair in enumerate(recomputable_rng_ops_map.values()):
         # Step 2 - Modify the fwd pass such that
         fw_node = node_pair["fwd"]
         bw_node = node_pair["bwd"]
@@ -2714,9 +2712,7 @@ def thread_graphsafe_rng_from_hops(module, is_backward):
         subgraph = getattr(module, hop_node.args[0].target)
         if isinstance(subgraph, fx.GraphModule):
             new_rng_inputs = []
-            for idx, placeholder_node in enumerate(
-                subgraph.graph.find_nodes(op="placeholder")
-            ):
+            for placeholder_node in subgraph.graph.find_nodes(op="placeholder"):
                 if rng_string in placeholder_node.name:
                     # Found a rng state placeholder in the hop graph, lets add
                     # the corresponding node in the outer graph
