@@ -78,6 +78,17 @@ def is_bf16_supported(including_emulation: bool = True) -> bool:
     )
 
 
+def is_tf32_supported() -> bool:
+    r"""Return a bool indicating if the current XPU device supports dtype tf32."""
+    if not is_available():
+        return False
+    # On Intel Xe architecture and newer, TF32 operations can be accelerated
+    # through DPAS (Dot Product Accumulate Systolic) instructions. Therefore,
+    # TF32 support can be determined by checking whether the device supports
+    # subgroup matrix multiply-accumulate operations.
+    return torch.xpu.get_device_properties().has_subgroup_matrix_multiply_accumulate
+
+
 def is_initialized():
     r"""Return whether PyTorch's XPU state has been initialized."""
     return _initialized and not _is_in_bad_fork()
@@ -247,7 +258,9 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     }
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
+def get_device_properties(
+    device: Optional[_device_t] = None,
+) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
     Args:
@@ -315,7 +328,7 @@ class StreamContext:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1
+            self.idx = -1  # pyrefly: ignore [bad-assignment]
 
     def __enter__(self):
         cur_stream = self.stream
@@ -517,6 +530,7 @@ from .memory import (
     memory_stats_as_nested_dict,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
+    set_per_process_memory_fraction,
 )
 from .random import (
     get_rng_state,
@@ -556,6 +570,7 @@ __all__ = [
     "is_available",
     "is_bf16_supported",
     "is_initialized",
+    "is_tf32_supported",
     "manual_seed",
     "manual_seed_all",
     "max_memory_allocated",
@@ -570,6 +585,7 @@ __all__ = [
     "seed",
     "seed_all",
     "set_device",
+    "set_per_process_memory_fraction",
     "set_rng_state",
     "set_rng_state_all",
     "set_stream",

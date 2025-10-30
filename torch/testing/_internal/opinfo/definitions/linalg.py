@@ -293,7 +293,7 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
 
     for sizes in test_cases:
         tensors = []
-        for size in zip(sizes[:-1], sizes[1:]):
+        for size in itertools.pairwise(sizes):
             t = make_tensor(
                 size, dtype=dtype, device=device, requires_grad=requires_grad
             )

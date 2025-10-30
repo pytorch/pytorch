@@ -2,7 +2,8 @@
 import inspect
 import logging
 from collections import OrderedDict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -94,7 +95,7 @@ def split_module(
         This is a sample setup:
 
             import torch
-            from torch.fx.symbolic_trace import symbolic_trace
+            from torch.fx._symbolic_trace import symbolic_trace
             from torch.fx.graph_module import GraphModule
             from torch.fx.node import Node
             from torch.fx.passes.split_module import split_module
@@ -350,7 +351,9 @@ def split_module(
 
     assert all(v is not None for v in autocast_exits.values()), "autocast must exit"
 
+    # pyrefly: ignore [bad-assignment]
     autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
+    # pyrefly: ignore [bad-assignment]
     grad_regions = {k: sorted(v) for k, v in grad_regions.items()}
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -415,7 +418,9 @@ def split_module(
     for regions_mapping in [autocast_regions, grad_regions]:
         for node, regions in regions_mapping.items():
             assert len(regions) > 0
+            # pyrefly: ignore [index-error]
             partitions[str(regions[0])].environment[node] = node
+            # pyrefly: ignore [index-error]
             for r in regions[1:]:
                 partition = partitions[str(r)]
                 new_node = partition.graph.create_node(
@@ -515,6 +520,7 @@ def split_module(
         for node in reversed(regions_mapping):
             regions = regions_mapping[node]
             assert len(regions) > 0
+            # pyrefly: ignore [index-error]
             for r in regions[:-1]:
                 partition = partitions[str(r)]
                 exit_node = autocast_exits[node]

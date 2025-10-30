@@ -872,7 +872,7 @@ class AdditionalInputs:
         ]
 
         def _mark_dynamism(v, *other_vs):
-            if not all(type(v) == type(other) for other in other_vs):
+            if not all(type(v) is type(other) for other in other_vs):
                 raise ValueError(
                     "The following inputs were found to have differing types, "
                     f"so they cannot be marked as dynamic: {(v,) + other_vs}."
@@ -1332,7 +1332,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             roots.add(c.root.__name__)  # type: ignore[attr-defined]
 
     # check keys are existing dims or new roots
-    for k, c in shape_fixes.items():
+    for k in shape_fixes.keys():
         assert k in name_to_dim or k in roots
 
     # cache so we don't produce multiple derived dim objects

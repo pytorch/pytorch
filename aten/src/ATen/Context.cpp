@@ -292,42 +292,6 @@ bool Context::userEnabledOverrideableSDP() const {
   return enabled_overrideable;
 }
 
-static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
-static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
-
-bool Context::checkCuBLASConfigDeterministic() {
-  // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
-  // is set to deterministic setting
-  if (hasCUDART()) {
-    const auto workspace_config = c10::utils::get_env(cublas_config_var_name);
-    return (workspace_config == cublas_deterministic_configs[0] || workspace_config == cublas_deterministic_configs[1]);
-  }
-  return true;
-}
-
-void Context::alertCuBLASConfigNotDeterministic() const {
-  static const bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
-  if (C10_LIKELY(!deterministicAlgorithms() || cublas_config_deterministic)) {
-    return;
-  }
-
-  auto msg = c10::str(
-    "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
-    "`at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because ",
-    "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
-    "case, you must set an environment variable before running your PyTorch application: ",
-    cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
-    cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
-    "https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility"
-  );
-
-  if (deterministicAlgorithmsWarnOnly()) {
-    TORCH_WARN(msg);
-  } else {
-    TORCH_CHECK(false, msg);
-  }
-}
-
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }
@@ -519,8 +483,8 @@ at::BlasBackend Context::blasPreferredBackend() {
 #if ROCM_VERSION >= 60300
           "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
 #endif
-#if ROCM_VERSION >= 60500
-          "gfx950"
+#if ROCM_VERSION >= 70000
+          "gfx950", "gfx1150", "gfx1151"
 #endif
       };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
@@ -623,20 +587,33 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-bool Context::allowFP16ReductionCuBLAS() const {
+CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-void Context::setAllowFP16ReductionCuBLAS(bool b) {
-  allow_fp16_reduction_cublas = b;
+CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
+  TORCH_CHECK(
+      !(allow_reduced_precision && !allow_splitk),
+      "allow_splitk=False is not supported when reduced precision reductions are enabled");
+  if (allow_reduced_precision) {
+    return CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  } else if (allow_splitk) {
+    return CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK;
+  } else {
+    return CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  }
 }
 
-bool Context::allowBF16ReductionCuBLAS() const {
+void Context::setAllowFP16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk) {
+  allow_fp16_reduction_cublas = get_reduction_option(allow_reduced_precision, allow_splitk);
+}
+
+CuBLASReductionOption Context::allowBF16ReductionCuBLAS() const {
   return allow_bf16_reduction_cublas;
 }
 
-void Context::setAllowBF16ReductionCuBLAS(bool b) {
-  allow_bf16_reduction_cublas = b;
+void Context::setAllowBF16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk) {
+  allow_bf16_reduction_cublas = get_reduction_option(allow_reduced_precision, allow_splitk);
 }
 
 bool Context::allowFP16AccumulationCuBLAS() const {

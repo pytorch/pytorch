@@ -28,11 +28,14 @@ class FakeProcessGroup : public Backend {
     bool error_on_collective = false;
   };
 
-  FakeProcessGroup(
+  // Static factory method for official APIs
+  static c10::intrusive_ptr<FakeProcessGroup> _create_internal(
       int rank,
       int size,
-      c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>())
-      : Backend(rank, size), options_(std::move(options)) {}
+      c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>()) {
+    return c10::make_intrusive<FakeProcessGroup>(
+        rank, size, std::move(options));
+  }
 
   const std::string getBackendName() const override {
     return "fake";
@@ -234,9 +237,12 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
- private:
+  // Private constructor used by official APIs
+  FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
+      : Backend(rank, size), options_(std::move(options)) {}
   c10::intrusive_ptr<Options> options_;
 
+ private:
   void checkCollectiveError() {
     TORCH_CHECK(
         !options_ || !options_->error_on_collective,

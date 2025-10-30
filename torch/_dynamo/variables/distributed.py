@@ -29,6 +29,7 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
+from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented_v2
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
@@ -209,9 +210,16 @@ class PlacementVariable(DistributedVariable):
         if name in constant_fold_functions:
             try:
                 value_type = type(self.value)
-                assert (
-                    inspect.getattr_static(value_type, "__getattr__", None) is None
-                ), "no custom getattr allowed!"
+                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                    unimplemented_v2(
+                        gb_type="Placement with custom __getattr__ not supported",
+                        context=f"{value_type.__name__} with custom __getattr__",
+                        explanation="Dynamo does not support Placement types with custom __getattr__ methods",
+                        hints=[
+                            "Use Placement types without custom __getattr__ methods",
+                            "Move the Placement usage outside the compiled region",
+                        ],
+                    )
                 method = inspect.getattr_static(value_type, name)
             except AttributeError:
                 method = None
@@ -227,6 +235,30 @@ class PlacementVariable(DistributedVariable):
             return ConstantVariable.create(constant_val)
 
         return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        # Reconstruct the Placement object by calling its constructor
+        # e.g., Shard(0), Replicate(), Partial()
+        from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
+
+        placement_type = type(self.value)
+
+        # Load the placement class
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch.distributed.tensor.placement_types", placement_type.__name__
+            )
+        )
+
+        # For Shard, we need to pass the dim argument
+        if isinstance(self.value, Shard):
+            codegen(ConstantVariable.create(self.value.dim))
+            codegen.extend_output(create_call_function(1, False))
+        # Replicate and Partial have no required args
+        elif istype(self.value, (Replicate, Partial)):
+            codegen.extend_output(create_call_function(0, False))
+        else:
+            super().reconstruct(codegen)
 
 
 class DeviceMeshVariable(DistributedVariable):
@@ -271,7 +303,11 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_rank":
             return ConstantVariable.create(self.value.get_rank())
         if name == "get_local_rank":
-            return ConstantVariable.create(self.value.get_local_rank())
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ConstantVariable.create(
+                self.value.get_local_rank(*const_args, **const_kwargs)
+            )
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}

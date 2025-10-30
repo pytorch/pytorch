@@ -408,11 +408,13 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
 
     def __init__(self, tensors: Union[torch.Tensor, tuple[torch.Tensor, ...]]) -> None:
         self.tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tensors
-        assert isinstance(self.tensors, tuple)
+        if not isinstance(self.tensors, tuple):
+            raise AssertionError("Expected tensors to be a tuple")
         self.prev_versions = tuple(t._version for t in self.tensors)
 
     def __enter__(self) -> None:
         pass
 
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args) -> None:
         torch._C._autograd._unsafe_set_version_counter(self.tensors, self.prev_versions)

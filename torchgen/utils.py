@@ -11,8 +11,8 @@ from dataclasses import is_dataclass
 from enum import auto, Enum
 from pathlib import Path
 from pprint import pformat
-from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never, deprecated, Self
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never, Self
 
 from torchgen.code_template import CodeTemplate
 
@@ -96,15 +96,6 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
         msg = f"{e.args[0]}\n{msg}" if e.args else msg
         e.args = (msg,) + e.args[1:]
         raise
-
-
-if TYPE_CHECKING:
-    # A little trick from https://github.com/python/mypy/issues/6366
-    # for getting mypy to do exhaustiveness checking
-    # TODO: put this somewhere else, maybe
-    @deprecated("Use typing_extensions.assert_never instead")
-    def assert_never(x: NoReturn) -> NoReturn:  # type: ignore[misc] # noqa: F811
-        raise AssertionError(f"Unhandled type: {type(x).__name__}")
 
 
 @functools.cache

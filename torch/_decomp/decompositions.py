@@ -382,6 +382,7 @@ def to_real_dtype(dtype: torch.dtype):
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
+    # pyrefly: ignore [unsupported-operation]
     loss = (self - target) ** 2
     return apply_loss_reduction(loss, reduction)
 
@@ -415,6 +416,7 @@ def smooth_l1_loss(
     beta: float = 1.0,
 ):
     loss = (self - target).abs()
+    # pyrefly: ignore [unsupported-operation]
     loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
     return apply_loss_reduction(loss, reduction)
 
@@ -1451,7 +1453,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         # To avoid PendingUnbackedSymbolNotFound errors, we tell the compiler it's fine to not bind these.
         with ctx():
             indices = [i.item() for i in tensor_indices_or_sections]
-        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        # WARNING: Tempted to torch._check(x>0) on the indices here?  You
         # can't: tensor_split works with negative values in indices:
         #
         # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))
@@ -2788,7 +2790,7 @@ def _index_add(
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
-            python_type == bool
+            python_type is bool
             or utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
@@ -4077,6 +4079,7 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
+        # pyrefly: ignore [unbound-name]
         w = w.expand(self.shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)
@@ -4504,6 +4507,8 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 @aten.matmul.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 @out_wrapper(pass_is_out=True)
 def matmul(tensor1, tensor2, *, is_out=False):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
     assert dim_tensor1 != 0 and dim_tensor2 != 0
@@ -4572,11 +4577,11 @@ def matmul(tensor1, tensor2, *, is_out=False):
         if (
             dim_tensor1 == 3
             and dim_tensor2 == 3
-            and batch_tensor1[0] != batch_tensor2[0]
+            and guard_or_true(batch_tensor1[0] != batch_tensor2[0])
         ):
-            if batch_tensor1[0] == 1 and tensor1.requires_grad:
+            if guard_or_false(batch_tensor1[0] == 1) and tensor1.requires_grad:
                 return matmul(tensor1.squeeze(0), tensor2)
-            if batch_tensor2[0] == 1 and tensor2.requires_grad:
+            if guard_or_false(batch_tensor2[0] == 1) and tensor2.requires_grad:
                 return matmul(tensor1, tensor2.squeeze(0))
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
@@ -4893,7 +4898,9 @@ def _reflection_pad_backward(grad_output, x, padding):
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
+    # pyrefly: ignore [bad-argument-type]
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
+    # pyrefly: ignore [bad-argument-type]
     amax = torch.amax(self, dim=dim, keepdim=keepdim)
     return amin, amax
 
@@ -5138,6 +5145,7 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
         alpha = int(alpha)
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
+        # pyrefly: ignore [unsupported-operation]
         result = result * alpha
     if beta == 0:
         return result
