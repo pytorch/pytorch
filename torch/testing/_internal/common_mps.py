@@ -812,7 +812,6 @@ if torch.backends.mps.is_available():
             "__rmod__",
             "__rsub__",
             "__rpow__",
-            "bernoulli",
             "clamp_max",
             "clamp_min",
             "masked_scatter",
@@ -828,8 +827,6 @@ if torch.backends.mps.is_available():
             "amax",
             "amin",
             "aminmax",
-            # memory overlapping checks
-            "index_select",
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:

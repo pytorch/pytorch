@@ -583,12 +583,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
         ):
             args, kwargs = [self], {}
             if can_dispatch_torch_function(tx, args, kwargs):
-                if self.source:
-                    install_guard(
-                        AttrSource(
-                            AttrSource(self.source, "__class__"), name
-                        ).make_guard(GuardBuilder.FUNCTION_MATCH)
-                    )
                 get_fn = VariableTracker.build(tx, getattr(torch.Tensor, name).__get__)
 
                 return self.call_torch_function(
@@ -614,7 +608,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 cls_source = GlobalSource(self.global_mangled_class_name(tx))
                 attr_source = AttrSource(cls_source, name)
                 if isinstance(attr, types.FunctionType):
-                    install_guard(attr_source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                    install_guard(attr_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                     return UserMethodVariable(attr, self)
 
                 elif isinstance(attr, property):
