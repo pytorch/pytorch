@@ -14,7 +14,6 @@ from torch._export.passes._node_metadata_hook import (
     _node_metadata_hook,
     _set_node_metadata_hook,
 )
-from torch._export.utils import _detect_fake_mode_from_gm
 from torch._higher_order_ops.triton_kernel_wrap import (
     TraceableTritonKernelWrapper,
     tracing_triton_hopifier_singleton,
@@ -315,21 +314,6 @@ class FxConverter:
 
         return kernel
 
-    def _fake_tensor(
-        self,
-        size: tuple[Any, ...],
-        stride: tuple[Any, ...],
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-    ) -> torch.Tensor:
-        with V.fake_mode:
-            return torch.empty_strided(
-                convert_shape_to_symint(size),
-                convert_shape_to_symint(stride),
-                dtype=dtype,
-                device=device,
-            )
-
     def _create_as_strided(
         self,
         input_node: torch.fx.Node,
@@ -606,11 +590,9 @@ class FxConverter:
         self._generate_graph_constants()
         self._generate_subgm_getattrs()
 
-        fake_mode = _detect_fake_mode_from_gm(self.gm)
-
         with _set_node_metadata_hook(
             self.gm,
-            functools.partial(_node_metadata_hook, fake_mode=fake_mode),
+            functools.partial(_node_metadata_hook, fake_mode=V.fake_mode),
         ):
             self._generate_graph_input_shapes()
 

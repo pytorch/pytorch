@@ -1114,6 +1114,53 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_const_folded_subgraph(self):
+        """
+        If a graph only contains a call_module node to a subgraph,
+        where the subgraph can be const-folded away,
+        validate the fake mode used in FXConverter generation is not None.
+        """
+        device = self.device
+        shape = (5, 10)
+        class Submodule(torch.nn.Module):
+            def forward(self):
+                return torch.randn(*shape, device=device) + 1
+
+        # Create a parent graph with this module as a subgraph and output
+        ep = torch.export.export(Submodule(), ())
+        parent_graph = torch.fx.Graph()
+        call_mod = parent_graph.call_module("sub", args=())
+        get_item = parent_graph.call_function(operator.getitem, args=(call_mod, slice(None)))
+        parent_graph.output((get_item,))
+        parent = torch.fx.GraphModule({"sub": ep.module()}, parent_graph)
+
+        # Verify FXConverter.generate uses non-null fake mode
+        # Intercept _set_node_metadata_hook to ensure fake_mode is not None
+        orig_set_hook = torch._inductor.codegen.wrapper_fxir._set_node_metadata_hook
+        called = False
+
+        def mock_set_hook(gm: torch.fx.GraphModule, fn):
+            nonlocal called
+            called = True
+            # Please update this check if `fake_mode` is
+            # no longer used in FXConverter call to _node_metadata_hook
+            self.assertTrue("fake_mode" in fn.keywords)
+            self.assertIsNotNone(fn.keywords["fake_mode"])
+            return orig_set_hook(gm, fn)
+
+        self.assertFalse(called)
+        with unittest.mock.patch.object(
+            torch._inductor.codegen.wrapper_fxir, "_set_node_metadata_hook", mock_set_hook
+        ):
+            args = ()
+            compiled = torch._inductor.aot_compile(parent, args, options={"fx_wrapper": True})
+            self.assertTrue(called)
+
+            compiled_out = compiled(*args)
+            self.assertEqual(compiled_out.shape, shape)
+
+
+
 
 class TestReplaceFloorDiv(InductorTestCase):
     """
