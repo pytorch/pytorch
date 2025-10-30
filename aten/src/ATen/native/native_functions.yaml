@@ -3622,8 +3622,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: logaddexp_out
-    MPS: logaddexp_out_mps
+    CPU, CUDA, MPS: logaddexp_out
   tags: pointwise
 
 - func: logaddexp(Tensor self, Tensor other) -> Tensor
@@ -3635,8 +3634,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: logaddexp2_out
-    MPS: logaddexp2_out_mps
+    CPU, CUDA, MPS: logaddexp2_out
   tags: pointwise
 
 - func: logaddexp2(Tensor self, Tensor other) -> Tensor
