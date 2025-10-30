@@ -1,7 +1,6 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import torch
-import torch_openreg  # noqa: F401
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import run_tests, TestCase
 
