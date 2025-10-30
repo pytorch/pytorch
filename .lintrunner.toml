@@ -1,6 +1,6 @@
 [[linter]]
 code = 'TYPOS'
-include_patterns = ['**/*.cpp']
+include_patterns = ['**/*.py']
 exclude_patterns = [
 
 ]

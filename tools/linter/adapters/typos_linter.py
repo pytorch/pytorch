@@ -4,7 +4,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import time
@@ -17,14 +16,6 @@ class LintMessage(NamedTuple):
     line: int | None
     column: int | None
     code: str | None
-
-
-RESULTS_RE = re.compile(
-    r"""(?msx)
-    ^error:\s+(?P<message>`[^`]+`\s+should\s+be\s+`[^`]+`(?:,\s*`[^`]+`)*)\s*\n
-    [^\n]*?╭▸\s*(?P<filename>[^\s:]+):(?P<line>\d+):(?P<column>\d+)
-    """,
-)
 
 
 def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -44,7 +35,7 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
     filenames = [os.path.relpath(f) for f in filenames]
     try:
         proc = run_command(
-            ["typos", "--config", f"{config}"] + filenames,
+            ["typos", "--config", f"{config}", "--format", "json"] + filenames,
         )
         # print(["typos", "--config", f"{config}"] + filenames)
     except OSError:
@@ -58,17 +49,20 @@ def check_run_typos(filenames: list[str], config: str, code: str) -> list[LintMe
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
-
-    rc = [
-        LintMessage(
-            message=match["message"],
-            filename=match["filename"],
-            line=int(match["line"]),
-            column=int(match["column"]),
-            code=code,
+    rc = []
+    for line in stdout.splitlines():
+        if not line:
+            continue
+        dic = json.loads(line)
+        rc.append(
+            LintMessage(
+                message=f"{dic['typo']} should be replaced by {dic['corrections']}",
+                filename=dic["path"],
+                line=dic["line_num"],
+                column=dic["byte_offset"],
+                code=code,
+            )
         )
-        for match in RESULTS_RE.finditer(stdout)
-    ]
     return rc
 
 
@@ -125,6 +119,7 @@ def main() -> None:
     lint_messages = check_typos_installed(args.code) + check_run_typos(
         args.filenames, args.config, args.code
     )
+    # print(lint_messages)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 
