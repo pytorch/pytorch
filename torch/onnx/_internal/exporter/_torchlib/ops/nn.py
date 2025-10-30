@@ -48,9 +48,9 @@ def aten_group_norm(
 
     c = op21.Shape(input, start=1, end=2)
     if weight is None:
-        weight = op21.ConstantOfShape(c, value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op21.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
     if bias is None:
-        bias = op21.ConstantOfShape(c, value=ir.tensor(0.0, dtype=input.dtype))
+        bias = op21.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
     return op21.GroupNormalization(
         input, weight, bias, epsilon=eps, num_groups=num_groups
     )
