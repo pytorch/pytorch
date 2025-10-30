@@ -319,11 +319,6 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 # succ nodes should be forwarded to pre mutation buffer
                 self.assertTrue(buffer_info[post][2] <= buffer_info[pre][2])
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties().total_memory < int(1e10),
-        "Need 10GB memory to be safe to run the test",
-    )
     def test_fusing_reductions_increase_peak_memory(self):
         @torch.compile
         def f(a, b, c):
@@ -332,9 +327,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
         a = torch.randn(1024 * 32, 16, device=GPU_TYPE)
         b = torch.randn(1024 * 32, 16, device=GPU_TYPE)
         c = torch.randn(16, 1024 * 32, device=GPU_TYPE)
-        torch.cuda.reset_peak_memory_stats()
+        torch.get_device_module(GPU_TYPE).reset_peak_memory_stats()
         f(a, b, c)
-        peak_mem = torch.cuda.max_memory_allocated()
+        peak_mem = torch.get_device_module(GPU_TYPE).max_memory_allocated()
 
         expected_bound = a.size(0) * c.size(1) * a.dtype.itemsize * 2
         self.assertLess(peak_mem, expected_bound)

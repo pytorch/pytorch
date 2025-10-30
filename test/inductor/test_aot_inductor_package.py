@@ -28,7 +28,7 @@ from torch.export.pt2_archive._package import (
     load_weights_to_pt2_contents,
 )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -267,9 +267,9 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
     )
-    @skipIfXpu  # build system may be different
+    #@skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
@@ -315,7 +315,7 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(torch.allclose(actual, expected))
 
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
@@ -362,7 +362,7 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(torch.allclose(actual, expected))
 
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different
@@ -457,7 +457,7 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(a_path.exists())
 
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
@@ -515,7 +515,7 @@ class TestAOTInductorPackage(TestCase):
                         )
 
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary

@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     subtest,
     TemporaryFileName,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -66,6 +67,8 @@ from torch._custom_op.impl import custom_op  # usort: skip
 # Needed by TestTypeConversion.test_string_type:
 MyList = list
 MyTensor = torch.Tensor
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 def requires_compile(fun):
@@ -2154,11 +2157,16 @@ Dynamic shape operator
         self._test_impl_device("foo2", ["cpu"], "cpu")
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_impl_device_cuda(self):
-        self._test_impl_device("foo4", "default", "cuda")
-        self._test_impl_device("foo5", ["cuda"], "cuda")
-        self._test_impl_device("foo6", ["cpu", "cuda"], "cuda")
+        if TEST_CUDA:
+            self._test_impl_device("foo4", "default", "cuda")
+            self._test_impl_device("foo5", ["cuda"], "cuda")
+            self._test_impl_device("foo6", ["cpu", "cuda"], "cuda")
+        else:
+            self._test_impl_device("foo4", "default", "xpu")
+            self._test_impl_device("foo5", ["xpu"], "xpu")
+            self._test_impl_device("foo6", ["cpu", "xpu"], "xpu")
 
     def test_impl_device_function(self):
         lib = self.lib()

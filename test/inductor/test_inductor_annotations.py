@@ -3,7 +3,13 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class InductorAnnotationTestCase(TestCase):
@@ -11,8 +17,8 @@ class InductorAnnotationTestCase(TestCase):
         def f(a, b):
             return a + b, a * b
 
-        a = torch.randn(5, device="cuda")
-        b = torch.randn(5, device="cuda")
+        a = torch.randn(5, device=device_type)
+        b = torch.randn(5, device=device_type)
         f_comp = torch.compile(f)
 
         _, code = run_and_get_code(f_comp, a, b)
@@ -26,7 +32,7 @@ class InductorAnnotationTestCase(TestCase):
         self.assertTrue("training_annotation" not in code)
 
     @inductor_config.patch(annotate_training=True)
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_training_annotation(self):
         code = self.get_code()
 
