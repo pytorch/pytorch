@@ -13,7 +13,7 @@ import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
-from functorch.compile import min_cut_rematerialization_partition, default_partition
+from functorch.compile import default_partition, min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint

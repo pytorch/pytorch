@@ -51,6 +51,7 @@ from ._activation_checkpointing.knapsack import (
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.descriptors import AOTOutput, SavedForBackwardsAOTOutput
+from ._aot_autograd.functional_utils import assert_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
@@ -1017,8 +1018,12 @@ def default_partition(
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
-    # It is NOT sufficient to extract some forward-only graph because can DCE some nodes
-    # that may be important to save. TODO: link to Brian's PR.
+    # Rely on the original placement rather than on _extract_graph_with_inputs_outputs
+    # which will not include any node not in the forward output closure.
+    # Not respecting the original placement can result in forward node being moved to
+    # the backward. That is problematic if the node has an arg which is mutated
+    # later in the forward. This can occur when an in-place op saves its input for backward,
+    # e.g. sin_. See https://github.com/pytorch/pytorch/pull/164577 for more context.
     not_backward_nodes = [
         x for x in joint_module.graph.nodes if not _has_tag_is_backward(x)
     ]
@@ -1032,7 +1037,7 @@ def default_partition(
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
-        # TODO: require functionalization here
+        assert_functional_graph(joint_module.graph)
         # Insert save between adjacent AC regions.
         # Interesting existing behavior is that we do NOT save the inputs to the very
         # first AC region!
@@ -1059,9 +1064,11 @@ def default_partition(
             backward_usages = [
                 n for n in node.users if n.name not in forward_node_names
             ]
-            if "tensor_meta" in node.meta and all(
-                is_sym_node(n) for n in backward_usages
-            ) and len(backward_usages) > 0:
+            if (
+                "tensor_meta" in node.meta
+                and all(is_sym_node(n) for n in backward_usages)
+                and len(backward_usages) > 0
+            ):
                 # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
                 # and not the actual tensor data,
                 # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.

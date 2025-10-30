@@ -1600,6 +1600,10 @@ class GraphExecGroup:
 
     Backward calls under the same instance of this context manager must execute
     over non-overlapping regions of the backward graph even if retain_graph=True.
+
+    .. note::
+        This context manager only affects checkpoint with use_reentrant=False, and
+        is a no-op otherwise.
     """
 
     def __enter__(self) -> "GraphExecGroup":
