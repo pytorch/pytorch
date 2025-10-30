@@ -1625,12 +1625,8 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #endif
 }
 
-
-// ---------------------------------------------------------------------------
-// cuSOLVERDnXgeev (CUDA >= 12.6 Update 2 / cuSOLVER >= 11.7.2)
-// ---------------------------------------------------------------------------
+// cuSOLVER Xgeev (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
-#pragma message("Compiling with cuSOLVER >= 11.7.2 — Xgeev bindings enabled")
 
 template <typename scalar_t>
 void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
@@ -1639,31 +1635,25 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
 
-
-
-  int n = cuda_int_cast(input.size(-1), "n");
-  int lda = std::max<int64_t>(1, n);
-  auto batch_size = batchCount(input);
+  int   n   = cuda_int_cast(input.size(-1), "n");
+  int   lda = std::max<int>(1, n);
+  auto  batch_size = batchCount(input);
 
   if (n == 0 || batch_size == 0) {
-    //XGeev does not support empty input, so we need to handle this case separately to
-    // emulate CPU semantics for empty input
+    // XGeev crashes on empty input, explicitly handle empty input
     auto values_shape = IntArrayRef(input.sizes().data(), input.dim() - 1);
     values.resize_(values_shape, MemoryFormat::Contiguous);
-    values.zero_();  // optional
+    values.zero_();
 
     if (compute_eigenvectors) {
       vectors.resize_(input.sizes(), MemoryFormat::Contiguous);
-      vectors.zero_();  // optional
+      vectors.zero_();
     } else {
-      // ensure defined but empty (e.g. for eigvals)
       vectors.resize_({0});
     }
 
     infos.resize_({std::max<int64_t>(1, batch_size)}, MemoryFormat::Contiguous);
     infos.zero_();
-
-    // early exit – nothing to compute
     return;
   }
 
@@ -1673,8 +1663,6 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   }
 
   auto values_stride = values.size(-1);
-
-
   auto vectors_data = vectors.data_ptr<scalar_t>();
   auto values_data = values.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<int>();
@@ -1682,13 +1670,14 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   cusolverDnParams_t params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
 
-
   Tensor A_fortran = input.mT().contiguous();
   auto* A_data = A_fortran.data_ptr<scalar_t>();
   const auto A_stride = matrixStride(A_fortran);
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
   const int ldvl = 1; // ldvl >= 1 if jobvl = CUSOLVER_EIG_MODE_NOVECTOR
+  cusolverEigMode_t jobvl = CUSOLVER_EIG_MODE_NOVECTOR;
+
   cusolverEigMode_t jobvr;
   int ldvr;
   if (compute_eigenvectors) {
@@ -1700,22 +1689,19 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
     jobvr = CUSOLVER_EIG_MODE_NOVECTOR;
   }
 
+  scalar_t*   W   = values.data_ptr<scalar_t>();
+  scalar_t*   VL  = nullptr;
+  scalar_t*   VR  = vectors.data_ptr<scalar_t>();
 
-  scalar_t* W  = values.data_ptr<scalar_t>();
-  scalar_t*    VL = nullptr;
-
-  scalar_t* VR = vectors.data_ptr<scalar_t>();
-
-
-  const scalar_t*	A_const = A_data;
-  const scalar_t* 	W_const = W;
-  const scalar_t*    	VL_const = VL;
-  const scalar_t*    	VR_const = VR;
+  const scalar_t*   A_const = A_data;
+  const scalar_t*   W_const = W;
+  const scalar_t*   VL_const = VL;
+  const scalar_t*   VR_const = VR;
 
   size_t ws_dev = 0, ws_host = 0;
   at::cuda::solver::xgeev_bufferSize<scalar_t>(
     handle, params,
-    CUSOLVER_EIG_MODE_NOVECTOR, jobvr,
+    jobvl, jobvr,
     n,
     A_const, lda,
     W_const,
@@ -1723,33 +1709,22 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
     VR_const, ldvr,
     &ws_dev, &ws_host);
 
-  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
-  auto work_device_data = device_allocator.allocate(ws_dev);
-  auto& host_allocator = *at::cuda::getPinnedMemoryAllocator();
-  auto work_host_data = host_allocator.allocate(ws_host);
-
-  // TORCH_WARN("=== XGEEV DEBUG ===");
-  // TORCH_WARN("vectors shape: ", vectors.sizes());
-  // TORCH_WARN("values  shape: ", values.sizes());
-  // TORCH_WARN("input   shape: ", input.sizes());
-  // TORCH_WARN("vectors dtype: ", vectors.scalar_type());
-  // TORCH_WARN("values  dtype: ", values.scalar_type());
-  // TORCH_WARN("vectors numel: ", vectors.numel());
-  // TORCH_WARN("values  numel: ", values.numel());
-  // TORCH_WARN("input   numel: ", input.numel());
-  // TORCH_WARN("===================");
+  auto& device_allocator  = *at::cuda::getCUDADeviceAllocator();
+  auto  work_device_data  = device_allocator.allocate(ws_dev);
+  // use pinned memory for best performance.
+  auto& host_allocator    = *at::cuda::getPinnedMemoryAllocator();
+  auto  work_host_data    = host_allocator.allocate(ws_host);
 
   for (decltype(batch_size) i = 0; i < batch_size; ++i) {
     scalar_t* Ai   = A_data      + i * A_stride;
     scalar_t* Wi   = values_data + i * values_stride;
-    scalar_t* VLi  = nullptr; // keine linken EV
+    scalar_t* VLi  = nullptr; // xgeev does not support computing left evs
     scalar_t* VRi  = compute_eigenvectors ? (vectors_data + i * vectors_stride) : nullptr;
     int*      info = infos_data + i;
 
-
-    at::cuda::solver::xgeev<scalar_t>(  // <- A-Typ zuerst, dann EV/EVec-Typ
+    at::cuda::solver::xgeev<scalar_t>(
       handle, params,
-      CUSOLVER_EIG_MODE_NOVECTOR, jobvr,
+      jobvl, jobvr,
       n,
       Ai, lda,
       Wi,
@@ -1760,7 +1735,6 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
       info);
   }
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
-
 }
 
 void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {

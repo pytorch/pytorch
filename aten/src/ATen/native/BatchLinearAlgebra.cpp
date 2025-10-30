@@ -2921,8 +2921,6 @@ DEFINE_DISPATCH(linalg_eig_stub);
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
   auto options = input.options();
 
-
-
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of the hierarchy of calls
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
@@ -2988,17 +2986,25 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     }
   }
 
+
+  // Historically, the MAGMA backend used a switchover threshold because
+  // CPU routines outperformed MAGMA for small matrices due to its hybrid
+  // CPU-GPU algorithm. See: https://github.com/pytorch/pytorch/pull/52491#issuecomment-795685687
+  //
+  // cuSOLVER, however, is GPU-based and much faster even for small matrices
+  // (e.g. 128x128 on RTX 4070). It is therefore reasonable to omit this threshold
+  // and let users select the preferred backend (CPU or CUDA) explicitly.
+  //
   // MAGMA uses a hybrid CPU-GPU algorithm that performs well only for large matrices
   // See: https://github.com/pytorch/pytorch/pull/52491#issuecomment-795685687
   // Here we call CPU path for matrices smaller than 2048x2048
   // that should be in general significantly faster than calling MAGMA
-  // if (false) { //(input.size(-1) <= 2048) { //replaced with false to force GPU path for testing
+  // if (input.size(-1) <= 2048) {
   //   linalg_eig_stub(at::kCPU, real_imag_values, maybe_complex_vectors, infos, input.to(kCPU), compute_eigenvectors);
   // } else {
-  //
+  //linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
   // }
 
-  //call to the device-specific linalg_eig_stub (LAPACK, MAGMA or cuSOLVER)
   linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
 
   // if input is not complex we need to do some post-processing
@@ -3032,7 +3038,6 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
                                 : maybe_complex_vectors.cpu();
 
         vectors = linalg_eig_make_complex_eigenvectors(vectors_cpu, values_cpu, maybe_complex_vectors_cpu);
-
 
         if (!vectors.device().is_cpu()) {//move tensors back to device if needed
           vectors.copy_(vectors_cpu.to(vectors.device()));

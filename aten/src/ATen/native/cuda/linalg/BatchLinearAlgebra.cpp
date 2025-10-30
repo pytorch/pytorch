@@ -2081,14 +2081,11 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
-  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or 'linalg_eig_cusolver_xgeev'
-  // both geev routines modify the provided input matrix in-place, therefore we need a copy
+  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
+  // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
-  // ───────────────────────────────────────────────
-  // New CUDA 12.8+ path using cuSOLVER Xgeev
-  // ───────────────────────────────────────────────
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
@@ -2096,7 +2093,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
       linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
       return;
     case at::LinalgBackend::Magma:
-      break; // fallback to CPU path below
+      break; // MAGMA path handled below
   }
 #endif
   // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer 'input' to CPU
