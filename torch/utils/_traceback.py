@@ -206,7 +206,8 @@ class CapturedTraceback:
         import torch._C._profiler
 
         if script or cpp:
-            assert skip == 0, "skip with script/cpp NYI"
+            if skip != 0:
+                raise AssertionError("skip with script/cpp NYI")
 
         return CapturedTraceback(
             torch._C._profiler.gather_traceback(python=True, script=script, cpp=cpp),
