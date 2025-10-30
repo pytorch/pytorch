@@ -143,7 +143,7 @@ class PlacementClassVariable(DistributedVariable):
 
         from torch.distributed.tensor.placement_types import Placement
 
-        return type(value) is type and issubclass(value, Placement)
+        return isinstance(value, type) and issubclass(value, Placement)
 
     def as_python_constant(self):
         return self.value
@@ -154,13 +154,10 @@ class PlacementClassVariable(DistributedVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if (
-            inspect.getattr_static(self.value, "__new__", None) == object.__new__
-            and self.source
-        ):
+        if self.source:
             # NOTE: we don't need to track mutations to the placement class as they
-            # suppose to be immutable.
-            new_obj = object.__new__(self.value)
+            # are supposed to be immutable.
+            new_obj = self.value.__new__(self.value)
             var = PlacementVariable(new_obj)
             if inspect.getattr_static(self.value, "__init__", None):
                 var.call_method(tx, "__init__", args, kwargs)
@@ -213,9 +210,16 @@ class PlacementVariable(DistributedVariable):
         if name in constant_fold_functions:
             try:
                 value_type = type(self.value)
-                assert (
-                    inspect.getattr_static(value_type, "__getattr__", None) is None
-                ), "no custom getattr allowed!"
+                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                    unimplemented_v2(
+                        gb_type="Placement with custom __getattr__ not supported",
+                        context=f"{value_type.__name__} with custom __getattr__",
+                        explanation="Dynamo does not support Placement types with custom __getattr__ methods",
+                        hints=[
+                            "Use Placement types without custom __getattr__ methods",
+                            "Move the Placement usage outside the compiled region",
+                        ],
+                    )
                 method = inspect.getattr_static(value_type, name)
             except AttributeError:
                 method = None
