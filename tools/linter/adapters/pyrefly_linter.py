@@ -286,9 +286,7 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    # Only check for nightly_conda.py if it's an hg repo and NOT a git repo
     nightly_check = check_nightly_run(args.code)
-
     if len(nightly_check) != 0:
         print(json.dumps(nightly_check[0]._asdict()), flush=True)
         return
