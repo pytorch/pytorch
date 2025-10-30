@@ -113,16 +113,16 @@ def _strong_wolfe(
 
         # compute new trial value
         t = _cubic_interpolate(
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             bracket[0],
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             bracket_f[0],
             bracket_gtd[0],  # type: ignore[possibly-undefined]
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             bracket[1],
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             bracket_f[1],
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             bracket_gtd[1],
         )
 
@@ -133,20 +133,20 @@ def _strong_wolfe(
         #   + `t` is at one of the boundary,
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         eps = 0.1 * (max(bracket) - min(bracket))
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             if insuf_progress or t >= max(bracket) or t <= min(bracket):
                 # evaluate at 0.1 away from boundary
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     t = max(bracket) - eps
                 else:
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     t = min(bracket) + eps
                 insuf_progress = False
             else:
@@ -160,45 +160,45 @@ def _strong_wolfe(
         gtd_new = g_new.dot(d)
         ls_iter += 1
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             bracket[high_pos] = t
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             bracket_f[high_pos] = f_new
             bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             bracket_gtd[high_pos] = gtd_new
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
             if abs(gtd_new) <= -c2 * gtd:
                 # Wolfe conditions satisfied
                 done = True
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
                 # old high becomes new low
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 bracket[high_pos] = bracket[low_pos]
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 bracket_f[high_pos] = bracket_f[low_pos]
                 bracket_g[high_pos] = bracket_g[low_pos]  # type: ignore[possibly-undefined]
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
 
             # new point becomes new low
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             bracket[low_pos] = t
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             bracket_f[low_pos] = f_new
             bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             bracket_gtd[low_pos] = gtd_new
 
     # return stuff
     t = bracket[low_pos]  # type: ignore[possibly-undefined]
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     f_new = bracket_f[low_pos]
     g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
     return f_new, g_new, t, ls_func_evals
@@ -276,7 +276,7 @@ class LBFGS(Optimizer):
 
     def _numel(self):
         if self._numel_cache is None:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self._numel_cache = sum(
                 2 * p.numel() if torch.is_complex(p) else p.numel()
                 for p in self._params

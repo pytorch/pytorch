@@ -39,7 +39,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, NamedTuple, Self
+from typing_extensions import deprecated, NamedTuple, Self, TypeAlias
 
 from torch.torch_version import TorchVersion as _TorchVersion
 
@@ -52,6 +52,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -1071,7 +1072,7 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 # context: some context that is useful in unflattening the pytree
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
-@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
+@dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
     _context: Context
@@ -1080,6 +1081,17 @@ class TreeSpec:
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
     num_children: int = dataclasses.field(init=False)
+
+    def __init__(
+        self,
+        type: Any,
+        context: Context,  # keep for backward compatibility
+        children: list[Self],  # keep for backward compatibility
+    ) -> None:
+        object.__setattr__(self, "type", type)
+        object.__setattr__(self, "_context", context)
+        object.__setattr__(self, "_children", children)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if self.type is None:
@@ -1275,6 +1287,9 @@ class TreeSpec:
             # don't care about that.
             hashable_context = None
         return hash((node_type, hashable_context, tuple(self._children)))
+
+
+PyTreeSpec: TypeAlias = TreeSpec
 
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about

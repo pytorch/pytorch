@@ -3955,7 +3955,7 @@ def forward(self, causal_mask, fill_value):
     def test_export_custom_op_lib(self):
         ops_registered_before = set(torch.ops.mylib)
 
-        # Assert warning for CompositeImplictAutograd op
+        # Assert warning for CompositeImplicitAutograd op
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo123(Tensor x) -> Tensor")
             lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
