@@ -28,6 +28,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
+from torch._utils_internal import find_compile_subproc_binary
 
 
 log = logging.getLogger(__name__)
@@ -143,6 +144,11 @@ class SubprocPool:
         cmd = [
             sys.executable,
             entry,
+        ]
+        if (binary := find_compile_subproc_binary()) is not None:
+            cmd = [binary]
+
+        args = [
             f"--pickler={self.pickler.__class__.__module__}.{self.pickler.__class__.__name__}",
             f"--kind={self.kind.value}",
             f"--workers={nprocs}",
@@ -151,6 +157,7 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
+        cmd.extend(args)
         log_path = None
         self.log_file = None
 
@@ -163,6 +170,7 @@ class SubprocPool:
                 log_path = config.get_worker_log_path()
 
         if log_path:
+            # pyrefly: ignore [bad-assignment]
             self.log_file = open(log_path, "w")
 
         self.process = subprocess.Popen(
@@ -197,6 +205,7 @@ class SubprocPool:
         self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
     ) -> Future[_T]:
         if args or kwargs:
+            # pyrefly: ignore [bad-assignment]
             job_fn = functools.partial(job_fn, *args, **kwargs)
         job_data = self.pickler.dumps(job_fn)
         future: Future[_T]
@@ -275,8 +284,8 @@ class SubprocPool:
             self.process.wait(300)
             if self.log_file:
                 self.log_file.close()
-        except OSError as e:
-            log.warning("Ignored OSError in pool shutdown:  %s", e)
+        except OSError:
+            log.warning("Ignored OSError in pool shutdown", exc_info=True)
         finally:
             with self.futures_lock:
                 for future in self.pending_futures.values():

@@ -29,7 +29,7 @@ class BoolTest(__TestCase):
 
     def test_subclass(self):
         try:
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class C(bool):
                     pass
         except TypeError:
@@ -328,39 +328,39 @@ class BoolTest(__TestCase):
         # from __bool__().  This isn't really a bool test, but
         # it's related.
         check = lambda o: self.assertRaises(TypeError, bool, o)
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Foo(object):
                 def __bool__(self):
                     return self
         check(Foo())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Bar(object):
                 def __bool__(self):
                     return "Yes"
         check(Bar())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Baz(int):
                 def __bool__(self):
                     return self
         check(Baz())
 
         # __bool__() must return a bool not an int
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Spam(int):
                 def __bool__(self):
                     return 1
         check(Spam())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Eggs:
                 def __len__(self):
                     return -1
         self.assertRaises(ValueError, bool, Eggs())
 
     def test_interpreter_convert_to_bool_raises(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class SymbolicBool:
                 def __bool__(self):
                     raise TypeError
@@ -388,7 +388,7 @@ class BoolTest(__TestCase):
         # this test just tests our assumptions about __len__
         # this will start failing if __len__ changes assertions
         for badval in ['illegal', -1, 1 << 32]:
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class A:
                     def __len__(self):
                         return badval
@@ -401,12 +401,12 @@ class BoolTest(__TestCase):
                     self.assertEqual(str(e_bool), str(e_len))
 
     def test_blocked(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class A:
                 __bool__ = None
         self.assertRaises(TypeError, bool, A())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class B:
                 def __len__(self):
                     return 10
@@ -424,7 +424,7 @@ class BoolTest(__TestCase):
         self.assertIs(type(False.imag), int)
 
     def test_bool_called_at_least_once(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class X:
                 def __init__(self):
                     self.count = 0

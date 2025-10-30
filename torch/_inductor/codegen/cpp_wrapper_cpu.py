@@ -59,9 +59,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
         self.model_class_name_suffix = (
-            config.aot_inductor.model_name_for_generated_files
-            if config.aot_inductor.compile_standalone
-            else ""
+            ""
+            if config.aot_inductor.dynamic_linkage
+            else config.aot_inductor.model_name_for_generated_files
         )
         self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
 
@@ -221,7 +221,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.add_device_include(self.device)
 
         if V.graph.aot_mode:
-            if not config.aot_inductor.compile_standalone:
+            if config.aot_inductor.dynamic_linkage:
                 with open(
                     os.path.join(
                         os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
@@ -767,7 +767,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         num_outputs = len(V.graph.graph_outputs)
         num_constants = len(V.graph.constants)
         include_weights = (
-            "true" if config.aot_inductor.package_constants_in_so else "false"
+            "true"
+            if config.aot_inductor.package_constants_in_so
+            and config.aot_inductor.package_constants_on_disk_format != "binary_blob"
+            else "false"
         )
         self.prefix.splice(
             f"""
@@ -1168,7 +1171,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1295,6 +1298,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             extern_kernel.get_kernel_name(), args, device
         )
@@ -1353,6 +1357,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
@@ -1381,7 +1386,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel, args, device, debug_handle=debug_handle
         )
 
-    def generate_scatter_fallback(
+    def _get_scatter_reduce_enum(self, reduce):
+        # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+        get_operator_enum = {"add": "sum", "multiply": "prod"}
+        if reduce in get_operator_enum:
+            reduce = get_operator_enum[reduce]
+
+        return reduce
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -1391,6 +1404,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reduce,
         kwargs,
     ):
+        reduce = self._get_scatter_reduce_enum(reduce)
+
         # call the ABI shim function instead of the ATen one
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
@@ -1411,7 +1426,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
@@ -1470,7 +1485,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
 
-    def codegen_dynamic_scalar(self, node):
+    def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 
@@ -1489,19 +1504,58 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
-    def codegen_dynamic_select_index(self, node):
+    def codegen_dynamic_select_index(self, node, clamp):
         index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
 
-        index_compute_str = (
+        # codegen index
+        sym = node.unbacked_offset_symbol
+        index_str = (
             f"{index_cpp_str} < 0 ? {index_cpp_str} + "
-            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}: {index_cpp_str}"
         )
+        self.writeline(f"auto {sym}_index = {index_str};")
+        index_str_clamped = (
+            f"{sym}_index < 0 ? 0 : ({sym}_index > {size_cpp_str} ? {size_cpp_str} : {sym}_index)"
+            if clamp
+            else f"{sym}_index"
+        )
+        self.writeline(f"auto {sym}_index_clamped = {index_str_clamped};")
         self.writeline(
-            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
-            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+            f"auto {sym} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * {sym}_index_clamped;"
         )
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
+        self.unbacked_symbol_decls.add(str(sym))
+
+    def codegen_dynamic_slice_size(self, node):
+        start_cpp_str = self.val_to_arg_str_for_prim_type(node.start, int)
+        end_cpp_str = self.val_to_arg_str_for_prim_type(node.end, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
+        step_cpp_str = self.val_to_arg_str_for_prim_type(node.step, int)
+        sym = node.unbacked_size_symbol
+
+        def codegen_clamp(index_str, start=True):
+            suf = "st" if start else "en"
+            index_ = f"{sym}_{suf}_index"
+            self.writeline(
+                f"int64_t {index_} = {index_str} < 0 ? {index_str} + {size_cpp_str} : {index_str};"
+            )
+            self.writeline(
+                f"int64_t {sym}_{suf}_cl = {index_} < 0 ? 0 : ({index_} > {size_cpp_str} ? {size_cpp_str} : {index_});"
+            )
+
+        codegen_clamp(start_cpp_str, start=True)
+        codegen_clamp(end_cpp_str, start=False)
+        if node.step == 1:
+            step_str = f"{sym}_en_cl - {sym}_st_cl"
+        else:
+            step_str = (
+                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} + 1) / {step_cpp_str}"
+            )
+        self.writeline(f"int64_t {sym}_with_step = {step_str};")
+        self.writeline(f"int64_t {sym} = {sym}_with_step < 0 ? 0 : {sym}_with_step;")
+        self.unbacked_symbol_decls.add(str(sym))
 
     def make_buffer_free(self, buffer):
         return (
@@ -1677,6 +1731,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"
+            )
+            self.wrapper_call.writeline(
+                f"wrap_with_raii_handle_if_needed({old_handle_name});"
             )
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
@@ -1927,7 +1984,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         finally:
             self.pop_codegened_graph()
 
-    def codegen_while_loop(self, while_loop):
+    def codegen_while_loop(self, while_loop, stack_output=False):
+        if stack_output:
+            raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
         is_bool_pred = isinstance(
             while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
         )

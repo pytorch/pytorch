@@ -337,6 +337,13 @@ void Weights::loadStateDict(
 
 void Weights::validateValue(const std::string& name, const at::Tensor& newValue)
     const {
+  validateValue(name, newValue, /*skipDeviceCheck=*/false);
+}
+
+void Weights::validateValue(
+    const std::string& name,
+    const at::Tensor& newValue,
+    bool skipDeviceCheck) const {
   auto& weightMeta = weightsMeta_.at(name);
 
   TORCH_CHECK(
@@ -360,23 +367,32 @@ void Weights::validateValue(const std::string& name, const at::Tensor& newValue)
       " vs ",
       newValue.dtype());
 
-  auto targetDevice = weightMeta.device();
-  if (targetDevice.is_cpu() && targetDevice.has_index()) {
-    LOG(WARNING) << "Target device is cpu but has index: " << targetDevice;
+  if (!skipDeviceCheck) {
+    auto targetDevice = weightMeta.device();
+    if (targetDevice.is_cpu() && targetDevice.has_index()) {
+      LOG(WARNING) << "Target device is cpu but has index: " << targetDevice;
+    }
+    TORCH_CHECK(
+        isSameDevice(targetDevice, newValue.device()),
+        "Mismatched device for ",
+        name,
+        ": ",
+        targetDevice,
+        " vs ",
+        newValue.device());
   }
-  TORCH_CHECK(
-      isSameDevice(targetDevice, newValue.device()),
-      "Mismatched device for ",
-      name,
-      ": ",
-      targetDevice,
-      " vs ",
-      newValue.device());
 }
 
 void Weights::setValue(const std::string& name, const at::Tensor& newValue) {
+  setValue(name, newValue, /*skipDeviceCheck=*/false);
+}
+
+void Weights::setValue(
+    const std::string& name,
+    const at::Tensor& newValue,
+    bool skipDeviceCheck) {
   if (allValues_.find(name) != allValues_.end()) {
-    validateValue(name, newValue);
+    validateValue(name, newValue, skipDeviceCheck);
   } else {
     LOG(WARNING) << name << " is not found in the registered weights";
   }

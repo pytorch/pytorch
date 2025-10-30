@@ -2,9 +2,7 @@ import random
 from typing import Any
 
 import torch
-
-# Import centralized distributed components
-from torch.distributed._distributed_c10d import (
+from torch._C._distributed_c10d import (
     _resolve_process_group,
     FakeWork,
     ProcessGroup,

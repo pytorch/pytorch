@@ -1,20 +1,27 @@
 import functools
+import logging
 import math
 from enum import IntEnum
+from typing import Optional
 
 import sympy
 
 import torch
+from torch.fx.operator_schemas import normalize_function
 
 from . import ir
-from .utils import get_dtype_size, sympy_product
+from .utils import get_dtype_size, snode_args_kwargs, sympy_product
 from .virtualized import V
+
+
+log = logging.getLogger(__name__)
 
 
 class NCCL_COLL(IntEnum):
     ALL_REDUCE = 0
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
+    ALL_TO_ALL = 3
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -37,11 +44,7 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
         return NVIDIA_GPU_TYPE.AMPERE
 
 
-def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
-    if not isinstance(node, ir._CollectiveKernel):
-        raise ValueError(f"node is not a collective kernel: {node}")
-
-    kernel_name = node.python_kernel_name
+def get_collective_type_from_kernel_name(kernel_name: str) -> NCCL_COLL:
     assert kernel_name is not None
     if "all_reduce" in kernel_name:
         return NCCL_COLL.ALL_REDUCE
@@ -49,8 +52,19 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
         return NCCL_COLL.ALL_GATHER
     elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
+    elif "torch.ops._dtensor.shard_dim_alltoall.default" in kernel_name:
+        return NCCL_COLL.ALL_TO_ALL
     else:
         raise ValueError(f"Unsupported collective kernel: {kernel_name}")
+
+
+def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
+    if not isinstance(node, ir._CollectiveKernel):
+        raise ValueError(f"node is not a collective kernel: {node}")
+
+    name = node.python_kernel_name
+    assert name is not None
+    return get_collective_type_from_kernel_name(name)
 
 
 def get_collective_input_size_bytes(node: ir.IRNode) -> int:
@@ -158,9 +172,55 @@ llMaxBws = [
 ]
 
 
-def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
+def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  # type: ignore[no-untyped-def]
+    kernel = snode.node
+    assert kernel is not None
+    py_kernel_name = getattr(kernel, "python_kernel_name", "")
+    if not ("all_gather" in py_kernel_name or "reduce_scatter" in py_kernel_name):
+        # NCCL of version 2.27 sometimes unrecoverably fail for all_to_all, all_reduce
+        return None
+
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
+    pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
+    pg = _resolve_process_group(pg_name)
+    rank: int = torch.distributed.get_rank(pg)
+    # TODO(ivankobzarev): Figure out how we can use time estimations,
+    # without cuda allocations.
+    device = torch.device(f"cuda:{rank}")
+
+    fn = eval(py_kernel_name)
+    args, kwargs = snode_args_kwargs(snode)
+
+    # TODO(ivankobzarev): fix out variants snode_args_kwargs
+    if "all_gather_into_tensor_out" in py_kernel_name:
+        args = args[1:] + args[0]
+
+    try:
+        with torch.distributed._time_estimator(
+            group=pg, device=device
+        ) as time_estimator:
+            w = fn(*args, **kwargs)
+            torch.ops._c10d_functional.wait_tensor.default(w)
+    except Exception as e:
+        # NCCL estimator can fail
+        log.info(e)  # noqa: G200
+        return None
+
+    est_time_us = time_estimator.estimated_time
+    # -1000 constant is NCCL return in case of error during estimations.
+    # Observed it for all_to_all estimations.
+    if est_time_us < 0:
+        return None
+    est_time_ms = est_time_us / 1e3
+    return est_time_ms
+
+
+def estimate_nccl_collective_runtime_impl(
+    tensor_storage_size_bytes: int, group_size: int, coll: NCCL_COLL
+) -> float:
     """
-    Returns estimated NCCL collective runtime in nanoseconds (ns).
+    Returns estimated NCCL collective runtime in milliseconds (ms).
 
     The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
     We aim to estimate the runtime as accurately as possible.
@@ -171,14 +231,12 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     - collective is one of: allreduce, reducescatter, allgather
     """
-    tensor_storage_size_bytes = get_collective_input_size_bytes(node)
     # Convert bytes to GB
     tensor_storage_size_GB = tensor_storage_size_bytes / 1024 / 1024 / 1024
 
     # Currently assumes each node has 8 gpus. And when >1 node is used, assumes each node uses all 8 gpus.
     # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     num_gpus_per_node = 8
-    group_size = get_collective_group_size(node)
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
 
@@ -188,7 +246,6 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     # Assumes ring algorithm
     nccl_algo = NCCL_ALGO.RING
     nccl_proto = NCCL_PROTO.LL
-    coll = get_collective_type(node)
 
     # =============== bandwidth computation ===============
     # First compute bandwidth in GB/s; then at the end, convert it to GB/ns
@@ -220,6 +277,8 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     if coll == NCCL_COLL.ALL_REDUCE:
         nsteps = 2 * (nRanks - 1)
+    elif coll == NCCL_COLL.ALL_TO_ALL:
+        nsteps = 2 * (nRanks - 1)
     elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
         nsteps = nRanks - 1
 
@@ -237,7 +296,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
             nInterSteps = 2 * nNodes
         else:
             nInterSteps = 0
-    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
         nInterSteps = nNodes - 1
 
     # First compute latency in us; then at the end, convert it to ns
@@ -256,9 +315,83 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     # =============== final result ===============
     transport_ns = tensor_storage_size_GB / bandwidth_GB_per_ns
-    return transport_ns + latency_ns
+    ns = transport_ns + latency_ns
+    ms = ns / 1e6
+    return ms
 
 
 ################################################################################################################
 # The above code and constants are adapted from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc #
 ################################################################################################################
+
+
+def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
+    """
+    Returns estimated NCCL collective runtime in nanoseconds (ns).
+
+    The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
+    We aim to estimate the runtime as accurately as possible.
+
+    Assumptions:
+    - only ring algorithm (NCCL_ALGO_RING) is used
+    - only Low-Latency protocol (NCCL_PROTO_LL) is used, i.e. Simple or LL128 is not used
+    - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
+    - collective is one of: allreduce, reducescatter, allgather
+    """
+    tensor_storage_size_bytes = get_collective_input_size_bytes(node)
+    group_size = get_collective_group_size(node)
+    coll = get_collective_type(node)
+    return estimate_nccl_collective_runtime_impl(
+        tensor_storage_size_bytes, group_size, coll
+    )
+
+
+def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
+    size = 0
+    for node in fx_node.all_input_nodes:
+        if (t := node.meta.get("val")) is not None:
+            size += t.numel() * t.element_size()
+
+    # TODO - symbolic
+    return size
+
+
+def estimate_nccl_collective_runtime_from_fx_node(
+    fx_node: torch.fx.Node, override_size: Optional[int] = None
+) -> float:
+    """
+    Returns estimated NCCL collective runtime in nanoseconds (ns).
+
+    The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
+    We aim to estimate the runtime as accurately as possible.
+
+    Assumptions:
+    - only ring algorithm (NCCL_ALGO_RING) is used
+    - only Low-Latency protocol (NCCL_PROTO_LL) is used, i.e. Simple or LL128 is not used
+    - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
+    - collective is one of: allreduce, reducescatter, allgather
+    """
+    from torch.distributed.distributed_c10d import _get_group_size_by_name
+
+    if override_size is None:
+        tensor_storage_size_bytes = estimate_fx_collective_size(fx_node)
+    else:
+        tensor_storage_size_bytes = override_size
+
+    assert not isinstance(fx_node.target, str)
+    opt_args_kwargs = normalize_function(
+        fx_node.target,
+        args=fx_node.args,
+        kwargs=fx_node.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    assert opt_args_kwargs is not None
+    _, kwargs = opt_args_kwargs
+
+    group_size = _get_group_size_by_name(kwargs["group_name"])
+    assert isinstance(fx_node.target, torch._ops.OpOverload)
+    coll = get_collective_type_from_kernel_name(fx_node.target.name())
+
+    return estimate_nccl_collective_runtime_impl(
+        tensor_storage_size_bytes, group_size, coll
+    )

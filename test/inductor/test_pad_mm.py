@@ -539,6 +539,115 @@ class PadMMTest(TestCase):
         # Its name should contain `mm` because `mm` was the original aten op where the mm came from.
         FileCheck().check("def triton_tem_fused_mm").run(code[0])
 
+    def test_no_autocast_in_pad_bmm_joint_graph_pass(self):
+        # Track bmm dtypes before and after joint graph passes
+        bmm_dtypes_pre = {}
+        bmm_dtypes_post = {}
+
+        def make_bmm_dtype_tracker(dtype_dict):
+            def track_bmm_dtype(graph):
+                for node in graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.bmm.default
+                    ):
+                        # Store the output dtype
+                        if hasattr(node.meta.get("val", None), "dtype"):
+                            dtype_dict[str(node)] = node.meta["val"].dtype
+                return graph
+
+            return track_bmm_dtype
+
+        class MaskedMHA(torch.nn.Module):
+            def __init__(self, H_q, H_kv, D):
+                super().__init__()
+                self.H_kv = H_kv
+                num_heads_total = H_q + 2 * H_kv
+                self.qkv_proj_vid = torch.nn.Linear(H_q * D, num_heads_total * D)
+                self.qkv_proj_txt = torch.nn.Linear(H_q * D, num_heads_total * D)
+                self.out_proj = torch.nn.Linear(H_q * D, H_q * D)
+                self.H_q = H_q
+                self.D = D
+
+            def forward(self, x_vid, x_txt, attn_mask):
+                qkv_vid = self.qkv_proj_vid(x_vid)
+                qkv_txt = self.qkv_proj_txt(x_txt)
+                qkv_vid = qkv_vid.reshape((*qkv_vid.shape[:-1], -1, self.D))
+                qkv_txt = qkv_txt.reshape((*qkv_txt.shape[:-1], -1, self.D))
+
+                q_vid = qkv_vid[..., : self.H_q, :]
+                k_vid = qkv_vid[..., self.H_q : self.H_q + self.H_kv, :]
+                v_vid = qkv_vid[..., self.H_q + self.H_kv :, :]
+
+                q_txt = qkv_txt[..., : self.H_q, :]
+                k_txt = qkv_txt[..., self.H_q : self.H_q + self.H_kv, :]
+                v_txt = qkv_txt[..., self.H_q + self.H_kv :, :]
+
+                q = torch.cat([q_vid, q_txt], dim=-3)
+                k = torch.cat([k_vid, k_txt], dim=-3)
+                v = torch.cat([v_vid, v_txt], dim=-3)
+
+                out = torch.nn.functional.scaled_dot_product_attention(
+                    q.transpose(-2, -3),
+                    k.transpose(-2, -3),
+                    v.transpose(-2, -3),
+                    attn_mask=attn_mask,
+                    enable_gqa=True,
+                )
+                out = out.transpose(-2, -3)
+
+                return out
+
+        def test_masked_mha(B, H, S, D, device, dtype):
+            S_vid = 300
+            S_txt = S - S_vid
+            x1 = torch.randn(B, S_vid, H * D, requires_grad=True, device=device)
+            x2 = torch.randn(B, S_txt, H * D, requires_grad=True, device=device)
+            attn_mask = torch.ones(B, 1, S, S, dtype=torch.bool, device=device)
+
+            H_kv = H // 4
+            mha = MaskedMHA(H, H_kv, D)
+            mha = mha.to(device)
+
+            with torch._inductor.config.patch(
+                joint_custom_pre_pass=make_bmm_dtype_tracker(bmm_dtypes_pre),
+                joint_custom_post_pass=make_bmm_dtype_tracker(bmm_dtypes_post),
+            ):
+                mha = torch.compile(mha, fullgraph=True, backend="inductor")
+                with torch.autocast(
+                    device_type="cuda", dtype=dtype, cache_enabled=False
+                ):
+                    out_vid = mha(x1, x2, attn_mask)
+                    target_vid = torch.randn_like(out_vid)
+
+                    loss_vid = (out_vid - target_vid).mean()
+                    loss = loss_vid
+                loss.backward()
+
+            torch.cuda.synchronize()
+
+            # Check if any bmm operations had dtype changes
+            for node_name_pre, node_name_post in zip(
+                bmm_dtypes_pre, bmm_dtypes_post, strict=True
+            ):
+                pre_dtype = bmm_dtypes_pre[node_name_pre]
+                post_dtype = bmm_dtypes_post[node_name_post]
+                # Assert no bmm output dtype changes
+                self.assertEqual(pre_dtype, post_dtype)
+
+            # Based on issue https://github.com/pytorch/pytorch/issues/159469,
+            # if autocast was applied in pad_bmm causing bmm's output dtype to be changed from fp32 to bf16,
+            # gradient will have NaNs in this test case.
+            self.assertFalse(torch.any(x1.grad.isnan()).item())
+            self.assertFalse(torch.any(x2.grad.isnan()).item())
+
+        B, H, S, D = 2, 32, 549, 128
+        device = "cuda"
+        dtype = torch.bfloat16
+        torch.compiler.reset()
+        torch.manual_seed(42)
+        test_masked_mha(B, H, S, D, device, dtype)
+
 
 if __name__ == "__main__":
     if HAS_CUDA_AND_TRITON:

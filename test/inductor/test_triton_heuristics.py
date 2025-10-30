@@ -3,15 +3,24 @@
 import functools
 import sys
 import unittest
+from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
-from torch.testing._internal.common_utils import IS_LINUX, runOnRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    runOnRocm,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     requires_cuda_with_enough_memory,
 )
@@ -67,6 +76,7 @@ def get_autotuned_amd_sqr_kernel():
     )(amd_sqr_kernel)
 
 
+@instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
 
@@ -261,6 +271,34 @@ class TestTritonHeuristics(TestCase):
         ref = fn(x)
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
+
+    @skipIfXpu
+    @skipIfRocm
+    @skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
+    @parametrize("do_pruning", [False, True])
+    def test_prune_configs_over_shared_memory_limit(self, do_pruning):
+        from torch._inductor.template_heuristics.triton import (
+            CUDAConfigHeuristic,
+            GemmConfig,
+        )
+
+        expected_count = 1 if do_pruning else 2
+        mm_configs = [
+            GemmConfig(32, 32, 32, 1, 8, 8),
+            GemmConfig(
+                128, 128, 128, 100, 8, 4
+            ),  # intentionally large to exceed shared memory limit
+        ]
+        with config.patch(
+            {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
+        ):
+            config_heuristic = CUDAConfigHeuristic()
+            config_heuristic.should_scale_configs = False
+            config_heuristic.mm_configs = mm_configs
+            configs = list(
+                config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
+            )
+            self.assertEqual(len(configs), expected_count)
 
 
 class TestArgumentCloneAndRestore(TestCase):

@@ -40,18 +40,34 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/GraphPasses.cpp
   ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/PassManager.cpp
   ${TORCH_ROOT}/torch/nativert/kernels/KernelHandlerRegistry.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/triton/CpuTritonKernelManager.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/TritonKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/DelegateExecutor.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/AOTInductorDelegateExecutor.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/ETCallDelegateKernel.cpp
+  ${TORCH_ROOT}/torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp
 )
+
+if(USE_CUDA OR USE_ROCM)
+  list(APPEND NATIVERT_TEST_SRCS ${TORCH_ROOT}/torch/nativert/executor/triton/CudaTritonKernelManager.cpp)
+  list(APPEND NATIVERT_TEST_SRCS ${TORCH_ROOT}/torch/nativert/executor/AOTInductorModelContainerCudaShim.cpp)
+endif()
 
 add_executable(test_nativert
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${NATIVERT_TEST_SRCS}
 )
 
+if(MSVC)
+  target_compile_definitions(test_nativert PRIVATE NATIVERT_MSVC_TEST)
+endif()
+
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_nativert PRIVATE USE_GTEST)
 
 set(NATIVERT_TEST_DEPENDENCIES torch gtest_main)
 
+target_link_libraries(test_nativert PRIVATE ${CMAKE_DL_LIBS})
 target_link_libraries(test_nativert PRIVATE ${NATIVERT_TEST_DEPENDENCIES})
 target_link_libraries(test_nativert PRIVATE fmt::fmt-header-only)
 target_include_directories(test_nativert PRIVATE ${ATen_CPU_INCLUDE})

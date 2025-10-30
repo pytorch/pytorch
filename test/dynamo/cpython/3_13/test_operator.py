@@ -104,7 +104,7 @@ class OperatorTestCase:
 
     def test_eq(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 def __eq__(self, other):
                     raise SyntaxError
@@ -119,7 +119,7 @@ class OperatorTestCase:
 
     def test_ne(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 def __ne__(self, other):
                     raise SyntaxError
@@ -267,7 +267,7 @@ class OperatorTestCase:
         operator = self.module
         self.assertRaises(TypeError, operator.matmul)
         self.assertRaises(TypeError, operator.matmul, 42, 42)
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class M:
                 def __matmul__(self, other):
                     return other - 1
@@ -338,7 +338,7 @@ class OperatorTestCase:
 
     def test_truth(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 def __bool__(self):
                     raise SyntaxError
@@ -373,7 +373,7 @@ class OperatorTestCase:
 
     def test_attrgetter(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class A:
                 pass
         a = A()
@@ -396,7 +396,7 @@ class OperatorTestCase:
         self.assertEqual(operator.attrgetter('x','z','y')(record), ('X', 'Z', 'Y'))
         self.assertRaises(TypeError, operator.attrgetter, ('x', (), 'y'))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 def __getattr__(self, name):
                     raise SyntaxError
@@ -437,7 +437,7 @@ class OperatorTestCase:
         f = operator.itemgetter(10)
         self.assertRaises(IndexError, f, a)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 def __getitem__(self, name):
                     raise SyntaxError
@@ -471,7 +471,7 @@ class OperatorTestCase:
         self.assertEqual(operator.itemgetter(slice(2, 4))(t), ('c', 'd'))
 
         # interesting sequences
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class T(tuple):
                 'Tuple subclass'
                 pass
@@ -483,7 +483,7 @@ class OperatorTestCase:
         operator = self.module
         self.assertRaises(TypeError, operator.methodcaller)
         self.assertRaises(TypeError, operator.methodcaller, 12)
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class A:
                 def foo(self, *args, **kwds):
                     return args[0] + args[1]
@@ -509,7 +509,7 @@ class OperatorTestCase:
 
     def test_inplace(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 def __iadd__     (self, other): return "iadd"
                 def __iand__     (self, other): return "iand"
@@ -550,7 +550,7 @@ class OperatorTestCase:
 
     def test_index(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class X:
                 def __index__(self):
                     return 1
@@ -570,7 +570,7 @@ class OperatorTestCase:
 
     def test_not_(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C:
                 def __bool__(self):
                     raise SyntaxError
@@ -583,7 +583,7 @@ class OperatorTestCase:
 
     def test_length_hint(self):
         operator = self.module
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class X(object):
                 def __init__(self, value):
                     self.value = value
@@ -607,7 +607,7 @@ class OperatorTestCase:
         with self.assertRaises(LookupError):
             operator.length_hint(X(LookupError))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Y: pass
 
         msg = "'str' object cannot be interpreted as an integer"
@@ -679,7 +679,7 @@ class OperatorPickleTestCase:
 
     def test_attrgetter(self):
         attrgetter = self.module.attrgetter
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class A:
                 pass
         a = A()
@@ -723,7 +723,7 @@ class OperatorPickleTestCase:
 
     def test_methodcaller(self):
         methodcaller = self.module.methodcaller
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class A:
                 def foo(self, *args, **kwds):
                     return args[0] + args[1]

@@ -282,9 +282,15 @@ endif()
 # cufft
 add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft_static_nocallback)
+    if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
+      set_property(
+          TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+          CUDA::cufft_static_nocallback)
+    else()
+      set_property(
+          TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+          CUDA::cufft_static)
+    endif()
 else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES

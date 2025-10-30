@@ -8,7 +8,6 @@
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/cpu/utils.h>
-#include <ATen/OpMathType.h>
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {

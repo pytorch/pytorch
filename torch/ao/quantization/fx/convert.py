@@ -3,7 +3,7 @@
 import copy
 import operator
 import warnings
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
@@ -62,6 +62,10 @@ from .utils import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
 __all__ = [
     "convert",
     "convert_custom_module",
@@ -94,6 +98,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     modules: dict[str, torch.nn.Module],
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node working with decomposed Tensor
@@ -210,7 +215,11 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                     # sure that the default overload can be used.
                     # TODO: maybe need more complex attr name here
                     qparam_node = create_getattr_from_value(
-                        model, graph, module_path + prefix + key, value_or_node
+                        model,
+                        graph,
+                        module_path + prefix + key,
+                        value_or_node,
+                        model_device,
                     )
                     quantize_op_inputs.append(qparam_node)
                 else:
@@ -362,6 +371,7 @@ def _replace_observer_with_quantize_dequantize_node(
     modules: dict[str, torch.nn.Module],
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node
@@ -442,7 +452,11 @@ def _replace_observer_with_quantize_dequantize_node(
                     # For scale and zero_point values we register them as buffers in the root module.
                     # TODO: maybe need more complex attr name here
                     qparam_node = create_getattr_from_value(
-                        model, graph, module_path + prefix + key, value_or_node
+                        model,
+                        graph,
+                        module_path + prefix + key,
+                        value_or_node,
+                        model_device,
                     )
                     quantize_op_inputs.append(qparam_node)
                 else:
@@ -583,7 +597,8 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     else:
         warnings.warn(
-            f"Unsupported node type in recursive remove dequantize: {type(arg)}"
+            f"Unsupported node type in recursive remove dequantize: {type(arg)}",
+            stacklevel=2,
         )
 
 
@@ -740,6 +755,7 @@ def convert_weighted_module(
     backend_config: BackendConfig,
     is_decomposed: bool = False,
     is_reference: bool = False,
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
@@ -828,7 +844,10 @@ def convert_weighted_module(
         is_ptq = weight_post_process is None
         if is_ptq:
             weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
-            device = assert_and_get_unique_device(float_module)
+            if model_device is not None:
+                device = model_device
+            else:
+                device = assert_and_get_unique_device(float_module)
             if device:
                 weight_post_process.to(device)
 
@@ -1144,6 +1163,7 @@ def convert(
     qat_module_classes = get_qat_module_classes(backend_config)
     fused_module_classes = get_fused_module_classes(backend_config)
     statically_quantized_custom_module_nodes: set[Node] = set()
+    model_device = assert_and_get_unique_device(model)
 
     for node in list(model.graph.nodes):
         if node.op == "placeholder":
@@ -1178,7 +1198,8 @@ def convert(
                     _maybe_recursive_remove_dequantize(output, return_node, model.graph)
             else:
                 warnings.warn(
-                    f"Unsupported node type for output_quantized_idxs: {type(output)}"
+                    f"Unsupported node type for output_quantized_idxs: {type(output)}",
+                    stacklevel=2,
                 )
         elif node.op == "call_module":
             mod = _get_module(node, modules)
@@ -1197,6 +1218,7 @@ def convert(
                             modules,
                             node_name_to_scope,
                             node_name_to_qconfig,
+                            model_device,
                         )
                     else:
                         _replace_observer_with_quantize_dequantize_node(
@@ -1205,6 +1227,7 @@ def convert(
                             modules,
                             node_name_to_scope,
                             node_name_to_qconfig,
+                            model_device,
                         )
             elif isinstance(mod, DeQuantStub):
                 _replace_observer_or_dequant_stub_with_dequantize_node(
@@ -1234,6 +1257,7 @@ def convert(
                     backend_config,
                     is_decomposed,
                     is_reference,
+                    model_device,
                 )
             elif type_before_parametrizations(mod) in custom_module_classes:
                 convert_custom_module(

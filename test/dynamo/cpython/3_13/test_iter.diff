@@ -61,15 +61,15 @@ index 1b9f3cf7624..6560c7423a6 100644
 +# ======= END DYNAMO PATCH =======
 +
  # Test iterators.
- 
+
  import sys
 @@ -104,12 +161,10 @@ class EmptyIterClass:
- 
+
  # Main test suite
- 
+
 -class TestCase(unittest.TestCase):
 +class TestCase(__TestCase):
- 
+
      # Helper to check that an iterator returns a given sequence
      def check_iterator(self, it, seq, pickle=True):
 -        if pickle:
@@ -78,7 +78,7 @@ index 1b9f3cf7624..6560c7423a6 100644
          while 1:
              try:
 @@ -121,8 +176,6 @@ class TestCase(unittest.TestCase):
- 
+
      # Helper to check that a for loop generates a given sequence
      def check_for_loop(self, expr, seq, pickle=True):
 -        if pickle:
@@ -89,7 +89,7 @@ index 1b9f3cf7624..6560c7423a6 100644
 @@ -261,19 +314,20 @@ class TestCase(unittest.TestCase):
          def run(builtin_name, item, sentinel=None):
              it = iter(item) if sentinel is None else iter(item, sentinel)
- 
+
 -            class CustomStr:
 -                def __init__(self, name, iterator):
 -                    self.name = name
@@ -103,7 +103,7 @@ index 1b9f3cf7624..6560c7423a6 100644
 -                    # the pointers after this call
 -                    list(self.iterator)
 -                    return other == self.name
-+            with torch._dynamo.set_fullgraph(fullgraph=False):
++            with torch._dynamo.error_on_graph_break(False):
 +                class CustomStr:
 +                    def __init__(self, name, iterator):
 +                        self.name = name
@@ -117,25 +117,25 @@ index 1b9f3cf7624..6560c7423a6 100644
 +                        # the pointers after this call
 +                        list(self.iterator)
 +                        return other == self.name
- 
+
              # del is required here
              # to not prematurely call __eq__ from
 @@ -323,9 +377,10 @@ class TestCase(unittest.TestCase):
- 
+
      # Test a new_style class with __iter__ but no next() method
      def test_new_style_iter_class(self):
 -        class IterClass(object):
 -            def __iter__(self):
 -                return self
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class IterClass(object):
 +                def __iter__(self):
 +                    return self
          self.assertRaises(TypeError, iter, IterClass())
- 
+
      # Test two-argument iter() with callable instance
 @@ -394,11 +449,12 @@ class TestCase(unittest.TestCase):
- 
+
      # Test exception propagation through sequence iterator
      def test_exception_sequence(self):
 -        class MySequenceClass(SequenceClass):
@@ -143,7 +143,7 @@ index 1b9f3cf7624..6560c7423a6 100644
 -                if i == 10:
 -                    raise RuntimeError
 -                return SequenceClass.__getitem__(self, i)
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MySequenceClass(SequenceClass):
 +                def __getitem__(self, i):
 +                    if i == 10:
@@ -153,7 +153,7 @@ index 1b9f3cf7624..6560c7423a6 100644
          try:
              for x in MySequenceClass(20):
 @@ -410,11 +466,12 @@ class TestCase(unittest.TestCase):
- 
+
      # Test for StopIteration from __getitem__
      def test_stop_sequence(self):
 -        class MySequenceClass(SequenceClass):
@@ -161,25 +161,25 @@ index 1b9f3cf7624..6560c7423a6 100644
 -                if i == 10:
 -                    raise StopIteration
 -                return SequenceClass.__getitem__(self, i)
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MySequenceClass(SequenceClass):
 +                def __getitem__(self, i):
 +                    if i == 10:
 +                        raise StopIteration
 +                    return SequenceClass.__getitem__(self, i)
          self.check_for_loop(MySequenceClass(20), list(range(10)), pickle=False)
- 
+
      # Test a big range
 @@ -541,32 +598,34 @@ class TestCase(unittest.TestCase):
          self.assertRaises(TypeError, filter, None, list)
          self.assertRaises(TypeError, filter, None, 42)
- 
+
 -        class Boolean:
 -            def __init__(self, truth):
 -                self.truth = truth
 -            def __bool__(self):
 -                return self.truth
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class Boolean:
 +                def __init__(self, truth):
 +                    self.truth = truth
@@ -187,7 +187,7 @@ index 1b9f3cf7624..6560c7423a6 100644
 +                    return self.truth
          bTrue = Boolean(True)
          bFalse = Boolean(False)
- 
+
 -        class Seq:
 -            def __init__(self, *args):
 -                self.vals = args
@@ -206,7 +206,7 @@ index 1b9f3cf7624..6560c7423a6 100644
 -                        else:
 -                            raise StopIteration
 -                return SeqIter(self.vals)
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class Seq:
 +                def __init__(self, *args):
 +                    self.vals = args
@@ -225,12 +225,12 @@ index 1b9f3cf7624..6560c7423a6 100644
 +                            else:
 +                                raise StopIteration
 +                    return SeqIter(self.vals)
- 
+
          seq = Seq(*([bTrue, bFalse] * 25))
          self.assertEqual(list(filter(lambda x: not x, seq)), [bFalse]*25)
 @@ -635,6 +694,7 @@ class TestCase(unittest.TestCase):
                  pass
- 
+
      # Test zip()'s use of iterators.
 +    @skipIfTorchDynamo("infinite loop")
      def test_builtin_zip(self):
@@ -238,21 +238,21 @@ index 1b9f3cf7624..6560c7423a6 100644
          self.assertEqual(list(zip(*[])), [])
 @@ -653,17 +713,18 @@ class TestCase(unittest.TestCase):
          self.assertEqual(list(d.items()), list(zip(d, d.values())))
- 
+
          # Generate all ints starting at constructor arg.
 -        class IntsFrom:
 -            def __init__(self, start):
 -                self.i = start
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class IntsFrom:
 +                def __init__(self, start):
 +                    self.i = start
- 
+
 -            def __iter__(self):
 -                return self
 +                def __iter__(self):
 +                    return self
- 
+
 -            def __next__(self):
 -                i = self.i
 -                self.i = i+1
@@ -261,60 +261,60 @@ index 1b9f3cf7624..6560c7423a6 100644
 +                    i = self.i
 +                    self.i = i+1
 +                    return i
- 
+
          f = open(TESTFN, "w", encoding="utf-8")
          try:
 @@ -686,19 +747,20 @@ class TestCase(unittest.TestCase):
          self.assertEqual(list(zip(range(5))), [(i,) for i in range(5)])
- 
+
          # Classes that lie about their lengths.
 -        class NoGuessLen5:
 -            def __getitem__(self, i):
 -                if i >= 5:
 -                    raise IndexError
 -                return i
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class NoGuessLen5:
 +                def __getitem__(self, i):
 +                    if i >= 5:
 +                        raise IndexError
 +                    return i
- 
+
 -        class Guess3Len5(NoGuessLen5):
 -            def __len__(self):
 -                return 3
 +            class Guess3Len5(NoGuessLen5):
 +                def __len__(self):
 +                    return 3
- 
+
 -        class Guess30Len5(NoGuessLen5):
 -            def __len__(self):
 -                return 30
 +            class Guess30Len5(NoGuessLen5):
 +                def __len__(self):
 +                    return 30
- 
+
          def lzip(*args):
              return list(zip(*args))
 @@ -718,20 +780,21 @@ class TestCase(unittest.TestCase):
- 
+
          # This class inserts a Unicode object into its argument's natural
          # iteration, in the 3rd position.
 -        class OhPhooey:
 -            def __init__(self, seq):
 -                self.it = iter(seq)
 -                self.i = 0
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class OhPhooey:
 +                def __init__(self, seq):
 +                    self.it = iter(seq)
 +                    self.i = 0
- 
+
 -            def __iter__(self):
 -                return self
 +                def __iter__(self):
 +                    return self
- 
+
 -            def __next__(self):
 -                i = self.i
 -                self.i = i+1
@@ -327,25 +327,25 @@ index 1b9f3cf7624..6560c7423a6 100644
 +                    if i == 2:
 +                        return "fooled you!"
 +                    return next(self.it)
- 
+
          f = open(TESTFN, "w", encoding="utf-8")
          try:
 @@ -895,29 +958,30 @@ class TestCase(unittest.TestCase):
              f.writelines({})
- 
+
              # Try a big chunk too.
 -            class Iterator:
 -                def __init__(self, start, finish):
 -                    self.start = start
 -                    self.finish = finish
 -                    self.i = self.start
-+            with torch._dynamo.set_fullgraph(fullgraph=False):
++            with torch._dynamo.error_on_graph_break(False):
 +                class Iterator:
 +                    def __init__(self, start, finish):
 +                        self.start = start
 +                        self.finish = finish
 +                        self.i = self.start
- 
+
 -                def __next__(self):
 -                    if self.i >= self.finish:
 -                        raise StopIteration
@@ -358,12 +358,12 @@ index 1b9f3cf7624..6560c7423a6 100644
 +                        result = str(self.i) + '\n'
 +                        self.i += 1
 +                        return result
- 
+
 -                def __iter__(self):
 -                    return self
 +                    def __iter__(self):
 +                        return self
- 
+
 -            class Whatever:
 -                def __init__(self, start, finish):
 -                    self.start = start
@@ -372,16 +372,16 @@ index 1b9f3cf7624..6560c7423a6 100644
 +                    def __init__(self, start, finish):
 +                        self.start = start
 +                        self.finish = finish
- 
+
 -                def __iter__(self):
 -                    return Iterator(self.start, self.finish)
 +                    def __iter__(self):
 +                        return Iterator(self.start, self.finish)
- 
+
              f.writelines(Whatever(6, 6+2000))
              f.close()
 @@ -990,15 +1054,16 @@ class TestCase(unittest.TestCase):
- 
+
      @cpython_only
      def test_ref_counting_behavior(self):
 -        class C(object):
@@ -393,7 +393,7 @@ index 1b9f3cf7624..6560c7423a6 100644
 -                cls = self.__class__
 -                assert cls.count > 0
 -                cls.count -= 1
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class C(object):
 +                count = 0
 +                def __new__(cls):
@@ -407,7 +407,7 @@ index 1b9f3cf7624..6560c7423a6 100644
          self.assertEqual(C.count, 1)
          del x
 @@ -1089,12 +1154,13 @@ class TestCase(unittest.TestCase):
- 
+
      def test_3720(self):
          # Avoid a crash, when an iterator deletes its next() method.
 -        class BadIterator(object):
@@ -416,19 +416,19 @@ index 1b9f3cf7624..6560c7423a6 100644
 -            def __next__(self):
 -                del BadIterator.__next__
 -                return 1
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class BadIterator(object):
 +                def __iter__(self):
 +                    return self
 +                def __next__(self):
 +                    del BadIterator.__next__
 +                    return 1
- 
+
          try:
              for i in BadIterator() :
 @@ -1187,4 +1253,4 @@ class TestCase(unittest.TestCase):
- 
- 
+
+
  if __name__ == "__main__":
 -    unittest.main()
 +    run_tests()

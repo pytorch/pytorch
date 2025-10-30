@@ -1,6 +1,6 @@
 import math
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -92,7 +92,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         kernel_options: dict[str, Any],
         score_mod_other_buffers: tuple = (),
         mask_mod_other_buffers: tuple = (),
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
         return super().__call__(
             query,
@@ -112,7 +112,7 @@ flex_attention = FlexAttentionHOP()
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flex_attention_backward")
+        super().__init__("flex_attention_backward", cacheable=True)
 
     def __call__(
         self,
@@ -171,7 +171,7 @@ def _math_attention_inner(
 
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
-    scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
+    scores = query.to(working_precision) @ key.to(working_precision).transpose(-2, -1)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
@@ -209,7 +209,7 @@ def math_attention(
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Eager implementation
 
     This implementation uses vmap to vectorize the score_mod function over the batch, head, m, and n dimensions.
@@ -252,9 +252,19 @@ def math_attention(
     masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
     logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
+    # working precision will be used so no need to cast to fp32
+    max_scores = torch.max(post_mod_scores, dim=-1)[0]
+
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
-    return post_mod_scores.to(query.dtype) @ value, logsumexp / math.log(2)
+    # NB: kernel computes in ln2 space, we always convert back at the top level op, so
+    # for math impl we divide by log(2) because we will multiply by log(2)
+
+    return (
+        post_mod_scores.to(query.dtype) @ value,
+        logsumexp / math.log(2),
+        max_scores / math.log(2),
+    )
 
 
 @flex_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -268,8 +278,8 @@ def sdpa_dense(
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
-    out, lse = math_attention(
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    out, lse, max_scores = math_attention(
         query,
         key,
         value,
@@ -281,7 +291,7 @@ def sdpa_dense(
         mask_mod_other_buffers,
     )
     out = _permute_strides(out, query.stride())
-    return out, lse
+    return out, lse, max_scores
 
 
 def trace_flex_attention(
@@ -295,7 +305,7 @@ def trace_flex_attention(
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Traces the flex_attention operator with the given score_mod function and other_buffers.
 
     Trace SDPA will call make_fx with "fake" example vals and then trace the score_mod function
@@ -344,12 +354,17 @@ def trace_flex_attention(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    # pyrefly: ignore  # missing-attribute
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", flex_attention, proxy_args, {}
     )
     return track_tensor_tree(
-        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+        example_out,
+        out_proxy,
+        constant=None,
+        # pyrefly: ignore  # bad-argument-type
+        tracer=proxy_mode.tracer,
     )
 
 
@@ -365,7 +380,7 @@ def flex_attention_proxy_torch_dispatch_mode(
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
     return trace_flex_attention(
         mode,
@@ -393,7 +408,7 @@ def flex_attention_functionalize(
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Defines the functionalization rules for the flex_attention operator.
 
     Write now we are unwrapping each tensor and then redispatching to the next, however we want to
@@ -478,7 +493,7 @@ def flex_attention_fake_impl(
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if has_user_subclass(
         (
             query,
@@ -495,19 +510,14 @@ def flex_attention_fake_impl(
     ):
         return NotImplemented
 
-    # TODO: Figure out a better way to handle this for NJT than using sum()
-    if query.is_nested:
-        out = torch.empty_like(query, memory_format=torch.contiguous_format)
-        logsumexp = query.sum(dim=-1)
-        return out, logsumexp
-
     v_head_dim = value.size(-1)
     batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
     logsumexp = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
+    max_scores = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
     out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
     out = query.new_empty(out_shape)
     out = _permute_strides(out, query.stride())
-    return out, logsumexp
+    return out, logsumexp, max_scores
 
 
 # Registers dispatches for SAC
@@ -616,6 +626,7 @@ def create_fw_bw_graph(
 
 class FlexAttentionAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any,
         query: Tensor,
@@ -628,7 +639,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         kernel_options: dict[str, Any],
         mask_mod_other_buffers: tuple[Any, ...],
         *score_mod_other_buffers: tuple[Any, ...],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         any_buffer_requires_grad = any(
             buffer.requires_grad
             for buffer in mask_mod_other_buffers
@@ -644,7 +655,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
         with torch._C._AutoDispatchBelowAutograd():
-            out, logsumexp = flex_attention(
+            out, logsumexp, max_scores = flex_attention(
                 query,
                 key,
                 value,
@@ -655,7 +666,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 score_mod_other_buffers,
                 mask_mod_other_buffers,
             )
-
+        # no grads for you sir
+        ctx.mark_non_differentiable(max_scores)
         save_tensors_and_symints_for_backward(
             ctx,
             (
@@ -664,18 +676,20 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 value,
                 out,
                 logsumexp,
+                max_scores,
                 *block_mask[:-1],
                 *score_mod_other_buffers,
                 *mask_mod_other_buffers,
             ),
         )
-        return out, logsumexp
+        return out, logsumexp, max_scores
 
     @staticmethod
     def backward(  # type: ignore[override]
         ctx: Any,
         grad_out: Tensor,
         grad_logsumexp: Tensor,
+        grad_max_scores: Tensor,
     ) -> tuple[Optional[Tensor], ...]:
         fw_args = saved_tensors_and_symints(ctx)
         (
@@ -684,6 +698,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             value,
             out,
             logsumexp,
+            max_scores,
             query_lengths,
             kv_lengths,
             kv_num_blocks,
@@ -762,7 +777,7 @@ def flex_attention_autograd(
     kernel_options: dict[str, Any],
     score_mod_other_buffers: tuple[Tensor, ...] = (),
     mask_mod_other_buffers: tuple[Tensor, ...] = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     with TransformGetItemToIndex():
@@ -788,7 +803,7 @@ def flex_attention_autograd(
             )
         else:
             fw_graph, bw_graph = score_mod, None
-        out, logsumexp = FlexAttentionAutogradOp.apply(
+        out, logsumexp, max_scores = FlexAttentionAutogradOp.apply(
             query,
             key,
             value,
@@ -800,7 +815,7 @@ def flex_attention_autograd(
             mask_mod_other_buffers,
             *score_mod_other_buffers,
         )
-    return out, logsumexp
+    return out, logsumexp, max_scores
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------
@@ -887,9 +902,15 @@ def sdpa_dense_backward(
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
-    grad_softmax_scores = grad_out @ value.transpose(-2, -1)
+    grad_softmax_scores = grad_out.to(dtype=softmax_scores.dtype) @ value.to(
+        dtype=softmax_scores.dtype
+    ).transpose(-2, -1)
 
-    sum_scores = torch.sum(out * grad_out, -1, keepdim=True)
+    sum_scores = torch.sum(
+        out.to(dtype=softmax_scores.dtype) * grad_out.to(dtype=softmax_scores.dtype),
+        -1,
+        keepdim=True,
+    )
     grad_score_mod = softmax_scores * (
         grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
     )
@@ -1054,6 +1075,7 @@ def trace_flex_attention_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    # pyrefly: ignore  # missing-attribute
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -1063,7 +1085,11 @@ def trace_flex_attention_backward(
         name="flex_attention_backward",
     )
     return track_tensor_tree(
-        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+        example_out,
+        out_proxy,
+        constant=None,
+        # pyrefly: ignore  # bad-argument-type
+        tracer=proxy_mode.tracer,
     )
 
 
@@ -1247,14 +1273,12 @@ def flex_attention_backward_fake_tensor_mode(
     grad_query = torch.empty_like(query)
     # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
     grad_score_mod_captured = tuple(
-        [
-            (
-                torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
-                else None
-            )
-            for buffer in score_mod_other_buffers
-        ]
+        (
+            torch.empty_like(buffer, memory_format=torch.contiguous_format)
+            if isinstance(buffer, torch.Tensor)
+            else None
+        )
+        for buffer in score_mod_other_buffers
     )
 
     broadcasted_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))

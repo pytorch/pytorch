@@ -86,6 +86,7 @@ if torch.backends.mps.is_available():
             "item",
             "kron",
             "linalg.diagonal",
+            "linalg.householder_product",
             "linalg.svd",
             "log10",
             "log1p",
@@ -313,8 +314,6 @@ if torch.backends.mps.is_available():
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
-            "igamma": None,
-            "igammac": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
@@ -324,7 +323,6 @@ if torch.backends.mps.is_available():
             "linalg.cond": None,
             "linalg.eigh": None,
             "linalg.eigvalsh": None,
-            "linalg.householder_product": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
@@ -342,7 +340,6 @@ if torch.backends.mps.is_available():
             "masked.median": None,
             "matrix_exp": None,
             "mode": None,
-            "native_dropout_backward": None,
             "normnuc": None,
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
@@ -351,7 +348,6 @@ if torch.backends.mps.is_available():
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.ctc_loss": None,
-            "nn.functional.embedding_bag": None,
             "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": None,
             "nn.functional.pdist": None,
@@ -387,8 +383,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "to_sparse": None,
-            "unique": None,
             "vdot": None,
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -690,12 +684,15 @@ if torch.backends.mps.is_available():
             "_upsample_bilinear2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "sparse.mmreduce": [torch.float32],  # csr not supported
+            "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": [torch.float32],
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
+            "igamma": None,  # currently not supported for any device
+            "igammac": None,  # currently not supported for any device
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
             "linalg.solve_ex": [
                 torch.float16,
@@ -759,6 +756,10 @@ if torch.backends.mps.is_available():
             "eye": [torch.float16, torch.float32],
             # topk fails with duplicate indices
             "topk": [torch.float16],
+            # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
+            "to_sparse": None,
+            # Exception: the derivative for '_unique2' is not implemented.
+            "unique": None,
         }
 
         SKIPLIST_GRAD = {

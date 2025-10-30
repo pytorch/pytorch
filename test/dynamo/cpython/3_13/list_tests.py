@@ -319,7 +319,7 @@ class CommonTest(seq_tests.CommonTest):
         self.assertRaises(TypeError, a.extend)
 
         # overflow test. issue1621
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class CustomIter:
                 def __iter__(self):
                     return self
@@ -387,7 +387,7 @@ class CommonTest(seq_tests.CommonTest):
         a = self.type2test([NEVER_EQ])
         self.assertRaises(ValueError, a.remove, ALWAYS_EQ)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadExc(Exception):
                 pass
 
@@ -400,7 +400,7 @@ class CommonTest(seq_tests.CommonTest):
         a = self.type2test([0, 1, 2, 3])
         self.assertRaises(BadExc, a.remove, BadCmp())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadCmp2:
                 def __eq__(self, other):
                     raise BadExc()
@@ -428,7 +428,7 @@ class CommonTest(seq_tests.CommonTest):
         self.assertRaises(ValueError, a.index, 2, 0, 4)
         self.assertEqual(a, self.type2test([-2, -1, 0, 1, 2]))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Test modifying the list during index's iteration
             class EvilCmp:
                 def __init__(self, victim):

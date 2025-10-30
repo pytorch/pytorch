@@ -20,7 +20,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -415,7 +414,6 @@ class AOTInductorTestsTemplate:
         self.assertTrue(sentinel_seen)
 
     @skipIfXpu
-    @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
