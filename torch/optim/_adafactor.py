@@ -532,7 +532,7 @@ def _multi_tensor_adafactor(
 
         alphas = [
             max(eps2, p.norm(2).item() / (p.numel() ** 0.5)) * r
-            for p, r in zip(device_params, rho_ts, strict=True)
+            for p, r in zip(device_params, rho_ts)
         ]
 
         # Perform stepweight decay
@@ -566,9 +566,7 @@ def _multi_tensor_adafactor(
 
             var_estimates = [
                 row_var @ col_var
-                for row_var, col_var in zip(
-                    device_row_vars, device_col_vars, strict=True
-                )
+                for row_var, col_var in zip(device_row_vars, device_col_vars)
             ]
             row_var_means = [
                 row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars
@@ -596,7 +594,7 @@ def _multi_tensor_adafactor(
 
         alphas = [
             -a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
-            for a, update in zip(alphas, updates, strict=True)
+            for a, update in zip(alphas, updates)
         ]
         torch._foreach_mul_(updates, alphas)
         torch._foreach_add_(device_params, updates)
