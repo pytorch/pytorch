@@ -38,7 +38,7 @@ uint32_t crc32_combine (uint32_t crcA, uint32_t crcB, size_t lengthB);
 
 /// compute CRC32 (bitwise algorithm)
 uint32_t crc32_bitwise (const void* data, size_t length, uint32_t previousCrc32 = 0);
-/// compute CRC32 (half-byte algoritm)
+/// compute CRC32 (half-byte algorithm)
 uint32_t crc32_halfbyte(const void* data, size_t length, uint32_t previousCrc32 = 0);
 
 #ifdef CRC32_USE_LOOKUP_TABLE_BYTE
@@ -96,7 +96,7 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
   #define __BIG_ENDIAN    4321
 #endif
 
-// define endianess and some integer data types
+// define endianness and some integer data types
 #if defined(_MSC_VER) || defined(__MINGW32__)
   // Windows always little endian
   #define __BYTE_ORDER __LITTLE_ENDIAN
@@ -168,7 +168,7 @@ namespace
   /// zlib's CRC32 polynomial
   const uint32_t Polynomial = 0xEDB88320;
 
-  /// swap endianess
+  /// swap endianness
   static inline uint32_t swap(uint32_t x)
   {
   #if defined(__GNUC__) || defined(__clang__)
@@ -229,7 +229,7 @@ uint32_t crc32_bitwise(const void* data, size_t length, uint32_t previousCrc32)
 }
 
 
-/// compute CRC32 (half-byte algoritm)
+/// compute CRC32 (half-byte algorithm)
 uint32_t crc32_halfbyte(const void* data, size_t length, uint32_t previousCrc32)
 {
   uint32_t crc = ~previousCrc32; // same as previousCrc32 ^ 0xFFFFFFFF
@@ -662,7 +662,7 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
   // - if you append length(B) zeros to A and call it A' (think of it as AAAA000)
   //   and   prepend length(A) zeros to B and call it B' (think of it as 0000BBB)
   //   then exists a C' = A' ^ B'
-  // - remember: if you XOR someting with zero, it remains unchanged: X ^ 0 = X
+  // - remember: if you XOR something with zero, it remains unchanged: X ^ 0 = X
   // - that means C' = A concat B so that crc(A concat B) = crc(C') = crc(A') ^ crc(B')
   // - the trick is to compute crc(A') based on crc(A)
   //                       and crc(B') based on crc(B)
