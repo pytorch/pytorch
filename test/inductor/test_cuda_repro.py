@@ -41,8 +41,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     MI350_ARCH,
-    skipIfRocmArch,
     parametrize,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
@@ -2637,7 +2637,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
 
-<<<<<<< HEAD
     @config.patch({"emulate_divison_rounding": True})
     def test_truediv_emulate_divison_rounding(self):
         from decimal import Decimal
@@ -2683,61 +2682,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertNotEqual(eager_div, compiled_div)
         self.assertTrue("div_rn" not in code)
-=======
-    @parametrize(
-        "quantiles_shape,quantiles_strides,batch_size",
-        [
-            ((100, 10), (10, 1), 16),  # Contiguous C-order
-            ((100, 10), (1, 100), 16),  # Transposed/F-order
-            ((80, 12), (1, 80), 16),  # Transposed different size
-            ((50, 20), (1, 50), 16),  # Transposed medium
-            ((200, 8), (1, 200), 16),  # Transposed large x small
-            ((25, 40), (1, 25), 16),  # Transposed small x large
-            ((20, 5, 8), (40, 1, 5), 16),  # 3D case with mixed strides
-            ((20, 5, 8), (1, 20, 100), 16),  # 3D case different stride order
-        ],
-    )
-    def test_searchsorted_stride_permutations(
-        self, quantiles_shape, quantiles_strides, batch_size
-    ):
-        class Foo(torch.nn.Module):
-            def __init__(self, quantiles: torch.Tensor) -> None:
-                super().__init__()
-                assert quantiles.shape[0] > 0
-                quantiles = quantiles.T
-                self.q = torch.nn.Parameter(quantiles, requires_grad=False)
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                return torch.searchsorted(self.q, x.T).T
-
-        torch.manual_seed(42)
-
-        # Create contiguous tensor first
-        numel = 1
-        for dim in quantiles_shape:
-            numel *= dim
-        data = torch.randn(numel, dtype=torch.float32, device="cuda")
-
-        # Create tensor with specified shape and strides
-        quantiles = torch.as_strided(
-            data, size=quantiles_shape, stride=quantiles_strides
-        )
-
-        quantiles = torch.sort(quantiles, dim=0)[0]
-
-        x_shape = (batch_size,) + quantiles_shape[1:]
-        x = torch.randn(*x_shape, dtype=torch.float32, device="cuda")
-
-        foo = Foo(quantiles)
-        foo_compiled = torch.compile(Foo(quantiles), fullgraph=True)
-
-        # Test eager vs compiled
-        with torch.no_grad():
-            eager = foo(x)
-            compiled = foo_compiled(x)
-
-        self.assertEqual(eager, compiled)
->>>>>>> 457da1adf408 (fix searchsorted non dense)
 
 
 if __name__ == "__main__":
