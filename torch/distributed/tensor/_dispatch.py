@@ -1,8 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-import functools
 import logging
-import operator
 import warnings
 from collections.abc import Sequence
 from typing import cast, Optional
@@ -23,6 +21,7 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
@@ -79,8 +78,11 @@ def found_inf_reduce_handler(
             dtype=target_tensor.dtype,
         ),
     )
+    # pyrefly: ignore [bad-argument-type]
     found_inf_dtensor = dtensor.DTensor(
-        local_tensor=target_tensor, spec=spec, requires_grad=False
+        local_tensor=target_tensor,  # pyrefly: ignore [unexpected-keyword]
+        spec=spec,  # pyrefly: ignore [unexpected-keyword]
+        requires_grad=False,  # pyrefly: ignore [unexpected-keyword]
     )
     found_inf = found_inf_dtensor.full_tensor()
     target_tensor.copy_(found_inf)
@@ -121,11 +123,17 @@ class OpDispatcher:
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
         }
 
-        # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
-        # as implicitly replicated or we throw error to user.
-        # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
-        # it as False by default.
-        self._allow_implicit_replication = False
+    # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
+    # as implicitly replicated or we throw error to user.
+    # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
+    # it as False by default.
+    @property
+    def _allow_implicit_replication(self) -> bool:
+        return torch._C._get_dtensor_allow_implicit_replication()
+
+    @_allow_implicit_replication.setter
+    def _allow_implicit_replication(self, value: bool) -> None:
+        return torch._C._set_dtensor_allow_implicit_replication(value)
 
     def dispatch(
         self,
@@ -144,7 +152,6 @@ class OpDispatcher:
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
-        logger.debug("Dispatching op_call: %s", op_info.schema)
 
         try:
             self.sharding_propagator.propagate(op_info)
@@ -161,15 +168,15 @@ class OpDispatcher:
                 raise
         except Exception as e:
             raise RuntimeError(
-                f"Sharding propagation failed for {op_info.schema}"
+                f"{e}\n\nSharding propagation failed for {op_info.schema}"
             ) from e
 
         output_sharding = op_info.output_sharding
-        logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.compute_mesh
         participating = mesh.get_coordinate() is not None
+        local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
@@ -184,7 +191,9 @@ class OpDispatcher:
 
             local_tensor_args = (
                 pytree.tree_unflatten(
-                    cast(list[object], op_info.local_args), op_info.args_tree_spec
+                    cast(list[object], op_info.local_args),
+                    # pyrefly: ignore [bad-argument-type]
+                    op_info.args_tree_spec,
                 )
                 if op_info.args_tree_spec
                 else op_info.local_args
@@ -271,14 +280,16 @@ class OpDispatcher:
 
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
-                # For equal operator, The local results from all devices should be all-gathered
-                # and a reduce op (AND) will be performed on the list of results to ensure SPMD
-                # execution. We can extend this for more ops if necessary.
-                obj_list = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
-                obj_list = list(filter(lambda x: x is not None, obj_list))
-                # perform reduce on the collection with AND op
-                local_results = functools.reduce(operator.and_, obj_list, True)
+                # The output of the equal op is a bool, by converting it into a
+                # a single value tensor, we can use all-reduce with min reduce op
+                # to simulate logical and.
+                assert local_results is None or isinstance(local_results, bool)
+                r = torch.tensor(
+                    int(local_results) if local_results is not None else 1,
+                    device=mesh.device_type,
+                )
+                dist.all_reduce(r, op=dist.ReduceOp.MIN)
+                local_results = bool(r.item())
 
         if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping
@@ -330,6 +341,8 @@ class OpDispatcher:
         suggested_input_schema: OpSchema,
         use_val_from_redistribute_schema: bool,
     ) -> None:
+        debug_mode = get_active_debug_mode()
+
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
             flatten_args_schema_to_reshard = tuple(
@@ -344,9 +357,21 @@ class OpDispatcher:
             if isinstance(arg_spec, DTensorSpec):
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
-                    resharded_local_tensor = redistribute_local_tensor(
-                        local_tensor, arg_spec, reshard_arg_spec
+                    redistribute_context = (
+                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+                            i, arg_spec, reshard_arg_spec
+                        )
+                        if debug_mode is not None
+                        else contextlib.nullcontext()
                     )
+
+                    with redistribute_context:
+                        resharded_local_tensor = redistribute_local_tensor(
+                            local_tensor,
+                            arg_spec,
+                            # pyrefly: ignore [bad-argument-type]
+                            reshard_arg_spec,
+                        )
                     new_local_args.append(resharded_local_tensor)
                 else:
                     new_local_args.append(local_tensor)
@@ -415,7 +440,10 @@ class OpDispatcher:
                     op_call, args_list
                 )
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
-                    op_call, v, compute_mesh
+                    op_call,
+                    v,
+                    # pyrefly: ignore [bad-argument-type]
+                    compute_mesh,
                 )
                 local_kwargs[k] = v
             else:
@@ -431,6 +459,7 @@ class OpDispatcher:
             OpSchema(
                 op_call,
                 (
+                    # pyrefly: ignore [bad-argument-type]
                     pytree.tree_unflatten(args_schema, args_spec)
                     if args_spec
                     else tuple(args_schema)
@@ -452,6 +481,7 @@ class OpDispatcher:
                 assert isinstance(spec, DTensorSpec), (
                     f"output spec does not match with output! Expected DTensorSpec, got {spec}."
                 )
+                # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
@@ -483,7 +513,8 @@ class OpDispatcher:
                 "Found a non-scalar tensor with numel=1 and ndim!=0, "
                 "we are implicitly creating a replicated DTensor for it. "
                 "However, please consider changing it to a scalar tensor "
-                "or explicitly create a DTensor under distributed environment."
+                "or explicitly create a DTensor under distributed environment.",
+                stacklevel=2,
             )
 
         if tensor_arg.numel() == 1 or self._allow_implicit_replication:
@@ -501,5 +532,7 @@ class OpDispatcher:
             raise RuntimeError(
                 f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
+                " Please see https://docs.pytorch.org/docs/main/distributed.tensor.html#mixed-tensor-and-dtensor-operations"
+                " for more details."
             )
         return replication_spec

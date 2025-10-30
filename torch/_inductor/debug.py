@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import torch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
-from torch import fx as fx
+from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._inductor import utils
@@ -34,7 +34,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
-from .ir import ExternKernelOut
+from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -97,6 +97,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
+        # pyrefly: ignore [missing-attribute]
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -228,6 +229,7 @@ def update_orig_fx_node_name_to_buf_name(
             )
             continue
         else:
+            # pyrefly: ignore [bad-argument-type, unsupported-operation]
             assert len(children_nodes) == 1 and children_nodes[0] == node
 
         ir_node = node.node
@@ -251,6 +253,7 @@ def get_node_name_to_buf_meta(
         if buf_name not in buf_name_to_n_node:
             buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
+            # pyrefly: ignore [missing-attribute]
             buf_name_to_n_node[buf_name].add(node_name)
 
     node_name_to_buf_meta = {}
@@ -1093,7 +1096,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     kernel_name: str,
     is_extern: bool = False,
 ) -> Optional[int]:
@@ -1102,6 +1105,9 @@ def set_kernel_post_grad_provenance_tracing(
 
     Returns a unique int debug handler for each call to this function.
     """
+
+    if config.trace.provenance_tracking_level == 0:
+        return None
 
     try:
         from .codegen.simd_kernel_features import DisableReduction, EnableReduction
@@ -1114,7 +1120,7 @@ def set_kernel_post_grad_provenance_tracing(
         stack_traces: list[str] = []
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
-            assert isinstance(node_schedule, ExternKernelOut)
+            assert isinstance(node_schedule, ExternKernel)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )
@@ -1143,9 +1149,11 @@ def set_kernel_post_grad_provenance_tracing(
                                 kernel_name, []
                             )
                         )
+                        # pyrefly: ignore [missing-attribute]
                         stack_traces_set.update(snode.node.get_stack_traces())
                         curr_node_info.extend(
                             origin.name
+                            # pyrefly: ignore [missing-attribute]
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )
@@ -1250,7 +1258,7 @@ def aot_inductor_minifier_wrapper(
 
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
-    gm = exported_program.module()
+    gm = exported_program.module(check_guards=False)
     assert isinstance(gm, torch.fx.GraphModule)
 
     args, kwargs = exported_program.example_inputs
@@ -1279,7 +1287,7 @@ def aot_inductor_minifier_wrapper(
             tuple_inputs = tuple(flat_example_inputs)
             flattened_ep = torch.export.export(gm_copy, tuple_inputs, strict=False)
             func(
-                flattened_ep.module(),
+                flattened_ep.module(check_guards=False),
                 tuple_inputs,
                 inductor_configs=config_copy,
                 package_path=package_path,

@@ -29,6 +29,7 @@ import cProfile
 import dis
 import functools
 import gc
+import inspect
 import itertools
 import logging
 import os
@@ -45,7 +46,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -95,6 +96,7 @@ from .cache_size import (
 )
 from .eval_frame import (
     always_optimize_code_objects,
+    Constraint,
     dynamo_tls,
     skip_code,
     TorchPatcher,
@@ -115,14 +117,19 @@ from .exc import (
     unimplemented_v2,
     Unsupported,
 )
+from .graph_bytecode_inputs import reset_user_object_tracking
 from .guards import (
     CheckFunctionManager,
     get_and_maybe_log_recompilation_reasons,
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import DynamoTracerOutput
-from .pgo import log_frame_dynamic_whitelist, put_code_state
+from .output_graph import DynamoTracerOutput, OutputGraphCommon
+from .pgo import (
+    _log_size_mismatch_recompile,
+    log_frame_dynamic_whitelist,
+    put_code_state,
+)
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -169,6 +176,10 @@ except ModuleNotFoundError:
 
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.utils.weak import WeakIdKeyDictionary
+
     from .backends.registry import CompilerFn
     from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
@@ -296,7 +307,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
             if torch.cuda.is_available():
-                cuda_rng_state = torch.cuda.get_rng_state()
+                with torch._C.DisableTorchFunction():
+                    cuda_rng_state = torch.cuda.get_rng_state()
             cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
                 "cuda", "matmul"
             )
@@ -308,6 +320,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
             exit_stack.enter_context(torch_function_mode_stack_state_mgr)
+            reset_user_object_tracking()
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -330,7 +343,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 if prior_mobile_allocator_state != curr_mobile_allocator_state:
                     torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
-                    torch.cuda.set_rng_state(cuda_rng_state)
+                    with torch._C.DisableTorchFunction():
+                        torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_fp32_precision_setter(
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
@@ -461,6 +475,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         try:
             prof.enable()
             start_ts = time.time()
+            # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
             prof.disable()
@@ -522,12 +537,6 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
 @dataclass
 class ConvertFrameBox:
     error_on_graph_break: Optional[bool] = None
-
-
-def _is_error_on_graph_break(tx: Optional[DynamoTracerOutput]) -> bool:
-    if tx is None:
-        return _get_error_on_graph_break()
-    return tx.error_on_graph_break
 
 
 def get_compile_id(
@@ -752,6 +761,9 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
+# TODO - We want to run preserve_node_meta context manager here, but the CI
+# fails (its unclear if the failures were flaky)
+# @torch.fx.traceback.preserve_node_meta()
 @preserve_global_state
 def trace_frame(
     code: types.CodeType,
@@ -856,15 +868,35 @@ class DynamoOutput:
         hooks: Optional[Hooks] = None,
         save: bool = False,
         cache_entry: Optional[CacheEntry] = None,
+        strict_error: bool = False,
     ) -> CheckFunctionManager:
-        assert self.tracer_output.output_graph is not None
+        output_graph = self.tracer_output.output_graph
+        assert output_graph is not None
         return CheckFunctionManager(
             code,
-            self.tracer_output.output_graph,
+            output_graph,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
+            strict_error=strict_error,
+        )
+
+    def graph_capture_output(self) -> GraphCaptureOutput:
+        output_graph = self.tracer_output.output_graph
+        assert output_graph is not None
+        return GraphCaptureOutput(
+            OutputGraphCommon(
+                output_graph.dump_guards_state(),
+                output_graph.import_sources,
+                output_graph.shape_env,
+                output_graph.export_metadata,
+                output_graph.tracked_fakes_id_to_source,
+            ),
+            output_graph.import_sources,
+            output_graph.traced_code,
+            self.bytecode,
+            self.tracer_output.closure,
         )
 
 
@@ -883,6 +915,38 @@ class BackendInput:
     graph_module: torch.fx.GraphModule
     example_inputs: Any
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    tensor_to_context: WeakIdKeyDictionary
+
+
+@dataclass
+class GraphCaptureOutput:
+    """
+    Minimal version of DynamoOutput
+    """
+
+    output_graph: OutputGraphCommon
+    import_sources: dict[str, str]
+    traced_code: list[CodeType]
+    bytecode: CodeType
+    closure: Optional[tuple[Any, ...]]
+
+    def build_guards(
+        self,
+        code: types.CodeType,
+        hooks: Optional[Hooks] = None,
+        save: bool = False,
+        cache_entry: Optional[CacheEntry] = None,
+        strict_error: bool = False,
+    ) -> CheckFunctionManager:
+        return CheckFunctionManager(
+            code,
+            self.output_graph,
+            cache_entry,
+            hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
+            save_guards=save,
+            strict_error=strict_error,
+        )
 
 
 @dataclass
@@ -897,8 +961,129 @@ class CaptureOutput:
     frontends.
     """
 
-    dynamo_output: DynamoOutput
-    backend_input: BackendInput
+    graph_capture_output: GraphCaptureOutput
+    # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
+    backend_input: Optional[BackendInput]
+
+    def forward_callable(self) -> Callable[..., Any]:
+        import importlib
+
+        # TODO code sharing
+        import_sources = self.graph_capture_output.output_graph.import_sources
+        assert self.backend_input is not None
+        backend_id = self.backend_input.backend_id
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in import_sources.items()
+        }
+        f_globals = {
+            **import_sources,
+            backend_id: self.backend_input.graph_module,
+        }
+        return types.FunctionType(
+            self.graph_capture_output.bytecode,
+            f_globals,
+            closure=self.graph_capture_output.closure,
+        )
+
+
+def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
+    """
+    Utility function to get the function to trace, and optionally a bound self
+    object, from a callable (nn.Module, function, or method).
+    """
+    import inspect
+
+    if isinstance(mod, torch.nn.Module):
+        mod = mod.forward
+    if hasattr(mod, "__self__"):
+        # pyrefly: ignore [missing-attribute]
+        return mod.__func__, mod.__self__
+    elif inspect.isfunction(mod):
+        return mod, None
+    else:
+        raise RuntimeError(f"Unsupported model code type {mod}")
+
+
+def _get_signature(fn: Any) -> inspect.Signature:
+    return inspect.signature(fn, follow_wrapped=False)
+
+
+def _get_frame(
+    mod: Any,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+) -> FrameInfo:
+    """
+    Create a frame to trace, given a model, args, and optional kwargs.
+    """
+    import builtins
+
+    fn, self_opt = get_traced_fn(mod)
+    if self_opt is not None:
+        args = (self_opt,) + args
+    if kwargs is None:
+        kwargs = {}
+
+    signature = _get_signature(fn)
+    bound_arguments = signature.bind(*args, **kwargs)
+    bound_arguments.apply_defaults()
+    f_locals = bound_arguments.arguments
+
+    closure = fn.__closure__ or ()
+    freevars = fn.__code__.co_freevars
+    if freevars or closure:
+        assert len(closure) == len(freevars)
+        f_locals.update(
+            {name: cell.cell_contents for name, cell in zip(freevars, closure)}
+        )
+
+    return FrameInfo(
+        fn.__code__,
+        fn.__globals__,
+        f_locals,
+        builtins.__dict__,
+        closure=fn.__closure__ or (),  # type: ignore[arg-type]
+    )
+
+
+def fullgraph_capture(
+    mod: Any,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    *,
+    constraints: Optional[list[Constraint]] = None,
+    _is_export_deprecated_do_not_use: bool = False,
+) -> CaptureOutput:
+    """
+    This API captures a full graph for a model, given example inputs to trace with.
+
+    Specifically, it takes a callable (nn.Module, method, or function), args, and
+    optional kwargs, and returns Dynamo-captured graph along with other important
+    compile-time information. This serves as the common graph-capture mechanism
+    for different torch compiler AOT frontends (e.g. AOT precompile, export).
+
+    Note that this API doesn't apply context managers like metrics context,
+    and the expectation is that the caller will apply them depending
+    on the use case.
+
+    The CaptureOutput is separated into two parts:
+    1. Frontend specific information, which includes:
+        - guards
+        - generated bytecode
+        - other information tracked by OutputGraphCommon.
+    2. Backend specific information (indexed by unique backend id) such as:
+        - fx graph
+        - example inputs
+    """
+    frame = _get_frame(mod, args, kwargs)
+
+    with compile_context(CompileContext(get_compile_id({}))):
+        return _fullgraph_capture_frame(
+            frame,
+            constraints=constraints,
+            _is_export_deprecated_do_not_use=_is_export_deprecated_do_not_use,
+        )
 
 
 @dataclass
@@ -910,24 +1095,12 @@ class FrameInfo:
     closure: tuple[CellType]
 
 
-def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
-    """
-    A standalone function which takes a frame and returns dynamo captured graph
-    plus other important compile information. This should serve as the common
-    interface for different torch compiler AOT frontengs (e.g. precompile, export).
-    Note that this function doesn't apply context managers like metrics context
-    or compile id, and the expectation is that the caller will apply them depending
-    on the use case.
-
-    The CaptureOutput is separated into two parts:
-    1. Dynamo specific information from DynamoOutput, which includes:
-        - guards
-        - generated bytecode
-        - other information tracked by OutputGraph.
-    2. Backend specific information (indexed by unique backend id) such as:
-        - fx graph
-        - example inputs
-    """
+def _fullgraph_capture_frame(
+    frame: FrameInfo,
+    *,
+    constraints: Optional[list[Constraint]] = None,
+    _is_export_deprecated_do_not_use: bool = False,
+) -> CaptureOutput:
     from torch._guards import TracingContext
 
     backend_input: Optional[BackendInput] = None
@@ -936,26 +1109,46 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> torch.fx.GraphModule:
         nonlocal backend_input
-        fake_mode = TracingContext.get().fake_mode
+        tracing_context = TracingContext.get()
+        fake_mode = tracing_context.fake_mode
+        tensor_to_context = tracing_context.tensor_to_context
         assert fake_mode is not None
         assert isinstance(gm.meta["backend_id"], str)
         backend_input = BackendInput(
-            gm.meta["backend_id"], gm, example_inputs, fake_mode
+            gm.meta["backend_id"], gm, example_inputs, fake_mode, tensor_to_context
         )
         return gm
 
-    dynamo_output = compile_frame(
-        frame.code,
-        frame.globals,
-        frame.locals,
-        frame.builtins,
-        frame.closure,
-        compiler_fn=fullgraph_compiler,
-        one_graph=True,
-        restart_reasons=set(),
+    try:
+        dynamo_output = compile_frame(
+            frame.code,
+            frame.globals,
+            frame.locals,
+            frame.builtins,
+            frame.closure,
+            compiler_fn=fullgraph_compiler,
+            export=_is_export_deprecated_do_not_use,
+            export_constraints=constraints,  # type: ignore[arg-type]
+            one_graph=True,
+            restart_reasons=set(),
+        )
+        # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
+    except Unsupported as e:
+        augment_exc_message(e)
+        if config.verbose:
+            raise
+        # strip internal tracebacks from causes
+        cur_exn: BaseException = e
+        while cur_exn.__cause__ is not None:
+            cur_exn.__cause__.with_traceback(None)
+            cur_exn = cur_exn.__cause__
+        # pyrefly: ignore [invalid-inheritance]
+        raise e.with_traceback(None) from e.__cause__  # User compiler error
+
+    return CaptureOutput(
+        dynamo_output.graph_capture_output(),
+        backend_input,
     )
-    assert backend_input is not None
-    return CaptureOutput(dynamo_output, backend_input)
 
 
 def compile_frame(  # type: ignore[return]
@@ -973,6 +1166,7 @@ def compile_frame(  # type: ignore[return]
     frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
+    # pyrefly: ignore [bad-return]
 ) -> DynamoOutput:
     """
     A helper function taking a frame and backend, then return the generated bytecode
@@ -1047,7 +1241,7 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
-            log.debug(
+            log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
                 e,
@@ -1152,10 +1346,8 @@ def _compile(
                 package=package,
             )
         except exc.SkipFrame as e:
-            if one_graph or _is_error_on_graph_break(e._torch_dynamo_tracer_output):
-                log.debug(
-                    "No graph captured with one_graph=True or error_on_graph_break=True"
-                )
+            if one_graph:
+                log.debug("No graph captured with export/fullgraph=True")
             assert e._torch_dynamo_tracer_output is not None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
@@ -1249,6 +1441,7 @@ def _compile(
             assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
+            package.update_device_type(output.current_tracer.graph)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -1361,10 +1554,9 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _get_error_on_graph_break():
+            elif one_graph:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
-                    "Excessive recompilations can degrade "
+                    f"{limit_type} reached with fullgraph=True. Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
                     "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
@@ -1420,6 +1612,7 @@ def _compile(
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
+        tracer_output = None
         try:
             guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
 
@@ -1439,6 +1632,8 @@ def _compile(
                 and output_graph.has_outputs()
             ):
                 log_frame_dynamic_whitelist(code)
+                if recompile_reason and "size mismatch at index" in recompile_reason:
+                    _log_size_mismatch_recompile()
 
             return guarded_code
         except Exception as e:
@@ -1732,7 +1927,7 @@ def replay(filename: str) -> None:
         record = ExecutionRecord.load(in_file)
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
-    with decorators.set_fullgraph(fullgraph=False):
+    with decorators.error_on_graph_break(False):
         try:
             _compile(
                 record.code,
@@ -1793,7 +1988,6 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
-
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)

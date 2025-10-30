@@ -13,7 +13,6 @@ from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -431,12 +430,10 @@ class TestMakeFx(TestCase):
         # so create a fake_pg.
         self.rank = 0
         self.world_size = 2
-        store = FakeStore()
         dist.init_process_group(
             backend="fake",
             world_size=self.world_size,
             rank=self.rank,
-            store=store,
         )
 
     def tearDown(self):
@@ -598,7 +595,6 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
             backend="fake",
             rank=0,
             world_size=8,
-            store=FakeStore(),
         )
         allreduce(torch.randn(8, device=device), pg=dist.group.WORLD)
         dist.destroy_process_group()

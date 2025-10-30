@@ -36,6 +36,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 class Model(torch.nn.Module):
     def __init__(self) -> None:
@@ -94,9 +96,9 @@ class ModelWithIgnoredModules(Model):
 class TestFSDPIgnoredModules(FSDPTest):
     @property
     def world_size(self):
-        return min(torch.cuda.device_count(), 2)
+        return min(torch.accelerator.device_count(), 2)
 
-    def _train_model(self, model, optim, num_iters, device=torch.device("cuda")):
+    def _train_model(self, model, optim, num_iters, device=torch.device(device_type)):
         for _ in range(num_iters):
             module = model.module if isinstance(model, FSDP) else model
             inp = module.get_input(device)
@@ -198,7 +200,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         # Initialize an FSDP-wrapped nested model that first wraps the nested
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
-        model = Model().cuda()
+        model = Model().to(device_type)
         fsdp_fn = functools.partial(FSDP, use_orig_params=use_orig_params)
         model.layer1[1] = fsdp_fn(model.layer1[1])
         if ignore_modules:
@@ -246,7 +248,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         )
 
     def _test_ignored_states_auto_wrap(self, policy, ignore_bias: bool):
-        model = Model().cuda()
+        model = Model().to(device_type)
         ignored_states = [model.layer1[1].weight]
         if ignore_bias:
             ignored_states.append(model.layer1[1].bias)
@@ -285,7 +287,7 @@ class TestFSDPIgnoredModules(FSDPTest):
     def test_ignored_modules_invalid(self):
         """Tests that passing an FSDP module as an ignored module or the
         top-level module itself errors."""
-        model = Model().cuda()
+        model = Model().to(device_type)
         wrap_cls = FSDP
         model.layer1 = wrap_cls(model.layer1)
         # Passing an FSDP module as an ignored module should error
@@ -302,7 +304,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         ):
             # FSDP does not allow to wrap the same model twice, so create
             # a new local model here.
-            new_model = Model().cuda()
+            new_model = Model().to(device_type)
             wrap_cls(new_model, ignored_modules=[new_model])
 
     @skip_if_lt_x_gpu(2)
@@ -334,7 +336,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         # we wrap `layer3` with FSDP, where `layer3` is registered as a module
         # after `layer1`, which has the variable number of ignored modules
         wrap_cls = FSDP
-        model = ModelWithIgnoredModules(num_ignored=self.rank + 1).cuda()
+        model = ModelWithIgnoredModules(num_ignored=self.rank + 1).to(device_type)
         layer1_ignored_modules = [
             m for m in model.layer1.modules() if isinstance(m, IgnoredModule)
         ]
@@ -370,7 +372,7 @@ class TestFSDPIgnoredModules(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("ignore_modules", [True, False])
     def test_ignored_modules_not_under_wrapped_root(self, ignore_modules: bool):
-        model = Model().cuda()
+        model = Model().to(device_type)
         ignored_modules = list(model.layer1.children())[1:]
 
         ignore_kwargs = (
@@ -409,7 +411,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         )
 
     def _test_ignored_states_check(self, ignore_modules: bool):
-        model = Model().cuda()
+        model = Model().to(device_type)
         ignored_modules = list(model.layer1.children())[1:]
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
         ignored_states = ignored_params.union(set(ignored_modules))

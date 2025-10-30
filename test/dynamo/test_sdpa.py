@@ -5,6 +5,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 from torch.backends.cuda import SDPAParams
+from torch.nn.attention import _cur_sdpa_kernel_backends, sdpa_kernel, SDPBackend
 
 
 @contextlib.contextmanager
@@ -98,6 +99,43 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             expected = SDPAParams(q, k, v, m, 0.1, True, False)
             self.assert_ref_equals_params(o, expected)
             self.assertEqual(counter.frame_count, 1)
+
+    def test_sdpa_c_functions_no_graph_break(self):
+        counter = CompileCounter()
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def test_cur_sdpa_kernel_backends():
+            return _cur_sdpa_kernel_backends()
+
+        result = test_cur_sdpa_kernel_backends()
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_sdpa_kernel_decorator_with_compile(self):
+        SDPA_BACKEND_PRIORITY = [
+            SDPBackend.MATH,
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.FLASH_ATTENTION,
+        ]
+
+        @sdpa_kernel(backends=SDPA_BACKEND_PRIORITY, set_priority=True)
+        def scaled_dot_product_attention(q, k, v, *args, **kwargs):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, *args, **kwargs
+            )
+
+        counter = CompileCounter()
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def f(x):
+            return scaled_dot_product_attention(x, x, x)
+
+        x = torch.rand(128, 64, 64, 256, dtype=torch.float16)
+        result = f(x)
+
+        self.assertEqual(result.shape, x.shape)
+        self.assertEqual(counter.frame_count, 1)
 
 
 if __name__ == "__main__":

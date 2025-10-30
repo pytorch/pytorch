@@ -5,7 +5,6 @@ import pickle
 import random
 import signal
 import string
-import sys
 import traceback
 from collections.abc import KeysView, Sequence
 from enum import Enum
@@ -23,7 +22,8 @@ from typing import (
 )
 
 import torch
-from torch._inductor.custom_graph_pass import CustomGraphPass
+from functorch.compile import min_cut_rematerialization_partition
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomPartitionerFn
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch.utils._config_module import _ConfigEntry, ConfigModule
 from torch.utils._ordered_set import OrderedSet
@@ -74,6 +74,20 @@ class DummyPass(CustomGraphPass):
         return None
 
 
+class DummyPartitionerFn(CustomPartitionerFn):
+    """
+    A Dummy partitioner function to be used by ConfigFuzzer
+    """
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, joint_inputs: Sequence[object], **kwargs: Any
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        return min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
+
+    def uuid(self) -> Optional[Any]:
+        return None
+
+
 T = TypeVar("T")
 
 
@@ -84,6 +98,7 @@ class TypeExemplars:
 
     TYPE_EXEMPLARS: dict[str, Any] = {
         CustomGraphPass.__name__: DummyPass(),
+        CustomPartitionerFn.__name__: DummyPartitionerFn(),
         torch.fx.graph.Graph.__name__: torch.fx.graph.Graph(),
         BaseSchedulerNode.__name__: BaseSchedulerNode(None),  # type: ignore[arg-type]
     }
@@ -93,10 +108,12 @@ class TypeExemplars:
         """
         Return an example of a class.
         """
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
     def contains(t: type[T]) -> bool:
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
@@ -203,15 +220,15 @@ class SamplingMethod(Enum):
         if field_name in TYPE_OVERRIDES:
             return random.choice(TYPE_OVERRIDES[field_name])
 
-        if type_hint == bool:
+        if type_hint is bool:
             return random.choice([True, False]) if random_sample else not default
-        elif type_hint == int:
+        elif type_hint is int:
             # NOTE initially tried to use negation of the value, but it doesn't work because most types are ints
             # when they should be natural numbers + zero. Python types to cover these values aren't super convenient.
             return random.randint(0, 1000)
-        elif type_hint == float:
+        elif type_hint is float:
             return random.uniform(0, 1000)
-        elif type_hint == str:
+        elif type_hint is str:
             characters = string.ascii_letters + string.digits + string.punctuation
             return "".join(
                 random.choice(characters) for _ in range(random.randint(1, 20))
@@ -289,11 +306,11 @@ class SamplingMethod(Enum):
                 new_type = random.choice(type_hint.__args__)
             else:
                 new_type = random.choice(
-                    [t for t in type_hint.__args__ if t != type(default)]
+                    [t for t in type_hint.__args__ if t is not type(default)]
                 )
             try:
                 new_default = new_type()
-            except Exception:  # noqa: E722
+            except Exception:
                 # if default constructor doesn't work, try None
                 new_default = None
 
@@ -368,7 +385,7 @@ class SamplingMethod(Enum):
         elif TypeExemplars.contains(type_hint):
             return TypeExemplars.example(type_hint)
         elif type_hint == Any:
-            return 1 if not default == 1 else 2
+            return 1 if default != 1 else 2
         else:
             raise ValueError(f"Unable to process type {type_hint}. PRs welcome :)")
 
@@ -499,6 +516,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "joint_custom_post_pass": DEFAULT,  # Typing
         "joint_custom_pre_pass": DEFAULT,  # Typing
         "pre_grad_custom_pass": DEFAULT,  # Typing
+        "custom_partitioner_fn": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
@@ -593,9 +611,6 @@ class ConfigFuzzer:
             sm: How type value samples are generated, default TOGGLE.
             test_timeout: max time a test can take.
         """
-        if sys.version_info < (3, 10):
-            log.error("Only python 3.10 and later supported")
-            return
         self.seed = seed
         self.test_timeout = test_timeout
         self.detailed_results: dict[ComboType, dict[str, Any]] = {}
@@ -764,7 +779,7 @@ class ConfigFuzzer:
         test_model_fn = self.test_model_fn_factory()
         try:
             test_model_fn()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
             )
@@ -773,7 +788,7 @@ class ConfigFuzzer:
         try:
             test_model_fn2 = self.test_model_fn_factory()
             comp = torch.compile(test_model_fn2, backend="inductor")
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
             )
@@ -781,7 +796,7 @@ class ConfigFuzzer:
         # try running compiled
         try:
             compile_result = comp()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception running compiled",
                 Status.FAILED_RUN_COMPILE_EXCEPTION,

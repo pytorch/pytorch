@@ -66,6 +66,10 @@ class Weights {
    * Replace the value stored at the weight with name "name".
    */
   void setValue(const std::string& name, const at::Tensor& newValue);
+  void setValue(
+      const std::string& name,
+      const at::Tensor& newValue,
+      bool skipDeviceCheck);
 
   /*
    * Update the value stored at the weight with name "name".
@@ -77,6 +81,10 @@ class Weights {
       const std::unordered_map<std::string, at::Tensor>& newValues);
 
   void validateValue(const std::string& name, const at::Tensor& newValue) const;
+  void validateValue(
+      const std::string& name,
+      const at::Tensor& newValue,
+      bool skipDeviceCheck) const;
 
   void validateAllWeightsLoaded();
 

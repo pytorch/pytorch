@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from typing_extensions import Protocol, runtime_checkable
 
 
