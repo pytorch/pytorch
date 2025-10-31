@@ -5849,7 +5849,7 @@ class ExternKernel(InputsKernel):
         if shape_env := V.fake_mode.shape_env:
             node_meta_val = V.current_node.meta.get("val")
             ctx: AbstractContextManager[None] = nullcontext()
-            if V.current_node.target == torch._higher_order_ops.effects.with_effects:
+            if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
@@ -8770,9 +8770,7 @@ class WhileLoop(ExternKernel):
         seen_buffers: OrderedSet[int] = OrderedSet()
         result: list[Union[IRNode, TensorBox, ShapeAsConstantBuffer]] = []
 
-        for i, (original_input, unwrapped_buffer) in enumerate(
-            zip(carried_inputs, unwrapped_buffers)
-        ):
+        for original_input, unwrapped_buffer in zip(carried_inputs, unwrapped_buffers):
             if id(unwrapped_buffer) in seen_buffers:
                 result.append(ExternKernel.copy_input(original_input))
             else:
@@ -9463,3 +9461,30 @@ def maybe_free_symbols(s: object) -> OrderedSet[Symbol]:
         return free_symbols(s)
     else:
         return OrderedSet()
+
+
+def assign_origin_node(result: Any, n: torch.fx.Node) -> None:
+    # This is not complete, but it doesn't have to be: origin_node
+    # tracking is best effort.  The logic here critically relies on direct
+    # TensorBox -> StorageBox denoting a non-view; we don't bother trying
+    # to get views to work.  Feel free to add any extra cases as needed.
+    #
+    # Note: we can't YOLO tree_map over this result, because if there are
+    # buffers or a view involved, we might not be able to validly assign
+    # the origin_node here.
+    if isinstance(result, TensorBox) and isinstance(result.data, StorageBox):
+        if isinstance(result.data.data, Loops):
+            result.data.data._post_init_setattr("origin_node", n)
+        elif isinstance(result.data.data, Buffer):
+            result.data.data._post_init_setattr("origin_node", n)
+            if isinstance(result.data.data, ComputedBuffer) and isinstance(
+                result.data.data.data, Loops
+            ):
+                result.data.data.data._post_init_setattr("origin_node", n)
+            # Not really multi-output, can straightforwardly recurse in
+            elif (
+                isinstance(result.data.data, MultiOutput)
+                and not result.data.data.indices
+            ):
+                if isinstance(result.data.data.inputs[0], Buffer):
+                    result.data.data.inputs[0]._post_init_setattr("origin_node", n)
