@@ -2112,6 +2112,11 @@ class BlockParameters:
                 # Use identity
                 sort_idx = list(range(len(original_strides)))
             else:
+                # TODO: even if the strides are not in descending order the strides
+                # may be tensor descriptor compliant
+                # i.e. innermost stride == 1 and outer strides 16 byte aligned
+                # We should benchmark the effect of applying a transpose to these
+                # cases vs leaving them unsorted.
                 sort_idx = utils.argsort(original_strides, reverse=True)
 
             return cls(
