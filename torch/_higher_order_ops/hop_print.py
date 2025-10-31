@@ -8,14 +8,36 @@ class Print(HigherOrderOperator):
         super().__init__("hop_print")
         self._print_str = None
 
-    def __call__(self, *args, **kwargs):
-        if self._print_str is None:
-            self._print_str = self._get_print_str()
-        print(self._print_str)
-        return self._fn(*args, **kwargs)
+    def __call__(self, format_str, **kwargs):
+        self._print_str = format_str
+        self._print_kwargs = kwargs
+        return super().__call__(format_str, **kwargs)
 
     def _get_print_str(self):
-        return
+        return self._print_str
 
 
 print = Print()
+
+
+@print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
+# pyre-ignore
+def print_cpu(format_str, **kwargs):
+    # Ensure all immutable_dict/list in kwargs are converted to regular dict/list
+    map_types: dict[type, type] = {
+        torch.fx.immutable_collections.immutable_dict: dict,
+        torch.fx.immutable_collections.immutable_list: list,
+    }
+    if kwargs:
+        new_kwargs = pytree.tree_map_only(
+            tuple(map_types.keys()),
+            lambda a: map_types[type(a)](a),
+            kwargs,
+            lambda a: isinstance(a, tuple(map_types.keys())),
+        )
+        print_str = format_str.format(**new_kwargs)
+    else:
+        print_str = format_str
+    # Use built-in print to avoid recursion with the HOP print
+    __builtins__["print"](print_str)
+    return None
