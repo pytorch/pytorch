@@ -370,7 +370,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                                      onValue:-1.0f
                                                     offValue:0.0f
                                                         name:nil];
-      oneHotTensor = castMPSTensor(mpsGraph, oneHotTensor, inputTensor.dataType);
+      oneHotTensor = castMPSTensor(mpsGraph, oneHotTensor, [inputTensor dataType]);
       if (isWeightsArrayValid) {
         oneHotTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                  secondaryTensor:weightTensor
@@ -705,6 +705,7 @@ static void smooth_l1_loss_template(const Tensor& input,
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.");
   TORCH_CHECK(input.is_mps());
   TORCH_CHECK(target.is_mps());
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "MPS doesn't know how to do square_i64");
   if ((input.numel() == 0) || (target.numel() == 0)) {
     reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
     return;
@@ -771,7 +772,7 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
       MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:MPSDataTypeFloat32];
+      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta dataType:[inputTensor dataType]];
       // xn - yn
       MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                           secondaryTensor:targetTensor
@@ -797,7 +798,8 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
                                                                   name:@"lossTensor"];
       MPSGraphTensor* outputTensor = lossTensor;
       if (reduction == Reduction::Mean) {
-        MPSGraphTensor* numelTensor = [mpsGraph constantWithScalar:(double)input.numel() dataType:MPSDataTypeFloat32];
+        MPSGraphTensor* numelTensor = [mpsGraph constantWithScalar:(double)input.numel()
+                                                          dataType:[lossTensor dataType]];
         outputTensor = [mpsGraph divisionWithPrimaryTensor:lossTensor secondaryTensor:numelTensor name:nil];
       }
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor

@@ -738,8 +738,6 @@ if torch.backends.mps.is_available():
             "equal": [torch.float16, torch.float32],
             # 'float' object is not iterable
             "item": [torch.float16, torch.float32],
-            # "smooth_l1_backward_cpu_out" not implemented for 'Half'
-            "nn.functional.smooth_l1_loss": [torch.float16],
             # cpu error: grad requires non-empty inputs
             "randn": [torch.float16, torch.float32],
             "signal.windows.bartlett": [torch.float32],
@@ -812,7 +810,6 @@ if torch.backends.mps.is_available():
             "__rmod__",
             "__rsub__",
             "__rpow__",
-            "bernoulli",
             "clamp_max",
             "clamp_min",
             "masked_scatter",
@@ -828,8 +825,6 @@ if torch.backends.mps.is_available():
             "amax",
             "amin",
             "aminmax",
-            # memory overlapping checks
-            "index_select",
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
