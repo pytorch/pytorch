@@ -1479,7 +1479,18 @@ def _compile(
             code.co_firstlineno,
             code,
         )
-
+        # Dump the ORIGINAL bytecode of resumption frame into TORCH_TRACE
+        # log file, so that it is parsed by tlparse tool.
+        is_resumption_frame = "torch_dynamo_resume_in" in code.co_name
+        if is_resumption_frame:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": code.co_name + "_ORIGINAL_BYTECODE",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dis.Bytecode(code).dis(),
+            )
         out_code = None
         try:
             dynamo_output = compile_frame(
@@ -1519,6 +1530,17 @@ def _compile(
             code.co_firstlineno,
             out_code,
         )
+        # Dump the MODIFIED bytecode of resumption frame into TORCH_TRACE
+        # log file, so that it is parsed by tlparse tool.
+        if is_resumption_frame:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": code.co_name + "_MODIFIED_BYTECODE",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dis.Bytecode(out_code).dis(),
+            )
 
         for idx, hook in enumerate(_bytecode_hooks.values()):
             with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
