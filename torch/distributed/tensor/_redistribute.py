@@ -592,7 +592,7 @@ class DTensorRedistributePlanner:
                 current = current_placements[mesh_dim]
                 target = target_placements[mesh_dim]
                 # If target is not Shard, we can directly redistribute since we
-                # are traversing from innner to outer placements here
+                # are traversing from inner to outer placements here
                 if isinstance(target, Shard):
                     # If target is Shard, check for nested sharding on the
                     # tensor dim BEFORE the current mesh_dim
