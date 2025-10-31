@@ -93,6 +93,47 @@ class TestConvolutionNN(NNTestCase):
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
+    def test_huge_padding(self):
+        class Conv1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=1,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv1", module=self.conv1)
+
+        input_data = torch.randn(1, 16, 100)
+        model = Conv1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv1(input_data)
+
+        class ConvTransposed1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transposed1d = nn.ConvTranspose1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=2,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv_transposed1d", module=self.conv_transposed1d)
+
+        input_data = torch.randn(1, 16, 100)
+        model = ConvTransposed1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv_transposed1d(input_data)
+
     def test_invalid_conv1d(self):
         for dtype in [
             torch.half,
@@ -1009,7 +1050,7 @@ class TestConvolutionNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
-        # dominante the layout of output.
+        # dominant the layout of output.
         # which is not the same as current behavior, we'll fix this in
         # following up PRs and remove the `expectedFailure` tag
         input = torch.randint(
@@ -1292,7 +1333,7 @@ class TestConvolutionNN(NNTestCase):
             kernel_x = torch.zeros([3, 1, 1, radius * 2 + 1], device=image.device)
             image = torch.nn.functional.conv2d(image, kernel_x, groups=image.shape[-3])
 
-        for i in range(0, 128):
+        for i in range(128):
             # This should not fail
             reproducer(radius=i)
 
@@ -3599,7 +3640,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     input_format=input_format,
                     weight_format=weight_format,
                 )
-                # test when input chanels is 1 and not converted to channels last
+                # test when input channel is 1 and not converted to channels last
                 helper(
                     nn.Conv2d,
                     2,

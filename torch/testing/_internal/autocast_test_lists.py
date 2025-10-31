@@ -437,7 +437,7 @@ class TestAutocast(TestCase):
                 if isinstance(first, torch.Tensor):
                     return torch.equal(first, second)
                 elif isinstance(first, collections.abc.Iterable):
-                    return all(compare(f, s) for f, s in zip(first, second))
+                    return all(compare(f, s) for f, s in zip(first, second, strict=False))
                 else:
                     return first == second
 

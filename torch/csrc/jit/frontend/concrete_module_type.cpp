@@ -204,7 +204,8 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
-  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
+  TORCH_INTERNAL_ASSERT(
+      it != data_.modules_.end(), "Cannot find submodule with name/key ", name);
   return it->meta_;
 }
 
