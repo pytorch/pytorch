@@ -1503,7 +1503,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         x = torch.randn(3)
         torch._dynamo.maybe_mark_dynamic(x, 0)
 
-        with self.assertRaisesRegex(RuntimeError, None):
+        with self.assertRaisesRegex(
+            RuntimeError, f"{GLOBAL_INT} is not greater than 3"
+        ):
             f(x)
 
     def test_check_raises_at_runtime_when_predicate_false_and_message_None(self):
