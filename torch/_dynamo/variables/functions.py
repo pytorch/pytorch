@@ -333,6 +333,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_name(self):
         return self.get_code().co_name
 
+    def get_globals(self):
+        raise NotImplementedError
+
     def call_function(
         self,
         tx: "InstructionTranslator",
