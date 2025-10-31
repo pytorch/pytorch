@@ -303,7 +303,7 @@ class TestTransformers(NNTestCase):
         encoder = nn.TransformerEncoder(layer, 2).to(device)
         optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
         encoder.train()
-        for i in range(iters):
+        for _ in range(iters):
             encoder.train()
             optimizer.zero_grad()
             inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
@@ -537,7 +537,7 @@ class TestTransformers(NNTestCase):
 
         with torch.no_grad():
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -587,7 +587,7 @@ class TestTransformers(NNTestCase):
 
             with torch.no_grad():
                 # set constant weights of the model
-                for idx, p in enumerate(layer.parameters()):
+                for p in layer.parameters():
                     x = p.data
                     sz = x.view(-1).size(0)
                     shape = x.shape
@@ -4320,8 +4320,8 @@ class TestSDPAXpuOnly(NNTestCase):
             _ = F.scaled_dot_product_attention(q, k, v)
 
     def test_default_priority_order(self, device):
-        # The default priority order of xpu is overrideable, math, flash, efficient, cudnn
-        # For xpu backend, we need to make sure that overrideable > math > flash
+        # The default priority order of xpu is overridable, math, flash, efficient, cudnn
+        # For xpu backend, we need to make sure that overridable > math > flash
         dtype = torch.bfloat16
         shape = SdpaShape(1, 1, 1, 1)
         make_tensor = partial(torch.rand, shape, device=device, dtype=dtype)

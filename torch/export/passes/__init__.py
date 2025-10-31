@@ -78,7 +78,7 @@ def move_to_device_pass(
 
                 if (
                     node.op == "call_function"
-                    and node.target == torch.ops.aten.to.device
+                    and node.target is torch.ops.aten.to.device
                 ):
                     args = list(node.args)
                     # pyrefly: ignore [unsupported-operation]
