@@ -132,8 +132,10 @@ def should_decompose_mm(mat1, mat2) -> bool:
         "skip_dynamic_shape_dim_check", False
     ):
         return (
-            check_device(mat1, mat2, device="cuda")
-            or check_device(mat1, mat2, device="xpu")
+            (
+                check_device(mat1, mat2, device="cuda")
+                or check_device(mat1, mat2, device="xpu")
+            )
             and statically_known_true(
                 mat1.shape[0] >= min_first_dimension_decomposition
             )
@@ -154,8 +156,10 @@ def should_decompose_mm(mat1, mat2) -> bool:
     # case 2: we decompose mm if the input is dynamic shape
     else:
         return (
-            check_device(mat1, mat2, device="cuda")
-            or check_device(mat1, mat2, device="xpu")
+            (
+                check_device(mat1, mat2, device="cuda")
+                or check_device(mat1, mat2, device="xpu")
+            )
             and (
                 statically_known_true(
                     mat1.shape[0] >= min_first_dimension_decomposition
