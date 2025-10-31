@@ -51,24 +51,10 @@ bool input_require_grad(
        (attn_mask.has_value() && attn_mask.value().requires_grad()));
 }
 
-bool check_enable_onednn_sdpa_training() {
-  static const bool enabled = c10::utils::check_env("TORCH_ENABLE_ONEDNN_SDPA_TRAINING") == true;
-  return enabled;
-}
-
 bool check_grad(sdp::sdp_params const& params, bool debug) {
   if (!input_require_grad(
           params.query, params.key, params.value, params.attn_mask))
     return true;
-
-  if (!check_enable_onednn_sdpa_training()) {
-    if (debug) {
-      TORCH_WARN(
-          "scale_dot_product_attention training mode on xpu is not supported by default. ",
-          "Set the environment variable TORCH_ENABLE_ONEDNN_SDPA_TRAINING=1 to enable it.");
-    }
-    return false;
-  }
 
   auto q_num_heads = params.query.sym_size(-3);
   auto k_num_heads = params.key.sym_size(-3);
