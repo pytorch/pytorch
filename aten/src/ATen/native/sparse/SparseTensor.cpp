@@ -902,8 +902,8 @@ Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) 
 }
 
 Tensor view_as_complex_sparse(const Tensor& self) {
-  TORCH_CHECK(self.is_sparse(), "view_as_complex_sparse is only supported for sparse tensors");
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(self.is_sparse(), "view_as_complex_sparse is only supported for sparse tensors");
+  TORCH_CHECK_TYPE(
     self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
     "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
   // Use dispatch stub to dispatch to CPU or CUDA implementation

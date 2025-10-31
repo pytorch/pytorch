@@ -75,7 +75,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   Tensor origIndices = at::empty({nnz}, self._indices().options());
   Tensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
-  typedef thrust::device_ptr<int64_t> thrust_ptr;
+  using thrust_ptr = thrust::device_ptr<int64_t>;
   thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());
   thrust_ptr origIndicesIter(origIndices.data_ptr<int64_t>());
   thrust_ptr uniqueOffsetsIter(uniqueOffsets.data_ptr<int64_t>());
@@ -266,7 +266,7 @@ Tensor view_as_complex_sparse_cuda(const Tensor& self) {
   Tensor sort_perm = std::get<1>(sort_result);
   new_indices = new_indices.index_select(1, sort_perm);
 
-  typedef thrust::device_ptr<int64_t> int_ptr;
+  using int_ptr = thrust::device_ptr<int64_t>;
   int_ptr hash_begin(sorted_hash.data_ptr<int64_t>());
   int_ptr hash_end = hash_begin + nnz;
 
@@ -292,7 +292,7 @@ Tensor view_as_complex_sparse_cuda(const Tensor& self) {
 
     complex_values = complex_values.index_select(0, sort_perm);
 
-    typedef thrust::device_ptr<complex_t> complex_ptr;
+    using complex_ptr = thrust::device_ptr<complex_t>;
     complex_ptr vals_begin(complex_values.data_ptr<complex_t>());
     complex_ptr reduced_vals_begin(reduced_values.data_ptr<complex_t>());
 
@@ -314,7 +314,7 @@ Tensor view_as_complex_sparse_cuda(const Tensor& self) {
 
   // Create mask to remove indices with the same position.
   Tensor keep_mask = at::empty({nnz}, at::TensorOptions().dtype(at::kBool).device(self.device()));
-  typedef thrust::device_ptr<bool> bool_ptr;
+  using bool_ptr = thrust::device_ptr<bool>;
   bool_ptr mask_begin(keep_mask.data_ptr<bool>());
 
   // Mark positions where hash changes (keep first of each group)
