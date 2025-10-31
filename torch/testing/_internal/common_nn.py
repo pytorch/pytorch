@@ -122,8 +122,7 @@ module_tests = [
         with_tf32=True,
         tf32_precision=0.005,
         # ROCM: skipping tf32 test on gfx94 archs due to tolerance issue.
-        test_cuda=False if (TEST_WITH_ROCM and
-            "gfx94" in torch.cuda.get_device_properties(0).gcnArchName) else True,
+        test_cuda=not (TEST_WITH_ROCM and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName),
         default_dtype=torch.double,
     ),
     dict(
