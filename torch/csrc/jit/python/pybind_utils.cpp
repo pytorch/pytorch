@@ -586,7 +586,7 @@ py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    if (tensor.is_wrapped_number()) {
+    if (tensor.unsafeGetTensorImpl()->is_wrapped_number() || (tensor._is_zerotensor() && tensor.dim() == 0)) {
       TORCH_INTERNAL_ASSERT(tensor.device().is_cpu() || (tensor._is_zerotensor() && tensor.dim() == 0));
       auto py_tensor = py::cast(tensor);
       if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
@@ -600,6 +600,8 @@ py::object toPyObject(IValue ivalue) {
           return py::cast(tensor._is_zerotensor() ? int64_t(0) : *tensor.const_data_ptr<int64_t>());
         case at::ScalarType::UInt64:
           return py::cast(tensor._is_zerotensor() ? uint64_t(0) : *tensor.const_data_ptr<uint64_t>());
+        case at::ScalarType::Float:
+          return py::cast(tensor._is_zerotensor() ? float(0.0) : * tensor.const_data_ptr<float>());
         case at::ScalarType::Double:
           return py::cast(tensor._is_zerotensor() ? 0.0 : *tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
