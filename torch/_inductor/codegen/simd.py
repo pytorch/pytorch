@@ -35,7 +35,7 @@ from torch.utils._sympy.symbol import (
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
-from ..codecache import code_hash
+from ..codecache import code_hash, PyCodeCache
 from ..dependencies import MemoryDep, StarDep, WeakDep
 
 
@@ -43,7 +43,9 @@ if TYPE_CHECKING:
     from ..ir import IRNode
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..runtime.runtime_utils import green_text, yellow_text
+from ..runtime.coordinate_descent_tuner import CoordescTuner
+from ..runtime.hints import DeviceProperties
+from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -1535,41 +1537,17 @@ class SIMDScheduling(BaseScheduling):
                 epilogues.append(node)
         return reductions, epilogues
 
-    def _codegen_mix_order_reduction(self, node1, node2):
-        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+    def _generate_kernel_code_for_mix_order_reduction(
+        self, kernel_features, split_size, for_benchmark
+    ):
+        """
+        for_benchmark:
+            True if the generated code is for benchmarking. We need make
+            sure benchmark harness code is generated.
+        """
+        numel, rnumel = kernel_features.numel, kernel_features.reduction_numel
+        node_schedule = kernel_features.node_schedule
 
-        if not V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        ):
-            return self._codegen_mix_order_reduction(node2, node1)
-
-        # pyrefly: ignore [bad-assignment]
-        metrics.codegen_mix_order_reduction += 1
-
-        assert V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        )
-
-        # split epilogue out of node2
-        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
-            node2
-        )
-
-        split_size = config.triton.mix_order_reduction_split_size
-        nsplit = (numel + split_size - 1) // split_size
-
-        converted_nodes = []
-        for subnode in node2_reductions:
-            subnode.cancel_reduction_split()
-            converted = subnode.extract_pw_from_reduction()
-            converted.swap_pw_red_dimension()
-            converted_nodes.append(converted)
-        node_schedule = self.generate_node_schedule(
-            node1.get_nodes() + converted_nodes, numel, rnumel
-        )
-        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
         kernel = self.create_kernel_choices(
             kernel_features,
             [{"x": numel, "r0_": rnumel}],
@@ -1585,10 +1563,117 @@ class SIMDScheduling(BaseScheduling):
         kernel.rsplit_size = split_size
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        is_split_reduction = bool(node2_reductions[0].node._split_size)
+        # allocate workspace for this kernel
+        _, ws_name, ws_off = kernel.args.workspace(
+            len(kernel.saved_partial_accumulate)
+            * kernel.numels["r0_"]
+            * ((kernel.numels["x"] + kernel.rsplit_size - 1) // kernel.rsplit_size),
+            False,
+            dtype=torch.float,
+        )
+        assert ws_off == 0, f"{ws_off=}"
+        with kernel:
+            kernel.codegen_body()
+
+        stack = contextlib.ExitStack()
+        with V.set_kernel_handler(kernel), stack:
+            if for_benchmark:
+                stack.enter_context(config.patch(benchmark_kernel=True))
+            src_code = kernel.codegen_kernel()
+
+        if for_benchmark:
+            # only do this if we are doing benchmarking.
+            # When we are generating final code, the kernel name
+            # should be decided differently with node type, fx node name
+            # etc.
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+        return kernel, ws_name, src_code
+
+    def benchmark_codegened_module(
+        self, mod, n_spills_threshold=8, node_names: Optional[OrderedSet[str]] = None
+    ) -> tuple[float, str]:
+        raise NotImplementedError
+
+    def _codegen_mix_order_reduction(self, node1, node2):
+        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+
+        if not V.graph.sizevars.statically_known_gt(
+            numel,
+            rnumel,
+        ):
+            return self._codegen_mix_order_reduction(node2, node1)
+
+        def _pick_split_size():
+            # the overridden has highest priority
+            if config.triton.mix_order_reduction_split_size is not None:
+                return config.triton.mix_order_reduction_split_size
+
+            # heuristics based on number of SMs
+            device_prop = DeviceProperties.create(node1.get_device())
+            num_sm = device_prop.multi_processor_count
+            estimated_num_splits = num_sm * 8
+            split_size = max(next_power_of_2(numel // estimated_num_splits), 16)
+            split_size = min(split_size, 128)
+            return split_size
+
+        split_size = _pick_split_size()
+
+        metrics.codegen_mix_order_reduction += 1
+
+        assert V.graph.sizevars.statically_known_gt(
+            numel,
+            rnumel,
+        )
+
+        # split epilogue out of node2
+        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
+            node2
+        )
+
+        converted_nodes = []
+        for subnode in node2_reductions:
+            subnode.cancel_reduction_split()
+            converted = subnode.extract_pw_from_reduction()
+            converted.swap_pw_red_dimension()
+            converted_nodes.append(converted)
+        node_schedule = self.generate_node_schedule(
+            node1.get_nodes() + converted_nodes, numel, rnumel
+        )
+        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+
+        # The autotuning is skipped in deterministic mode
+        if (
+            not torch._inductor.config.deterministic
+            and config.triton.mix_order_reduction_split_size is None
+            and config.triton.mix_order_reduction_autotune_split_size
+        ):
+
+            def _bench(candidate_split_size):
+                _, _, src_code = self._generate_kernel_code_for_mix_order_reduction(
+                    kernel_features,
+                    split_size=candidate_split_size,
+                    for_benchmark=True,
+                )
+                mod = PyCodeCache.load(src_code)
+                ms, _ = self.benchmark_codegened_module(mod)
+                return ms
+
+            split_size = CoordescTuner.autotune_single_field(
+                _bench,
+                split_size,
+                8,
+            )
+            # print(f"Autotuning pick split size {split_size}")
+
+        kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
+            kernel_features,
+            split_size=split_size,
+            for_benchmark=False,
+        )
 
         # rename intermediate reduction output to final reduction
         # output
+        is_split_reduction = bool(node2_reductions[0].node._split_size)
         rename = {}
         if is_split_reduction:
             for subnode in node2_reductions:
@@ -1611,19 +1696,6 @@ class SIMDScheduling(BaseScheduling):
                     partial_accum.buffer_name, partial_accum.buffer_name
                 )
 
-        # allocate workspace for this kernel
-        _, ws_name, ws_off = kernel.args.workspace(
-            len(kernel.saved_partial_accumulate)
-            * kernel.numels["r0_"]
-            * ((kernel.numels["x"] + kernel.rsplit_size - 1) // kernel.rsplit_size),
-            False,
-            dtype=torch.float,
-        )
-        assert ws_off == 0, f"{ws_off=}"
-        with kernel:
-            kernel.codegen_body()
-        with V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule, kernel)
         kernel.kernel_name = kernel_name
         kernel.code_hash = code_hash(src_code)
@@ -1643,6 +1715,7 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
+        nsplit = (numel + split_size - 1) // split_size
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
