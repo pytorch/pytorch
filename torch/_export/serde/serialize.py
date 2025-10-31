@@ -1530,10 +1530,10 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             raise AssertionError("TODO")
 
-    def serialize_treespec(self, treespec):
+    def serialize_treespec(self, treespec: pytree.TreeSpec) -> str:
         # We want to additionally save all the field names of the namedtuples in
         # case users want to check that the treespec types are equivalent
-        def store_namedtuple_fields(ts):
+        def store_namedtuple_fields(ts: pytree.TreeSpec) -> None:
             if ts.type is None:
                 return
             if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
@@ -1555,7 +1555,7 @@ class GraphModuleSerializer(metaclass=Final):
                         NamedTupleDef(field_names=ts.context._fields)
                     )
 
-            for child in ts.children_specs:
+            for child in ts.children():
                 store_namedtuple_fields(child)
 
         serialized_treespec = treespec_dumps(treespec, TREESPEC_VERSION)
@@ -2354,14 +2354,14 @@ class GraphModuleDeserializer(metaclass=Final):
         )
 
         # handle ShapeEnv asserts
-        if target == torch.ops.aten._assert_scalar.default:
+        if target is torch.ops.aten._assert_scalar.default:
             if not isinstance((arg := fx_node.args[0]), bool):
                 expr = arg.meta["val"]  # type: ignore[union-attr]
                 if isinstance(expr, torch.SymBool):
                     self.shape_env.guard_or_defer_runtime_assert(
                         expr.node.expr, "", fx_node
                     )
-        elif target == torch.ops.aten.sym_constrain_range_for_size.default:
+        elif target is torch.ops.aten.sym_constrain_range_for_size.default:
             sym = fx_node.args[0].meta["val"]  # type: ignore[union-attr]
             if isinstance(sym, torch.SymInt):
                 self.shape_env._constrain_range_for_size(sym.node.expr)
