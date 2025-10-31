@@ -9791,7 +9791,7 @@
   structured_delegate: erfinv.out
   variants: method, function
   dispatch:
-    SparseCPU, SparseCUDA: erfinv_sparse
+    SparseCPU, SparseCUDA, SparseMPS: erfinv_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erfinv_sparse_csr
   tags: pointwise
 
@@ -9800,7 +9800,7 @@
   structured_delegate: erfinv.out
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: erfinv_sparse_
+    SparseCPU, SparseCUDA, SparseMPS: erfinv_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erfinv_sparse_csr_
   tags: pointwise
 
@@ -9810,7 +9810,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS: erfinv_out
-    SparseCPU, SparseCUDA: erfinv_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS: erfinv_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: erfinv_sparse_csr_out
   tags: pointwise
 
