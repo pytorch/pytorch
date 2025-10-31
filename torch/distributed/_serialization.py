@@ -41,7 +41,7 @@ class _PseudoZipFile:
 
         pickle.dump(entries, f, protocol=DEFAULT_PROTOCOL)
 
-        for data in self.records.keys():
+        for data, _ in self.records.values():
             if isinstance(data, bytes):
                 f.write(data)
             elif isinstance(data, str):
