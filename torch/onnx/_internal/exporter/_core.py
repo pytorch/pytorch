@@ -456,7 +456,7 @@ def _convert_fx_arg_to_onnx_arg(
         # The actual dropping of a None attribute value is done by OpRecorder
         return None
     if hasattr(arg, "name"):
-        if isinstance(arg, torch.fx.Node) and arg.target == operator.getitem:
+        if isinstance(arg, torch.fx.Node) and arg.target is operator.getitem:
             source = arg.all_input_nodes[0]
             source_outputs = node_name_to_values[source.name]
             if isinstance(source_outputs, Sequence):

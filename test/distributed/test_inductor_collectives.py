@@ -2223,11 +2223,6 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
             return ag_1_wait
 
-        from torch._inductor.comm_analysis import nccl_pg_connectivity
-
-        conn = nccl_pg_connectivity(group)
-        assert len(conn) > 0
-
         gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
         g = gm.graph
         for n in g.nodes:
@@ -2241,6 +2236,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
                     n, use_nccl_estimator=True
                 )
+                assert est_ms_nccl > 0
 
 
 if __name__ == "__main__":

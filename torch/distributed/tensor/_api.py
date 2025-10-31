@@ -671,8 +671,6 @@ class DTensor(torch.Tensor):
     def __metadata_guard__(
         cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
     ) -> bool:
-        # TODO - delete this - This is now unused after the PR -
-        # https://github.com/pytorch/pytorch/pull/165824
         orig_spec, orig_requires_grad = orig
         other_spec, other_requires_grad = other
         return (
@@ -969,7 +967,7 @@ def distribute_module(
     if partition_fn is None:
         # if partition_fn not specified, we by default replicate
         # all module params/buffers
-        for name, submod in module.named_modules():
+        for submod in module.modules():
             replicate_module_params_buffers(submod, device_mesh)
     else:
         # apply partition_fun to submodules

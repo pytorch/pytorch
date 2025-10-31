@@ -92,7 +92,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
     first_user = next(iter(comm_node.users))
     if (
         len(comm_node.users) == 1
-        and first_user.target == torch.ops._c10d_functional.wait_tensor.default
+        and first_user.target is torch.ops._c10d_functional.wait_tensor.default
     ):
         # Collective with only one output
         node_list = [comm_node, first_user]
@@ -348,7 +348,7 @@ def _scatter_fused_allreduce_waits(
         # Some descendant users of the orig_comm_blocks may be scheduled before
         # the fused all_reduce. For example, the user nodes of the very first
         # all_reduce may be scheduled before the second all_reduce. Since the
-        # fused all_reduce is inserted right after the last all_reudce, the
+        # fused all_reduce is inserted right after the last all_reduce, the
         # order can be wrong.
         # `incorrect_order_nodes` records these nodes.
 

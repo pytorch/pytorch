@@ -1221,7 +1221,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
-                        # make sure seralization works
+                        # make sure serialization works
                         state_dict = copy.deepcopy(model.state_dict())
                         all_keys = _get_keys(module_name, is_dynamic)
                         for key in all_keys:
@@ -1484,7 +1484,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -1569,7 +1569,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -4672,7 +4672,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare(m, {"": qconfig}, example_inputs=example_inputs)
             # check that there is a duplicated observer instance
             actpp_module_count = 0
-            for name, module in m.named_modules(remove_duplicate=False):
+            for module in m.modules(remove_duplicate=False):
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 2)
