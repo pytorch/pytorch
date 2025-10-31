@@ -967,7 +967,7 @@ def distribute_module(
     if partition_fn is None:
         # if partition_fn not specified, we by default replicate
         # all module params/buffers
-        for name, submod in module.named_modules():
+        for submod in module.modules():
             replicate_module_params_buffers(submod, device_mesh)
     else:
         # apply partition_fun to submodules

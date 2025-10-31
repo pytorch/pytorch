@@ -8423,6 +8423,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(x[0:]), x[16:][:16])
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
+    def test_index_float_zero(self):
+        def fn(arg0, arg1, arg2):
+            t1 = torch.tanh(arg0)
+            t2 = t1.clone()
+            t2.fill_(arg1.item())
+            t3 = torch.clamp(t2, 0, arg2.size(0) - 1).to(torch.long)
+            return torch.nn.functional.embedding(t3, arg2)
+
+        arg0 = torch.randint(0, 1000, [47], dtype=torch.int64, device=self.device)
+        arg1 = torch.randint(0, 1000, [], dtype=torch.int64, device=self.device)
+        arg2 = torch.rand([256, 88], dtype=torch.float16, device=self.device)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        self.assertEqual(fn(arg0, arg1, arg2), cfn(arg0, arg1, arg2))
+
     # from GPT2ForSequenceClassification
     @skip_if_gpu_halide
     def test_index_tensor(self):
@@ -10988,6 +11004,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn((128, 64), device=self.device)
         p = torch.tensor(0.50, device=self.device)
         get_mask(x, p)
+
+    def test_flexible_layout_immutable_free_symbols(self):
+        import sympy
+
+        x = sympy.Symbol("x")
+        y = sympy.Symbol("y")
+        z = sympy.Symbol("z")
+
+        layout = torch._inductor.ir.FlexibleLayout(
+            self.device, torch.float32, size=(x, y)
+        )
+
+        # pad_strides works since it does not add new symints
+        layout.pad_strides()
+
+        # same symints and different order should work
+        layout.size = (y, x)
+
+        # adding new symints should fail
+        with self.assertRaisesRegex(
+            AssertionError, "Expected free symbols unchanged, but got"
+        ):
+            layout.size = (z,)
 
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
