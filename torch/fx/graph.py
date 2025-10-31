@@ -856,6 +856,7 @@ class CodeGen:
 
 {prologue}
 {code}"""
+        # The +4 accounts for the empty lines before prologue in fn_code
         prologue_start = wrap_stmts.count("\n") + 4
         return PythonCode(
             fn_code,
