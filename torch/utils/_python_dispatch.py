@@ -797,7 +797,9 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
                 # We also have to exclude DTensor to avoid infinite recursion.
                 dtensor_key = torch._C.DispatchKey.DTensor
-                old_exclude = torch._C._dispatch_tls_is_dispatch_key_excluded(dtensor_key)
+                old_exclude = torch._C._dispatch_tls_is_dispatch_key_excluded(
+                    dtensor_key
+                )
                 torch._C._dispatch_tls_set_dispatch_key_excluded(dtensor_key, True)
                 meta_in_tls = torch._C._meta_in_tls_dispatch_include()
                 torch._C._set_meta_in_tls_dispatch_include(True)
@@ -805,8 +807,9 @@ def return_and_correct_aliasing(func, args, kwargs, out):
                     func(*args, **kwargs)
                 finally:
                     torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
-                    torch._C._dispatch_tls_set_dispatch_key_excluded(dtensor_key, old_exclude)
-
+                    torch._C._dispatch_tls_set_dispatch_key_excluded(
+                        dtensor_key, old_exclude
+                    )
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
