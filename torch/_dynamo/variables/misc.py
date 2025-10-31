@@ -1346,7 +1346,7 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
-        unimplemented("unsupported method call on typing variablel")
+        unimplemented("unsupported method call on typing variable")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1368,6 +1368,8 @@ class TypingVariable(VariableTracker):
         return self.value
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if not isinstance(self.value, types.GenericAlias):
+            return super().reconstruct(codegen)
         # We're just trying to load the type here. Reconstructing the type from
         # scratch is tricky - for a type like `typing.List[int]` we'd need to
         # deconstruct the origin and args.  The origin for `List[int]` is `list`
