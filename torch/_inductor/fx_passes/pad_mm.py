@@ -344,7 +344,7 @@ def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
         return False
 
     if (
-        node_def.target == aten.cat.default
+        node_def.target is aten.cat.default
         and len(node_def.all_input_nodes)
         > torch._inductor.config.max_pointwise_cat_inputs
     ):
