@@ -57,7 +57,7 @@ def install_packages(dry_run: str) -> bool:
 
     cmd = [sys.executable, str(pip_init_script), f"--dry-run={dry_run}"] + packages
 
-    print("📦 Installing pyrefly dependencies...")
+    print("Installing pyrefly dependencies...")
     result = subprocess.run(cmd)
 
     if result.returncode != 0:
@@ -109,7 +109,7 @@ def generate_stub_files() -> bool:
         return False
 
     # Step 2: Generate main stub files
-    print("  → Generating main stub files...")
+    print("Generating main stub files...")
     result = subprocess.run(
         [
             sys.executable,
@@ -129,7 +129,7 @@ def generate_stub_files() -> bool:
         return False
 
     # Step 3: Generate DataPipe stub files
-    print("  → Generating DataPipe stub files...")
+    print("Generating DataPipe stub files...")
     result = subprocess.run(
         [sys.executable, "torch/utils/data/datapipes/gen_pyi.py"],
         cwd=repo_root,
@@ -155,7 +155,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    print("🚀 Initializing pyrefly linter...")
+    print("Initializing pyrefly linter...")
 
     # Step 1: Install packages
     if not install_packages(args.dry_run):
@@ -175,7 +175,7 @@ def main() -> None:
         if args.dry_run == "1":
             print("\n[DRY RUN] Would generate stub files, but skipping in dry run mode")
         else:
-            print("\n🔧 Generating missing stub files...")
+            print("\n Generating missing stub files...")
             if not generate_stub_files():
                 sys.exit(1)
 
