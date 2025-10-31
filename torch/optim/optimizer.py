@@ -62,7 +62,7 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -136,13 +136,13 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
                 and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
                     and kwarg[0].is_cuda
@@ -362,18 +362,18 @@ class Optimizer:
 
     _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
-    # pyrefly: ignore  # not-a-type
+    # pyrefly: ignore [not-a-type]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_pre_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer"], None]]'
     )
 
@@ -522,7 +522,7 @@ class Optimizer:
                                 f"{func} must return None or a tuple of (new_args, new_kwargs), but got {result}."
                             )
 
-                # pyrefly: ignore  # invalid-param-spec
+                # pyrefly: ignore [invalid-param-spec]
                 out = func(*args, **kwargs)
                 self._optimizer_step_code()
 
@@ -961,9 +961,9 @@ class Optimizer:
                 return Optimizer._process_value_according_to_param_policy(
                     param,
                     value,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_id,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_groups,
                     key,
                 )
@@ -976,7 +976,7 @@ class Optimizer:
                 }
             elif isinstance(value, Iterable):
                 return type(value)(
-                    # pyrefly: ignore  # bad-argument-count
+                    # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]
