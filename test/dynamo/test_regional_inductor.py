@@ -471,7 +471,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
-    """Tests for RegionalOutputCode and RegionalAOTAutogradCacheEntry."""
+    """Tests for RegionalOutputCode and BundledAOTAutogradResult."""
 
     def test_regional_output_code_serialization(self):
         """Test that RegionalOutputCode can be serialized and deserialized."""
