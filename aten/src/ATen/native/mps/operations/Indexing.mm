@@ -617,6 +617,9 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "index_select(): self and output must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  at::assert_no_internal_overlap(output);
+  at::assert_no_overlap(output, self);
+  at::assert_no_overlap(output, index);
   auto output_size = self.sizes().vec();
   if (self.dim() > 0) {
     output_size[dim] = num_indices;

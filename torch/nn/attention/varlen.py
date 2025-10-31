@@ -206,17 +206,12 @@ def varlen_attn(
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
     out, lse, rng_state = output
-    ctx.query = query
-    ctx.key = key
-    ctx.value = value
-    ctx.cu_seq_q = cu_seq_q
-    ctx.cu_seq_k = cu_seq_k
+
+    ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
+
     ctx.max_q = max_q
     ctx.max_k = max_k
     ctx.is_causal = is_causal
-    ctx.output = out
-    ctx.lse = lse
-    ctx.rng_state = rng_state
 
 
 @torch.library.custom_op("torch_attn::_varlen_attn_backward", mutates_args={})
@@ -305,19 +300,11 @@ def _varlen_attn_backward_fake(
 def _backward(
     ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
 ) -> tuple[Optional[torch.Tensor], ...]:
-    query = ctx.query
-    key = ctx.key
-    value = ctx.value
-    cu_seq_q = ctx.cu_seq_q
-    cu_seq_k = ctx.cu_seq_k
+    query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state = ctx.saved_tensors
+
     max_q = ctx.max_q
     max_k = ctx.max_k
     is_causal = ctx.is_causal
-    out = ctx.output
-    lse = ctx.lse
-    rng_state = ctx.rng_state
-
-    # rng_state = torch.empty(2, device=query.device)
 
     dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,

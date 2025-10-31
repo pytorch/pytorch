@@ -4842,7 +4842,7 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
 
             make_arg = partial(make_tensor, device=device, dtype=dtype)
-            # offline tuning only handles matmuls on two dimensionsal tensors
+            # offline tuning only handles matmuls on two dimensional tensors
             # matmul that require broadcasting are
             # not supported either.
             # Below we check the different transA and transB combinations.
@@ -4871,7 +4871,7 @@ class TestLinalg(TestCase):
                     continue
 
             # offline tuning only handles batched matmuls on
-            # three dimensionsal tensors
+            # three dimensional tensors
             # matmul that require broadcasting are
             # not supported either.
             # Below we check the different transA and transB combinations.
