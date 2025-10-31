@@ -1308,7 +1308,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    @parametrize("batch_size", (32,))
+    @parametrize(
+        "batch_size",
+        (
+            4,
+            32,
+        ),
+    )
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64, 65))
     @parametrize("bias", (False, True))
