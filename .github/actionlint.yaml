@@ -54,17 +54,12 @@ self-hosted-runner:
     - windows-11-arm64
     - windows-11-arm64-preview
     # Organization-wide AMD-hosted runners
-    # MI2xx non-ARC runners
+    # MI2xx runners
     - linux.rocm.gpu
+    - linux.rocm.gpu.mi250
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
-    - linux.rocm.gpu.mi250
-    - linux.rocm.gpu.gfx1100
-    # MI2xx ARC runners
-    - linux.rocm.gpu.mi250.1
-    - linux.rocm.gpu.mi250.2
-    - linux.rocm.gpu.mi250.4
-    # gfx942 ARC runners
+    # gfx942 runners
     - linux.rocm.gpu.gfx942.1
     - linux.rocm.gpu.gfx942.2
     - linux.rocm.gpu.gfx942.4

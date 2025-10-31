@@ -403,16 +403,14 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: angle
-    MPS: angle_mps
+    CPU, CUDA, MPS: angle
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr
   tags: pointwise
 
 - func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: angle_out
-    MPS: angle_out_mps
+    CPU, CUDA, MPS: angle_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: angle_sparse_csr_out
   tags: pointwise
 
@@ -10058,8 +10056,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: hypot_out
-    MPS: hypot_out_mps
+    CPU, CUDA, MPS: hypot_out
   tags: pointwise
 
 - func: hypot(Tensor self, Tensor other) -> Tensor
@@ -14173,16 +14170,10 @@
 - func: linalg_lu_factor(Tensor A, *, bool pivot=True) -> (Tensor LU, Tensor pivots)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeImplicitAutograd: linalg_lu_factor
-    MPS: linalg_lu_factor_mps
 
 - func: linalg_lu_factor.out(Tensor A, *, bool pivot=True, Tensor(a!) LU, Tensor(b!) pivots) -> (Tensor(a!) LU, Tensor(b!) pivots)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeImplicitAutograd: linalg_lu_factor_out
-    MPS: linalg_lu_factor_out_mps
 
 - func: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
   python_module: linalg
@@ -14384,12 +14375,12 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_householder_product
+    CPU, CUDA, MPS: linalg_householder_product
 
 - func: linalg_householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CPU, CUDA: linalg_householder_product_out
+    CPU, CUDA, MPS: linalg_householder_product_out
 
 - func: linalg_inv_ex(Tensor A, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   python_module: linalg

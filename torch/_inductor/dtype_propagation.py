@@ -58,7 +58,7 @@ def promote_types(
 ):
     dtype_prop_candidates = []
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         assert not isinstance(arg, str)
         if isinstance(arg, OpsValue):
@@ -69,7 +69,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
@@ -246,6 +246,14 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def store(name: str, index, value: DTypeArg, mode: Optional[str] = None) -> None:
+        return None
+
+    @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: DTypeArg,
+    ) -> None:
         return None
 
     @staticmethod
