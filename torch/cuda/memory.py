@@ -10,8 +10,8 @@ import re
 import sys
 import warnings
 from inspect import signature
-from typing import Any, cast, Literal, NotRequired, Optional, TYPE_CHECKING, TypedDict
-from typing_extensions import deprecated
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypedDict
+from typing_extensions import deprecated, NotRequired
 
 import torch
 from torch import _C
