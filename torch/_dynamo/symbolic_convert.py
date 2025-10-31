@@ -538,91 +538,35 @@ def _detect_and_normalize_assert_statement(
 explain = False
 
 
-def log_graph_break(
-    code_options: dict[str, Any],
-    reason: str = "",
-    exc_info: bool = False,
-    user_stack: Optional[StackSummary] = None,
-    latest_bytecode_log: Optional[str] = None,
-) -> None:
-    if user_stack is None:
-        user_stack = torch._guards.TracingContext.extract_stack()
-
-    try:
-        frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-    except IndexError:
-        # first instruction
-        frame_loc = (
-            code_options["co_filename"],
-            code_options["co_firstlineno"],
-        )
-
-    stack_above_dynamo_formatted = ""
-    if config.verbose:
-        stack_above_dynamo = get_stack_above_dynamo()
-        stack_above_dynamo_formatted = "".join(
-            traceback.format_list(stack_above_dynamo)
-        )
-    else:
-        user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
-        # pyrefly: ignore [bad-argument-type]
-        user_stack = collapse_resume_frames(user_stack)
-    user_stack_formatted = "".join(traceback.format_list(user_stack))
-    user_stack_trace = (
-        f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
-        f"Graph Break Reason: {reason}\n"
-        "User code traceback:\n"
-    )
-
-    if config.verbose:
-        user_stack_trace += (
-            f"{stack_above_dynamo_formatted}\n"
-            "========== most recent `torch.compile` tracing attempt started here ==========\n\n"
-            f"{user_stack_formatted}\n"
-            "NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! "
-            "This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another "
-            "Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python "
-            "function, which Dynamo intercepts as a top-level frame.\n"
-        )
-    else:
-        user_stack_trace += str(user_stack_formatted)
-
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "dynamo_graph_break_reason",
-            "encoding": "string",
-        },
-        payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc() if exc_info else ''}",
-    )
-
-    # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-    # more actionable user code pointer
-    if (
-        graph_break_log.isEnabledFor(logging.DEBUG)
-        and not explain
-        and graph_break_dup_warning_checker.add(frame_loc)
-    ):
-        # This log line MUST contain the string "Graph break in user code",
-        # This log line is exercised from
-        #   python test/dynamo/test_exc.py -k test_graph_break_log
-        if latest_bytecode_log and config.verbose:
-            user_stack_trace += "Most recent bytecode instructions traced (max 20):\n"
-            user_stack_trace += latest_bytecode_log
-
-        graph_break_log.debug(
-            user_stack_trace,
-        )
-    else:
-        # This log line MUST not contain the string "Graph break in user code",
-        # exercised by
-        #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
-        graph_break_log.debug(
-            "Graph break (user stack suppressed due to duplicate graph break) in user code at %s:%s\nGraph Break Reason: %s",
-            frame_loc[0],
-            frame_loc[1],
-            reason,
-        )
+# [NOTE] graph break handling in symbolic_convert
+# There are 4 possible graph break cases that InstructionTranslatorBase handles:
+#   1. Regular graph breaks from CALL, BINARY_SUBSCR, etc. (implemented by break_graph_if_unsupported)
+#   2. Data-dependent condition graph breaks (implemented by generic_jump)
+#   3. STORE_ATTR graph breaks (implemented in InstructionTranslatorBase.STORE_ATTR)
+#   4. All other unhandled graph breaks - unsupported step graph breaks (implemented in InstructionTranslatorBase.step)
+#
+# Graph breaks are handled in the following manner:
+#   1. The Unsupported exception is caught. If we cannot compile a partial graph (should_compile_partial_graph() is False),
+#      then propagate the exception upward. For unsupported step graph breaks, the condition to abort partial compilation is
+#      more restrictive (see InstructionTranslatorBase.step).
+#   2. If the Unsupported exception escapes symbolic_convert.py, then we are done.
+#      Otherwise, we want to attempt partial compilation.
+#      Log the graph break via log_graph_break. If we're handling a data-dependent graph break (type 2.), then we can immediately
+#      codegen the compiled graph and resume function and we're done. This is because the jump instruction we graph break on is
+#      limited in how it can manipulate Python state (say, in comparison, to CALL, which can modify Python state arbitrarily).
+#      Otherwise, we need to restart compilation. We need to restart because by processing the unsupported instruction,
+#      we may have modified the VariableTrackers, and we need all of our VariableTrackers to be in the state BEFORE tracing the
+#      unsupported instruction.
+#   3. During the first compilation, we updated a speculation log, indicating points in the code that we can resume from.
+#      On the second compilation, we will stop tracing at the first speculation log that fails. Then we compile the partial
+#      graph and resume function.
+#
+# Logging invariants:
+#   1. No logs need to be made if Unsupported escapes symbolic_convert.py. Python's default exception printing will
+#      print out all of the necessary information and no partial compilation will be attempted.
+#   2. log_graph_break should be called as soon as Unsupported is caught and we determined we want to partial compile.
+#      This always happens on the first compilation, NOT the restart handling this graph
+#   3. Any compile_subgraph call should be preceded immediately by a log in the form of "... triggered compile".
 
 
 def generic_jump(
@@ -645,7 +589,8 @@ def generic_jump(
         value: VariableTracker,
         extra_msg: str = "",
     ) -> None:
-        log_graph_break(
+        assert self.should_compile_partial_graph()
+        self.log_graph_break(
             self.code_options,
             reason=format_graph_break_message(
                 gb_type=_gb_type,
@@ -654,7 +599,6 @@ def generic_jump(
                 hints=_hints,
             ),
         )
-        assert self.should_compile_partial_graph()
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
             msg = (
@@ -928,12 +872,10 @@ def break_graph_if_unsupported(
                 if not self.should_compile_partial_graph():
                     raise
 
-                log_graph_break(
+                self.log_graph_break(
                     self.code_options,
-                    exc_info=True,
                     reason=str(excp),
                     user_stack=excp.real_stack,
-                    latest_bytecode_log="\n".join(self.latest_bytecode_queue),
                 )
 
                 if self.maybe_has_backedge():
@@ -966,6 +908,7 @@ def break_graph_if_unsupported(
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
 
+            log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
                 self, reason=reason, stack_pops=push - stack_effect
             )
@@ -1388,9 +1331,21 @@ class InstructionTranslatorBase(
                 or self.error_on_graph_break
                 or self.is_tracing_resume_prologue
             ):
+                if isinstance(e, StepUnsupported):
+                    unimplemented_v2(
+                        gb_type="cannot resume from torch._dynamo.step_unsupported()",
+                        context="",
+                        explanation="traced torch._dynamo.step_unsupported(), but Dynamo is instructed "
+                        "to error on graph break. This graph break is used for debugging only.",
+                        hints=[
+                            "Remove the torch._dynamo.step_unsupported() call.",
+                            "Make sure fullgraph=False and error_on_graph_break=False.",
+                            *graph_break_hints.DYNAMO_BUG,
+                        ],
+                    )
                 raise
             if self.current_speculation is None:
-                log.debug("empty checkpoint")
+                log.debug("empty checkpoint - cannot resume from graph break")
                 if isinstance(e, StepUnsupported):
                     unimplemented_v2(
                         gb_type="torch._dynamo.step_unsupported() with empty checkpoint",
@@ -1405,7 +1360,17 @@ class InstructionTranslatorBase(
                         ],
                     )
                 raise
-            log.debug("step triggered compile", exc_info=True)
+            reason = (
+                "Encountered graph break that we cannot resume from. "
+                "Compiling up to the previous resumable state, "
+                "then skipping the rest of the function. "
+                f"Graph break encountered:\n{str(e)}"
+            )
+            self.log_graph_break(
+                self.code_options,
+                reason=reason,
+                user_stack=e.real_stack,
+            )
 
         self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
         return False
@@ -1477,6 +1442,7 @@ class InstructionTranslatorBase(
         # NOTE: if we support non-empty self.stack in the future, the `stack_pops` argument
         # below should be set to the stack length to ensure that the stack is codegen'd
         # for the rest of the function.
+        log.debug("step triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             partial_convert=True,
@@ -2669,13 +2635,17 @@ class InstructionTranslatorBase(
         except Unsupported as e:
             if not self.should_compile_partial_graph():
                 raise
-            log.debug("STORE_ATTR triggered compile", exc_info=True)
+            reason = f"Encountered graph break when attempting to store an object's attribute (STORE_ATTR):\n\n{str(e)}"
+            self.log_graph_break(
+                self.code_options,
+                reason=reason,
+                user_stack=e.real_stack,
+            )
             e.remove_from_stats()
             e.add_to_stats("graph_break")
         speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
     def store_attr_graph_break(self, inst: Instruction) -> None:
-        log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
         if not self.should_compile_partial_graph():
             unimplemented_v2(
                 gb_type="Should not compile partial graph (STORE_ATTR)",
@@ -2684,6 +2654,7 @@ class InstructionTranslatorBase(
                 "STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
                 hints=[],
             )
+        log.debug("STORE_ATTR triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason("store_attr", [self.frame_summary()]),
@@ -4178,6 +4149,93 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def log_graph_break(
+        self,
+        code_options: dict[str, Any],
+        reason: str = "",
+        user_stack: Optional[StackSummary] = None,
+    ) -> None:
+        if user_stack is None:
+            user_stack = torch._guards.TracingContext.extract_stack()
+
+        try:
+            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+        except IndexError:
+            # first instruction
+            frame_loc = (
+                code_options["co_filename"],
+                code_options["co_firstlineno"],
+            )
+
+        stack_above_dynamo_formatted = ""
+        if config.verbose:
+            stack_above_dynamo = get_stack_above_dynamo()
+            stack_above_dynamo_formatted = "".join(
+                traceback.format_list(stack_above_dynamo)
+            )
+        else:
+            user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
+            # pyrefly: ignore [bad-argument-type]
+            user_stack = collapse_resume_frames(user_stack)
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        user_stack_trace = (
+            f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
+            f"Graph Break Reason: {reason}\n"
+            "User code traceback:\n"
+        )
+
+        if config.verbose:
+            user_stack_trace += (
+                f"{stack_above_dynamo_formatted}\n"
+                "========== most recent `torch.compile` tracing attempt started here ==========\n\n"
+                f"{user_stack_formatted}\n"
+                "NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! "
+                "This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another "
+                "Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python "
+                "function, which Dynamo intercepts as a top-level frame.\n"
+            )
+        else:
+            user_stack_trace += str(user_stack_formatted)
+
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "dynamo_graph_break_reason",
+                "encoding": "string",
+            },
+            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+        )
+
+        # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+        # more actionable user code pointer
+        if (
+            graph_break_log.isEnabledFor(logging.DEBUG)
+            and not explain
+            and graph_break_dup_warning_checker.add(frame_loc)
+        ):
+            # This log line MUST contain the string "Graph break in user code",
+            # This log line is exercised from
+            #   python test/dynamo/test_exc.py -k test_graph_break_log
+            if config.verbose:
+                user_stack_trace += (
+                    "\nMost recent bytecode instructions traced (max 20):\n"
+                )
+                user_stack_trace += "\n".join(self.latest_bytecode_queue) + "\n"
+
+            graph_break_log.debug(
+                user_stack_trace,
+            )
+        else:
+            # This log line MUST not contain the string "Graph break in user code",
+            # exercised by
+            #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+            graph_break_log.debug(
+                "Graph break (user stack suppressed due to duplicate graph break) in user code at %s:%s\nGraph Break Reason: %s",
+                frame_loc[0],
+                frame_loc[1],
+                reason,
+            )
+
     def __init__(
         self,
         output: OutputGraph,
@@ -4555,7 +4613,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} ({inst.opname})",
         )
-        log.debug("%s triggered compile", inst.opname)
+        log.debug("return triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason(
