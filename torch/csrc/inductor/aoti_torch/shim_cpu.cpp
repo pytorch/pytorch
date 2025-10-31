@@ -1,5 +1,7 @@
 
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/Functional.hpp>
+#endif
 #include <torch/csrc/inductor/aoti_torch/c/shim_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
@@ -531,6 +533,7 @@ AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
   });
 }
 
+#ifdef USE_DISTRIBUTED
 AOTITorchError aoti_torch_cpu__c10d_functional_all_reduce_(
     AtenTensorHandle inp,
     const char* reduce_op,
@@ -563,3 +566,4 @@ AOTITorchError aoti_torch_cpu__c10d_functional_wait_tensor(
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
+#endif

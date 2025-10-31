@@ -107,6 +107,7 @@ def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_numb
     return register_graph_pattern(
         pattern,
         extra_check=extra_check,
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
     )
 
@@ -115,6 +116,7 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     return register_graph_pattern(
         pattern,
         extra_check=extra_check,
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=binary_folding_pass,
     )
 
@@ -160,13 +162,6 @@ def addmm_patterns_init():
         ):
             return False
 
-        equal_shape_inputs = [weight_inputs]
-        for equal_shape_group in equal_shape_inputs:
-            inps = [match.kwargs[name] for name in equal_shape_group]
-            if not all(
-                inp.meta["val"].shape == inps[0].meta["val"].shape for inp in inps
-            ):
-                return False
         return True
 
     def check_concat_weights(match):
@@ -205,13 +200,18 @@ def addmm_patterns_init():
         cat_w = torch.cat((w1, w2, w3), dim=1)
         cat_s = torch.cat((s1, s2, s3), dim=0)
         mm = (inp @ cat_w).mul(cat_s)
-        return mm.chunk(3, dim=1)
+        n1, n2 = w1.size(1), w2.size(1)
+        return mm.tensor_split([n1, n1 + n2], dim=-1)
 
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         int8_woq_fusion_pattern,
+        # pyrefly: ignore [bad-argument-type]
         int8_woq_fusion_replacement,
         [val(), val(), val(), val(), scale(), scale(), scale()],
+        # pyrefly: ignore [bad-argument-type]
         fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         pass_patterns[0],
         extra_check=check_int8_woq_concat_linear_weights,
         exclusive_arg_names=("w1", "w2", "w3", "s1", "s2", "s3"),
@@ -226,10 +226,14 @@ def addmm_patterns_init():
         return mm.chunk(3, dim=1)
 
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         matmul_fuse_pattern,
+        # pyrefly: ignore [bad-argument-type]
         matmul_replacement,
         [val(), val(), val(), val()],
+        # pyrefly: ignore [bad-argument-type]
         fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3"),
@@ -244,10 +248,14 @@ def addmm_patterns_init():
         return mm.chunk(2, dim=1)
 
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         matmul_fuse_pattern_two,
+        # pyrefly: ignore [bad-argument-type]
         matmul_replacement_two,
         [val(), val(), val()],
+        # pyrefly: ignore [bad-argument-type]
         fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2"),
@@ -266,10 +274,14 @@ def addmm_patterns_init():
         return aten.addmm(cat_b, inp, cat_w).chunk(3, dim=1)
 
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         addmm_fuse_pattern_second,
+        # pyrefly: ignore [bad-argument-type]
         addmm_fuse_replacement_second,
         [val() for _ in range(7)],
+        # pyrefly: ignore [bad-argument-type]
         fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
@@ -286,6 +298,7 @@ def same_dtype(match):
         Ignored(),
         KeywordArg("dtype"),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[0],
     extra_check=same_dtype,
 )
