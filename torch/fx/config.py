@@ -4,3 +4,5 @@ disable_progress = True
 
 # If True this also shows the node names in each pass, for small models this is great but larger models it's quite noisy
 verbose_progress = False
+
+codegen_record_function: bool = False
