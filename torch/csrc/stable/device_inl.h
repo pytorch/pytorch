@@ -11,6 +11,20 @@
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
+inline Device::Device(DeviceType type, DeviceIndex index) {
+  DeviceHandle ret;
+  DeviceType libtorch_device_type =
+      torch::stable::detail::to<DeviceType>(torch::stable::detail::from(type));
+  // bounds checking for DeviceIndex is done within shim
+  TORCH_ERROR_CODE_CHECK(torch_create_device(
+      static_cast<int32_t>(libtorch_device_type),
+      static_cast<int32_t>(index),
+      &ret));
+  dh_ = std::shared_ptr<DeviceOpaque>(ret, [](DeviceHandle dh) {
+    TORCH_ERROR_CODE_CHECK(torch_delete_device(dh));
+  });
+}
+
 inline DeviceType Device::type() const {
   int32_t device_type;
   TORCH_ERROR_CODE_CHECK(torch_device_type(dh_.get(), &device_type));

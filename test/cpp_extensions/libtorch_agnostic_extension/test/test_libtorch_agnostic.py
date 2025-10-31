@@ -371,32 +371,52 @@ if not IS_WINDOWS:
         def test_device(self, device):
             import libtorch_agnostic
 
-            cpu_device_result = libtorch_agnostic.ops.test_device_cpu()
-            self.assertTrue(cpu_device_result)
-
-            devices_equal = libtorch_agnostic.ops.test_device_equality()
-            self.assertTrue(devices_equal)
-
-            has_index_result = libtorch_agnostic.ops.test_device_has_index()
-            self.assertTrue(has_index_result)
-
-            type_result = libtorch_agnostic.ops.test_device_type()
-            self.assertTrue(type_result)
-
-            cuda_device_result = libtorch_agnostic.ops.test_device_cuda()
-            self.assertTrue(cuda_device_result)
-
-            new_index = libtorch_agnostic.ops.test_device_set_index()
-            self.assertEqual(new_index, 1)
-
-            expected_device = torch.device("cuda:1")
-            returned_device = libtorch_agnostic.ops.test_device_return()
-            self.assertEqual(returned_device, expected_device)
-
-            argument_result = libtorch_agnostic.ops.test_device_argument(
-                expected_device
+            cuda_device = libtorch_agnostic.ops.test_device_constructor(
+                is_cuda=True, index=1, use_str=False
             )
-            self.assertTrue(argument_result)
+            self.assertEqual(cuda_device, torch.device("cuda:1"))
+            cuda_device = libtorch_agnostic.ops.test_device_constructor(
+                is_cuda=True, index=1, use_str=True
+            )
+            self.assertEqual(cuda_device, torch.device("cuda:1"))
+
+            self.assertEqual(libtorch_agnostic.ops.test_device_index(cuda_device), 1)
+            self.assertTrue(
+                libtorch_agnostic.ops.test_device_equality(
+                    cuda_device, torch.device("cuda:1")
+                )
+            )
+            self.assertFalse(
+                libtorch_agnostic.ops.test_device_equality(
+                    cuda_device, torch.device("cuda:0")
+                )
+            )
+            self.assertFalse(libtorch_agnostic.ops.test_device_is_cpu(cuda_device))
+            self.assertTrue(libtorch_agnostic.ops.test_device_is_cuda(cuda_device))
+
+            cuda_0_device = libtorch_agnostic.ops.test_device_set_index(cuda_device, 0)
+            self.assertEqual(cuda_0_device, torch.device("cuda:0"))
+
+            cpu_device = libtorch_agnostic.ops.test_device_constructor(False, 0, False)
+            self.assertEqual(cpu_device, torch.device("cpu"))
+            self.assertTrue(
+                libtorch_agnostic.ops.test_device_equality(
+                    cpu_device, torch.device("cpu")
+                )
+            )
+            self.assertTrue(libtorch_agnostic.ops.test_device_is_cpu(cpu_device))
+            self.assertFalse(libtorch_agnostic.ops.test_device_is_cuda(cpu_device))
+            self.assertFalse(
+                libtorch_agnostic.ops.test_device_equality(cpu_device, cuda_device)
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "API call failed"):
+                libtorch_agnostic.ops.test_device_constructor(
+                    is_cuda=True, index=129, use_str=False
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "API call failed"):
+                libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

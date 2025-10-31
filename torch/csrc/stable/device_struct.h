@@ -6,11 +6,14 @@
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
+#include <torch/csrc/stable/accelerator.h>
+
 #include <memory>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 using DeviceType = torch::headeronly::DeviceType;
+using DeviceIndex = torch::stable::accelerator::DeviceIndex;
 
 // The torch::stable::Device class is a high-level C++ wrapper around
 // the C shim Device APIs. We've modeled this class after c10::Device
@@ -27,14 +30,8 @@ class Device {
  public:
   // Construct a stable::Device from a DeviceType and optional device index
   // Default index is -1 (current device)
-  /* implicit */ Device(DeviceType type, int32_t index = -1) {
-    DeviceHandle ret;
-    TORCH_ERROR_CODE_CHECK(
-        torch_create_device(static_cast<int32_t>(type), index, &ret));
-    dh_ = std::shared_ptr<DeviceOpaque>(ret, [](DeviceHandle dh) {
-      TORCH_ERROR_CODE_CHECK(torch_delete_device(dh));
-    });
-  }
+  // defined in device_inl.h to avoid circular dependencies
+  /* implicit */ Device(DeviceType type, DeviceIndex index = -1);
 
   // Construct a stable::Device from a string description
   // The string must follow the schema: (cpu|cuda|...)[:<device-index>]
@@ -92,7 +89,7 @@ class Device {
   // defined in device_inl.h to avoid circular dependencies
   DeviceType type() const;
 
-  int32_t index() const {
+  DeviceIndex index() const {
     int32_t device_index;
     TORCH_ERROR_CODE_CHECK(torch_device_index(dh_.get(), &device_index));
     return device_index;

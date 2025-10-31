@@ -489,161 +489,128 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 
 // Test functions for torch::stable::Device
 
-bool test_device_cpu() {
+torch::stable::Device test_device_constructor(
+    bool is_cuda,
+    int32_t index,
+    bool use_str) {
   using torch::stable::Device;
   using torch::stable::DeviceType;
 
-  Device d(DeviceType::CPU);
-  return d.get() != nullptr && d.is_cpu() && d.index() == -1;
+  if (use_str) {
+    std::string device_str;
+    if (is_cuda) {
+      device_str = "cuda:" + std::to_string(index);
+    } else {
+      device_str = "cpu";
+    }
+    return Device(device_str);
+  } else {
+    if (is_cuda) {
+      return Device(DeviceType::CUDA, index);
+    } else {
+      return Device(DeviceType::CPU);
+    }
+  }
 }
 
-void boxed_test_device_cpu(
+void boxed_test_device_constructor(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  bool res = test_device_cpu();
+  torch::stable::Device res = test_device_constructor(
+      torch::stable::detail::to<bool>(stack[0]),
+      torch::stable::detail::to<int32_t>(stack[1]),
+      torch::stable::detail::to<bool>(stack[2]));
   stack[0] = torch::stable::detail::from(res);
 }
 
-bool test_device_cuda() {
-  using torch::stable::Device;
-
-  Device d("cuda:1");
-  return d.get() != nullptr && d.is_cuda() && d.index() == 1;
-}
-
-void boxed_test_device_cuda(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  bool res = test_device_cuda();
-  stack[0] = torch::stable::detail::from(res);
-}
-
-bool test_device_equality() {
-  using torch::stable::Device;
-  using torch::stable::DeviceType;
-
-  Device d1(DeviceType::CPU);
-  Device d2("cpu");
-  Device d3(DeviceType::CUDA, 0);
-  Device d4(DeviceType::CUDA, 1);
-  return d1 == d2 && d3 != d4;
+bool test_device_equality(torch::stable::Device d1, torch::stable::Device d2) {
+  return d1 == d2;
 }
 
 void boxed_test_device_equality(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  bool res = test_device_equality();
+  bool res = test_device_equality(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]),
+      torch::stable::detail::to<torch::stable::Device>(stack[1]));
   stack[0] = torch::stable::detail::from(res);
 }
 
-int64_t test_device_set_index() {
-  using torch::stable::Device;
-
-  Device d("cuda:0");
-  d.set_index(1);
-  return d.index();
+torch::stable::Device test_device_set_index(
+    torch::stable::Device device,
+    int32_t index) {
+  device.set_index(index);
+  return device;
 }
 
 void boxed_test_device_set_index(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  int64_t res = test_device_set_index();
+  torch::stable::Device res = test_device_set_index(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]),
+      torch::stable::detail::to<int32_t>(stack[1]));
   stack[0] = torch::stable::detail::from(res);
 }
 
-bool test_device_has_index() {
-  using torch::stable::Device;
-  using torch::stable::DeviceType;
-
-  Device d1(DeviceType::CPU);
-  bool res1 = d1.has_index();
-  Device d2("cuda:0");
-  bool res2 = d2.has_index();
-  return !res1 && res2;
+int32_t test_device_index(torch::stable::Device device) {
+  return device.index();
 }
 
-void boxed_test_device_has_index(
+void boxed_test_device_index(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  bool res = test_device_has_index();
+  int32_t res = test_device_index(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]));
   stack[0] = torch::stable::detail::from(res);
 }
 
-bool test_device_type() {
-  using torch::stable::Device;
-  using torch::stable::DeviceType;
-
-  Device d1(DeviceType::CPU);
-  Device d2("cuda:0");
-  return (d1.type() == DeviceType::CPU) && (d2.type() == DeviceType::CUDA);
+bool test_device_is_cuda(torch::stable::Device device) {
+  return device.is_cuda();
 }
 
-void boxed_test_device_type(
+void boxed_test_device_is_cuda(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  bool res = test_device_type();
+  bool res = test_device_is_cuda(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]));
   stack[0] = torch::stable::detail::from(res);
 }
 
-bool test_device_argument(torch::stable::Device device) {
-  using torch::stable::DeviceType;
-
-  return device.type() == DeviceType::CUDA && device.index() == 1;
+bool test_device_is_cpu(torch::stable::Device device) {
+  return device.is_cpu();
 }
 
-void boxed_test_device_argument(
+void boxed_test_device_is_cpu(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  torch::stable::Device device =
-      torch::stable::detail::to<torch::stable::Device>(stack[0]);
-  bool res = test_device_argument(device);
-  stack[0] = torch::stable::detail::from(res);
-}
-
-torch::stable::Device test_device_return() {
-  using torch::stable::Device;
-  using torch::stable::DeviceType;
-
-  return Device(DeviceType::CUDA, 1);
-}
-
-void boxed_test_device_return(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  torch::stable::Device res = test_device_return();
+  bool res = test_device_is_cpu(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]));
   stack[0] = torch::stable::detail::from(res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
-  m.def("test_device_cpu() -> bool");
-  m.def("test_device_cuda() -> bool");
-  m.def("test_device_equality() -> bool");
-  m.def("test_device_set_index() -> int");
-  m.def("test_device_has_index() -> bool");
-  m.def("test_device_type() -> bool");
-  m.def("test_device_argument(Device device) -> bool");
-  m.def("test_device_return() -> Device");
+  m.def("test_device_constructor(bool is_cuda, int index, bool use_str) -> Device");
+  m.def("test_device_equality(Device d1, Device d2) -> bool");
+  m.def("test_device_set_index(Device device, int index) -> Device");
+  m.def("test_device_index(Device device) -> int");
+  m.def("test_device_is_cuda(Device device) -> bool");
+  m.def("test_device_is_cpu(Device device) -> bool");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("test_device_cpu", &boxed_test_device_cpu);
-  m.impl("test_device_cuda", &boxed_test_device_cuda);
+  m.impl("test_device_constructor", &boxed_test_device_constructor);
   m.impl("test_device_equality", &boxed_test_device_equality);
   m.impl("test_device_set_index", &boxed_test_device_set_index);
-  m.impl("test_device_has_index", &boxed_test_device_has_index);
-  m.impl("test_device_type", &boxed_test_device_type);
-  m.impl("test_device_argument", &boxed_test_device_argument);
-  m.impl("test_device_return", &boxed_test_device_return);
+  m.impl("test_device_index", &boxed_test_device_index);
+  m.impl("test_device_is_cuda", &boxed_test_device_is_cuda);
+  m.impl("test_device_is_cpu", &boxed_test_device_is_cpu);
 }
-
 
 // Test functions for torch::stable::accelerator APIs
 
