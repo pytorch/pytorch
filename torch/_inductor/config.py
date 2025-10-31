@@ -1546,7 +1546,7 @@ class triton:
     enable_pdl = False
 
     mix_order_reduction = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "1") == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
     )
 
     mix_order_reduction_split_size = 64
