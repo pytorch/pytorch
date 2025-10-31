@@ -349,6 +349,10 @@ def set_current_meta(node, pass_name=""):
             current_meta["from_node"] = [
                 NodeSource(node, pass_name, NodeSourceAction.CREATE)
             ]
+            # We need something like this because the AC HOP runs with a fx.Interpreter
+            # overriding the partitioner_tag context in the outer scope.
+            if saved_meta.get("partitioner_tag") is not None:
+                current_meta["partitioner_tag"] = saved_meta["partitioner_tag"]
             yield
         finally:
             current_meta = saved_meta

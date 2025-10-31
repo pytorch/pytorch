@@ -1016,22 +1016,17 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    # Should we run CSE?
+    # In the min-cut partitioner, we run CSE, but we don't have non-pure aware CSE
+    # Maybe we could conditionally run if the graph is functional.
     # fx_g = joint_module.graph
     # if config.cse:
     #     assert_functional_graph(joint_module.graph)
     #     cse_graph = fx_graph_cse(fx_g)
     #     joint_module.graph = cse_graph
-
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
-    # Rely on the original placement rather than on _extract_graph_with_inputs_outputs
-    # which will not include any node not in the forward output closure.
-    # Not respecting the original placement can result in forward node being moved to
-    # the backward. That is problematic if the node has an arg which is mutated
-    # later in the forward. This can occur when an in-place op saves its input for backward,
-    # e.g. sin_. See https://github.com/pytorch/pytorch/pull/164577 for more context
+    # Respect the original placement of ops rather than rely on dataflow.
     forward_nodes = []
     last_node = None
     for node in joint_module.graph.nodes:
@@ -1039,11 +1034,15 @@ def default_partition(
             last_node = node
     assert last_node is not None
     for node in joint_module.graph.nodes:
-        forward_nodes.append(node)
+        if not _is_tangent(node):
+            forward_nodes.append(node)
         if node is last_node:
             break
     forward_node_names = OrderedSet(
         node.name for node in forward_nodes if node.op != "output"
+    )
+    backward_node_names = OrderedSet(
+        node.name for node in joint_module.graph.nodes if _has_tag_is_backward(node)
     )
     saved_values = []
     saved_sym_nodes = []
@@ -1052,9 +1051,6 @@ def default_partition(
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         assert_functional_graph(joint_module.graph)
-        # Insert save between adjacent AC regions.
-        # Interesting existing behavior is that we do NOT save the inputs to the very
-        # first AC region!
         joint_module = cleanup_recompute_tags(joint_module)
 
     for node in joint_module.graph.nodes:
@@ -1064,46 +1060,43 @@ def default_partition(
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
-        elif (
+            continue
+        if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
+            saved_values.append(node)
+            continue
+        if node.is_impure(impure_random=False) and node.op not in ("placeholder", "output"):
+            # See is_impure in torch/fx/node.py
+            assert not graph_has_recomputable_ops, (
+                "Trying to apply AC on a graph with impure op", node, node.target
+            )
+            saved_values.append(node)
+            continue
+        backward_usages = [
+            n for n in node.users if n.name in backward_node_names
+        ]
+        if (
+            "tensor_meta" in node.meta
+            and all(is_sym_node(n) for n in backward_usages)
+        ):
+            # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
+            # and not the actual tensor data,
+            # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
+            #
+            # Note that saving the tensor could also cause compilation problems:
+            # If the user mutated an input in the forward and uses its sizes/strides in the backward,
+            # then we would be obligated to clone the input before saving it to appease autograd.
+            # (This is how we originally found this bug).
+            saved_sym_nodes.extend(backward_usages)
+            continue
+        if (
             "tensor_meta" not in node.meta
             and node.op == "call_function"
             and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
         ):
-            # Since we can't save tuple of tensor values, we need to flatten out what we're saving
-            users = node.users
-            assert all(user.target == operator.getitem for user in users)
-            if not must_recompute(node):
-                saved_values.extend(users)
-        else:
-            backward_usages = [
-                n for n in node.users if n.name not in forward_node_names
-            ]
-            if (
-                "tensor_meta" in node.meta
-                and all(is_sym_node(n) for n in backward_usages)
-                and len(backward_usages) > 0
-            ):
-                # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
-                # and not the actual tensor data,
-                # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
-                #
-                # Note that saving the tensor could also cause compilation problems:
-                # If the user mutated an input in the forward and uses its sizes/strides in the backward,
-                # then we would be obligated to clone the input before saving it to appease autograd.
-                # (This is how we originally found this bug).
-                #
-                # The "all" condition is vacuously true when len(backward_usage) == 0. This means that
-                # this unconditionally skips saving of any tensors that don't have a backward user.
-                # Without the "len(backward_usages) > 0" condition this would break SAC because I may
-                # want to save tensors that don't have backward user since they can still be needed
-                # for recomputation of other saved activations.
-                # TODO: We should understand the original failure case here, because the current state is
-                # still that if there exists some sym_node backward usage, SAC will not be able to save.
-                # Maybe fine for now since that seems rare.
-                saved_sym_nodes.extend(backward_usages)
-            else:
-                if not must_recompute(node):
-                    saved_values.append(node)
+            assert all(user.target == operator.getitem for user in node.users)
+            continue
+        if not must_recompute(node):
+            saved_values.append(node)
 
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
@@ -1667,6 +1660,9 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
                 #
                 # Solution: check whether `out` has a backward hook, and if so, intentionally save `out`
                 # in forward graph outputs. With this, we can break the above circular dependency.
+                node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        else:
+            if any(must_recompute(user) for user in node.users):
                 node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
     return joint_module
 

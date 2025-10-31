@@ -293,10 +293,12 @@ def create_joint(
                 outs, tangent_mask = fn(*primals)
             assert not pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask)
         else:
-            with set_partitioner_tag_is_forward():
-                (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
-                    fn, primals
-                )
+            def fn_wrapped(*args, **kwargs):
+                with set_partitioner_tag_is_forward():
+                    return fn(*args, **kwargs)
+            (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
+                fn_wrapped, primals
+            )
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:

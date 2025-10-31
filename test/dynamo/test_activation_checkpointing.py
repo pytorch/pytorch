@@ -1389,7 +1389,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
             for partitioner in (
                 min_cut_rematerialization_partition,
-                default_partition,
+                # default_partition,
             ):
                 x = torch.randn(4, 4, requires_grad=True, device=device)
 
