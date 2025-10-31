@@ -1171,15 +1171,36 @@ class CachingAutotuner(KernelInterface):
                 launcher.bin.metadata, "threads_per_warp", 32
             )
 
+        from torch._inductor import config
         from torch._inductor.codecache import CudaKernelParamCache
 
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
         binary = launcher.bin.asm[bin_type]
-        # Also store asm code which can be used for debugging and generating cpp package
-        asm_type = {"hip": "amdgcn", "cuda": "ptx", "xpu": "spv"}.get(
-            self.device_props.type, None
-        )
-        asm = launcher.bin.asm.get(asm_type, None)
+
+        # ROCm multi-arch: capture LLVM IR
+        if torch.version.hip and config.aot_inductor.emit_multi_arch_kernel:
+            # Multi-arch ROCm: Capture LLVM IR for cross-architecture compilation
+            asm_type = "ll"
+
+            # llir is the key to obtain LLVM IR from triton
+            asm = launcher.bin.asm.get("llir", None)
+
+            # CRITICAL: Multi-arch compilation cannot proceed without LLVM IR
+            # Fail fast with clear error message pointing to the issue
+            if not asm:
+                available_keys = list(launcher.bin.asm.keys())
+                raise RuntimeError(
+                    f"ROCm multi-arch requires LLVM IR, but none found. "
+                    f"Available keys: {available_keys}. "
+                    f"Triton may need to be patched to emit LLVM IR."
+                )
+
+        # Everything else: capture architecture-specific assembly
+        else:
+            asm_type = {"hip": "amdgcn", "cuda": "ptx", "xpu": "spv"}.get(
+                self.device_props.type, None
+            )
+            asm = launcher.bin.asm.get(asm_type, None)
 
         CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
