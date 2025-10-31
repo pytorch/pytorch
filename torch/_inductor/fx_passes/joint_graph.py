@@ -315,7 +315,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # single-elem attrs
         if node.op == "get_attr" or (
             node.op == "call_function"
-            and node.target == torch.ops.aten.lift_fresh_copy.default
+            and node.target is torch.ops.aten.lift_fresh_copy.default
         ):
             out = super(ConstantFolder, self).run_node(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
