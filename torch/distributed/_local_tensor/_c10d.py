@@ -799,7 +799,6 @@ def _local_recv_(
 
     def _recv_and_store(timeout: timedelta) -> bool:
         def _wait_and_store(obj: object) -> None:
-            print(f"recv_and_store {dst} {src} {tag}")
             assert isinstance(obj, torch.Tensor), "Expected to receive a Tensor"
             assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
             tensor._local_tensors[dst] = obj

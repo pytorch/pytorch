@@ -8,11 +8,11 @@ from torch.distributed._local_tensor import (
     LocalTensorMode,
     maybe_run_for_local_tensor,
 )
-from torch.distributed.tensor import DTensor, init_device_mesh, Shard
+from torch.distributed.tensor import init_device_mesh
 
 
 @maybe_run_for_local_tensor
-def get_peer(rank, world_size, dir) -> int:
+def _get_peer(rank, world_size, dir) -> int:
     return (rank + dir) % world_size
 
 
@@ -20,7 +20,7 @@ def get_rank(world_size) -> torch.SymInt:
     return torch.SymInt(LocalIntNode({r: r for r in range(world_size)}))
 
 
-def maybe_wait(work: dist.Work | None | list[dist.Work | None]) -> None:
+def _maybe_wait(work: dist.Work | None | list[dist.Work | None]) -> None:
     if work is None:
         return
     if isinstance(work, dist.Work):
@@ -31,50 +31,57 @@ def maybe_wait(work: dist.Work | None | list[dist.Work | None]) -> None:
         w.wait()
 
 
-def attach_rank(tensor: torch.Tensor, rank: int) -> torch.Tensor:
+def _attach_rank(tensor: torch.Tensor, rank: int) -> torch.Tensor:
     tensor.__rank__ = rank
     return tensor
 
 
-def run_peer_op(
-    tensor: torch.Tensor,
+def _unpack_ranks(ranks: int | torch.SymInt) -> list[int]:
+    if isinstance(ranks, torch.SymInt) and isinstance(ranks.node, LocalIntNode):
+        return list(ranks.node._local_ints.keys())
+    if isinstance(ranks, int):
+        return [ranks]
+    raise AssertionError(f"Unsupported ranks type {type(ranks)}")
+
+
+def _run_peer_op(
+    rank: int | torch.SymInt,
     peer: int | torch.SymInt,
+    tensor: torch.Tensor,
     op: Callable[[torch.Tensor, int], dist.Work | None],
 ) -> dist.Work | None | list[dist.Work | None]:
-    if isinstance(peer, torch.SymInt) and isinstance(peer.node, LocalIntNode):
-        return [op(attach_rank(tensor, r), p) for r, p in peer.node._local_ints.items()]
-    if isinstance(peer, int):
-        return op(tensor, peer)
-    else:
-        raise AssertionError(f"Unsupported peer type {type(peer)}")
+    w = []
+    for r in _unpack_ranks(rank):
+        for p in _unpack_ranks(peer):
+            tensor = _attach_rank(tensor, r)
+            w.append(op(tensor, p))
+    return w
 
 
-def _run(world_size: int) -> None:
-    with LocalTensorMode(world_size):
-        x = torch.arange(world_size)
-        xd = DTensor.from_local(x, mesh)
-        xd = xd.redistribute(placements=[Shard(0)])
+def _run(world_size: int, rank: int) -> None:
+    ltm = LocalTensorMode(world_size)
+    with ltm:
+        x = torch.ones(1) * rank
+        y = torch.zeros_like(x)
 
-        y = xd.to_local()
-        z = torch.zeros_like(y)
+        next_rank = _get_peer(rank, world_size, +1)
+        prev_rank = _get_peer(rank, world_size, -1)
 
-        n = get_peer(rank, world_size, +1)
-        p = get_peer(rank, world_size, -1)
+        _run_peer_op(rank, next_rank, x, lambda tensor, dst: dist.isend(tensor, dst))
 
-        run_peer_op(y, n, lambda tensor, dst: dist.isend(tensor, dst))
+        rw = _run_peer_op(
+            rank, prev_rank, y, lambda tensor, src: dist.irecv(tensor, src)
+        )
 
-        rw = run_peer_op(z, p, lambda tensor, src: dist.irecv(tensor, src))
-
-        maybe_wait(rw)
-        print(f"{y=}\n{z=}")
+        _maybe_wait(rw)
+        print(f"{rank=}\n{x=}\n{y=}")
 
 
 if __name__ == "__main__":
-    world_size = 3
+    world_size = 4
     dist.init_process_group("fake", rank=0, world_size=world_size)
 
     mesh = init_device_mesh("cpu", (world_size,))
-    rank = get_rank(world_size)
 
-    with LocalRunnerMode(world_size, 1, lambda: _run(world_size)):
+    with LocalRunnerMode(world_size, world_size, lambda rank: _run(world_size, rank)):
         pass

@@ -1066,7 +1066,7 @@ class LocalRunnerMode:
     runner_context = threading.local()
 
     def __init__(
-        self, ranks: frozenset[int] | int, concurrency: int, fn: Callable[[], None]
+        self, ranks: frozenset[int] | int, concurrency: int, fn: Callable[[int], None]
     ):
         if isinstance(ranks, int):
             ranks = frozenset(range(ranks))
@@ -1107,7 +1107,7 @@ class LocalRunnerMode:
         # Only one thread can run at a time, hence must acquire the lock
         try:
             self._acquire_run_lock()
-            self._fn()
+            self._fn(id)
         finally:
             self._release_run_lock()
 
