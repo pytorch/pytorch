@@ -447,7 +447,6 @@ class RMSNormBackward(BenchmarkKernel):
             (32768, 4096),
             (32768, 8192),
             (32768, 16384),
-            (32768, 32768),
         ) + extra_shapes_for_norm
 
     def get_memory_bytes(self, args, kwargs) -> int:
