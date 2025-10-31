@@ -4187,6 +4187,91 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @torch.fx.config.patch("codegen_record_function", True)
+    def test_profiler_stack_trace_augmentation(self):
+        """
+        Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
+        augments profiler events with stack traces from FX metadata registry.
+        """
+        import json
+        import tempfile
+        from torch.profiler import profile, ProfilerActivity
+        from torch.fx._utils import map_recorded_events_to_aten_ops_with_stack_trace
+        from torch.autograd.profiler_util import _canonicalize_profiler_events
+
+        # Simple test model
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(16, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.relu(x)
+                x = self.linear2(x)
+                return x
+
+        model = TestModel().cuda()
+
+        # Compile the model
+        compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_model(torch.randn(10, 10, device="cuda"))
+
+        # Profile with the compiled model
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            result = compiled_model(torch.randn(10, 10, device="cuda"))
+
+        # Export to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
+            trace_file = f.name
+
+            prof.export_chrome_trace(trace_file)
+
+            # Load the trace data
+            with open(trace_file, 'r') as f:
+                trace_data = json.load(f)
+
+            # Augment the trace with stack traces
+            event_mapping = map_recorded_events_to_aten_ops_with_stack_trace(
+                trace_data, remove_fx_events=False
+            )
+
+            events = []
+
+            for event in trace_data["traceEvents"]:
+                if "args" in event and "stack_trace" in event["args"]:
+                    events.append(event)
+
+            actual_traces = _canonicalize_profiler_events(events)
+
+            self.assertExpectedInline(actual_traces, """\
+event=aten::t node=t stack_trace=x = self.linear1(x)
+event=aten::transpose node=t stack_trace=x = self.linear1(x)
+event=aten::as_strided node=t stack_trace=x = self.linear1(x)
+event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
+event=cudaLaunchKernel node=addmm stack_trace=x = self.linear1(x)
+event=ampere_sgemm_32x128_ node=addmm stack_trace=x = self.linear1(x)
+event=aten::relu node=relu stack_trace=x = self.relu(x)
+event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
+event=cudaLaunchKernel node=relu stack_trace=x = self.relu(x)
+event=void at::native::vec node=relu stack_trace=x = self.relu(x)
+event=aten::t node=t_1 stack_trace=x = self.linear2(x)
+event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
+event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
+event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
+event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)
+event=ampere_sgemm_32x128_ node=addmm_1 stack_trace=x = self.linear2(x)"""
+            )
+
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch

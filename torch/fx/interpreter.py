@@ -161,7 +161,6 @@ class Interpreter:
             delay=0,
         )
 
-        print("running inside interpreter")
         for node in self.graph.nodes:
             pbar.update(1)
             if node in self.env:

@@ -443,7 +443,6 @@ class CodeGen:
         colored: bool = False,
         # Render each argument on its own line
         expanded_def: bool = False,
-        record_func: bool = False,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -799,7 +798,9 @@ class CodeGen:
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
 
-        record_func = record_func or torch.fx.config.codegen_record_function
+        record_func = torch.fx.config.codegen_record_function
+        if record_func:
+            body.append("_rf = torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##'); _rf.__enter__()\n")
         for i, node in enumerate(nodes):
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
@@ -811,11 +812,13 @@ class CodeGen:
             body.append(f"# COUNTER: {i}\n")
             do_record = record_func and node.op in ("call_function", "call_method", "call_module")
             if do_record:
-                body.append(f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {node.name} ##'); _rf_{node.name}.__enter__()\n")
+                body.append(f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {i} ##'); _rf_{node.name}.__enter__()\n")
             emit_node(node)
             delete_unused_values(node)
             if do_record:
                 body.append(f"_rf_{node.name}.__exit__(None, None, None)\n")
+        if record_func:
+            body.append("_rf.__exit__(None, None, None)\n")
 
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
@@ -1768,7 +1771,6 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
-        record_func: bool = False,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1836,7 +1838,6 @@ class Graph:
                 include_device=include_device,
                 colored=colored,
                 expanded_def=expanded_def,
-                record_func=record_func,
             )
 
     def _python_code(
@@ -1849,7 +1850,6 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
-        record_func: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -1860,7 +1860,6 @@ class Graph:
             include_device=include_device,
             colored=colored,
             expanded_def=expanded_def,
-            record_func=record_func,
         )
 
     def __str__(self) -> str:

@@ -1224,3 +1224,40 @@ def _build_table(
             f"time total: {override_time_unit(sum_self_device_time_total, _format_time(sum_self_device_time_total), time_unit)}"
         )
     return "".join(result)
+
+
+# Collect all events with stack traces and format them canonically
+def _canonicalize_profiler_events(events):
+    """
+    Extract and format all events with stack traces in a canonical way
+    for deterministic testing.
+    """
+    events_with_traces = []
+
+    for event in events:
+        # Extract relevant fields
+        event_name = event.get("name", "")
+        node_name = event["args"].get("node_name", "")
+        stack_trace = event["args"].get("stack_trace", "")
+
+        if "\n" in stack_trace:
+            stack_trace = [s.strip() for s in stack_trace.split("\n") if s.strip()][-1]
+
+        events_with_traces.append({
+            "event_name": event_name[:20],
+            "node_name": node_name,
+            "stack_trace": stack_trace.split("\n")[-1], # TODO: make this safe for when there is no \n 
+            "start_time": event.get("ts", 0)
+        })
+
+    # Sort by node_name for deterministic ordering
+    events_with_traces.sort(key=lambda x: x["start_time"])
+
+    # Format as a string
+    lines = []
+    for evt in events_with_traces:
+        lines.append(
+            f"event={evt['event_name']} node={evt['node_name']} stack_trace={evt['stack_trace']}"
+        )
+
+    return "\n".join(lines)

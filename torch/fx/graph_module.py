@@ -869,8 +869,9 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
 
-        if co_fields:
-            cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
+        # Determine the filename for the generated code
+        if co_fields and 'co_filename' in co_fields:
+            filename = co_fields['co_filename']
         else:
             node_metadata: dict[int, dict[str, Any]] = {}
             for i, node in enumerate(self._graph.nodes):
@@ -885,7 +886,6 @@ class {module_name}(torch.nn.Module):
             # This ensures the same code+metadata always generates the same filename
             hash_value = _metadata_hash(self._code, node_metadata)
             file_stem = f"{FX_GRAPH_MODULE_FILE_PREFIX}_{hash_value}"
-
             filename = f"{file_stem}.py"
 
             # Only include co_filename to use it directly as the cache key
@@ -905,8 +905,14 @@ class {module_name}(torch.nn.Module):
 
             register_fx_metadata(filename, metadata)
 
-            # Use filename as filename (doesn't need to exist on disk)
-            cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
+        if torch.fx.config.codegen_record_function:
+            # Replace the placeholder in generated code with actual filename
+            self._code = self._code.replace(
+                "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
+                f"torch._C._profiler._RecordFunctionFast('## {filename} ##')"
+            )
+
+        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.

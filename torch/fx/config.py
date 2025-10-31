@@ -1,3 +1,7 @@
+import sys 
+
+from torch.utils._config_module import install_config_module
+
 # Whether to disable showing progress on compilation passes
 # Need to add a new config otherwise will get a circular import if dynamo config is imported here
 disable_progress = True
@@ -6,3 +10,6 @@ disable_progress = True
 verbose_progress = False
 
 codegen_record_function: bool = False
+
+# adds patch, save_config, etc
+install_config_module(sys.modules[__name__])
