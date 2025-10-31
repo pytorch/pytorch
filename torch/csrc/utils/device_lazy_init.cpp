@@ -87,15 +87,13 @@ void register_fork_handler_for_device_init(at::DeviceType device_type) {
       }
     });
   });
-  if (device_type != at_fork_device_type_global) {
-    TORCH_CHECK(
-        false,
-        "register_fork_handler_for_device_init only supports a single accelerator type per process. ",
-        "First registered device type: ",
-        at::DeviceTypeName(at_fork_device_type_global, /*lower_case=*/true),
-        ", got: ",
-        at::DeviceTypeName(device_type, /*lower_case=*/true));
-  }
+  TORCH_CHECK(
+      device_type == at_fork_device_type_global,
+      "register_fork_handler_for_device_init only supports a single accelerator type per process. ",
+      "First registered device type: ",
+      at::DeviceTypeName(at_fork_device_type_global, /*lower_case=*/true),
+      ", got: ",
+      at::DeviceTypeName(device_type, /*lower_case=*/true));
 #endif
 }
 
