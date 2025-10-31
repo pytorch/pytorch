@@ -210,7 +210,7 @@ class TestScheduler(TestCase):
         return node
 
 
-instantiate_device_type_tests(TestScheduler, globals())
+instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

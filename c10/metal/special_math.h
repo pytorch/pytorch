@@ -1,4 +1,4 @@
-// Implementation of specal math functions for Metal
+// Implementation of special math functions for Metal
 #pragma once
 #include <c10/metal/expm1f.h>
 #include <c10/metal/igamma.h>
