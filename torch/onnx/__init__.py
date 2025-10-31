@@ -325,7 +325,7 @@ def export(
         warnings.warn(
             "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
             "the new torch.export-based ONNX exporter has become the default. "
-            "Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. 
+            "Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. "
             "For exporting control flow: "
             "https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html",
             category=DeprecationWarning,
