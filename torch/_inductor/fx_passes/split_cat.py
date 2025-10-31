@@ -1526,7 +1526,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
     # 'immutable_list' object does not support mutation. Create a new copy of it
     split_sections = list(split_sections)
     for cat_user in next_users:
-        if cat_user.target == torch.cat:
+        if cat_user.target is torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim")
             # check the all getitems in the cat_user from the same node
             # check the input of the cat has all getitem from the split
@@ -1631,7 +1631,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
     # Find the next users (i.e. users after the getitem)
     next_users = find_next_users(split_node)
     for cat_user in next_users:
-        if cat_user.target == torch.cat:
+        if cat_user.target is torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim") or 0
             # check that all getitems in the cat_user from the same node
             # check the input of the cat has all getitem from the split
@@ -2010,7 +2010,7 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(node, 1, "dim")
     # check the unsqueeze nodes come from the select nodes
     if not all(
-        get_arg_value(unsqueeze_node, 0, "input").target == torch.ops.aten.select
+        get_arg_value(unsqueeze_node, 0, "input").target is torch.ops.aten.select
         for unsqueeze_node in unsqueeze_nodes
     ):
         return
@@ -2755,13 +2755,13 @@ def get_view_shape_list(cat_arg: torch.fx.Node, stack_dim: int) -> list[int]:
     # cat_arg must be the split input
     view_shape_list = []
     for user in cat_arg.users.keys():
-        if user.target == torch.split:
+        if user.target is torch.split:
             for getitem in user.users.keys():
                 if getitem.target == operator.getitem:
                     reshape_user = [
                         user
                         for user in getitem.users.keys()
-                        if user.target == torch.reshape
+                        if user.target is torch.reshape
                     ]
                     if len(reshape_user) > 0:
                         view_shape_list = list(

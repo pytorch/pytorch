@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch._C import DispatchKey, DispatchKeySet
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -153,7 +154,7 @@ class OpDispatcher:
             )
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+                op_call.name(), DispatchKey.CompositeImplicitAutograd
             ):
                 # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
                 # so we manually decompose them, here
@@ -178,7 +179,7 @@ class OpDispatcher:
         #
         # TODO: add RecordFunction to make it clearer in profiles when this slow path is
         # being hit?
-        return op_call(*args, **kwargs)
+        return op_call.redispatch(DispatchKeySet(DispatchKey.DTensor), *args, **kwargs)
 
     def _dispatch_fast_path_python_tail(
         self,

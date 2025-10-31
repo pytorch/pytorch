@@ -3088,9 +3088,7 @@ class GraphModule(torch.nn.Module):
             )
 
             # Compare gradients for each layer
-            for i, (uncompiled_grad, compiled_grad) in enumerate(
-                zip(uncompiled_grads, compiled_grads)
-            ):
+            for uncompiled_grad, compiled_grad in zip(uncompiled_grads, compiled_grads):
                 self.assertEqual(
                     uncompiled_grad,
                     compiled_grad,
