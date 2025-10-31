@@ -660,7 +660,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 #     gx = gy0 * bw(y0, x),
 #
-# where gy0 denotes the graident of loss with respect to y0, and bw(y0, x) denotes the graident of y0 with
+# where gy0 denotes the gradient of loss with respect to y0, and bw(y0, x) denotes the gradient of y0 with
 # respect to x. Note that bw can be computed from forward body_fn easily using torch.autograd.grad.
 # We could substitute the unknowns gy0, gy1, ..., with chain rule until gy4:
 #
@@ -769,7 +769,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         # Note [Handle inputs that're not differentiable]
         # When a forward input is non-differentiable e.g. a symint or an integer tensor, their gradients
         # will be None. However, we don't want to return None in the subgraph because this complicates the
-        # inductor codegen, where we need to do a non-unform treatment for None and tensors.
+        # inductor codegen, where we need to do a non-uniform treatment for None and tensors.
         # So we set up masks and filter the None gradients so that only tensors are returned from each step.
         carries_tensor_masks = [
             bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
