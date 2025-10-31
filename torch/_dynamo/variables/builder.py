@@ -3727,7 +3727,9 @@ class SourcelessBuilder:
                 pass  # failthrough to unimplemented branch
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(value, torch.utils._pytree.TreeSpec):
+        elif isinstance(
+            value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
+        ):
             return UserDefinedObjectVariable(value)
         elif PlacementVariable.is_placement(value):
             return PlacementVariable(value)
