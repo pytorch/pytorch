@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
     load_tests,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, get_gpu_type
+from torch.testing._internal.inductor_utils import get_gpu_type
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
 from torch.utils._traceback import (
