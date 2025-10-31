@@ -2185,6 +2185,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         name: str,
         reduction_type: ReductionType,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
