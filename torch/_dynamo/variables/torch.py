@@ -1293,16 +1293,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             message_graph_proxy = None
             if len(args) >= 2:
                 message_vt = args[1]
-                if message_vt.has_closure() or not isinstance(
-                    message_vt, NestedUserFunctionVariable
+                if (
+                    not isinstance(message_vt, NestedUserFunctionVariable)
+                    or message_vt.has_closure()
                 ):
                     unimplemented_v2(
                         gb_type="Can't extract message from torch._check()",
                         context=str(message_vt),
-                        explanation="The second argument of torch._check() must be a function defined within the torch.compile region that does not reference a non-local variable.",
+                        explanation=(
+                            "The second argument of torch._check() must be a function"
+                            "defined within the torch.compile region"
+                            "that does not reference a non-local variable."
+                        ),
                         hints=[
                             "Make sure the message function is defined in the torch.compile region.",
-                            "Remove any non-local variables, e.g. remove references to `x` in `lambda: f'{x} failed check'`",
+                            (
+                                "Remove any non-local variables, e.g. "
+                                "remove references to `x` in `lambda: f'{x} failed check'`"
+                            ),
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
@@ -1319,6 +1327,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             predicate_proxy = predicate_vt.as_proxy()
 
+            proxy_args: tuple[Any, ...]
             if message_graph_proxy is None:
                 proxy_args = (predicate_proxy,)
             else:
