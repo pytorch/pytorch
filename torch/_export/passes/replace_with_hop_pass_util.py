@@ -35,7 +35,7 @@ def _replace_with_hop_helper(
         )
         call_func_node.meta["torch_fn"] = (
             f"{wrap_hoo.__name__}",
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             f"{wrap_hoo.__class__.__name__}.{wrap_hoo.__name__}",
         )
         if isinstance(output_args, (tuple, list)):

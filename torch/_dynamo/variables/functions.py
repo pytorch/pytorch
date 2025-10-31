@@ -35,7 +35,6 @@ from collections.abc import Callable, Sequence
 from types import FunctionType
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
-from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
@@ -69,7 +68,6 @@ from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
-    counters,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -84,6 +82,12 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+
+
+try:
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None
 
 
 if TYPE_CHECKING:
@@ -707,8 +711,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
-            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-                return tracer.inline_call_()
+            return tracer.inline_call_()
         except ObservedException as e:
             tracer.generator_exhausted = True
             raise e
@@ -718,8 +721,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
-        finally:
-            counters["unimplemented"] |= counters["inline_call"]
 
     def call_obj_hasattr(self, tx, name):
         if name in self.python_type().__dict__:
@@ -1137,19 +1138,13 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
-        else:
-            try:
-                from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-            except ModuleNotFoundError:
-                _fsdp_param_group = None
-
-            if (
-                _fsdp_param_group is not None
-                and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
-            ):
-                return variables.TorchCtxManagerClassVariable(self.fn).call_function(
-                    tx, (self.obj, *args), kwargs
-                )
+        elif (
+            _fsdp_param_group is not None
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
+                tx, (self.obj, *args), kwargs
+            )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -1498,6 +1493,8 @@ class SkipFunctionVariable(VariableTracker):
                 )
 
             guard_on_source.make_guard(GuardBuilder.CLOSURE_MATCH)
+        elif inspect.isbuiltin(value):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
@@ -2004,7 +2001,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
 

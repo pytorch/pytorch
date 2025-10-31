@@ -796,6 +796,9 @@ static Tensor make_tensor_for_subclass_helper(
   return tensor;
 }
 
+static py::handle get_dtensor_class();
+static bool checked_issubclass(PyObject* cls, PyObject* cls2);
+
 static PyObject* THPVariable_make_wrapper_subclass(
     PyObject* /*unused*/,
     PyObject* args,
@@ -844,12 +847,21 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // TODO: This check is not complete; because the user can disable torch
   // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
   // to delete this function entirely
-  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
-  TORCH_CHECK_TYPE(
-      attr.ptr() != nullptr &&
-          attr.ptr() != torch::disabled_torch_dispatch_impl(),
-      ((PyTypeObject*)cls)->tp_name,
-      " must define __torch_dispatch__");
+
+  // DTensor is known to have __torch_dispatch__ and we have to check
+  // for it so that we correctly set up the DTensor dispatch key
+  // anyway.
+  const auto dtensor = get_dtensor_class();
+  const bool is_dtensor =
+      cls == dtensor.ptr() || checked_issubclass(cls, dtensor.ptr());
+  if (!is_dtensor) {
+    py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+    TORCH_CHECK_TYPE(
+        attr.ptr() != nullptr &&
+            attr.ptr() != torch::disabled_torch_dispatch_impl(),
+        ((PyTypeObject*)cls)->tp_name,
+        " must define __torch_dispatch__");
+  }
 
   const auto options = TensorOptions()
                            .dtype(r.scalartype(5))
@@ -865,13 +877,19 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // data
   auto sym_sizes = r.symintlist(1);
   auto sym_strides_own = r.symintlistOptional(2);
+  std::optional<DispatchKeySet> extra_dispatch_keys =
+      r.toDispatchKeySetOptional(13);
+  if (is_dtensor) {
+    extra_dispatch_keys = extra_dispatch_keys.value_or(DispatchKeySet())
+                              .add(c10::DispatchKey::DTensor);
+  }
   Tensor tensor = make_tensor_for_subclass_helper(
       /*sym_sizes=*/r.symintlist(1),
       /*sym_strides=*/r.symintlistOptional(2),
       /*sym_storage_offset=*/r.toSymIntOptional(3),
       options,
       /*storage_size=*/r.toSymIntOptional(14),
-      r.toDispatchKeySetOptional(13));
+      extra_dispatch_keys);
 
   const auto sizes_strides_policy = r.stringViewOptional(10);
   if (sizes_strides_policy.has_value()) {
@@ -915,6 +933,13 @@ static PyObject* THPVariable_make_wrapper_subclass(
     return storage;                                                \
   }
 #endif
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_dtensor_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("DTensor"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_spec_class,
@@ -1000,6 +1025,14 @@ static bool intern_dtensor_strings() {
   FOR_EACH_DTENSOR_INTERNED_STRING(INTERN_DTENSOR_STRING);
 #undef INTERN_DTENSOR_STRING
   return true;
+}
+
+static bool checked_issubclass(PyObject* cls, PyObject* cls2) {
+  int result = PyObject_IsSubclass(cls, cls2);
+  if (result == -1) {
+    throw py::error_already_set();
+  }
+  return result;
 }
 
 static bool checked_not(PyObject* obj) {
@@ -1345,6 +1378,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       }
       const auto mesh_dim_size = py::cast<int64_t>(mesh_size(idx));
       tensor_shape[shard_dim] *= mesh_dim_size;
+      // recover tensor stride by modifying the strides that are
+      // larger than the current stride on the shard_dim.
       for (const auto i : c10::irange(tensor_strides.size())) {
         if (static_cast<int64_t>(i) != shard_dim &&
             tensor_strides[i] >= tensor_strides[shard_dim]) {
