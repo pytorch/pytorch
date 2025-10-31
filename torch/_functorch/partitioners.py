@@ -1041,9 +1041,6 @@ def default_partition(
     forward_node_names = OrderedSet(
         node.name for node in forward_nodes if node.op != "output"
     )
-    backward_node_names = OrderedSet(
-        node.name for node in joint_module.graph.nodes if _has_tag_is_backward(node)
-    )
     saved_values = []
     saved_sym_nodes = []
 
@@ -1072,7 +1069,7 @@ def default_partition(
             saved_values.append(node)
             continue
         backward_usages = [
-            n for n in node.users if n.name in backward_node_names
+            n for n in node.users if n.name not in forward_node_names
         ]
         if (
             "tensor_meta" in node.meta
