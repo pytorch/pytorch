@@ -11,12 +11,7 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._op_schema import (
-    OpInfo,
-    OpSchema,
-    OutputSharding,
-    OutputSpecType,
-)
+from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
