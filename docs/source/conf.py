@@ -1068,6 +1068,7 @@ coverage_ignore_functions = [
     "set_stack_trace",
     "set_current_replay_node",
     "get_current_replay_node",
+    "register_fx_metadata",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
