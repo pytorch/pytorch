@@ -65,20 +65,6 @@ class SkipPatternTest(TestBase):
         self.check_numeric(f, (x,))
         self.assertEqual(0, metrics.codegen_mix_order_reduction)
 
-    @inductor_config.patch(split_reductions=False)
-    def test_skip_due_to_non_persistent_reduction(self):
-        """
-        We only generate mix order reduction if one of the reduction is
-        persistent reduction.
-        """
-
-        def f(x):
-            return x.sum(dim=1), x.sum(dim=0)
-
-        x = torch.randn(32768, 2048, device=GPU_TYPE)
-        self.check_numeric(f, (x,))
-        self.assertEqual(0, metrics.codegen_mix_order_reduction)
-
 
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
@@ -150,8 +136,8 @@ class MixOrderReductionTest(TestBase):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
 
-        x = torch.randn(128 * 15, 128, device=GPU_TYPE)
-        y = torch.randn(256 * 15, 256, device=GPU_TYPE)
+        x = torch.randn(4096, 32, device=GPU_TYPE)
+        y = torch.randn(4098, 34, device=GPU_TYPE)
 
         self.check_numeric(f, (x, y))
         expected_mix_order_reduction = (
@@ -169,7 +155,7 @@ class MixOrderReductionTest(TestBase):
         ],
     )
     @parametrize("split_reductions", (False, True))
-    @parametrize("shape", ((32768, 768), (32769, 768)))
+    @parametrize("shape", ((32768, 2048), (32768, 768), (32769, 768)))
     def test_rms_norm_bwd(self, wdtype, split_reductions, shape):
         def f(x, w, eps):
             orig_dtype = x.dtype

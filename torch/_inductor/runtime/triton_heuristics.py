@@ -3388,15 +3388,28 @@ def persistent_reduction(
 
             # small XBLOCK to use less registers/smem
             c.kwargs["XBLOCK"] = 1
-            c.num_warps //= 2
-            c.num_warps = max(c.num_warps, 2)
 
-            # less warps so potentially each sm can run more thread blocks
-            # Inside each thread block, we handle the split sequentially,
-            # more thread blocks is beneficial here.
-            newc = copy.deepcopy(c)
-            newc.num_warps = 2
-            new_configs.append(newc)
+            rnumel_hint = size_hints["r0_"]
+
+            if rnumel_hint <= 1024:
+                c.num_warps //= 2
+                c.num_warps = max(c.num_warps, 2)
+                new_configs.append(c)
+
+                # less warps so potentially each sm can run more thread blocks
+                # Inside each thread block, we handle the split sequentially,
+                # more thread blocks is beneficial here.
+                newc = copy.deepcopy(c)
+                newc.num_warps = 2
+                new_configs.append(newc)
+            else:
+                # more warps for larger rows
+                new_configs.append(c)
+
+                if c.num_warps < 32:
+                    newc = copy.deepcopy(c)
+                    newc.num_warps *= 2
+                    new_configs.append(newc)
 
         configs = unique_configs(new_configs)
 
