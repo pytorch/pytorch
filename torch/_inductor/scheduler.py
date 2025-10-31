@@ -4287,9 +4287,6 @@ class Scheduler:
         ):
             return -1
 
-        node2_read = node2_read.normalize()
-        node2_write = node2_write.normalize()
-
         node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
         if node2_read.name not in node1_writes:
             return -1
@@ -4298,7 +4295,11 @@ class Scheduler:
 
         if not isinstance(node1_write, MemoryDep):
             return -1
-        
+
+        # We are checking for compatibility with the normalized node1 write
+        # then modifying node2 reads/writes. since the node1 write will be just used
+        # for compatibility, while node2 will be used in actual modification, just
+        # normalize node1 not node2.
         node1_write = node1_write.normalize()
 
         if (
@@ -4768,10 +4769,14 @@ class Scheduler:
         if (
             config.loop_index_inversion_in_fusion
             and shared_data_score < config.score_fusion_memory_threshold
-        ):  
-            new_shared_data_score = self.shared_data_after_inverting_indexing(node1, node2)
+        ):
+            new_shared_data_score = self.shared_data_after_inverting_indexing(
+                node1, node2
+            )
             if new_shared_data_score >= 0:
-                shared_data_score = self.shared_data_after_inverting_indexing(node1, node2)
+                shared_data_score = self.shared_data_after_inverting_indexing(
+                    node1, node2
+                )
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
             loop_ordering_log.debug(
