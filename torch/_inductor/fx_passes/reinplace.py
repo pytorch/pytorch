@@ -679,7 +679,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
-        elif node.target == torch.ops.higher_order.auto_functionalized_v2:
+        elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
 
@@ -696,7 +696,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # auto_functionalized into clones + a mutable op; this metadata
             # tells the decomp to only clone the following inputs
             node.meta["only_clone_these_tensors"] = new_bases_to_clone
-        elif node.target == torch.ops.higher_order.auto_functionalized:
+        elif node.target is torch.ops.higher_order.auto_functionalized:
             _mutable_op = node.args[0]
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
 
