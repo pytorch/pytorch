@@ -5114,6 +5114,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
 
+    def test_batchnorm_invalid_eps(self):
+        input = torch.rand(2, 10)
+        running_mean = torch.rand(10)
+        running_var = torch.rand(10)
+
+        with self.assertRaisesRegex(ValueError, "eps must be positive"):
+            F.batch_norm(input, running_mean, running_var, eps=-1.0)
+
+        with self.assertRaisesRegex(ValueError, "eps must be positive"):
+            F.batch_norm(input, running_mean, running_var, eps=0.0)
+
     def test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad(self):
         args = (
             torch.randn(3, 2, 5),  # input
