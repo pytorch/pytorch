@@ -53,6 +53,7 @@ enum class PickleOpCode : char {
   BINFLOAT = 'G',
 
   // Protocol 2
+  // NOLINTNEXTLINE(readability-redundant-inline-specifier)
   PROTO = char('\x80'),
   NEWOBJ = '\x81',
   EXT1 = '\x82',
@@ -71,6 +72,7 @@ enum class PickleOpCode : char {
   SHORT_BINBYTES = 'C',
 
   // Protocol 4
+  // NOLINTNEXTLINE(readability-redundant-inline-specifier)
   SHORT_BINUNICODE = char('\x8c'),
   BINUNICODE8 = '\x8d',
   BINBYTES8 = '\x8e',
@@ -112,7 +114,7 @@ getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
 // if the cls has __getstate__/__setstate__
 // assert they have the right schema and return true,
 // otherwise return false
-bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
+bool checkHasValidSetGetState(const c10::ClassType& cls);
 
 // Declare BackendMeta serialization and deserialization function pointer types.
 using BackendMetaPtr = std::function<

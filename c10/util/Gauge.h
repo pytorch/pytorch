@@ -26,7 +26,8 @@ class GaugeBackendFactoryIf {
       std::string_view key) noexcept = 0;
 };
 
-void C10_API registerGaugeBackend(std::unique_ptr<GaugeBackendFactoryIf>);
+void C10_API
+    registerGaugeBackend(std::unique_ptr<GaugeBackendFactoryIf> /*backend*/);
 } // namespace detail
 
 // A handle to a Gauge.
