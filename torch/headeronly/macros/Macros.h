@@ -520,6 +520,18 @@ __host__ __device__
 #endif //  C10_USE_ROCM_KERNEL_ASSERT and USE_ROCM
 #endif // __APPLE__
 
+// Compile-time switch to control how assertions are logged inside CUDA kernels.
+// If C10_CUDA_VERBOSE_ASSERT is defined,  CUDA_KERNEL_ASSERT_VERBOSE will
+// take addition information passed to the macro and forward them to
+// CUDA_KERNEL_ASSERT_PRINTF If C10_CUDA_VERBOSE_ASSERT is not defined,
+// CUDA_KERNEL_ASSERT_VERBOSE will behave the same as CUDA_KERNEL_ASSERT.
+#ifdef C10_ENABLE_VERBOSE_ASSERT
+#define CUDA_KERNEL_ASSERT_VERBOSE(cond, ...) \
+  CUDA_KERNEL_ASSERT_PRINTF(cond, __VA_ARGS__)
+#else
+#define CUDA_KERNEL_ASSERT_VERBOSE(cond, ...) CUDA_KERNEL_ASSERT(cond)
+#endif
+
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif

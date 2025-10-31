@@ -121,7 +121,7 @@ class NnapiBackend : public PyTorchBackendInterface {
         shape_compute_module.run_method("prepare", ser_model, inputs)
             .toTensorList();
 
-    // Create and initialize NnapiComilation object
+    // Create and initialize NnapiCompilation object
     comp_ = std::make_unique<torch::nnapi::bind::NnapiCompilation>();
     auto weights = dict.at("weights").toTensorVector();
     comp_->init(ser_model, weights);
