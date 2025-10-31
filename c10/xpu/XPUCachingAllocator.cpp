@@ -573,16 +573,17 @@ class DeviceCachingAllocator {
       return 1.0;
     }
 
-    c10::xpu::DeviceProp device_prop;
-    c10::xpu::get_device_properties(&device_prop, device_index);
+    const auto total_device =
+        xpu::get_raw_device(device_index)
+            .get_info<sycl::info::device::global_mem_size>();
     return static_cast<double>(allowed_memory_maximum) /
-        static_cast<double>(device_prop.global_mem_size);
+        static_cast<double>(total_device);
   }
 
   void setMemoryFraction(double fraction) {
-    c10::xpu::DeviceProp device_prop;
-    c10::xpu::get_device_properties(&device_prop, device_index);
-    auto device_total = device_prop.global_mem_size;
+    const auto total_device =
+        xpu::get_raw_device(device_index)
+            .get_info<sycl::info::device::global_mem_size>();
     allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
     set_fraction = true;
   }
