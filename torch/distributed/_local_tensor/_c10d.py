@@ -2,6 +2,7 @@ import functools
 import math
 import operator
 from collections.abc import Sequence
+from datetime import timedelta
 
 import torch
 from torch._C import ScriptObject
@@ -780,26 +781,6 @@ def _local_send(
     return work_so
 
 
-# class RecvWork(FakeWork):
-#     def __init__(self, recv: Callable[[], None]):
-#         super().__init__()
-#         self._done = False
-#         self._recv = recv
-
-#     def is_completed(self) -> bool:
-#         return self._done
-
-#     def is_success(self):
-#         return True
-
-#     def wait(self, timeout=None):
-#         if not self._done:
-#             breakpoint()
-#             self._recv()
-#             self._done = True
-#         return self
-
-
 def _local_recv_(
     tensors: list[torch.Tensor],
     process_group_so: ScriptObject,
@@ -816,13 +797,15 @@ def _local_recv_(
     assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
     dst = int(tensor.__rank__)
 
-    def _recv_and_store() -> None:
+    def _recv_and_store(timeout: timedelta) -> bool:
         def _wait_and_store(obj: object) -> None:
+            print(f"recv_and_store {dst} {src} {tag}")
             assert isinstance(obj, torch.Tensor), "Expected to receive a Tensor"
             assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
             tensor._local_tensors[dst] = obj
 
         LocalRunnerMode.current().wait_recv(src, dst, _wait_and_store)
+        return True
 
     work = CallbackWork(_recv_and_store)
     work_so = Work.boxed(work)

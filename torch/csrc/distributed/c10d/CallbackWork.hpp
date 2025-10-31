@@ -8,45 +8,17 @@ namespace c10d {
 
 class CallbackWork : public Work {
  public:
-  explicit CallbackWork(py::function callback)
-      : callback_(std::move(callback)) {}
+  explicit CallbackWork(py::function callback);
 
   ~CallbackWork() override;
 
-  bool isCompleted() override {
-    return false;
-  }
+  bool wait(std::chrono::milliseconds timeout) override;
 
-  bool isSuccess() const override {
-    return false;
-  }
-
-  std::exception_ptr exception() const override {
-    return nullptr;
-  }
-
-  int sourceRank() const override {
-    TORCH_CHECK(false, "CallbackWork::sourceRank() not implemented");
-  }
-
-  std::vector<at::Tensor> result() override {
-    return {};
-  }
-
-  bool wait(std::chrono::milliseconds timeout) override {
-    return true;
-  }
-
-  void abort() override {
-    TORCH_CHECK(false, "CallbackWork::abort() not implemented");
-  }
-
-  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
-    TORCH_CHECK(false, "CallbackWork::getFuture() not implemented");
-  }
+  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
  private:
   py::function callback_;
+  c10::intrusive_ptr<c10::ivalue::Future> future_;
 };
 
 } // namespace c10d

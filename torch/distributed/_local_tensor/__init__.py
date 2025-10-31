@@ -1153,6 +1153,7 @@ class LocalRunnerMode:
                 post(obj)
                 # Note that we are not releasing the lock here, since the thread
                 # will continue to run and therefore must hold the lock
+                return
             self._run_cond.wait()
 
     @staticmethod
