@@ -957,7 +957,7 @@ quiesce_async_compile_pool: bool = Config(
 quiesce_async_compile_pool_v2: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool_v2",
     env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
-    default=False,
+    default=True,
 )
 
 quiesce_async_compile_time: int = Config(
@@ -973,7 +973,7 @@ use_static_cuda_launcher: bool = static_cuda_launcher_default()
 static_launch_user_defined_triton_kernels: bool = Config(
     justknob="pytorch/inductor:static_launch_user_defined_triton_kernels",
     env_name_force="TORCHINDUCTOR_STATIC_LAUNCH_USER_DEFINED_TRITON_KERNELS",
-    default=True,
+    default=False,
 )
 
 # Raise error if we bypass the launcher
