@@ -848,10 +848,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
   // to delete this function entirely
 
-  // We check for DTensor specifically because unpickling a DTensor
-  // goes through this path, and DTensor does not have
-  // __torch_dispatch__.
-
+  // DTensor is known to have __torch_dispatch__ and we have to check
+  // for it so that we correctly set up the DTensor dispatch key
+  // anyway.
   const auto dtensor = get_dtensor_class();
   const bool is_dtensor =
       cls == dtensor.ptr() || checked_issubclass(cls, dtensor.ptr());
@@ -913,7 +912,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       // false is the default
       /*allow_preexisting_pyobj=*/false,
       // we checked __torch_dispatch__ above; avoid checking again.
-      /*has_torch_dispatch_if_known=*/!is_dtensor);
+      /*has_torch_dispatch_if_known=*/true);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1146,6 +1145,18 @@ static PyObject* THPVariable_dtensor_new(
       Py_TYPE(cls)->tp_name,
       ")");
 
+#ifndef NDEBUG
+  // This is specifically for making a DTensor, which we know defines
+  // __torch_dispatch__. Check anyway in debug builds in case somebody
+  // removes it.
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(
+      attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl(),
+      ((PyTypeObject*)cls)->tp_name,
+      " must define __torch_dispatch__");
+#endif
+
   const auto& local_tensor = r.tensor(1);
   const bool requires_grad = r.toBool(3);
   if (local_tensor.requires_grad() && !requires_grad) {
@@ -1191,8 +1202,8 @@ static PyObject* THPVariable_dtensor_new(
           tensor,
           // false is the default
           /*allow_preexisting_pyobj=*/false,
-          // we know DTensor does not have __torch_dispatch__; avoid checking.
-          /*has_torch_dispatch_if_known=*/false));
+          // we know DTensor has __torch_dispatch__; avoid checking again.
+          /*has_torch_dispatch_if_known=*/true));
   py_tensor.attr(dtensor_interned_strings._spec) = spec;
   py_tensor.attr(dtensor_interned_strings._local_tensor) = local_tensor;
   return py_tensor.release().ptr();

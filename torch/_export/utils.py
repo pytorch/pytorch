@@ -1120,14 +1120,14 @@ def placeholder_naming_pass(
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
         ):
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             spec.target = name_map[spec.target]
 
     # rename keys in constants dict for custom objects
@@ -1477,7 +1477,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         flattened, _ = flatten_fn(obj)
 
         # NOTE: This helper function will replicate an nn.Module in the exactly same
-        #       structure to be used together with _reparametrize_module. This will
+        #       structure to be used together with _reparameterize_module. This will
         #       create a clone of the module with the new parameters and buffers without
         #       affecting the original module.
         def copy_module(mod: torch.nn.Module):
