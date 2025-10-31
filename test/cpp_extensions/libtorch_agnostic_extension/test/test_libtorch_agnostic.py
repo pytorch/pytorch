@@ -418,6 +418,24 @@ if not IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "API call failed"):
                 libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
 
+        @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_tensor_device(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3)
+            self.assertEqual(libtorch_agnostic.ops.test_tensor_device(t), t.device)
+
+            t_cuda = torch.randn(2, 3, device="cuda")
+            self.assertEqual(
+                libtorch_agnostic.ops.test_tensor_device(t_cuda), t_cuda.device
+            )
+
+            t_cuda_1 = torch.randn(2, 3, device="cuda:1")
+            self.assertEqual(
+                libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
+            )
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

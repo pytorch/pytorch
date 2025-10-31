@@ -215,6 +215,18 @@ def test_default_constructor(defined) -> bool:
     return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
 
 
+def test_tensor_device(t):
+    """
+    Tests Tensor device() method.
+
+    Args:
+        t: Tensor - tensor to get device from
+
+    Returns: Device - device of the tensor
+    """
+    return torch.ops.libtorch_agnostic.test_tensor_device.default(t)
+
+
 def my_pad(t) -> Tensor:
     """
     Pads the input tensor with hardcoded padding parameters.
