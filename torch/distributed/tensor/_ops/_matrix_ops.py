@@ -33,6 +33,7 @@ from torch.distributed.tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    _StridedShard,
 )
 
 
@@ -93,6 +94,9 @@ def _mm_like_strategy(
                 generate_redistribute_costs(mat2_strategy, mat2_spec),
             ]
             strtg.redistribute_cost = redistribute_cost
+            if len(self_strategy.strategies) == 1 and len(self_strategy.strategies[0].output_specs.placements) == 1 and len(self_spec.placements) == 1 and self_spec.placements[0].is_shard() and isinstance(self_strategy.strategies[0].output_specs.placements[0], _StridedShard) and self_spec.placements[0].dim == self_strategy.strategies[0].output_specs.placements[0].dim and strtg.output_specs == strtg.input_specs[0]:
+                strtg.input_specs[0] = self_strategy.strategies[0].output_specs
+                strtg.output_specs = strtg.input_specs[0]
             filtered_strategies.append(strtg)
 
     mm_strategy.strategies = filtered_strategies
