@@ -159,44 +159,29 @@ struct ExpandableSegment {
       handles_.emplace_back(std::nullopt);
     }
 
-    // Allocate physical memory for each segment.
-    // Note: allocation here may over-subscribe the device memory (no OOM yet),
-    // as physical_mem construction reserves memory but does not map it.
+    // Allocate and map physical memory for each segment.
     for (const auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
       try {
-        // Construct the physical_mem in-place to avoid copies.
+        // Allocate physical memory for each segment. Construct the physical_mem
+        // in-place to avoid copies.
         handles_.at(i).emplace(
             xpu::get_raw_device(device_),
             xpu::get_device_context(),
             segment_size_);
-      } catch (const sycl::exception& e) {
-        // Mapping failed (likely sycl::errc::memory_allocation). Roll back all
-        // segments allocated in this operation.
-        for (const auto j : c10::irange(begin, i)) {
-          handles_.at(j) = std::nullopt;
-        }
-        trimHandles();
-        return rangeFromHandles(begin, begin);
-      }
-    }
-
-    // Map each allocated segment to virtual memory.
-    // Note: mapping may fail due to over-subscription (OOM), even if allocation
-    // succeeded.
-    for (const auto i : c10::irange(begin, end)) {
-      try {
+        // Map the allocated physical memory into the virtual address space.
         handles_.at(i).value().map(
             ptr_ + i * segment_size_,
             segment_size_,
             sycl::ext::oneapi::experimental::address_access_mode::read_write);
       } catch (const sycl::exception& e) {
-        // Mapping failed (likely sycl::errc::runtime). Roll back all segments
-        // allocated beyond the failure point.
-        for (const auto j : c10::irange(i, end)) {
-          handles_.at(j) = std::nullopt;
-        }
+        // Allocation failure: typically sycl::errc::memory_allocation.
+        // Mapping failure: typically sycl::errc::runtime (e.g., OOM due to
+        // over-subscription).
+        // Note: constructing physical_mem may over-subscribe device memory but
+        // not immediately trigger OOM. The actual OOM can occur during map().
         // Roll back all segments allocated or mapped in this operation.
+        handles_.at(i) = std::nullopt;
         for (const auto j : c10::irange(begin, i)) {
           sycl::ext::oneapi::experimental::unmap(
               reinterpret_cast<void*>(ptr_ + segment_size_ * j),
