@@ -1112,11 +1112,15 @@ class FxConverter:
         # Get FX nodes corresponding to the call args.
         assert ir.is_node_sequence(kernel.inputs)
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
-        args = tensor_nodes + tuple(kernel.constant_args)
+        if hasattr(kernel, "unflatten_args"):
+            args, _ = kernel.unflatten_args(tensor_nodes, kernel.constant_args)
+        else:
+            args = tensor_nodes + tuple(kernel.constant_args)
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
         kwargs = kernel.kwargs.copy()
+
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):
             kwargs["out"] = self.buffer_to_node[out_ir_node.codegen_reference()]
