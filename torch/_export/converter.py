@@ -971,7 +971,7 @@ class TS2FXGraphConverter:
         # "cannot mutate tensors with frozen storage" functionalization error.
         # To work around the issue, we override the copy to be True, so that the output
         # is for sure not an alias of input
-        if target == torch.ops.aten.to.dtype or target == torch.ops.aten.to.prim_dtype:
+        if target is torch.ops.aten.to.dtype or target is torch.ops.aten.to.prim_dtype:
             user_nodes = [use.user for use in node.output().uses()]
             user_targets = [
                 get_op_overload(user_node)
@@ -1011,7 +1011,7 @@ class TS2FXGraphConverter:
         else:
             target = get_op_overload(node)
 
-        if target == torch.ops.aten.add.t:
+        if target is torch.ops.aten.add.t:
             # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
             # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
             args, _kwargs = self.get_args_kwargs(node, target._schema)
