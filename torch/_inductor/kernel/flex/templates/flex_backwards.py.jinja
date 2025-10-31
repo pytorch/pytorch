@@ -77,8 +77,8 @@
 
     RCP_LN2 = 1.44269504
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
-    offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
-
+    offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)    
+    
     if pid >= NUM_KV_BLOCKS:
         off_pid = pid - NUM_KV_BLOCKS
         # THIS BLOCK DOES DQ
@@ -87,6 +87,8 @@
         off_hq2 = off_pid // NUM_Q_BLOCKS + off_hkv * GQA_SHARED_HEADS
         start_m2_block = off_pid % NUM_Q_BLOCKS
         off_pid_mask = start_m2_block // SPARSE_Q_MULTIPLE
+        start_m2 = start_m2_block * BLOCK_M2
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
         stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
         stride_kv_idx_h = {{stride("KV_IDX", 1)}}
         stride_kv_idx_m = {{stride("KV_IDX", 2)}}
@@ -111,16 +113,54 @@
         LSE2 = LSE + off_chz2
         DELTA2 = DELTA + off_chz2
 
+        desc_q = None
+        desc_do = None
+        desc_k = None
+        desc_v = None
+        {%- if USE_TMA %}
+        desc_q = tl.make_tensor_descriptor(
+            base=Q2,
+            shape=(Q_LEN, QK_HEAD_DIM),
+            strides=(stride_qm, stride_qd),
+            block_shape=[BLOCK_M2, QK_HEAD_DIM_ROUNDED],
+        )
+        desc_do = tl.make_tensor_descriptor(
+            base=DO2,
+            shape=(Q_LEN, V_HEAD_DIM),
+            strides=(stride_dom, stride_dod),
+            block_shape=[BLOCK_M2, V_HEAD_DIM_ROUNDED],
+        )
+        desc_k = tl.make_tensor_descriptor(
+            base=K,
+            shape=(KV_LEN, QK_HEAD_DIM),
+            strides=(stride_kn, stride_kd),
+            block_shape=[BLOCK_N2, QK_HEAD_DIM_ROUNDED],
+        )
+        desc_v = tl.make_tensor_descriptor(
+            base=V,
+            shape=(KV_LEN, V_HEAD_DIM),
+            strides=(stride_vn, stride_vd),
+            block_shape=[BLOCK_N2, V_HEAD_DIM_ROUNDED],
+        )
+        {%- endif %}    
         # dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM], dtype=tl.float32)
         dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM_ROUNDED], dtype=tl.float32)
-
-        start_m2 = start_m2_block * BLOCK_M2
-        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+        
+        {%- if USE_TMA %}
+        q = tl.load_tensor_descriptor(
+            desc_q,
+            [(start_m2_block * BLOCK_M2).to(tl.int32), 0],
+        )
+        do = tl.load_tensor_descriptor(
+            desc_do,
+            [(start_m2_block * BLOCK_M2).to(tl.int32), 0],
+        )
+        {%- else %}       
 
         # load Q and do: they stay in SRAM throughout the inner loop.
         q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
         do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
-
+        {%- endif %}        
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
@@ -137,14 +177,14 @@
         # KV_IDX and KV_NUM_BLKS are always contiguous.
         kv_indices = KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-        sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)       
 
-        offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
+        #offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
         dq = bwd_dq_inner(
             {{gen_argdefs()}},
-            K, V,
+            K, V, desc_k, desc_v, kv_start, start_m2,
             dq, q, do, Di, lse,
-            off_zq, off_hq2, offs_m2, offs_n2,
+            off_zq, off_hq2,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION,
@@ -161,9 +201,9 @@
             offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
             dq = bwd_dq_inner(
                 {{gen_argdefs()}},
-                K, V,
+                K, V, desc_k, desc_v, kv_start, start_m2,
                 dq, q, do, Di, lse,
-                off_zq, off_hq2, offs_m2, offs_n2,
+                off_zq, off_hq2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION,
@@ -193,12 +233,38 @@
         dk = tl.zeros([BLOCK_N1, QK_HEAD_DIM_ROUNDED], dtype=tl.float32)
 
         start_n1 = pid * BLOCK_N1
-        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
-
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)      
+      
+        desc_k = None
+        desc_v = None  
+        {%- if USE_TMA %}
+        desc_k = tl.make_tensor_descriptor(
+            base=K,
+            shape=(KV_LEN, QK_HEAD_DIM),
+            strides=(stride_kn, stride_kd),
+            block_shape=[BLOCK_N1, QK_HEAD_DIM_ROUNDED],
+        )
+        desc_v = tl.make_tensor_descriptor(
+            base=V,
+            shape=(KV_LEN, V_HEAD_DIM),
+            strides=(stride_vn, stride_vd),
+            block_shape=[BLOCK_N1, V_HEAD_DIM_ROUNDED],
+        )
+        {%- endif %}    
+        {%- if USE_TMA %}
+        k = tl.load_tensor_descriptor(
+            desc_k,
+            [start_n1.to(tl.int32), 0],
+        )
+        v = tl.load_tensor_descriptor(
+            desc_v,
+            [start_n1.to(tl.int32), 0],
+        )
+        {%- else %} 
         # load K and V: they stay in SRAM throughout the inner loop.
         k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
         v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
-
+        {%- endif %}
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
@@ -289,35 +355,36 @@
 @triton.jit
 def bwd_dq_inner(
     {{gen_argdefs()}},
-    K, V,  # pointers
+    K, V, desc_k, desc_v, kv_start, start_m2, # pointers and descriptors for TMA
     dq, q, do, Di, lse,
-    off_z, off_hq, offs_m2, offs_n2,
+    off_z, off_hq,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION,
     IS_FULL_BLOCKS,
 ):
+
     {{gen_defines() | indent_except_first(1) }}
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
     RCP_LN2: tl.constexpr = 1.44269504
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
-
+    
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
-    kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
-    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
     hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N2), 1))
-
+    
+    kv_offset = 0
     for start_n in range(0, hi):
         dq = bwd_dq_block_mn(
             {{gen_argdefs()}},
-            dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-            off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
+            dq, q, K, V, desc_k, desc_v, kv_start, kv_offset, start_m2,
+            do, Di, lse, Q_LEN, KV_LEN,
+            off_z, off_hq, offs_k, offs_v,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
@@ -330,10 +397,7 @@ def bwd_dq_inner(
             SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2, BLOCKS_ARE_CONTIGUOUS
         )
 
-        kT_ptrs += offset * stride_kn
-        vT_ptrs += offset * stride_vn
-
-        offs_n2 += offset
+        kv_offset += offset
 
     return dq
 
@@ -341,17 +405,29 @@ def bwd_dq_inner(
 @triton.jit
 def bwd_dq_block_mn(
     {{gen_argdefs()}},
-    dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-    off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
+    dq, q, K, V,
+    do, Di, lse, Q_LEN, KV_LEN, desc_k, desc_v, kv_start, kv_offset, start_m2,
+    off_z, off_hq, offs_k, offs_v,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1)}}
-
+    
+    {%- if USE_TMA %}
+    k = tl.load_tensor_descriptor(
+        desc_k,
+        [(kv_start + kv_offset).to(tl.int32), 0],
+    )
+    kT = tl.trans(k)
+    {%- else %}
+    offs_n2 = kv_start + kv_offset + tl.arange(0, BLOCK_N2)
+    kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
+    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
     # NB reversed order to since K is transposed
     kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
+    {%- endif %}
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qk *= SM_SCALE
