@@ -1569,7 +1569,7 @@ class SIMDScheduling(BaseScheduling):
         else:
             # TODO need add heuristics. But this is not really important
             # ATM since the common code path goes thru split reduction.
-            split_size = 64
+            split_size = config.triton.mix_order_reduction_split_size
 
         nsplit = (nrow + split_size - 1) // split_size
         numel, rnumel = node1.group[1]

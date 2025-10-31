@@ -249,7 +249,13 @@ class MixOrderReduction:
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
         # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 10):
+        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 2):
+            return False
+
+        # When nrow is small, ncol should also be small (due to the check
+        # above). Thus the entire tensor should be well cached in L2.
+        # Mix order reduction is less beneficial.
+        if not V.graph.sizevars.statically_known_geq(nrow, 4096):
             return False
 
         contiguous_node, other_node = (
@@ -274,7 +280,7 @@ class MixOrderReduction:
             return False
 
         # rnumel so large that we will not generated persistent reduction
-        if not V.graph.sizevars.statically_known_leq(ncol, 1024):
+        if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
         # Other reduction types like max/min is not supported yet.
@@ -309,22 +315,23 @@ class MixOrderReduction:
 
             if len(index_names) == 0:
                 continue
-            assert len(index_names) == 1
-            index_name = index_names[0]
-            index_expr = loop_body.indexing_exprs[index_name]
-            var_ranges = loop_body.var_ranges
 
-            # assumes the final symbol is for reduction
-            var_symbols = list(var_ranges.keys())
-            stride_vars = V.graph.sizevars.stride_vars(
-                index_expr,
-                var_symbols,
-                var_symbols,
-            )
-            n_congituous_read += stride_vars[-1] == 1
-            if n_congituous_read > 0:
-                break
-        return n_congituous_read > 0
+            # there can be multiple index_names some times
+            for index_name in index_names:
+                index_expr = loop_body.indexing_exprs[index_name]
+                var_ranges = loop_body.var_ranges
+
+                # assumes the final symbol is for reduction
+                var_symbols = list(var_ranges.keys())
+                stride_vars = V.graph.sizevars.stride_vars(
+                    index_expr,
+                    var_symbols,
+                    var_symbols,
+                )
+                n_congituous_read += stride_vars[-1] == 1
+                if n_congituous_read > 0:
+                    return True
+        return False
 
 
 @dataclasses.dataclass
