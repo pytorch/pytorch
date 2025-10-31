@@ -410,12 +410,16 @@ if not IS_WINDOWS:
                 libtorch_agnostic.ops.test_device_equality(cpu_device, cuda_device)
             )
 
-            with self.assertRaisesRegex(RuntimeError, "API call failed"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Device index 129 is out of range for int8_t"
+            ):
                 libtorch_agnostic.ops.test_device_constructor(
                     is_cuda=True, index=129, use_str=False
                 )
 
-            with self.assertRaisesRegex(RuntimeError, "API call failed"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Device index 129 is out of range for int8_t"
+            ):
                 libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
 
         @onlyCUDA
