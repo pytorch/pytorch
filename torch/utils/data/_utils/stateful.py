@@ -2,11 +2,11 @@
 """
 Stateful protocol for objects that can save and restore their state.
 
-This module defines the Stateful protocol that objects can implement to 
+This module defines the Stateful protocol that objects can implement to
 participate in DataLoader checkpointing when using stateful=True.
 """
 
-from typing import Any, Dict, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -22,14 +22,14 @@ class Stateful(Protocol):
             def __init__(self):
                 self.position = 0
 
-            def state_dict(self) -> Dict[str, Any]:
+            def state_dict(self) -> dict[str, Any]:
                 return {"position": self.position}
 
-            def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+            def load_state_dict(self, state_dict: dict[str, Any]) -> None:
                 self.position = state_dict["position"]
     """
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """
         Return the state of the object as a dictionary.
 
@@ -39,7 +39,7 @@ class Stateful(Protocol):
         """
         ...
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """
         Load the state from a dictionary.
 
