@@ -97,10 +97,10 @@ def _find_q_dq_node_for_user(
 def _is_sym_size_node(node: Node):
     return (
         node.op == "call_function"
-        and node.target == torch.ops.aten.sym_size.default
-        or node.target == torch.ops.aten.sym_numel.default
-        or node.target == torch.ops.aten.sym_numel
-        or node.target == torch.ops.aten.sym_size
+        and node.target is torch.ops.aten.sym_size.default
+        or node.target is torch.ops.aten.sym_numel.default
+        or node.target is torch.ops.aten.sym_numel
+        or node.target is torch.ops.aten.sym_size
     )
 
 
@@ -228,7 +228,7 @@ def fold_bn_weights_into_conv_node(
     bn_b = _get_tensor_constant_from_node(bn_args[2], m)
     bn_rm = _get_tensor_constant_from_node(bn_args[3], m)
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
-    if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
+    if bn_node.target is torch.ops.aten._native_batch_norm_legit_no_training.default:
         eps_arg_index = 6
     elif _is_supported_batch_norm_for_training(bn_node):
         eps_arg_index = 7
@@ -268,7 +268,7 @@ def fold_bn_weights_into_conv_node(
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
     # and we want to replace the uses of getitem 0 with the output of conv
     #
-    if bn_node.target == torch.ops.aten.batch_norm.default:
+    if bn_node.target is torch.ops.aten.batch_norm.default:
         # With the new training ir, instead of batch_norm + getitem,
         # we only have the batch_norm node.
         #
@@ -377,7 +377,7 @@ def _get_aten_graph_module_for_pattern(
     for node in aten_pattern.graph.nodes:  # type: ignore[union-attr]
         if (
             node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
+            and node.target is torch.ops.aten.copy_.default
             and len(node.users) == 0
         ):
             aten_pattern.graph.erase_node(node)  # type: ignore[operator, union-attr]

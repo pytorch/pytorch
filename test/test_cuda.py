@@ -4784,7 +4784,7 @@ print(torch.cuda.get_allocator_backend())
                 total -= x.numel()
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
-            for i in range(N):
+            for _ in range(N):
                 while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
