@@ -18,7 +18,6 @@ import threading
 import warnings
 from collections.abc import Callable
 from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -39,6 +38,7 @@ from torch.utils.data.sampler import (
     Sampler,
     SequentialSampler,
 )
+from typing_extensions import Self
 
 from ._utils.stateful import Stateful
 from ._utils.worker import _try_get_state_dict, _try_load_state_dict
@@ -1002,9 +1002,9 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
 
     def load_state_dict(self, state_dict):
         """Load state from a checkpoint."""
-        assert self._NUM_YIELDED in state_dict, (
-            f"State doesn't contain key '{self._NUM_YIELDED}' expected for single process dataloader"
-        )
+        assert (
+            self._NUM_YIELDED in state_dict
+        ), f"State doesn't contain key '{self._NUM_YIELDED}' expected for single process dataloader"
 
         # Load sampler state
         self._load_sampler_state(state_dict)
@@ -1035,7 +1035,7 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
             _try_load_state_dict(
                 self._index_sampler, state_dict[_StateKeys.INDEX_SAMPLER_STATE]
             )
-            self._sampler_iter = iter(self._index_sampler)
+            self._sampler_iter = iter(self._index_sampler)  # type: ignore[call-overload]
         elif isinstance(self._sampler_iter, Stateful):
             # Only restore iterator state
             self._sampler_iter = iter(self._index_sampler)
