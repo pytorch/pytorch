@@ -1050,7 +1050,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
             raise AssertionError(f"Expected exactly 1, got {len(shadow_n.users)}")
         quant_node = next(iter(shadow_n.users.keys()))
         new_args: Any = None
-        if quant_node.target == torch.quantize_per_channel:
+        if quant_node.target is torch.quantize_per_channel:
             _weight, scale_node, zp_node, axis, dtype = quant_node.args
             scale_val = getattr_from_fqn(shadow_wrapper, scale_node.target)
             zp_val = getattr_from_fqn(shadow_wrapper, zp_node.target)

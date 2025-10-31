@@ -81,7 +81,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace with make_tensor
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
@@ -942,7 +942,7 @@ class TestTensorCreation(TestCase):
                 num_tensors = random.randint(1, 5)
                 torch_input = []
                 # Create tensors with shape being different along one axis only
-                for param in range(num_tensors):
+                for _ in range(num_tensors):
                     shape[i] = random.randint(1, 5)
                     torch_input.append(_generate_input(tuple(shape), dtype, device, with_extremal=False))
 
@@ -997,7 +997,7 @@ class TestTensorCreation(TestCase):
         ops = ((torch.vstack, np.vstack), (torch.row_stack, np.vstack))
         for torch_op, np_op in ops:
             self._test_special_stacks(0, 2, torch_op, np_op, device, dtype)
-            for i in range(5):
+            for _ in range(5):
                 # Test dimension change for 1D tensor of size (N) and 2D tensor of size (1, N)
                 n = random.randint(1, 10)
                 input_a = _generate_input((n,), dtype, device, with_extremal=False)
@@ -1012,7 +1012,7 @@ class TestTensorCreation(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_dstack(self, device, dtype):
         self._test_special_stacks(2, 3, torch.dstack, np.dstack, device, dtype)
-        for i in range(5):
+        for _ in range(5):
             # Test dimension change for 1D tensor of size (N), 2D tensor of size (1, N), and 3D tensor of size (1, N, 1)
             n = random.randint(1, 10)
             input_a = _generate_input((n,), dtype, device, with_extremal=False)
@@ -2885,7 +2885,7 @@ class TestTensorCreation(TestCase):
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
     @dtypes(torch.float, torch.double, torch.long, torch.bfloat16, torch.float16)
     def test_kaiser_window(self, device, dtype):
-        for num_test in range(50):
+        for _ in range(50):
             self._test_signal_window_functions('kaiser', dtype, device, beta=random.random() * 30)
 
     def _test_signal_windows_functions(self, name, dtype, device, **kwargs):
@@ -2918,7 +2918,7 @@ class TestTensorCreation(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypes(torch.float, torch.double)
     def test_kaiser(self, device, dtype):
-        for num_test in range(50):
+        for _ in range(50):
             self._test_signal_windows_functions('kaiser', dtype, device, beta=random.random() * 30)
 
     def test_tensor_factories_empty(self, device):
