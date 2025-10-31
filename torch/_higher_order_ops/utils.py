@@ -402,6 +402,9 @@ def _collect_fake_inputs(inputs):
                             val = torch._C._functorch.get_unwrapped(val)
                         assert isinstance(val, FakeTensor)
                         inputs_fake.append(val)
+                    elif isinstance(val, torch.distributed.tensor.DTensor):
+                        assert isinstance(val._local_tensor, FakeTensor)
+                        inputs_fake.append(val._local_tensor)
                     else:
                         # This is the standard case of a TensorVariable
                         assert isinstance(val, FakeTensor)
