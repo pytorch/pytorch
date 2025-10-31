@@ -260,12 +260,12 @@ class IteratorVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "__iter__" or name == "__next__":
             return variables.ConstantVariable.create(True)
-        super().call_obj_hasattr(tx, name)
+        return super().call_obj_hasattr(tx, name)
 
     def call_method(
         self,
         tx: "InstructionTranslator",
-        name,
+        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
