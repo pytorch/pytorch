@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import dataclasses
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from torch import _C, _ops, autograd, Tensor
 from torch.utils import _pytree

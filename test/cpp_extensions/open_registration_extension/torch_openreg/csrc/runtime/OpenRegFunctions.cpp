@@ -36,7 +36,7 @@ OPENREG_EXPORT c10::DeviceIndex device_count() noexcept {
   static int count = []() {
     try {
       auto result = device_count_impl();
-      TORCH_INTERNAL_ASSERT(
+      TORCH_CHECK(
           result <= std::numeric_limits<c10::DeviceIndex>::max(),
           "Too many devices, DeviceIndex overflowed");
       return result;

@@ -7,8 +7,8 @@ from __future__ import annotations
 import io
 import logging
 import warnings
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx import _constants as onnx_constants
@@ -67,7 +67,7 @@ def export_compat(
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = True,
+    fallback: bool = False,
     # Legacy export parameters for fallback
     legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:
