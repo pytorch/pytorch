@@ -4869,7 +4869,7 @@ class AOTInductorTestsTemplate:
                 return result
 
         inputs = []
-        for i in range(1000):
+        for _ in range(1000):
             inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
         inputs = tuple(inputs)
         model = Model()
