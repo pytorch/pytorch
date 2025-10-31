@@ -1097,6 +1097,15 @@ class XPUAllocator : public DeviceAllocator {
     return block;
   }
 
+  void assertValidDevice(DeviceIndex device) {
+    const auto device_num = device_allocators.size();
+    TORCH_CHECK(
+        0 <= device && device < static_cast<int64_t>(device_num),
+        "Invalid device argument ",
+        device,
+        ": did you call init?");
+  }
+
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
@@ -1209,15 +1218,6 @@ class XPUAllocator : public DeviceAllocator {
     xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
   }
 
-  void assertValidDevice(DeviceIndex device) {
-    const auto device_num = device_allocators.size();
-    TORCH_CHECK(
-        0 <= device && device < static_cast<int64_t>(device_num),
-        "Invalid device argument ",
-        device,
-        ": did you call init?");
-  }
-
   DeviceStats getDeviceStats(DeviceIndex device) override {
     assertValidDevice(device);
     return device_allocators[device]->getStats();
@@ -1231,6 +1231,13 @@ class XPUAllocator : public DeviceAllocator {
   void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
+  }
+
+  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
+    assertValidDevice(dev);
+    assertValidDevice(dev_to_access);
+    c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
+        c10::xpu::get_raw_device(dev_to_access));
   }
 
   double getMemoryFraction(DeviceIndex device) {
@@ -1289,6 +1296,10 @@ void raw_delete(void* ptr) {
 
 void recordStream(const DataPtr& dataPtr, XPUStream stream) {
   return allocator.recordStream(dataPtr, stream);
+}
+
+void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
+  return allocator.enablePeerAccess(dev, dev_to_access);
 }
 
 double getMemoryFraction(DeviceIndex device) {
