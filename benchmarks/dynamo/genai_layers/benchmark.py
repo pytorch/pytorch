@@ -163,7 +163,36 @@ Examples:
         help="Whether to print the raw benchmarking result. Easier to quickly check the benchmark results on a server without GUI",
     )
 
+    parser.add_argument(
+        "--custom-compile-name",
+        type=str,
+        default=None,
+        help="Name for the curve with customized compilation options",
+    )
+
+    parser.add_argument(
+        "--custom-compile-options",
+        type=str,
+        default=None,
+        help="Json string for the custom compile options.",
+    )
+
     args = parser.parse_args()
+
+    if args.custom_compile_options:
+        import json
+
+        try:
+            args.custom_compile_options = json.loads(args.custom_compile_options)
+        except json.decoder.JSONDecodeError as e:
+            raise RuntimeError(
+                f"Invalid json string for --custom-compile-options: {args.custom_compile_options}"
+            ) from e
+
+        if not args.custom_compile_options:
+            raise RuntimeError("Found no options for --custom-compile-options")
+        if not args.custom_compile_name:
+            raise RuntimeError("Missing label name for the custom compilation")
 
     # Handle list option
     if args.list:
