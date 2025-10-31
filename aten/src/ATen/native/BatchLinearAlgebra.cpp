@@ -3031,17 +3031,13 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     if (compute_eigenvectors) {
       if (vectors.is_complex()) {
         // move tensors to CPU if they are not already there for post-processing
-        auto vectors_cpu = vectors.device().is_cpu() ? vectors : vectors.cpu();
-        auto values_cpu  = values.device().is_cpu()  ? values  : values.cpu();
-        auto maybe_complex_vectors_cpu = maybe_complex_vectors.device().is_cpu()
-                                ? maybe_complex_vectors
-                                : maybe_complex_vectors.cpu();
+        auto vectors_cpu = vectors.cpu();
+        auto values_cpu  = values.cpu();
+        auto maybe_complex_vectors_cpu = maybe_complex_vectors.cpu();
 
         vectors = linalg_eig_make_complex_eigenvectors(vectors_cpu, values_cpu, maybe_complex_vectors_cpu);
 
-        if (!vectors.device().is_cpu()) {//move tensors back to device if needed
-          vectors.copy_(vectors_cpu.to(vectors.device()));
-        }
+        vectors.copy_(vectors_cpu.to(vectors.device()));
 
 
       } else {
@@ -3139,7 +3135,6 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
   Tensor vectors = at::empty({0}, input.options().dtype(complex_dtype));
-
 
   at::linalg_eig_outf(input, values, vectors);
 

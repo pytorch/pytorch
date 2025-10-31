@@ -2097,9 +2097,9 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   }
 #endif
   // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer 'input' to CPU
-  auto eigenvalues_cpu = eigenvalues.device().is_cpu() ? eigenvalues : eigenvalues.cpu();
-  auto eigenvectors_cpu = eigenvectors.device().is_cpu() ? eigenvectors : eigenvectors.cpu();
-  auto infos_cpu = infos.device().is_cpu() ? infos : infos.cpu();
+  auto eigenvalues_cpu = eigenvalues.cpu();
+  auto eigenvectors_cpu = eigenvectors.cpu();
+  auto infos_cpu = infos.cpu();
 
   Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
@@ -2108,16 +2108,9 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "linalg_eig_out_cuda", [&]{
     linalg_eig_magma<scalar_t>(eigenvalues_cpu, eigenvectors_cpu, input_working_copy, infos_cpu, compute_eigenvectors);
   });
-  // Copy back to GPU if needed
-  if (!eigenvalues.device().is_cpu()) {
-    eigenvalues.copy_(eigenvalues_cpu);
-  }
-  if (!eigenvectors.device().is_cpu()) {
-    eigenvectors.copy_(eigenvectors_cpu);
-  }
-  if (!infos.device().is_cpu()) {
-    infos.copy_(infos_cpu);
-  }
+  eigenvalues.copy_(eigenvalues_cpu);
+  eigenvectors.copy_(eigenvectors_cpu);
+  infos.copy_(infos_cpu);
 
 }
 
