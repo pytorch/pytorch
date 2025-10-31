@@ -136,7 +136,8 @@ struct ExpandableSegment {
             .get_info<sycl::info::device::global_mem_size>();
     // The extra 1/8 allows flexibility for remapping or moving pages within the
     // segment when unmapping earlier regions.
-    max_handles_ = numSegments(device_total * (1 + 1.0 / 8));
+    constexpr float kVirtualMemOversubscriptFactor = 1.125f; // 1 + 1/8
+    max_handles_ = numSegments(device_total * kVirtualMemOversubscriptFactor);
     ptr_ = sycl::ext::oneapi::experimental::reserve_virtual_mem(
         segment_size_ * max_handles_, xpu::get_device_context());
   }
@@ -155,8 +156,8 @@ struct ExpandableSegment {
     }
 
     // Ensure handles_ vector is large enough to hold all segments.
-    while (end > handles_.size()) {
-      handles_.emplace_back(std::nullopt);
+    if (end > handles_.size()) {
+      handles_.resize(end, std::nullopt);
     }
 
     // Allocate and map physical memory for each segment.
@@ -280,6 +281,7 @@ struct ExpandableSegment {
   // relative to the base pointer `ptr_`. This is the *inclusive* lower bound
   // of the segment that includes `p`.
   size_t segmentLeft(char* p) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(p >= ptr() && p < ptr() + size());
     size_t offset = p - ptr();
     return offset / segment_size_;
   }
@@ -290,11 +292,12 @@ struct ExpandableSegment {
   // If `p` lies exactly on a segment boundary, this is equal to segmentLeft(p).
   // Otherwise, it rounds up and returns segmentLeft(p) + 1.
   size_t segmentRight(char* p) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(p >= ptr() && p < ptr() + size());
     size_t offset = p - ptr();
     return numSegments(offset);
   }
 
-  // Constructs a SegmentRange starting at [start, end) indices.
+  // Constructs a SegmentRange spanning indices [start, end).
   SegmentRange rangeFromHandles(size_t begin, size_t end) {
     return SegmentRange(
         ptr() + segment_size_ * begin, segment_size_ * (end - begin));
