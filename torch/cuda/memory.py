@@ -4,11 +4,13 @@ r"""This package adds support for device memory management implemented in CUDA."
 import collections
 import contextlib
 import ctypes
+import os
 import pickle
+import re
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Literal, Optional, TYPE_CHECKING
+from typing import Any, cast, Literal, NotRequired, Optional, TYPE_CHECKING, TypedDict
 from typing_extensions import deprecated
 
 import torch
@@ -23,11 +25,64 @@ from . import (
     is_initialized,
 )
 from ._memory_viz import memory as _memory, segments as _segments
-from ._utils import _augment_memory_snapshot_stack_traces
 
 
 if TYPE_CHECKING:
     from torch.types import Device
+
+
+# Type definitions for memory profiler
+class Frame(TypedDict):
+    """Frame information from memory profiler snapshots."""
+
+    filename: str
+    line: int
+    name: str
+    # Fields added by FX augmentation (optional)
+    fx_node_op: NotRequired[str]
+    fx_node_name: NotRequired[str]
+    fx_node_target: NotRequired[str]
+    fx_original_trace: NotRequired[str]
+
+
+class Block(TypedDict):
+    """Memory block information."""
+
+    size: int
+    requested_size: int
+    address: int
+    state: str
+    frames: list[Frame]
+
+
+class Segment(TypedDict):
+    """Memory segment information."""
+
+    address: int
+    total_size: int
+    stream: int
+    segment_type: str
+    allocated_size: int
+    active_size: int
+    blocks: list[Block]
+
+
+class TraceEntry(TypedDict):
+    """Memory trace entry information."""
+
+    action: str
+    addr: NotRequired[int]
+    frames: list[Frame]
+    size: int
+    stream: int
+    device_free: NotRequired[int]
+
+
+class Snapshot(TypedDict):
+    """Memory snapshot structure."""
+
+    segments: list[Segment]
+    device_traces: NotRequired[list[list[TraceEntry]]]
 
 
 __all__ = [
@@ -965,6 +1020,119 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
+def _augment_frames(frames: list[Frame]) -> int:
+    """
+    Augment a list of frames with FX debug information.
+
+    Args:
+        frames: List of frame dictionaries to augment
+
+    Returns:
+        The count of frames that were augmented.
+    """
+    from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
+
+    # Regex pattern to match FX generated files
+    _FX_GENERATED_PATTERN = re.compile(
+        rf"{re.escape(FX_GRAPH_MODULE_FILE_PREFIX)}.*\.py$"
+    )
+
+    count = 0
+    if not frames:
+        return count
+
+    for frame in frames:
+        if "filename" in frame and "line" in frame:
+            filename = frame["filename"]
+            lineno = frame["line"]
+
+            # Check if this looks like an FX generated file
+            if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
+                continue
+
+            # Look up metadata from the global registry
+            from torch.fx.traceback import _FX_METADATA_REGISTRY
+
+            metadata = _FX_METADATA_REGISTRY.get(filename)
+            if metadata is None:
+                continue
+
+            lineno_map = metadata.get("lineno_map", {})
+            node_metadata = metadata.get("node_metadata", {})
+            prologue_start = metadata.get("prologue_start", 0)
+
+            # Get the node index for this line
+            node_idx = lineno_map.get(lineno - prologue_start)
+
+            if node_idx is not None and node_idx in node_metadata:
+                node_info = node_metadata[node_idx]
+                original_trace = node_info.get("stack_trace")
+                node_op = node_info.get("op")
+                node_name = node_info.get("name")
+                node_target = node_info.get("target")
+
+                # Always add node metadata
+                frame["fx_node_op"] = node_op
+                frame["fx_node_name"] = node_name
+                frame["fx_node_target"] = str(node_target)
+
+                # Add original trace if available
+                if original_trace:
+                    frame["fx_original_trace"] = original_trace
+
+                count += 1
+
+    return count
+
+
+def _augment_memory_snapshot_stack_traces(
+    snapshot: str | Snapshot,
+) -> Snapshot:
+    """
+    Augment a memory snapshot with original source stack traces from FX metadata.
+
+    IMPORTANT: This function reads from a global in-memory registry (_FX_METADATA_REGISTRY)
+    that is populated during graph module compilation. It must be called in the same
+    Python process where the FX graphs were compiled. It cannot be used to augment
+    snapshots loaded from disk in a different process.
+
+    Args:
+        snapshot: Either a memory snapshot dict or path to a snapshot pickle file
+
+    Returns:
+        The augmented snapshot dictionary with fx_node_op, fx_node_name,
+        fx_original_trace, and fx_node_info fields added to frames
+    """
+
+    snapshot_dict: Snapshot
+    if isinstance(snapshot, str):
+        # Load the memory snapshot
+        with open(snapshot, "rb") as f:
+            snapshot_dict = cast(Snapshot, pickle.load(f))
+    else:
+        snapshot_dict = snapshot
+
+    # Process stack traces in the snapshot
+    augmented_count = 0
+
+    # Process blocks in segments (for regular allocations)
+    if "segments" in snapshot_dict:
+        for segment in snapshot_dict["segments"]:
+            if "blocks" in segment:
+                for block in segment["blocks"]:
+                    if "frames" in block:
+                        augmented_count += _augment_frames(block["frames"])
+
+    # Process device traces (for memory history)
+    if "device_traces" in snapshot_dict:
+        for trace_list in snapshot_dict["device_traces"]:
+            for trace_entry in trace_list:
+                if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                    augmented_count += _augment_frames(trace_entry["frames"])
+
+    return snapshot_dict
+
+
 def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
@@ -1059,7 +1227,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """
     s = _C._cuda_memorySnapshot(None)
     if augment_with_fx_traces:
-        s = _augment_memory_snapshot_stack_traces(s)
+        s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
     return s
 
 
