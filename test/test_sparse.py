@@ -217,6 +217,12 @@ class TestSparse(TestSparseBase):
             else:
                 existing_indices.add(index)
 
+    def test_negative_indices(self):
+        indices = torch.tensor([[0, 1, -1], [2, 0, 1]])
+        values = torch.tensor([1, 2, 3])
+        shape = torch.Size([3, 3])
+        self.assertRaisesRegex(RuntimeError, "found negative index", lambda: torch.sparse_coo_tensor(indices, values, shape))
+
     def randn(self, *args, **kwargs):
         """
         Variant of torch.randn that also works in the TEST_CUDA case.
@@ -1483,7 +1489,7 @@ class TestSparse(TestSparseBase):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
             b_list = []
-            for mat_idx in range(num_mats):
+            for _ in range(num_mats):
                 a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j], dtype, device, coalesced)[0])
                 b_list.append(torch.randn([dim_j, dim_k], dtype=dtype, device=device))
 

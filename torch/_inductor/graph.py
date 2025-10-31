@@ -661,7 +661,7 @@ class GraphLowering(torch.fx.Interpreter):
             return True
 
         conv_nodes = [
-            n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
+            n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
         nconv = len(conv_nodes)
 
@@ -860,7 +860,7 @@ class GraphLowering(torch.fx.Interpreter):
         nodes_cannot_propagate = [torch.ops.aten.bmm.default]
         output_set = OrderedSet[Node]()
         for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
-            if n.target == torch.ops.aten.convolution.default:
+            if n.target is torch.ops.aten.convolution.default:
                 output_set.add(n)
                 if last_conv is None:
                     last_conv = n
@@ -1322,7 +1322,12 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+            if "should_fallback" in n.meta:
+                out = fallback_handler(target, add_to_fallback_set=False)(
+                    *args, **kwargs
+                )
+            else:
+                out = lowerings[target](*args, **kwargs)  # type: ignore[index]
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
@@ -1983,7 +1988,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if (
             full_aoti_runtime_assert()
-            and n.target == torch.ops.aten._assert_scalar.default
+            and n.target is torch.ops.aten._assert_scalar.default
             and self.aot_mode
         ):
             node_args, _ = self.fetch_args_kwargs_from_env(n)

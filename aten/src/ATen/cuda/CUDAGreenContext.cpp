@@ -7,6 +7,8 @@
 #define HAS_CUDA_GREEN_CONTEXT() 1
 #else
 #define HAS_CUDA_GREEN_CONTEXT() 0
+// Suppress unsued private field warnings as this class is not supposed to be called
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-private-field")
 #endif
 
 namespace at::cuda {
