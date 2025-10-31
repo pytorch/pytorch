@@ -23,13 +23,13 @@ from typing_extensions import Never, ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.codecache import torch_key
+from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
 from torch._utils_internal import find_compile_subproc_binary
-from torch._inductor.compile_worker.timer import Timer
 from torch.monitor import _WaitCounter, _WaitCounterTracker
 
 
@@ -132,7 +132,7 @@ class SubprocPool:
         nprocs: int,
         pickler: Optional[SubprocPickler] = None,
         kind: SubprocKind = SubprocKind.FORK,
-        quiesce = False,
+        quiesce: bool = False,
     ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
@@ -218,7 +218,9 @@ class SubprocPool:
         ).guard()
 
         if quiesce:
-            self.timer = Timer(60, self.quiesce)
+            self.timer: Optional[Timer] = Timer(
+                config.quiesce_async_compile_time, self.quiesce
+            )
         else:
             self.timer = None
 
@@ -295,7 +297,7 @@ class SubprocPool:
                 if not self.running:
                     return
                 if self.timer:
-                    timer.record_call()
+                    self.timer.record_call()
                 if isinstance(result, _SubprocExceptionInfo):
                     # An exception occurred in the submitted job
                     self.pending_futures[job_id].set_exception(
@@ -315,6 +317,9 @@ class SubprocPool:
                 del self.pending_futures[job_id]
 
     def quiesce(self) -> None:
+        if self.timer is not None and len(self.pending_futures) > 0:
+            self.timer.record_call()
+            return
         self._send(MsgHeader.QUIESCE)
         assert self.quiesce_waitcounter is None
         self.quiesce_waitcounter = _WaitCounter(
