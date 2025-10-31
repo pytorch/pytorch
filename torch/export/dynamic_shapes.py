@@ -12,16 +12,14 @@ import torch
 from torch.utils._pytree import (
     _get_node_type,
     BUILTIN_TYPES,
-    KeyPath,
     keystr,
+    LeafSpec,
     MappingKey,
     SequenceKey,
     SUPPORTED_NODES,
-    tree_iter,
+    tree_flatten,
     tree_map,
     tree_map_with_path,
-    tree_structure,
-    TreeSpec,
 )
 
 from .exported_program import ExportedProgram
@@ -657,55 +655,53 @@ def _tree_map_with_path(
                     case_name="dynamic_shapes_validation",
                 )
 
-            def _compare(
-                treespec: TreeSpec, other_treespec: TreeSpec, path: KeyPath
-            ) -> None:
+            def _compare(tree, dynamic_shapes, path):
                 # raise an error at the point where tree and dynamic_shapes differ,
                 # including the path to that point and the reason for the difference
                 rendered_path = keystr(path)
-                if treespec.is_leaf():
+                if isinstance(tree, LeafSpec):
                     return
-                if other_treespec.is_leaf():
+                if isinstance(dynamic_shapes, LeafSpec):
                     raise_mismatch_error(
-                        f"`{tree_name}{rendered_path}` is a {treespec.type}, "
+                        f"`{tree_name}{rendered_path}` is a {tree.type}, "
                         f"but `dynamic_shapes{rendered_path}` is not"
                     )
-                if treespec.type != other_treespec.type:
+                if tree.type != dynamic_shapes.type:
                     raise_mismatch_error(
-                        f"`{tree_name}{rendered_path}` is a {treespec.type}, "
-                        f"but `dynamic_shapes{rendered_path}` is a {other_treespec.type}"
+                        f"`{tree_name}{rendered_path}` is a {tree.type}, "
+                        f"but `dynamic_shapes{rendered_path}` is a {dynamic_shapes.type}"
                     )
-                if treespec.num_children != other_treespec.num_children:
+                if len(tree.children_specs) != len(dynamic_shapes.children_specs):
                     raise_mismatch_error(
-                        f"`{tree_name}{rendered_path}` has {treespec.num_children} elements, "
-                        f"but `dynamic_shapes{rendered_path}` has {other_treespec.num_children} elements"
+                        f"`{tree_name}{rendered_path}` has {len(tree.children_specs)} elements, "
+                        f"but `dynamic_shapes{rendered_path}` has {len(dynamic_shapes.children_specs)} elements"
                     )
-                if treespec.type is dict:
+                if tree.type is dict:
                     # context, children could be out of order
-                    if set(treespec.context) != set(other_treespec.context):
+                    if sorted(tree.context) != sorted(dynamic_shapes.context):
                         raise_mismatch_error(
-                            f"`{tree_name}{rendered_path}` has keys {treespec.context}, "
-                            f"but `dynamic_shapes{rendered_path}` has keys {other_treespec.context}"
+                            f"`{tree_name}{rendered_path}` has keys {tree.context}, "
+                            f"but `dynamic_shapes{rendered_path}` has keys {dynamic_shapes.context}"
                         )
                     _remap = dict(
-                        zip(other_treespec.context, other_treespec.children())
+                        zip(dynamic_shapes.context, dynamic_shapes.children_specs)
                     )
-                    other_children = [_remap[k] for k in treespec.context]
+                    dynamic_shapes_children_specs = [_remap[k] for k in tree.context]
                 else:
-                    other_children = other_treespec.children()
-                for i, (child, other_child) in enumerate(
-                    zip(treespec.children(), other_children)
+                    dynamic_shapes_children_specs = dynamic_shapes.children_specs
+                for i, (tree_, dynamic_shapes_) in enumerate(
+                    zip(tree.children_specs, dynamic_shapes_children_specs)
                 ):
                     _compare(
-                        child,
-                        other_child,
-                        path + (_key(treespec.type, treespec.context, i),),
+                        tree_,
+                        dynamic_shapes_,
+                        path + [_key(tree.type, tree.context, i)],
                     )
 
-            treespec = tree_structure(tree, is_leaf=is_leaf)
+            _, tree_spec = tree_flatten(tree, is_leaf=is_leaf)
             for other_tree in dynamic_shapes:
-                other_treespec = tree_structure(other_tree, is_leaf)
-                _compare(treespec, other_treespec, ())
+                _, other_tree_spec = tree_flatten(other_tree, is_leaf)
+                _compare(tree_spec, other_tree_spec, [])
         raise
 
 
@@ -1235,7 +1231,10 @@ def _get_dim_name_mapping(
     dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ):
     name_to_dim = {}
-    for dim in tree_iter(dynamic_shapes, is_leaf=lambda x: isinstance(x, Dim)):
+    for dim in tree_flatten(
+        dynamic_shapes,
+        is_leaf=lambda x: isinstance(x, Dim),
+    )[0]:
         if dim is None:
             # NOTE: this must denote a non-Tensor or automatic at this point.
             continue
