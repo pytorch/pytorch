@@ -249,7 +249,7 @@ def maybe_to_fresh_input(idx, t, meta):
 def is_with_effects(node):
     return (
         node.op == "call_function"
-        and node.target == torch.ops.higher_order.with_effects
+        and node.target is torch.ops.higher_order.with_effects
     )
 
 
@@ -331,7 +331,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         output_token_nodes.append(out)
                     else:
                         other_output_nodes.append(out)
@@ -573,10 +573,10 @@ def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     @simple_wraps(f)
     def inner(*args, **kwargs):
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         return f(*args, **kwargs)[0]
 
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return inner
 
 
