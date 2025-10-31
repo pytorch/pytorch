@@ -199,8 +199,8 @@ class MixOrderReductionTest(TestBase):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
 
-        x = torch.randn(128 * 15, 128, device=GPU_TYPE)
-        y = torch.randn(256 * 15, 256, device=GPU_TYPE)
+        x = torch.randn(4096, 32, device=GPU_TYPE)
+        y = torch.randn(4098, 34, device=GPU_TYPE)
 
         self.check_numeric(f, (x, y))
         expected_mix_order_reduction = (
