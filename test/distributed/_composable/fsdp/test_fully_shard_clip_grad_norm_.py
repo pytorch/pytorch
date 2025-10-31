@@ -12,7 +12,7 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -123,6 +123,7 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
         return min(torch.get_device_module(device_type).device_count(), 4)
 
     @skip_if_lt_x_gpu(4)
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     def test_clip_grad_norm_2d(self):
         for norm_type in (2, 1, 3, float("inf")):
             dp_size = 2

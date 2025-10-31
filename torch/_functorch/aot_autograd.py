@@ -2,9 +2,10 @@
 
 import contextlib
 import itertools
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from unittest.mock import patch
 
 import torch
@@ -25,6 +26,7 @@ from torch._dynamo.utils import (
 from torch._guards import detect_fake_mode
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.utils import BoxedBool
+from torch._library.autograd import autograd_fallback_mode
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -106,6 +108,7 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     AOTDedupeWrapper,
     AOTSyntheticBaseWrapper,
+    SerializableCompiledFunction,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
@@ -526,6 +529,9 @@ def create_aot_state(
     stack.enter_context(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
+    # Make it an error to backprop through PT2 compliant ops that silently
+    # detach autograd
+    stack.enter_context(autograd_fallback_mode("error"))
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 
@@ -571,7 +577,6 @@ def create_aot_state(
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
                     pre_dispatch=aot_config.pre_dispatch,
-                    is_export=aot_config.is_export,
                 )(*_dup_fake_script_obj(fake_flat_args))
 
             req_subclass_dispatch = requires_subclass_dispatch(
@@ -721,6 +726,7 @@ def aot_function(
     # Whether or not to trace with dynamic shapes
     dynamic=False,
     enable_log=True,
+    disable_functionalization=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -774,15 +780,11 @@ def aot_function(
         >>> aot_fn(x)
     """
 
-    if bw_compiler is None:
-        bw_compiler = fw_compiler
-    if inference_compiler is None:
-        inference_compiler = fw_compiler
     aot_config = AOTConfig(
-        fw_compiler=fw_compiler,
-        bw_compiler=bw_compiler,
-        inference_compiler=inference_compiler,
-        partition_fn=partition_fn,
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
@@ -792,6 +794,7 @@ def aot_function(
         is_export=False,
         no_tangents=False,
         enable_log=enable_log,
+        disable_functionalization=disable_functionalization,
     )
     cached_res = None
 
@@ -824,7 +827,14 @@ def aot_function(
                     shape_env,
                 )
                 aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
-                compiled_fn, _ = aot_stage2_compile(aot_state, aot_graph_capture)
+                compiled_fn, _ = aot_stage2_compile(
+                    aot_state,
+                    aot_graph_capture,
+                    partition_fn,
+                    fw_compiler,
+                    bw_compiler,
+                    inference_compiler,
+                )
             cached_res = (compiled_fn, out_spec)
 
         cached_fn, out_spec = cached_res
@@ -890,17 +900,15 @@ def prepare_aot_module_simplified(
     mod: nn.Module,
     args,
     kwargs,
-    fw_compiler: Optional[AOTDispatchCompiler],
-    bw_compiler: Optional[AOTDispatchCompiler],
-    partition_fn: Callable,
     decompositions: dict,
     keep_inference_input_mutations,
-    inference_compiler: Optional[AOTDispatchCompiler],
     boxed_forward_device_index: BoxedDeviceIndex,
     ignore_shape_env: bool,
     flatten: bool,
     *,
     force_non_lazy_backward_lowering: bool = False,
+    disable_functionalization: bool = False,
+    _record_nn_module_stack: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -927,7 +935,13 @@ def prepare_aot_module_simplified(
     # NB: This doesn't change the in/out convention, except adding the
     # parameters as explicit arguments
     functional_call = create_functional_call(
-        mod, params_buffers_spec, params_len + buffers_len, strict_out_tuple=not flatten
+        mod,
+        params_buffers_spec,
+        params_len + buffers_len,
+        strict_out_tuple=not flatten,
+        # We need this for export to run ModuleStackTracer
+        # instead of PythonKeyTracer
+        store_orig_mod=_record_nn_module_stack,
     )
 
     full_args = [*params_flat, *buffers_flat, *args]
@@ -974,10 +988,10 @@ def prepare_aot_module_simplified(
             break
 
     aot_config = AOTConfig(
-        fw_compiler=fw_compiler,
-        bw_compiler=bw_compiler,
-        inference_compiler=inference_compiler,
-        partition_fn=partition_fn,
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
         decompositions=decompositions,
         num_params_buffers=params_len + buffers_len,
         aot_id=next(AOT_COUNTER),
@@ -991,6 +1005,7 @@ def prepare_aot_module_simplified(
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
+        disable_functionalization=False,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1027,6 +1042,7 @@ def aot_module_simplified(
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     ignore_shape_env: bool = False,
+    disable_functionalization: bool = False,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1041,10 +1057,6 @@ def aot_module_simplified(
 
     if cudagraphs is None:
         cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
-    if bw_compiler is None:
-        bw_compiler = fw_compiler
-    if inference_compiler is None:
-        inference_compiler = fw_compiler
 
     with contextlib.ExitStack() as stack:
         (
@@ -1063,15 +1075,13 @@ def aot_module_simplified(
             mod,
             args,
             None,
-            fw_compiler,
-            bw_compiler,
-            partition_fn,
             decompositions,
             keep_inference_input_mutations,
-            inference_compiler,
             boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
+            force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
+            disable_functionalization=disable_functionalization,
         )
 
         compiled_fn = None
@@ -1103,13 +1113,21 @@ def aot_module_simplified(
                 shape_env,
             )
             aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
-            compiled_fn, _ = aot_stage2_compile(aot_state, aot_graph_capture)
+            compiled_fn, _ = aot_stage2_compile(
+                aot_state,
+                aot_graph_capture,
+                partition_fn,
+                fw_compiler,
+                bw_compiler,
+                inference_compiler,
+            )
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
         # the inputs so that they can be freed before the end of this scope.
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+        @simple_wraps(compiled_fn)
         def forward(runtime_args: list[Any]):
             flat_args = []
             flat_args.extend(params_buffers_flat)
@@ -1123,6 +1141,7 @@ def aot_module_simplified(
         # historically returned a function that was not the boxed calling
         # convention.  This should get fixed...
         # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
+        @simple_wraps(compiled_fn)
         def forward(*runtime_args: tuple[Any]):
             full_args = []
             full_args.extend(params_buffers_flat)
@@ -1134,6 +1153,16 @@ def aot_module_simplified(
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
 
+    # Add a serialize function
+    def grab_serialize_fn(fn):
+        if isinstance(fn, SerializableCompiledFunction):
+            return fn.serialize_fn
+        elif hasattr(fn, "__wrapped__"):
+            return grab_serialize_fn(fn.__wrapped__)
+        else:
+            return None
+
+    forward.serialize = grab_serialize_fn(forward)  # type: ignore[attr-defined]
     return forward
 
 
@@ -1155,8 +1184,8 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
-    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
-    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    disable_functionalization=False,
+    _record_nn_module_stack=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1234,12 +1263,9 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        fw_compiler,
-        bw_compiler,
-        default_partition,
+        # In contrast, decompositions are needed at this stage.
         decompositions,
         keep_inference_input_mutations,
-        None,
         None,
         ignore_shape_env,
         flatten=True,
@@ -1249,6 +1275,8 @@ def aot_export_joint_with_descriptors(
         # Metric(s) {'is_forward'} have already been set in the current
         # context.
         force_non_lazy_backward_lowering=True,
+        disable_functionalization=disable_functionalization,
+        _record_nn_module_stack=_record_nn_module_stack,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
@@ -1280,7 +1308,13 @@ def aot_export_joint_with_descriptors(
     )
 
 
-def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
+def aot_compile_joint_with_descriptors(
+    jd: JointWithDescriptors,
+    *,
+    partition_fn: Callable = default_partition,
+    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
     graph into a callable function that follows a standard calling convention.
@@ -1291,7 +1325,13 @@ def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    compiled_fn, _ = aot_stage2_compile(jd._aot_state, jd._aot_graph_capture)
+    compiled_fn, _ = aot_stage2_compile(
+        jd._aot_state,
+        jd._aot_graph_capture,
+        partition_fn,
+        fw_compiler,
+        bw_compiler,
+    )
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)

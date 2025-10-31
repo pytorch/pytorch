@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch._prims_common as utils
@@ -56,6 +57,7 @@ def _interleave(a, b, dim=0):
 
     stacked = torch.stack([a, b], dim=dim + 1)
     interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
+    # pyrefly: ignore [unbound-name]
     if b_trunc:
         # TODO: find torch alternative for slice_along dim for torch.jit.script to work
         interleaved = aten.slice(interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1)
@@ -95,6 +97,7 @@ class AssociativeScanOp(HigherOrderOperator):
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
 
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -105,24 +108,14 @@ class AssociativeScanOp(HigherOrderOperator):
         xs_slice2 = [first_slice_copy(x) for x in xs]
         all_inputs = tuple(xs_slice1 + xs_slice2 + list(additional_inputs))
 
-        combine_gm: torch.fx.GraphModule = (
-            combine_fn
-            if isinstance(combine_fn, torch.fx.GraphModule)
-            else materialize_as_graph(combine_fn, all_inputs)
-        )
-
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in combine_gm.graph.find_nodes(op="placeholder")
-        ]
-
+        combine_gm: torch.fx.GraphModule = materialize_as_graph(combine_fn, all_inputs)
         (
             _,
             _,
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm)
         if len(mutated_inputs) > 0:
             raise RuntimeError(
                 "For associative_scan, combine_fn cannot have in-place mutations but found "
@@ -206,18 +199,18 @@ def associative_scan(
     def _validate_input(cfn, lxs, d, r, cm):
         # Basic arguments check
         if not callable(cfn):
-            raise ValueError("Combine_fn must be a callable, but got {cfn}")
+            raise ValueError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
             raise ValueError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
-                "Combine_mode must either 'pointwise' or 'generic', but got {cm}"
+                f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        if cm == "pointwise" and not all(l.device.type == "cuda" for l in lxs):
+        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
             raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA"
+                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
             )
 
         # Checks for xs
@@ -493,16 +486,16 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
     Level 0 (Input):    xs0    xs1    xs2    xs3    xs4
                         \    /       |      |      |
-                        \  /        |      |      |
-    Level 1:               ys1 ───────┘      |      |
-                            \               /       |
+                         \  /        |      |      |
+    Level 1:              ys1 ───────┘      |      |
+                           \               /       |
                             \             /        |
-    Level 2:                  ys2 ────────┘         |
-                            \                   /
-                                \                 /
-    Level 3:                     ys3 ────────────┘
-                                \
-                                \
+    Level 2:                 ys2 ────────┘         |
+                              \                   /
+                               \                 /
+    Level 3:                    ys3 ────────────┘
+                                 \
+                                  \
     Level 4:                        ys4
 
 
@@ -510,17 +503,17 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
 
     Level 0 (output):   g_xs0   g_xs1   g_xs2   g_xs3   g_xs4
-                        \      /       |       |     |
-                        \    /        |       |     |
-    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |     |
-                            \                  /      |
-                            \                /       |
-    Level 2:    gl_ys2     ─> g_ys2  ────────┘        |
-                            \                     /
-                                \                   /
-    Level 3:    gl_ys3        ─> g_ys3  ───────────┘
-                                \
-                                \
+                         \      /       |       |       |
+                          \    /        |       |       |
+    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |       |
+                            \                  /        |
+                             \                /         |
+    Level 2:    gl_ys2     ─> g_ys2  ────────┘          |
+                               \                       /
+                                \                    /
+    Level 3:    gl_ys3        ─> g_ys3  ────────────┘
+                                  \
+                                   \
     Level 4:    gl_ys4           ─> g_ys4,
 
     where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.
@@ -657,6 +650,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         combine_fn,

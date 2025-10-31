@@ -50,7 +50,6 @@ AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Warn;
 } // namespace
 
 void setAutogradFallbackMode(AutogradFallbackMode mode) {
-  TORCH_CHECK(mode != AutogradFallbackMode::Error, "NYI: mode='error'");
   kAutogradFallbackMode = mode;
 }
 
@@ -58,41 +57,61 @@ AutogradFallbackMode getAutogradFallbackMode() {
   return kAutogradFallbackMode;
 }
 
-static void warnAutogradNotImplemented(const std::string& op_name) {
-  TORCH_WARN(
-      op_name,
-      ": an autograd kernel was not registered to the Autograd key(s) ",
-      "but we are trying to backprop through it. This may lead to silently incorrect behavior. ",
-      "This behavior is deprecated and will be removed in a future version of PyTorch. ",
-      "If your operator is differentiable, please ensure you have registered an "
-      "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
-      "DispatchKey::CompositeImplicitAutograd). If your operator is not "
-      "differentiable, or to squash this warning and use the previous behavior, "
-      "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.");
+static void reportAutogradNotImplemented(
+    const std::string& op_name,
+    bool is_warn) {
+  if (is_warn) {
+    TORCH_WARN(
+        op_name,
+        ": an autograd kernel was not registered to the Autograd key(s) ",
+        "but we are trying to backprop through it. This may lead to silently incorrect behavior. ",
+        "This behavior is deprecated and will be removed in a future version of PyTorch. ",
+        "If your operator is differentiable, please ensure you have registered an "
+        "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
+        "DispatchKey::CompositeImplicitAutograd). If your operator is not "
+        "differentiable, or to squash this warning and use the previous behavior, "
+        "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.");
+  } else {
+    TORCH_CHECK(
+        0,
+        op_name,
+        ": an autograd kernel was not registered to the Autograd key(s) ",
+        "but we are trying to backprop through it. This can lead to silently incorrect behavior. ",
+        "If your operator is differentiable, please ensure you have registered an "
+        "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
+        "). If your operator is not "
+        "differentiable and ensure NO gradients flow through this operator, "
+        "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.")
+  }
 }
 
-struct WarnNotImplemented : public Node {
-  WarnNotImplemented(
+struct NotImplementedBackward : public Node {
+  NotImplementedBackward(
       std::string op_name,
       size_t num_outputs,
+      bool is_warn,
       edge_list&& next_edges)
       : Node(std::move(next_edges)),
         op_name(std::move(op_name)),
-        num_outputs(num_outputs) {}
+        num_outputs(num_outputs),
+        is_warn(is_warn) {}
 
-  WarnNotImplemented(std::string op_name, size_t num_outputs)
-      : op_name(std::move(op_name)), num_outputs(num_outputs) {}
+  NotImplementedBackward(std::string op_name, size_t num_outputs, bool is_warn)
+      : op_name(std::move(op_name)),
+        num_outputs(num_outputs),
+        is_warn(is_warn) {}
 
   variable_list apply(variable_list&& inputs) override;
 
   std::string op_name;
   size_t num_outputs;
+  bool is_warn;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
+auto NotImplementedBackward::apply(variable_list&& inputs) -> variable_list {
   auto inputsLocal = std::move(inputs);
-  warnAutogradNotImplemented(op_name);
+  reportAutogradNotImplemented(op_name, is_warn);
   std::vector<at::Tensor> output(num_outputs);
   return output;
 }
@@ -111,8 +130,6 @@ static void basicAutogradNotImplementedFallbackImpl(
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
     return;
   }
-  TORCH_INTERNAL_ASSERT(
-      getAutogradFallbackMode() == AutogradFallbackMode::Warn);
 
   bool any_input_requires_grad = false;
   _foreach_tensor(
@@ -128,7 +145,9 @@ static void basicAutogradNotImplementedFallbackImpl(
   // by putting it after the requires_grad checks.
   any_input_requires_grad = any_input_requires_grad && GradMode::is_enabled();
 
-  std::shared_ptr<WarnNotImplemented> grad_fn;
+  bool is_warn = getAutogradFallbackMode() == AutogradFallbackMode::Warn;
+
+  std::shared_ptr<NotImplementedBackward> grad_fn;
   if (any_input_requires_grad) {
     // NB: It is standard to collect edges from all tensors
     // (see generated/VariableTypeEverything.cpp for examples)
@@ -140,8 +159,9 @@ static void basicAutogradNotImplementedFallbackImpl(
         stack,
         stack_start,
         num_arguments);
-    grad_fn = std::shared_ptr<WarnNotImplemented>(
-        new WarnNotImplemented(op_name, all_tensors_on_stack.size()),
+    grad_fn = std::shared_ptr<NotImplementedBackward>(
+        new NotImplementedBackward(
+            op_name, all_tensors_on_stack.size(), is_warn),
         deleteNode);
     grad_fn->set_next_edges(collect_next_edges(all_tensors_on_stack));
   }
@@ -177,8 +197,8 @@ static void basicAutogradNotImplementedFallbackImpl(
           // >>> y = op(k)
           // >>> torch.autograd.grad(z.sum(), w)
           if (t.requires_grad()) {
-            t.register_hook([op_name](const at::Tensor& grad) {
-              warnAutogradNotImplemented(op_name);
+            t.register_hook([op_name, is_warn](const at::Tensor& grad) {
+              reportAutogradNotImplemented(op_name, is_warn);
             });
             // If history is rebased, then we will attempt to warn
             // on the view's base. This will catch most cases (because
@@ -188,18 +208,19 @@ static void basicAutogradNotImplementedFallbackImpl(
               const auto& base = t._base();
               if (base.requires_grad()) {
                 // Can only register_hook on tensors that require grad.
-                base.register_hook([op_name](const at::TensorBase& grad) {
-                  warnAutogradNotImplemented(op_name);
-                });
+                base.register_hook(
+                    [op_name, is_warn](const at::TensorBase& grad) {
+                      reportAutogradNotImplemented(op_name, is_warn);
+                    });
               }
             }
             return;
           }
 
           // If the post-autograd implementation returns any Tensors that
-          // don't require grad, then we install the WarnNotImplemented grad_fn.
-          // This grad_fn warns in backward and returns undefined tensor
-          // gradients.
+          // don't require grad, then we install the NotImplementedBackward
+          // grad_fn. This grad_fn warns in backward and returns undefined
+          // tensor gradients.
           //
           // NOTE [autograd fallback and in-place operations]
           // If the schema says the output is mutable, and the output
@@ -478,6 +499,58 @@ torch::CppFunction autogradNotImplementedFallback() {
       &autogradNotImplementedFallbackImpl>();
 }
 
+struct GenericViewFunc : public ViewFunc {
+  GenericViewFunc(
+      torch::jit::Stack non_tensor_stack,
+      size_t aliased_input_idx_val,
+      c10::OperatorHandle op)
+      : non_tensor_stack_(non_tensor_stack),
+        aliased_input_idx_val_(aliased_input_idx_val),
+        op_(op) {
+    // This should report saved Tensors and SymInts.
+    // We already have an assert that ensure there are no Tensors here
+    // by making sure there is only one Tensor input.
+    // We also verify there are no SymInt here for now.
+    // Both can be lifted if the visit and clone logic get updated.
+    const auto& schema = op_.schema();
+    for (const auto& arg : schema.arguments()) {
+      TORCH_CHECK(
+          arg.real_type()->kind() != c10::TypeKind::SymIntType,
+          "Custom ops that are views do not support SymInt. Please file an issue if you need it.");
+      for (const auto& ct : arg.real_type()->containedTypes()) {
+        TORCH_CHECK(
+            ct->kind() != c10::TypeKind::SymIntType,
+            "Custom ops that are views do not support SymInt. Please file an issue if you need it.");
+      }
+    }
+  }
+
+  at::Tensor operator()(const at::Tensor& new_base) const override {
+    torch::jit::Stack local_stack = non_tensor_stack_;
+    local_stack.at(aliased_input_idx_val_) = c10::IValue(new_base);
+
+    op_.callBoxed(local_stack);
+    auto& result = local_stack[local_stack.size() - 1];
+    TORCH_CHECK(
+        result.isTensor(),
+        "ADInplaceOrView fallback view replay did not return a Tensor");
+    return result.toTensor();
+  }
+
+  std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> /*unused*/ = std::nullopt,
+      std::optional<std::vector<at::Tensor>> /*unused*/ =
+          std::nullopt) const override {
+    return std::make_unique<GenericViewFunc>(
+        non_tensor_stack_, aliased_input_idx_val_, op_);
+  }
+
+ private:
+  torch::jit::Stack non_tensor_stack_;
+  size_t aliased_input_idx_val_;
+  c10::OperatorHandle op_;
+};
+
 static void autogradNotImplementedInplaceOrViewFallbackImpl(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
@@ -553,6 +626,18 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       "input and the first output (the output can be a vector of tensors). Please change the "
       "order of your operator's parameters so that this is the case.");
   const bool is_view = aliased_input_idx.has_value();
+  size_t aliased_input_idx_val;
+
+  // Save inputs before we redispatch down
+  torch::jit::Stack non_tensor_stack;
+  if (is_view) {
+    // Note that this won't be used if a TensorList is returned.
+    aliased_input_idx_val = aliased_input_idx.value();
+    non_tensor_stack.reserve(num_arguments);
+    for (const auto i : c10::irange(num_arguments)) {
+      non_tensor_stack.push_back((*stack)[stack_start + i]);
+    }
+  }
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;
@@ -608,13 +693,32 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       auto result = std::move(aliased_output);
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     } else {
+      c10::IValue& aliased_output_iv =
+          (*stack)[stack->size() - num_returns + aliased_output_idx];
       TORCH_CHECK(aliased_output_iv.isTensor());
+      TORCH_CHECK(
+          num_returns == 1,
+          "ADInplaceOrView fallback only support single output view functions");
+
+      // Remove the Tensor from the original stack
+      for (const auto i : c10::irange(num_arguments)) {
+        if (non_tensor_stack[i].isTensor()) {
+          TORCH_CHECK(
+              i == aliased_input_idx_val,
+              "Internal error in ADInplaceOrView fallback, unknown Tensor in the stack");
+          non_tensor_stack[i] = {};
+        }
+      }
+
+      auto view_func = std::make_unique<GenericViewFunc>(
+          non_tensor_stack, aliased_input_idx_val, op);
+
       auto result = as_view(
           /* base=*/aliased_input,
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/std::move(erroring_view_func),
+          /* view_func=*/std::move(view_func),
           /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()

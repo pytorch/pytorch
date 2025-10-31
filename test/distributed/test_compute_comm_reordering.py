@@ -29,7 +29,6 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -79,6 +78,10 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
 
 
 @requires_accelerator_dist_backend()
+@unittest.skipIf(
+    torch._inductor.config.triton.native_matmul,
+    "native matmul is fused with surrounding ops",
+)
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
@@ -368,7 +371,10 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skipIfRocm
+    @unittest.skipIf(
+        torch._inductor.config.triton.native_matmul,
+        "native matmul is fused with surrounding ops",
+    )
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(

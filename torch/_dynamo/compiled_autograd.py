@@ -20,8 +20,8 @@ import itertools
 import operator
 import time
 from collections import Counter, defaultdict
-from collections.abc import Generator, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Generator, Sequence
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -166,7 +166,7 @@ class NaNChecker:
             if grad is not None:
                 assert not torch.isnan(grad).any(), (
                     f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                    "having NaN gradient. This is not supported. {TURN_OFF_MSG}"
+                    f"having NaN gradient. This is not supported. {TURN_OFF_MSG}"
                 )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
@@ -573,7 +573,7 @@ class AutogradCompilerInstance:
                     result.name = make_unique(node.name)
                     value_remap[node] = result
                 elif node.op == "call_function":
-                    if node.target == torch.ops.aten.view.default:
+                    if node.target is torch.ops.aten.view.default:
                         # this aot bwd graph is being lazily compiled
                         # we must manually apply the view_to_reshape post grad pass
                         # since it was already applied to the aot fwd, and baked into the gradients
@@ -969,7 +969,8 @@ class AutogradCompilerInstance:
 
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
         unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
-        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
+        i: int | None = None
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):  # noqa: B007
             unpack_nodes.update(node.users.keys())
         assert i == len(_graph_placeholders) - 1
 
@@ -1240,7 +1241,7 @@ class AutogradCompilerInstance:
             to_append = []
             hook_block = [node]  # contain the hook and hook args getitem
             for n in input_nodes:
-                if n.op == "call_function" and n.target == operator.getitem:
+                if n.op == "call_function" and n.target is operator.getitem:
                     to_append.append(n.args[0])
                     to_remove.append(n)
                     hook_block.append(n)
@@ -1313,7 +1314,7 @@ class AutogradCompilerInstance:
             # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if n.op == "call_function" and n.target == call_accumulate_grad:
+                if n.op == "call_function" and n.target is call_accumulate_grad:
                     acc_grad_node = n
                     break
 
@@ -1362,13 +1363,13 @@ class AutogradCompilerInstance:
                 )
 
             arg = max(input_nodes_and_users)  # last input users
-            if arg.op == "call_function" and arg.target == call_accumulate_grad:
+            if arg.op == "call_function" and arg.target is call_accumulate_grad:
                 param_node = arg.args[0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
                     if (
                         n.op == "call_function"
-                        and n.target == call_hook
+                        and n.target is call_hook
                         and n.kwargs.get("hook_type", None) == "post_acc_grad_hook"
                     ):
                         post_acc_grad_hook_node = n

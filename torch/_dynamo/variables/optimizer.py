@@ -147,7 +147,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             for group in self.value.param_groups:
                 for p in group["params"]:
-                    mark_static_address(p)
+                    mark_static_address(p, guard=True)
 
             self._set_capturable(tx)
 
@@ -240,7 +240,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.tensor_to_source = {}
 
         def mark_static(x):
-            mark_static_address(x)
+            mark_static_address(x, guard=True)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
 
@@ -289,9 +289,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             all_static = True
             non_static_grads = []
-            for p_ind, (p, p_vt) in enumerate(
-                zip(group["params"], params_vt.unpack_var_sequence(tx))
-            ):
+            for p, p_vt in zip(group["params"], params_vt.unpack_var_sequence(tx)):
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
                 grad_source = GradSource(
@@ -322,12 +320,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # We have to again iterate over the state dict to collect the
         # tensor_to_source dict. This is used for the finalizer.
-        for idx, (p, value) in enumerate(self.value.state.items()):
+        for idx, value in enumerate(self.value.state.values()):
             p_state_source = DictGetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
             tx.output.guard_on_key_order.add(p_state_source)
-            for inner_idx, (k, v) in enumerate(value.items()):
+            for inner_idx, v in enumerate(value.values()):
                 if (
                     isinstance(v, torch.Tensor)
                     and v not in self.grad_to_source
@@ -348,14 +346,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         if tensor_value in self.tensor_to_source:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value)
+            mark_static_address(tensor_value, guard=True)
             source = self.tensor_to_source[tensor_value]
             self.static_tensor_names.add(tx.output.module_key_name(source.name()))
         elif tensor_value in self.grad_to_source:
             source = self.grad_to_source[tensor_value]
         else:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value)
+            mark_static_address(tensor_value, guard=True)
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             source = GlobalWeakRefSource(global_name)
