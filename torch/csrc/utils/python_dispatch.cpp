@@ -772,6 +772,7 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(ADInplaceOrView)
       DEF_ONE(PythonTLSSnapshot)
       DEF_ONE(Python)
+      DEF_ONE(DTensor)
       DEF_ONE(FuncTorchDynamicLayerFrontMode)
       DEF_ONE(FuncTorchDynamicLayerBackMode)
       DEF_ONE(FuncTorchBatchedDecomposition)

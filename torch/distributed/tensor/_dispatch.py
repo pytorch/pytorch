@@ -16,7 +16,6 @@ from torch.distributed.tensor._op_schema import (
     is_out_variant_op,
     OpInfo,
     OpSchema,
-    OutputSharding,
     OutputSpecType,
 )
 from torch.distributed.tensor._random import is_rng_supported_mesh
