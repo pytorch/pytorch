@@ -469,7 +469,7 @@ def _unlift_graph(
         gm,
         lifted_inputs,
         mutated_outputs,
-        pytree.treespec_leaf(),
+        pytree.LeafSpec(),
         None,
     )
     return unlifted_gm
