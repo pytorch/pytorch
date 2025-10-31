@@ -716,7 +716,7 @@ def _distribute_state_dict(
         else:
             if not isinstance(value, torch.Tensor):
                 raise AssertionError("value must be a torch.Tensor")
-            local_state = local_state_dict.get(key, None)
+            local_state = local_state_dict.get(key)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
