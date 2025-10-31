@@ -139,10 +139,10 @@ def _get_lstm_with_individually_observed_parts(
         mul_count = 0
         for node in cell.graph.nodes:
             op_index: Optional[tuple[Callable, int]] = None  # e.g. (torch.add, 1)
-            if node.target == torch.add:
+            if node.target is torch.add:
                 op_index = (torch.add, add_count)
                 add_count += 1
-            elif node.target == torch.mul:
+            elif node.target is torch.mul:
                 op_index = (torch.mul, mul_count)
                 mul_count += 1
             else:
@@ -205,7 +205,7 @@ def _get_reference_quantized_lstm_module(
         # on custom module input/output dtypes, and (2) expand support for complex
         # input/output structures.
         for node in cell.graph.nodes:
-            if node.target == torch.quantize_per_tensor:
+            if node.target is torch.quantize_per_tensor:
                 arg = node.args[0]
                 # Remove quantize(x), quantize(hidden[0]), and quantize(hidden[1])
                 if arg.target == "x" or (
