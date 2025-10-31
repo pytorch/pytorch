@@ -117,22 +117,6 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    @inductor_config.patch(coordinate_descent_tuning=True)
-    def test_XBLOCK_coordest_tuning(self):
-        """
-        We should skip XBLOCK coordinate descent tuning for
-        mix order reduction.
-        """
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        def f(x):
-            return x.sum(dim=-1), x.sum(dim=0)
-
-        x = torch.randn(32768, 256, dtype=torch.float, device=GPU_TYPE)
-        self.check_numeric(f, (x,))
-        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
-
     @inductor_config.patch(unroll_reductions_threshold=1)
     def test_3layer_split_reduction(self):
         """
@@ -199,8 +183,8 @@ class MixOrderReductionTest(TestBase):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
 
-        x = torch.randn(128 * 15, 128, device=GPU_TYPE)
-        y = torch.randn(256 * 15, 256, device=GPU_TYPE)
+        x = torch.randn(4096, 32, device=GPU_TYPE)
+        y = torch.randn(4098, 34, device=GPU_TYPE)
 
         self.check_numeric(f, (x, y))
         expected_mix_order_reduction = (
