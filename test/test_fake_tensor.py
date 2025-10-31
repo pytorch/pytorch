@@ -1,5 +1,3 @@
-# Owner(s): ["module: meta tensors"]
-# ruff: noqa: F841
 
 import contextlib
 import copy
@@ -14,8 +12,8 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
+
 import torch
-from torch._subclasses.fake_tensor import FakeTensorMode
 import torch._dynamo
 import torch._functorch.config
 import torch._prims as prims
@@ -33,6 +31,7 @@ from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
     FakeTensorConverter,
+    FakeTensorMode,
     MetadataMismatchError,
     unset_fake_temporarily,
     UnsupportedOperatorException,
@@ -510,7 +509,7 @@ class FakeTensorTest(TestCase):
     def test_upsample_bilinear_small_channels(self):
         out = []
         mode = FakeTensorMode()
-        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+        for context in [contextlib.nullcontext, lambda: mode]:
             with context():
                 arg0_1 = torch.empty_strided(
                     (3, 427, 640), (1, 1920, 3), dtype=torch.float32, device="cuda"
