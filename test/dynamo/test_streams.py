@@ -121,7 +121,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self.assertEqual(s0, s1)
 
     @requires_cuda
-    @requires_multigpu
+    @requires_multigpu()
     def test_get_current_stream_return_different_device(self):
         def fn(x, s0, s1):
             with s1:
@@ -138,7 +138,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self.assertEqual(s_act, s_exp)
 
     @requires_cuda
-    @requires_multigpu
+    @requires_multigpu()
     def test_get_current_stream_return_no_index(self):
         def fn(x, s0, s1):
             with s1:
