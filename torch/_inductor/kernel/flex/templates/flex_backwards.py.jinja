@@ -355,7 +355,7 @@
 @triton.jit
 def bwd_dq_inner(
     {{gen_argdefs()}},
-    K, V, desc_k, desc_v, kv_start, start_m2, # pointers and descriptors for TMA
+    K, V, desc_k, desc_v, kv_start, start_m2, 
     dq, q, do, Di, lse,
     off_z, off_hq,
     stride_kn, stride_kd, stride_vn, stride_vd,
@@ -405,8 +405,8 @@ def bwd_dq_inner(
 @triton.jit
 def bwd_dq_block_mn(
     {{gen_argdefs()}},
-    dq, q, K, V,
-    do, Di, lse, Q_LEN, KV_LEN, desc_k, desc_v, kv_start, kv_offset, start_m2,
+    dq, q, K, V, desc_k, desc_v, kv_start, kv_offset, start_m2,
+    do, Di, lse, Q_LEN, KV_LEN, 
     off_z, off_hq, offs_k, offs_v,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
@@ -415,14 +415,15 @@ def bwd_dq_block_mn(
 ):
     {{gen_defines() | indent_except_first(1)}}
     
+    offs_n2 = kv_start + kv_offset + tl.arange(0, BLOCK_N2)
+    offs_m2 = start_m2  + tl.arange(0, BLOCK_M2)
     {%- if USE_TMA %}
     k = tl.load_tensor_descriptor(
         desc_k,
         [(kv_start + kv_offset).to(tl.int32), 0],
     )
     kT = tl.trans(k)
-    {%- else %}
-    offs_n2 = kv_start + kv_offset + tl.arange(0, BLOCK_N2)
+    {%- else %}    
     kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
     vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
     # NB reversed order to since K is transposed
@@ -477,8 +478,15 @@ def bwd_dq_block_mn(
     p = tl.math.exp2(post_mod_scores - lse)
     # Compute dP and dS.
     # NB reversed order to since V is transposed
+    {%- if USE_TMA %}
+    v = tl.load_tensor_descriptor(
+        desc_v,
+        [(kv_start + kv_offset).to(tl.int32), 0],
+    )
+    vT = tl.trans(v)    
+    {%- else %}
     vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
-
+    {%- endif %}
     dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
     # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
