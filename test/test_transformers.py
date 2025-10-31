@@ -17,13 +17,15 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 import itertools
 import torch.optim as optim
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, largeTensorTest
+from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, largeTensorTest
 from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfRocmArch,
+    MI300_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -37,6 +39,7 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     IS_WINDOWS,
     TEST_WITH_TORCHDYNAMO,
+    TEST_XPU,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -302,7 +305,7 @@ class TestTransformers(NNTestCase):
         encoder = nn.TransformerEncoder(layer, 2).to(device)
         optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
         encoder.train()
-        for i in range(iters):
+        for _ in range(iters):
             encoder.train()
             optimizer.zero_grad()
             inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
@@ -426,7 +429,8 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @tf32_on_and_off(0.0021 if TEST_WITH_ROCM else 0.001)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -536,7 +540,7 @@ class TestTransformers(NNTestCase):
 
         with torch.no_grad():
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -586,7 +590,7 @@ class TestTransformers(NNTestCase):
 
             with torch.no_grad():
                 # set constant weights of the model
-                for idx, p in enumerate(layer.parameters()):
+                for p in layer.parameters():
                     x = p.data
                     sz = x.view(-1).size(0)
                     shape = x.shape
@@ -1106,6 +1110,7 @@ class TestTransformers(NNTestCase):
                 )[0]
 
     @tf32_on_and_off(0.003)
+    @parametrize("batch_size", [0, 5])
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
                   (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
@@ -1115,7 +1120,7 @@ class TestTransformers(NNTestCase):
                          if attn_dim is not None else "no_attn_mask")))
     @parametrize("dropout_p", [0.0, 0.2, 0.5])
     @sdpa_kernel(backends=[SDPBackend.MATH])
-    def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
+    def test_scaled_dot_product_attention(self, device, batch_size, input_dim, attn_mask_dim, is_causal, dropout_p):
         def sdp_ref(
                 q,
                 k,
@@ -1139,12 +1144,13 @@ class TestTransformers(NNTestCase):
         # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
         dtypes = [torch.double, torch.float]
         for dtype in dtypes:
+            N = batch_size
 
             def rand_tensor(*shape):
                 return torch.randn(shape, device=device, dtype=dtype)
 
             # This test compares python and C++ implementations of SDP.
-            N, N_prime, L, S, E = 5, 2, 4, 3, 6
+            N_prime, L, S, E = 2, 4, 3, 6
             if input_dim == 3:
                 query = rand_tensor(N, L, E)
                 key = rand_tensor(N, S, E)
@@ -2022,6 +2028,7 @@ class TestSDPA(NNTestCase):
         for both cpu and cuda. If you're test is only applicable to cuda,
         add it to TestSDPACudaOnly.
     """
+    @expectedFailureMPS  # No double support
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_math_gradcheck(self, device, contiguous_inputs: bool):
 
@@ -2066,7 +2073,7 @@ class TestSDPA(NNTestCase):
 
     def test_scaled_dot_product_attention_fp16_overflow(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/160841
-        x = torch.full((1, 32, 23, 80), 64.0, dtype=torch.half, device=device)
+        x = torch.full((1, 32, 23, 80), 256.0, dtype=torch.half, device=device)
         y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
         self.assertFalse(y.isnan().any().item())
 
@@ -4316,8 +4323,8 @@ class TestSDPAXpuOnly(NNTestCase):
             _ = F.scaled_dot_product_attention(q, k, v)
 
     def test_default_priority_order(self, device):
-        # The default priority order of xpu is overrideable, math, flash, efficient, cudnn
-        # For xpu backend, we need to make sure that overrideable > math > flash
+        # The default priority order of xpu is overridable, math, flash, efficient, cudnn
+        # For xpu backend, we need to make sure that overridable > math > flash
         dtype = torch.bfloat16
         shape = SdpaShape(1, 1, 1, 1)
         make_tensor = partial(torch.rand, shape, device=device, dtype=dtype)
@@ -4380,7 +4387,7 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
-    @parametrize("fused_kernel", [SDPBackend.MATH, SDPBackend.OVERRIDEABLE])
+    @parametrize("fused_kernel", [SDPBackend.OVERRIDEABLE])
     @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
     @parametrize("batch_size,n_head,q_size,kv_size,head_dim", [
         (2, 5, 9216, 9216, 64),
@@ -4419,7 +4426,7 @@ class TestSDPAXpuOnly(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
-        mask_shape = [batch_size, 1, 1, kv_size]
+        mask_shape = [batch_size, 1, q_size, kv_size]
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
         q_shape = SdpaShape(batch_size, n_head, q_size, head_dim)
         kv_shape = SdpaShape(batch_size, n_head, kv_size, head_dim)
@@ -4427,14 +4434,6 @@ class TestSDPAXpuOnly(NNTestCase):
         k = make_tensor(kv_shape)
         v = make_tensor(kv_shape)
         q2, k2, v2 = q.clone(), k.clone(), v.clone()
-
-        if train:
-            q.requires_grad_(True)
-            k.requires_grad_(True)
-            v.requires_grad_(True)
-            q2.requires_grad_(True)
-            k2.requires_grad_(True)
-            v2.requires_grad_(True)
 
         # (B, nh, T, hs)
         q = q.view(batch_size, q_size, n_head, head_dim).transpose(1, 2)
@@ -4455,17 +4454,43 @@ class TestSDPAXpuOnly(NNTestCase):
         v2 = v2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
         attn_mask2 = attn_mask.float() if attn_mask is not None else None
 
-        if fused_kernel == SDPBackend.MATH:
-            actual = torch.ops.aten._scaled_dot_product_attention_math(
-                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=is_causal)[0]
-        elif fused_kernel == SDPBackend.OVERRIDEABLE:
-            actual = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
-                q, k, v, attn_bias=attn_mask, dropout_p=0.0, is_causal=is_causal)[0]
+        if train:
+            q = q.detach().clone().requires_grad_(True)
+            k = k.detach().clone().requires_grad_(True)
+            v = v.detach().clone().requires_grad_(True)
+            q2 = q2.detach().clone().requires_grad_(True)
+            k2 = k2.detach().clone().requires_grad_(True)
+            v2 = v2.detach().clone().requires_grad_(True)
 
-        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
-            q2, k2, v2, attn_mask=attn_mask2, dropout_p=0.0, is_causal=is_causal)[0]
+        with sdpa_kernel(backends=[fused_kernel]):
+            actual = F.scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=is_causal)
 
-        self.assertEqual(actual.float(), math_ref, atol=tol.atol, rtol=tol.rtol)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = F.scaled_dot_product_attention(
+                q2, k2, v2, attn_mask=attn_mask2, dropout_p=0.0, is_causal=is_causal)
+
+        if dtype in [torch.float16, torch.bfloat16]:
+            math_ref = math_ref.to(dtype)
+
+        self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
+
+        if train:
+            loss = torch.mean(actual)
+            loss_ref = torch.mean(math_ref)
+            loss.backward()
+            loss_ref.backward()
+
+            grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
+            grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
+            if dtype in [torch.float16, torch.bfloat16]:
+                grad_q_ref = grad_q_ref.to(dtype)
+                grad_k_ref = grad_k_ref.to(dtype)
+                grad_v_ref = grad_v_ref.to(dtype)
+
+            self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
+            self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
+            self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
 
 class TestAttnBias(NNTestCase):
@@ -4625,16 +4650,19 @@ class TestAttnBias(NNTestCase):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
-    device_types = ("cuda", )
+    device_types = ("cuda", "mps")
 else:
-    device_types = ("cpu", "cuda")
+    device_types = ("cpu", "cuda", "mps")
+
+if TEST_XPU:
+    device_types += ("xpu", )
 
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
-instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
-instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types)
+instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True)
+instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
-instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types)
+instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == '__main__':
