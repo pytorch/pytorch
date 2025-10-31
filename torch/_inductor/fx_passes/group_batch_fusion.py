@@ -414,12 +414,12 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
                 # only consider the linear case so far
                 # pyre-fixme[16]
-                if input.target == aten.select or other.target == aten.select:  # type: ignore[union-attr]
+                if input.target is aten.select or other.target is aten.select:  # type: ignore[union-attr]
                     parent = (
                         # pyre-fixme[16]
                         input.args[0]  # type: ignore[union-attr]
                         # pyre-fixme[16]
-                        if input.target == aten.select  # type: ignore[union-attr]
+                        if input.target is aten.select  # type: ignore[union-attr]
                         else other.args[0]  # type: ignore[union-attr]
                     )
                 else:

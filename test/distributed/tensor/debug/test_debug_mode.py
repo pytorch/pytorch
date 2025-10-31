@@ -78,7 +78,7 @@ class TestDTensorDebugMode(TestCase):
         with (
             DebugMode() as debug_mode,
             DebugMode.record_outputs(),
-            DebugMode.log_output_hashes(),
+            DebugMode.log_tensor_hashes(),
         ):
             compiled_out = torch.compile(mm, backend="aot_eager")(x_dtensor, y_dtensor)
 
