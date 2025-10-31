@@ -1307,10 +1307,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ),
                         hints=[
                             "Make sure the message function is defined in the torch.compile region.",
-                            (
-                                "Remove any non-local variables, e.g. "
-                                "remove references to `x` in `lambda: f'{x} failed check'`"
-                            ),
+                            "Remove any non-local variables, e.g. "
+                            "remove references to `x` in `lambda: f'{x} failed check'`",
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
