@@ -265,22 +265,24 @@ class profile:
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
-                warn(f"The {self.use_device} is not a valid device option.")
+                warn(
+                    f"The {self.use_device} is not a valid device option.", stacklevel=2
+                )
                 self.use_device = None
 
             if self.use_device == "cuda" and not torch.cuda.is_available():
-                warn("CUDA is not available, disabling CUDA profiling")
+                warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
                 self.use_cuda = False
                 self.use_device = None
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
-                warn("XPU is not available, disabling XPU profiling")
+                warn("XPU is not available, disabling XPU profiling", stacklevel=2)
                 self.use_device = None
 
             if self.use_device == "hpu" and not (
                 hasattr(torch, "hpu") and torch.hpu.is_available()
             ):
-                warn("HPU is not available, disabling HPU profiling")
+                warn("HPU is not available, disabling HPU profiling", stacklevel=2)
                 self.use_device = None
 
         self.kineto_activities = set()
@@ -742,7 +744,7 @@ class profile:
         return all_function_events
 
 
-# pyrefly: ignore  # invalid-inheritance
+# pyrefly: ignore [invalid-inheritance]
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
@@ -790,7 +792,7 @@ class record_function(_ContextDecorator):
         # TODO: TorchScript ignores standard type annotation here
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
-            # pyrefly: ignore  # not-a-type
+            # pyrefly: ignore [not-a-type]
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
@@ -1224,7 +1226,8 @@ class KinetoStepTracker:
             if delta > 1:
                 warn(
                     "Profiler step count has increased more than 1 - "
-                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}"
+                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}",
+                    stacklevel=2,
                 )
             for _ in range(delta):
                 _kineto_step()

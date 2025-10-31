@@ -219,7 +219,7 @@ class PackageExporter:
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
         if isinstance(f, (str, os.PathLike)):
-            f = os.fspath(f)  # pyrefly: ignore  # no-matching-overload
+            f = os.fspath(f)
             self.buffer: Optional[IO[bytes]] = None
         else:  # is a byte buffer
             self.buffer = f
@@ -652,7 +652,7 @@ class PackageExporter:
             memo: defaultdict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (
