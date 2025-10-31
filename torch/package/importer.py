@@ -3,7 +3,7 @@ import importlib
 import logging
 from abc import ABC, abstractmethod
 
-# pyrefly: ignore  # missing-module-attribute
+# pyrefly: ignore [missing-module-attribute]
 from pickle import (  # type: ignore[attr-defined]
     _getattribute,
     _Pickler,
