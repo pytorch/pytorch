@@ -1240,13 +1240,14 @@ def _canonicalize_profiler_events(events):
         node_name = event["args"].get("node_name", "")
         stack_trace = event["args"].get("stack_trace", "")
 
-        if "\n" in stack_trace:
-            stack_trace = [s.strip() for s in stack_trace.split("\n") if s.strip()][-1]
+        # Get the last non-empty line of the stack trace
+        lines = [s.strip() for s in stack_trace.split("\n") if s.strip()]
+        stack_trace = lines[-1] if lines else ""
 
         events_with_traces.append({
             "event_name": event_name[:20],
             "node_name": node_name,
-            "stack_trace": stack_trace.split("\n")[-1], # TODO: make this safe for when there is no \n 
+            "stack_trace": stack_trace,
             "start_time": event.get("ts", 0)
         })
 

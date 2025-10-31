@@ -567,7 +567,7 @@ class GraphModule(torch.nn.Module):
         # in the global registry for use by the memory profiler augmentation.
         # Can be set on individual GraphModule instances to opt-in/out.
         # This must be set before assigning self.graph.
-        self._register_fx_metadata: bool = False
+        self._enrich_profiler_metadata: bool = False
         self.graph = graph
 
         # Store the Tracer class responsible for creating a Graph separately as part of the
@@ -858,10 +858,10 @@ class {module_name}(torch.nn.Module):
         return self._code
 
     @compatibility(is_backward_compatible=False)
-    def register_fx_metadata(self, enable=True):
-        if enable != self._register_fx_metadata:
+    def enrich_profiler_metadata(self, enable=True):
+        if enable != self._enrich_profiler_metadata:
             self.recompile()
-        self._register_fx_metadata = enable
+        self._enrich_profiler_metadata = enable
 
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
@@ -873,7 +873,7 @@ class {module_name}(torch.nn.Module):
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec
-        python_code = self._graph.python_code(root_module="self")
+        python_code = self._graph.python_code(root_module="self", record_func=self._register_fx_metadata)
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
         self._prologue_start = python_code._prologue_start
@@ -881,7 +881,7 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
 
-        if self._register_fx_metadata:
+        if self._enrich_profiler_metadata:
             # Generate metadata and register for profiler augmentation
             node_metadata: dict[int, dict[str, Any]] = {}
             for i, node in enumerate(self._graph.nodes):
@@ -915,12 +915,11 @@ class {module_name}(torch.nn.Module):
 
             register_fx_metadata(filename, metadata)
 
-            if torch.fx.config.codegen_record_function:
-                # Replace the placeholder in generated code with actual filename
-                self._code = self._code.replace(
-                    "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
-                    f"torch._C._profiler._RecordFunctionFast('## {filename} ##')"
-                )
+            # Replace the placeholder in generated code with actual filename
+            self._code = self._code.replace(
+                "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
+                f"torch._C._profiler._RecordFunctionFast('## {filename} ##')"
+            )
 
         cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 

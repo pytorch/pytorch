@@ -4189,7 +4189,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     # TODO: consolidate two configs
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @torch.fx.config.patch("codegen_record_function", True)
     @torch._dynamo.config.patch("enrich_profiler_stack_trace", True)
     def test_profiler_stack_trace_augmentation(self):
         """
@@ -4242,7 +4241,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 trace_data = json.load(f)
 
             # Augment the trace with stack traces
-            event_mapping = map_recorded_events_to_aten_ops_with_stack_trace(
+            map_recorded_events_to_aten_ops_with_stack_trace(
                 trace_data, remove_fx_events=False
             )
 

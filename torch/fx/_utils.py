@@ -69,10 +69,12 @@ def get_node_context(node, num_nodes=2) -> str:
 
 def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_events=False):
     """
-    Maps recorded profiler events to their corresponding aten operations and adds stack traces.
+    Maps recorded profiler events to their corresponding fx nodes and adds stack traces.
 
-    This function uses an efficient single-pass algorithm that processes events in chronological
-    order and maintains a stack of active FX node contexts.
+    Builds a timeline of all events (regular ops and FX markers for filenames/nodes),
+    sorts by timestamp, then processes chronologically while maintaining a context stack of active
+    filename/node scopes. Regular events are augmented with stack traces and node names from the
+    innermost active context. Runtime is O(n log n) for n events.
 
     Args:
         traced_data: Json of profiler events from Chrome trace
@@ -85,30 +87,13 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_even
 
     trace_events = traced_data.get("traceEvents", [])
 
-    # Collect all FX metadata registries (support multiple graph modules in one trace)
-    filename_to_metadata = {}
-    fx_marker_events = []  # Track FX marker events to optionally remove them
-
-    for event in trace_events:
-        if (event.get("cat") == "cpu_op" and
-            event.get("name", "").startswith("## ") and
-            event.get("name", "").endswith(" ##")):
-            fx_marker_events.append(event)
-            content = event["name"][3:-3]  # Remove "## " and " ##"
-
-            # Check if this is a graph entry event (contains .py extension)
-            if content.endswith(".py"):
-                if content in _FX_METADATA_REGISTRY:
-                    filename_to_metadata[content] = _FX_METADATA_REGISTRY[content]
-
-    if not filename_to_metadata:
-        raise ValueError("Could not find any graph entry events with filename in trace data")
-
     # Create event timeline: (timestamp, event_type, event_data)
     # event_type: 'start' or 'end'
     event_timeline = []
+    fx_marker_events = []  # Track FX marker events to optionally remove them
 
     for event in trace_events:
+        # TODO: do not drop any event. The output should have everything in the input AND the additional information (except those removed by remove_fx_events)
         if "ts" not in event or "dur" not in event:
             continue
 
@@ -119,6 +104,7 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_even
         if (event.get("cat") == "cpu_op" and
             event.get("name", "").startswith("## ") and
             event.get("name", "").endswith(" ##")):
+            fx_marker_events.append(event)
             content = event["name"][3:-3]
 
             # Parse the content
@@ -147,20 +133,18 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_even
     # identifier is the filename or node_index
     # metadata is the corresponding metadata dict
 
-    event_mapping = {}
-
+    # Invariant: all start event has a corresponding end event
     for timestamp, event_type, marker_type, identifier, event in event_timeline:
         if event_type == 'start':
             if marker_type == 'filename':
-                # Push filename context
-                context_stack.append(('filename', identifier, filename_to_metadata.get(identifier)))
+                # Push filename context - query metadata registry on-demand
+                metadata = _FX_METADATA_REGISTRY.get(identifier)
+                context_stack.append(('filename', identifier, metadata))
             elif marker_type == 'node':
                 # Find the current filename from stack
-                current_filename = None
                 current_file_metadata = None
                 for ctx_type, ctx_id, ctx_meta in reversed(context_stack):
                     if ctx_type == 'filename':
-                        current_filename = ctx_id
                         current_file_metadata = ctx_meta
                         break
 
@@ -170,22 +154,13 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_even
                         node_meta = node_metadata[identifier]
                         context_stack.append(('node', identifier, node_meta))
 
-                        # Store in event mapping
-                        node_name = node_meta.get("name", str(identifier))
-                        if node_name not in event_mapping:
-                            event_mapping[node_name] = {
-                                "recorded_event": event,
-                                "node_metadata": node_meta,
-                                "stack_trace": node_meta.get("stack_trace", "No stack trace available"),
-                                "filename": current_filename,
-                            }
-
         elif event_type == 'end':
-            # Pop from stack
-            if context_stack:
-                top_type, top_id, top_meta = context_stack[-1]
-                if marker_type == top_type and identifier == top_id:
-                    context_stack.pop()
+            # Pop from stack - search backwards to find matching context
+            for i in range(len(context_stack) - 1, -1, -1):
+                ctx_type, ctx_id, ctx_meta = context_stack[i]
+                if marker_type == ctx_type and identifier == ctx_id:
+                    context_stack.pop(i)
+                    break
 
         elif event_type == 'regular':
             # Apply metadata from current context stack
@@ -195,22 +170,22 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_even
 
             for ctx_type, ctx_id, ctx_meta in reversed(context_stack):
                 if ctx_type == 'node' and ctx_meta:
-                    current_stack_trace = ctx_meta.get("stack_trace", "No stack trace available")
+                    current_stack_trace = ctx_meta.get("stack_trace", "No model stack trace available")
                     current_node_name = ctx_meta.get("name", "")
+                    # Do we want to only attach the stack trace of the lowest node or stack trace of all nodes
+                    # if nodes are nested, e.g. in nested graph modules
                     break
 
-            # Augment the event with stack trace
-            if current_stack_trace:
-                if "args" not in event:
-                    event["args"] = {}
-                event["args"]["stack_trace"] = current_stack_trace
+            # Augment the event
+            if current_stack_trace or current_node_name:
+                args = event.setdefault("args", {})
+                if current_stack_trace:
+                    args["stack_trace"] = current_stack_trace
                 if current_node_name:
-                    event["args"]["node_name"] = current_node_name
+                    args["node_name"] = current_node_name
 
     # Remove FX marker events if requested
     if remove_fx_events:
         traced_data["traceEvents"] = [
             e for e in trace_events if e not in fx_marker_events
         ]
-
-    return event_mapping
