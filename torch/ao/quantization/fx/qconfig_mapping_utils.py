@@ -228,11 +228,12 @@ def _compare_prepare_convert_qconfig_mappings(
       `prepare_qconfig_mapping`: configuration for prepare quantization step
       `convert_qconfig_mapping`: configuration for convert quantization step
     """
-    assert qconfig_equals(
+    if not qconfig_equals(
         prepare_qconfig_mapping.global_qconfig, convert_qconfig_mapping.global_qconfig
-    ), (
-        "Expected global qconfigs to be the same in the prepare and convert quantization configs"
-    )
+    ):
+        raise AssertionError(
+            "Expected global qconfigs to be the same in the prepare and convert quantization configs"
+        )
     prepare_dicts: list[OrderedDict] = [
         prepare_qconfig_mapping.object_type_qconfigs,
         prepare_qconfig_mapping.module_name_qconfigs,
@@ -250,16 +251,17 @@ def _compare_prepare_convert_qconfig_mappings(
     ]
     for i in range(len(prepare_dicts)):
         for name in prepare_dicts[i].keys():
-            assert name in convert_dicts[i], (
-                f"Missing key {dict_names[i]} {name} in convert QConfigMapping \
-                when it was present in prepare"
-            )
-            assert convert_dicts[i][name] is None or qconfig_equals(
+            if name not in convert_dicts[i]:
+                raise AssertionError(
+                    f"Missing key {dict_names[i]} {name} in convert QConfigMapping when it was present in prepare"
+                )
+            if convert_dicts[i][name] is not None and not qconfig_equals(
                 prepare_dicts[i][name], convert_dicts[i][name]
-            ), (
-                f"Expected convert QConfigMapping to have the same qconfig as prepare for key {dict_names[i]} {name}; \
-                prepare: {prepare_dicts[i][name]}; convert: {convert_dicts[i][name]}"
-            )
+            ):
+                raise AssertionError(
+                    "Expected convert QConfigMapping to have the same qconfig as prepare for key "
+                    f"{dict_names[i]} {name}; prepare: {prepare_dicts[i][name]}; convert: {convert_dicts[i][name]}"
+                )
 
 
 def _is_qconfig_supported_by_dtype_configs(

@@ -58,7 +58,8 @@ wrapper__scaled_dot_product_fused_attention_overrideable(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool compute_log_sumexp) {
   return at::native::openreg::_scaled_dot_product_fused_attention_overrideable(
       query,
       key,
@@ -67,7 +68,8 @@ wrapper__scaled_dot_product_fused_attention_overrideable(
       dropout_p,
       is_causal,
       return_debug_mask,
-      scale);
+      scale,
+      compute_log_sumexp);
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -155,12 +157,6 @@ TORCH_LIBRARY_IMPL(openreg, PrivateUse1, m) {
   m.impl("custom_abs", &wrapper_custom_abs);
 }
 // LITERALINCLUDE END: CUSTOM OPERATOR DEFAULT
-
-// LITERALINCLUDE START: CUSTOM OPERATOR FALLBACK
-TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1, m) {
-  m.fallback(torch::autograd::autogradNotImplementedFallback());
-}
-// LITERALINCLUDE END: CUSTOM OPERATOR FALLBACK
 
 // The rest is for testing purposes
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
