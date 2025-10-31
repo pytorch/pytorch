@@ -65,6 +65,7 @@ from ..utils import (
     guard_if_dyn,
     has_torch_function,
     hashable,
+    is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
     unwrap_if_wrapper,
@@ -91,6 +92,12 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+try:
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None  # type: ignore[assignment]
+
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -141,6 +148,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.accelerator.current_device_index,
+    torch.accelerator.current_accelerator,
     torch.cuda.current_device,
     torch.cuda.is_initialized,
     torch.xpu.current_device,
@@ -242,6 +250,17 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
         elif inspect.ismodule(value):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
+        elif inspect.isfunction(value):
+            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        elif inspect.isbuiltin(value) or isinstance(
+            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        ):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        elif is_wrapper_or_member_descriptor(value) or isinstance(
+            value, torch._dynamo.compiled_autograd.Op
+        ):
+            # Dont need to guard on wrappers
+            pass
         else:
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
@@ -442,6 +461,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
+        elif (
+            _fsdp_param_group is not None
+            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            assert len(args) == 2
+            return FSDPParamGroupUseTrainingStateVariable.create(
+                tx, args[0], args[1].as_python_constant()
+            )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
                 self.value, tx, self.source, args, kwargs
@@ -449,19 +476,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             backends = name_to_arg_map["backends"].as_python_constant()
             set_priority = name_to_arg_map["set_priority"].as_python_constant()
             return SDPAKernelVariable.create(tx, backends, set_priority)
-        else:
-            try:
-                from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-            except ModuleNotFoundError:
-                _fsdp_param_group = None  # type: ignore[assignment]
-            if (
-                _fsdp_param_group is not None
-                and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
-            ):
-                assert len(args) == 2
-                return FSDPParamGroupUseTrainingStateVariable.create(
-                    tx, args[0], args[1].as_python_constant()
-                )
 
         return super().call_function(tx, args, kwargs)
 
@@ -1605,7 +1619,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # take the conservative approach to graph break on size changes, and
             # assume other cases can fall through soundly.
             #
-            # Note that although these tensor variablels would hold different
+            # Note that although these tensor variables would hold different
             # proxies, the in-place mutation semantics is preserved in the FX
             # graph, so we won't have correctness issues.
             if isinstance(saved_out_shapes, list):

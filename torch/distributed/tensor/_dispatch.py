@@ -145,8 +145,7 @@ class OpDispatcher:
         args: tuple[object, ...],
         kwargs: dict[str, object],
         op_info: OpInfo,
-    ) -> Optional[OutputSharding]:
-        # Return value of None indicates dispatch should return NotImplemented.
+    ) -> object:
         try:
             return self.sharding_propagator.propagate_op_sharding_non_cached(
                 op_info.schema
@@ -159,7 +158,7 @@ class OpDispatcher:
                 # so we manually decompose them, here
                 out = op_call.decompose(*args, **kwargs)
                 assert out is not NotImplemented
-                return None
+                return out
             else:
                 raise
         except Exception as e:
