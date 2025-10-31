@@ -109,11 +109,16 @@ class BenchmarkKernel:
             args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
             res[backend] = getattr(self, backend)(args_ref, kwargs_ref)()
 
-        if "compiled" in self.available_backends and self.script_args.custom_compile_options:
+        if (
+            "compiled" in self.available_backends
+            and self.script_args.custom_compile_options
+        ):
             torch._dynamo.reset()  # cause recompile
             with torch._inductor.config.patch(self.script_args.custom_compile_options):
                 args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
-                res[self.script_args.custom_compile_name] = self.compiled(args_ref, kwargs_ref)()
+                res[self.script_args.custom_compile_name] = self.compiled(
+                    args_ref, kwargs_ref
+                )()
 
         gold = res["eager"]
 
@@ -142,14 +147,14 @@ class BenchmarkKernel:
                     print("Exit right away since --exit-on-accuracy-failure is set")
                     sys.exit(1)
 
-    def benchmark_single_shape_for_backend(self, backend, args, kwargs, setting, fn=None) -> bool:
+    def benchmark_single_shape_for_backend(
+        self, backend, args, kwargs, setting, fn=None
+    ) -> bool:
         if fn is None:
             fn = getattr(self, backend)
         args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
         try:
-            avg_time = benchmark_kernel_in_milliseconds(
-                fn(args_ref, kwargs_ref)
-            )
+            avg_time = benchmark_kernel_in_milliseconds(fn(args_ref, kwargs_ref))
         except Exception as e:
             print(
                 f"Failed to run {backend} backend on {self.name} kernel for {setting} due to {e}"
@@ -162,18 +167,28 @@ class BenchmarkKernel:
         self.profiling_results[backend].append(perf)
         return True
 
-        
     def benchmark_single_shape(
         self, args, kwargs=None, should_check_accuracy=True, setting: str = ""
     ):
         for backend in self.available_backends:
             self.benchmark_single_shape_for_backend(backend, args, kwargs, setting)
-        if "compiled" in self.available_backends and self.script_args.custom_compile_options:
+        if (
+            "compiled" in self.available_backends
+            and self.script_args.custom_compile_options
+        ):
             torch._dynamo.reset()  # cause recompile
             with torch._inductor.config.patch(self.script_args.custom_compile_options):
-                status = self.benchmark_single_shape_for_backend(self.script_args.custom_compile_name, args, kwargs, setting, fn=self.compiled)
+                status = self.benchmark_single_shape_for_backend(
+                    self.script_args.custom_compile_name,
+                    args,
+                    kwargs,
+                    setting,
+                    fn=self.compiled,
+                )
             if not status:
-                self.script_args.custom_compile_options = None # once fail, don't run again
+                self.script_args.custom_compile_options = (
+                    None  # once fail, don't run again
+                )
 
         if should_check_accuracy:
             self.check_accuracy(args, kwargs)
