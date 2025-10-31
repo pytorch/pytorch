@@ -61,6 +61,15 @@ def _lazy_init():
     _initialized = True
 
 
+def _is_in_bad_fork() -> bool:
+    r"""Check if we are in a bad fork state.
+
+    For openreg (CPU-based emulation), fork state is not an issue,
+    so this always returns False.
+    """
+    return False
+
+
 from .random import *  # noqa: F403
 
 
