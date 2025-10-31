@@ -645,6 +645,7 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
+                from torch.distributed.tensor._api import DTensor, DTensorSpec
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -675,6 +676,15 @@ class CodeGen:
                     core = _tensor_annotation(meta_val)
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
+                    elif isinstance(meta_val, DTensor):
+                        dtensor_meta = DTensorSpec.format_shard_order_str(
+                            meta_val._spec.placements,
+                            meta_val._spec.shard_order,
+                        )
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = (
+                            f': "{cls}({core}, {dim_green(dtensor_meta)})"'
+                        )
                     else:
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = f': "{cls}({core})"'
