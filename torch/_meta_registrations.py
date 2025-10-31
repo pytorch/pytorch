@@ -5754,6 +5754,7 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     is_causal: bool = False,
     return_debug_mask: bool = False,
     scale: Optional[float] = None,
+    compute_log_sumexp: bool = True,
 ):
     B = query.size(0)
     H_Q = query.size(1)
@@ -5785,6 +5786,36 @@ def meta__scaled_dot_product_fused_attention_overrideable(
         offset,
         None,
     )
+
+
+@register_meta([aten._scaled_dot_product_fused_attention_overrideable_backward])
+def meta__scaled_dot_product_fused_attention_overrideable_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_bias: Tensor,
+    grad_input_mask: list[bool],
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    scale: Optional[float] = None,
+):
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
+
+    grad_attn_bias = None
+    if attn_bias is not None:
+        grad_attn_bias = torch.empty_like(attn_bias)
+    return grad_q, grad_k, grad_v, grad_attn_bias
 
 
 @register_meta(
@@ -6448,6 +6479,13 @@ def meta_scaled_mm(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
                 )
+            elif (
+                scale_a.size(0) == m
+                and scale_a.size(1) == scale_b.size(0) == (_k + 128 - 1) // 128
+                and scale_b.size(1) == (n + 128 - 1) // 128
+            ):
+                # (BlockWise1x128, BlockWise128x128)
+                pass  # do nothing, but do not error
             else:
                 # does not match any valid scaling type
                 torch._check(
@@ -6456,6 +6494,8 @@ def meta_scaled_mm(
                         "Invalid scaling configuration. "
                         "For tensorwise scaling, both scales should be scalar. "
                         f"For rowwise scaling, scale_a should be ({m}, 1), scale_b should be (1, {n}). "
+                        f"For (BlockWise1x128, BlockWise128x128), scale_a should be ({m}, {(_k + 128 - 1) // 128}), "
+                        + f"scale_b should be ({(_k + 128 - 1) // 128}, {(n + 128 - 1) // 128}). "
                         f"Got scale_a.size()=({scale_a.size(0)}, {scale_a.size(1)}) "
                         f"and scale_b.size()=({scale_b.size(0)}, {scale_b.size(1)})"
                     ),

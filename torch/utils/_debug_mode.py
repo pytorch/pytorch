@@ -12,7 +12,7 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_all, tree_map
 from torch.utils._traceback import CapturedTraceback
 
 
@@ -471,6 +471,15 @@ class DebugMode(TorchDispatchMode):
         record_hook: Optional[Callable] = None,
         log_hook: Optional[Callable] = None,
     ):
+        """
+        Allows installing post-hooks on arguments to intercepted __torch_dispatch__ calls;
+        hook signatures are expected as (func, types, args, kwargs, result),
+        i.e. __torch_dispatch__ args + return value.
+
+        Logging hook outputs are stored in call.log and annotate calls in debug_string(),
+        while recording hook outputs are just stored in call.record.
+        For now hooks are expected to return dictionaries.
+        """
         global _DISPATCH_RECORD_HOOKS, _DISPATCH_LOG_HOOKS
 
         if record_hook:
@@ -488,6 +497,10 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def record_outputs():
+        """
+        Hook for storing cloned output tensors in .record["output"].
+        """
+
         def dispatch_hook(func, types, args, kwargs, result):
             with torch._C._DisablePythonDispatcher():
                 out = tree_map(
@@ -500,17 +513,34 @@ class DebugMode(TorchDispatchMode):
 
     @staticmethod
     @contextlib.contextmanager
-    def log_output_hashes(hash_fn: Optional[Callable] = None):
+    def log_tensor_hashes(
+        hash_fn: Optional[Callable] = None, hash_inputs: bool = False
+    ):
+        """
+        Installs hook for tensor hash logging.
+
+        hash_fn: optional function for custom hashing
+        hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
+        NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
+        """
         if hash_fn is None:
             hash_fn = functools.partial(default_hash_fn, use_scalar=True)
 
-        def _dispatch_hash_hook(func, types, args, kwargs, result):
+        def _tree_hash(obj):
             with torch._C._DisablePythonDispatcher():
-                out = tree_map(
-                    lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None,
-                    result,
+                return tree_map(
+                    lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None, obj
                 )
-            return {"hash": out}
+
+        def _dispatch_hash_hook(func, types, args, kwargs, result):
+            out = {}
+            out["hash"] = _tree_hash(result)
+            if hash_inputs:
+                out["input_hash"] = _tree_hash((args, kwargs))
+
+            if tree_all(lambda x: x is None, out.values()):
+                return None
+            return out
 
         with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
             yield

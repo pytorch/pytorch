@@ -22,8 +22,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfXpu,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -492,9 +492,9 @@ def fail_cpu(is_skip=False):
     )
 
 
-def fail_cuda(is_skip=False):
+def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
     return TestFailure(
-        ("cuda"),
+        suffixes,
         is_skip=is_skip,
     )
 
@@ -506,11 +506,11 @@ CPU_TEST_FAILURES = {
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
-CUDA_TEST_FAILURES = {
+GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
-    "test_quantized_linear": fail_cuda(),
-    "test_quanatized_int8_linear": fail_cuda(),
-    "test_quantized_linear_bias_none": fail_cuda(),
+    "test_quantized_linear": fail_gpu(("cuda", "xpu")),
+    "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
 }
 
 
@@ -533,9 +533,9 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-class AOTInductorTestABICompatibleCuda(AOTICustomOpTestCase):
-    device = "cuda"
-    device_type = "cuda"
+class AOTInductorTestABICompatibleGpu(AOTICustomOpTestCase):
+    device = GPU_TYPE
+    device_type = GPU_TYPE
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -545,14 +545,14 @@ class AOTInductorTestABICompatibleCuda(AOTICustomOpTestCase):
 
 copy_tests(
     AOTInductorTestsTemplate,
-    AOTInductorTestABICompatibleCuda,
-    "cuda",
-    CUDA_TEST_FAILURES,
+    AOTInductorTestABICompatibleGpu,
+    GPU_TYPE,
+    GPU_TEST_FAILURES,
 )
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA_AND_TRITON or sys.platform == "darwin":
+    if HAS_GPU_AND_TRITON or sys.platform == "darwin":
         run_tests(needs="filelock")
