@@ -1,3 +1,4 @@
+# mypy: disable-error-code=import-not-found
 import cutlass.cute as cute
 
 
