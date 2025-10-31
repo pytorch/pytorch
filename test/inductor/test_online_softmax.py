@@ -293,6 +293,19 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(not act.isnan().any())
         self.assertTrue(torch.allclose(ref, act))
 
+    @inductor_config.patch(split_reductions=False)
+    def test_3d_tiled_online_softmax(self):
+        def f(x, y):
+            return (x * y).softmax(dim=-1)
+
+        M, N, K = 32, 8, 1024
+
+        x = torch.randn(K, N, M, device=GPU_TYPE).permute(2, 1, 0)
+        y = torch.randn(K, M, N, device=GPU_TYPE).permute(1, 2, 0)
+
+        opt_f = torch.compile(f)
+        torch.testing.assert_close(f(x, y), opt_f(x, y), atol=1e-3, rtol=1e-3)
+
 
 instantiate_parametrized_tests(TestOnlineSoftmax)
 

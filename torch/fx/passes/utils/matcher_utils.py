@@ -95,7 +95,7 @@ class SubgraphMatcher:
             )
 
         for node in pattern.nodes:
-            if node.op != "output":
+            if node.op != "output" and not node.is_impure():
                 assert len(node.users) > 0, (
                     "SubgraphMatcher cannot be initialized with an pattern with dead code"
                 )
@@ -127,7 +127,7 @@ class SubgraphMatcher:
         pn_value = torch.fx.graph_module._get_attr(pn.graph.owning_module, pn.target)
         gn_value = torch.fx.graph_module._get_attr(gn.graph.owning_module, gn.target)
 
-        if type(pn_value) != type(gn_value):
+        if type(pn_value) is not type(gn_value):
             return False
 
         # Don't require exact match on tensor values.
@@ -213,7 +213,7 @@ class SubgraphMatcher:
         elif not isinstance(pn, Node) and isinstance(gn, Node):
             return False
         else:
-            return type(gn) == type(pn) and gn == pn
+            return type(gn) is type(pn) and gn == pn
 
     def _match_nodes(
         self, pn: Node, gn: Node, match: InternalMatch, node_name_match: str = ""

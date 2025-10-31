@@ -84,6 +84,7 @@ def build_triton(
                 ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
             )
         else:
+            check_call(["git", "fetch", "origin", commit_hash], cwd=triton_basedir)
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         # change built wheel name and version

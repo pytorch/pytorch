@@ -8,6 +8,10 @@
 These APIs are experimental and subject to change without notice.
 :::
 
+```{eval-rst}
+.. autoclass:: torch.fx.experimental.sym_node.DynamicInt
+```
+
 ## torch.fx.experimental.symbolic_shapes
 
 ```{eval-rst}

@@ -239,4 +239,4 @@
 
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
     acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
-    {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
+    {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask", val_shape=("GQA_SHARED_HEADS", "BLOCK_M_PER_HQ", "V_HEAD_DIM"))}}

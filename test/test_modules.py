@@ -15,8 +15,14 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest)
+    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM)
 from unittest.mock import patch, call
+
+
+if TEST_WITH_ROCM:
+    import os
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
 
 class TestModule(TestCase):
