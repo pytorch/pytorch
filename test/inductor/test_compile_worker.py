@@ -16,9 +16,8 @@ from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class TestCompileWorker(TestCase):
-    def make_pool(size):
+    def make_pool(self, size):
         return SubprocPool(size)
-
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_basic_jobs(self):
@@ -86,8 +85,9 @@ class TestCompileWorker(TestCase):
             finally:
                 pool.shutdown()
 
-class TestCompileWorkerWithTimer(TestCase):
-    def make_pool(size):
+
+class TestCompileWorkerWithTimer(TestCompileWorker):
+    def make_pool(self, size):
         return SubprocPool(size, quiesce=True)
 
 
