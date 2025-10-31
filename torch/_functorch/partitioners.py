@@ -288,6 +288,10 @@ def _has_tag_is_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "is_backward"
 
 
+def _has_tag_is_forward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "is_forward"
+
+
 def _has_tag_must_be_in_forward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_forward"
 
@@ -1027,12 +1031,16 @@ def default_partition(
     # Not respecting the original placement can result in forward node being moved to
     # the backward. That is problematic if the node has an arg which is mutated
     # later in the forward. This can occur when an in-place op saves its input for backward,
-    # e.g. sin_. See https://github.com/pytorch/pytorch/pull/164577 for more context.
-    #
+    # e.g. sin_. See https://github.com/pytorch/pytorch/pull/164577 for more context
     forward_nodes = []
+    last_node = None
+    for node in joint_module.graph.nodes:
+        if _has_tag_is_forward(node) or _is_primal(node) or _is_fwd_seed_offset(node):
+            last_node = node
+    assert last_node is not None
     for node in joint_module.graph.nodes:
         forward_nodes.append(node)
-        if node.meta.get("is_last_forward_node", False):
+        if node is last_node:
             break
     forward_node_names = OrderedSet(
         node.name for node in forward_nodes if node.op != "output"

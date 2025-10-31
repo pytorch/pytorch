@@ -27,7 +27,6 @@ from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
-    get_proxy_mode,
     maybe_disable_thunkify,
     maybe_enable_thunkify,
 )
@@ -290,16 +289,14 @@ def create_joint(
     ]:
         outs_descs = None
         if primals_descs is None:
-            outs, tangent_mask = fn(*primals)
+            with set_partitioner_tag_is_forward():
+                outs, tangent_mask = fn(*primals)
             assert not pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask)
         else:
-            (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
-                fn, primals
-            )
-        # Mark the last node in the graph
-        mode = get_proxy_mode()
-        last_node = next(iter(reversed(mode.tracer.graph.nodes)))
-        last_node.meta["is_last_forward_node"] = True
+            with set_partitioner_tag_is_forward():
+                (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
+                    fn, primals
+                )
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:
@@ -562,6 +559,10 @@ def set_partitioner_tag(tag: str):
 
 def set_partitioner_tag_is_backward():
     return set_partitioner_tag("is_backward")
+
+
+def set_partitioner_tag_is_forward():
+    return set_partitioner_tag("is_forward")
 
 
 def set_partitioner_tag_must_be_in_backward():
