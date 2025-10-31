@@ -3593,6 +3593,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         for key in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS:
             if key in info:
+                # pyrefly: ignore [unsupported-operation]
                 result[key] = info[key]
 
         return result

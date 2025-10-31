@@ -72,7 +72,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
 
     auto retFuture = rrefsReadyFuture->thenAsync(
         [this,
-         // std::function must be copyable, hence hae to cast the unique_ptr to
+         // std::function must be copyable, hence has to cast the unique_ptr to
          // a shared_ptr here.
          rpc = std::shared_ptr<RpcCommandBase>(std::move(rpc)),
          messageType = request.type(),
