@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Callable, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
 
@@ -24,6 +24,10 @@ from .qconfig import (
     QConfig,
     QConfigAny,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 __all__ = [

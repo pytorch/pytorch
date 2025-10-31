@@ -3,8 +3,9 @@
 import contextlib
 import functools
 import unittest
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist

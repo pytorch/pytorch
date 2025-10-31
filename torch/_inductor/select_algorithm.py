@@ -17,6 +17,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
@@ -105,7 +106,9 @@ DEBUG = False
 if TYPE_CHECKING:
     import concurrent
 
-    from torch._inductor.codegen.simd import IterationRangesRoot
+    from torch._inductor.codegen.simd import IterationRangesEntry, IterationRangesRoot
+
+    from .codegen.common import CSE
 
 
 class KernelNamespace:
@@ -261,13 +264,20 @@ class SubgraphInfo:
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     stores: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
+    cse: Optional["CSE[Any]"] = None
 
     # only copied over if not None
     range_trees: Optional[list["IterationRangesRoot"]] = None
+    range_tree_nodes: Optional[dict[sympy.Symbol, "IterationRangesEntry"]] = None
     numels: Optional[dict[str, sympy.Expr]] = None
 
     def __post_init__(self):
-        self.only_copy_if_non_none_fields = ("range_trees", "numels")
+        self.only_copy_if_non_none_fields = (
+            "range_trees",
+            "range_tree_nodes",
+            "numels",
+            "cse",
+        )
 
     def to_dict(self):
         return {
@@ -323,6 +333,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
+    # pyrefly: ignore [bad-override]
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
@@ -426,6 +437,7 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
+        # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[dict[str, object]] = None
@@ -543,6 +555,7 @@ class TritonTemplateKernel(TritonKernel):
         context = (
             contextlib.nullcontext
             if not self.ops_handler
+            # pyrefly: ignore [not-callable]
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
         with context():  # type: ignore[operator]
@@ -557,12 +570,10 @@ class TritonTemplateKernel(TritonKernel):
             setattr(self, key, value)
 
     @contextlib.contextmanager
-    def create_subgraph_body(self, body_name: str):
+    def create_subgraph_body(self, body_name: str, clear_cse: bool = False):
         assert body_name not in self.subgraph_bodies
         self.subgraph_bodies[body_name] = SubgraphInfo(
-            IndentedBuffer(),
-            None,
-            None,
+            IndentedBuffer(), None, None, cse=self.cse.clone() if clear_cse else None
         )
         with self.set_subgraph_body(body_name):
             yield
@@ -983,6 +994,7 @@ class TritonTemplateKernel(TritonKernel):
                             f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
                         )
 
+            # pyrefly: ignore [bad-assignment]
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
@@ -1071,7 +1083,13 @@ class TritonTemplateKernel(TritonKernel):
             # XBLOCK/YBLOCK and xoffset/yoffset. We append XBLOCK/YBLOCK
             # to the top of the kernel so we can safely extract the tensor
             # descriptor construction to the top of the kernel.
-            self.defines += f"{block_name}: tl.constexpr = {block_size}\n"
+            if block_name in self.prologue_cache:
+                assert self.prologue_cache[block_name] == block_size, (
+                    f"Constant {block_name} must be used for all stores"
+                )
+            else:
+                self.prologue_cache[block_name] = block_size
+                self.prologue.writeline(f"{block_name}: tl.constexpr = {block_size}")
         else:
             block_name = block_size
         line0 = f"{offset_name} = {texpr(tma_index)}"
@@ -1124,7 +1142,10 @@ class TritonTemplateKernel(TritonKernel):
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
         """
-        with self.create_subgraph_body("<STORE_OUTPUT>"):
+        subgraph_name = self._get_store_output_subgraph_name(
+            next(self.store_output_ctr)
+        )
+        with self.create_subgraph_body(subgraph_name, clear_cse=True):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
@@ -1177,6 +1198,7 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(index_order),
+                                # pyrefly: ignore [missing-argument]
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1190,6 +1212,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
+                        # pyrefly: ignore [missing-argument]
                         val_shape_copy[i] = range_tree.symt.name
                     # Reverse the index symbols because TMA is indexed
                     # as (x, y) whereas the variables will naturally be indexed
@@ -1267,6 +1290,7 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
+            # pyrefly: ignore [bad-assignment]
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -1300,13 +1324,14 @@ class TritonTemplateKernel(TritonKernel):
             self.codegen_body()
 
         def hook():
-            # more stuff might have been added since the codegen_body above
-            self.codegen_body()
-            self.cse.invalidate(OrderedSet())
+            with self.set_subgraph_body(subgraph_name):
+                # more stuff might have been added since the codegen_body above
+                self.codegen_body()
+                self.cse.invalidate(OrderedSet())
 
-            return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
+                return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
-        return self._register_hook("<STORE_OUTPUT>", hook)
+        return self._register_hook(subgraph_name, hook)
 
     def _register_hook(
         self,
@@ -1356,9 +1381,11 @@ class TritonTemplateKernel(TritonKernel):
             self.cached_replay_events = []
 
         template_env = {
-            fn.__name__: self.record_input_dependent_tracked_event()(fn)
-            if record_input_dependent_tracked_event
-            else fn
+            fn.__name__: (
+                self.record_input_dependent_tracked_event()(fn)
+                if record_input_dependent_tracked_event
+                else fn
+            )
             for fn in [
                 self.def_kernel,
                 self.size,
@@ -1432,7 +1459,9 @@ class TritonTemplateKernel(TritonKernel):
             return (grid_args, map(type, grid_args))
         return ((), ())
 
-    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
+    def call_kernel(
+        self, name: str, node: Optional[ir.IRNode] = None, deallocate_ws: bool = True
+    ):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
 
@@ -1676,7 +1705,7 @@ class TritonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -1810,8 +1839,7 @@ class TritonTemplate(KernelTemplate):
 
             try:
                 template = kernel.render(self.template, kwargs, caching_enabled)
-                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                    code = template.finalize_all()
+                code = template.finalize_all()
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
                 return None
@@ -1881,6 +1909,7 @@ class TritonTemplate(KernelTemplate):
             extra,
             input_call_args,
             prologue_supported_inputs,
+            # pyrefly: ignore [bad-argument-type]
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -1965,8 +1994,17 @@ class TritonTemplate(KernelTemplate):
             expected_input_args,
         )
 
-        full_input_nodes = tuple(
+        # `kernel_input_nodes` are the actual inputs that will be passed to the kernel,
+        # so e.g. views of the same input are not included. `codegen_input_nodes`
+        # includes views of inputs to preserve the kernel semantics. The shape and
+        # strides of `codegen_input_nodes` will be used to infer read/writes in
+        # TemplateBuffer.extract_read_writes
+        kernel_input_nodes = tuple(
             [V.graph.get_buffer(k) for k in result.input_call_args]
+        )
+        # Here we have (*input_nodes, *captured_buffers)
+        codegen_input_nodes = (
+            tuple(input_nodes) + kernel_input_nodes[len(expected_input_args) :]
         )
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, result.kernel_args_sizevars_keys),
@@ -2040,13 +2078,13 @@ class TritonTemplate(KernelTemplate):
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
-            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
+            input_tensor_meta=TensorMeta.from_irnodes(kernel_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
         return TritonTemplateCaller(
             kernel_hash_name,
-            full_input_nodes,
+            codegen_input_nodes,
             layout,
             make_kernel_render,
             result.extra.strip("-").replace("-", ", "),
@@ -2062,11 +2100,16 @@ class TritonTemplate(KernelTemplate):
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "GROUP_M": kwargs.get("GROUP_M", -1),
-                "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
-                "acc_type": str(kwargs.get("ACC_TYPE", None)),
+                "allow_tf32": str(kwargs.get("ALLOW_TF32")),
+                "acc_type": str(kwargs.get("ACC_TYPE")),
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
+                **{
+                    k: kwargs[k]
+                    for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
+                    if k in kwargs
+                },
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
@@ -2360,6 +2403,17 @@ def get_mm_log_filename() -> Optional[str]:
     return mm_file_name
 
 
+@functools.cache
+def get_flex_attention_log_filename() -> Optional[str]:
+    flex_attention_file_name = os.environ.get(
+        "TORCHINDUCTOR_FLEX_ATTENTION_LOGGING_FILE", None
+    )
+    if not flex_attention_file_name:
+        return None
+
+    return str(Path(flex_attention_file_name).with_suffix(".json"))
+
+
 def append_to_log(filename, data):
     lock_file = filename.replace(".json", ".lock")
     lock = FileLock(lock_file)
@@ -2435,6 +2489,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
+        # pyrefly: ignore [not-callable]
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2569,6 +2624,25 @@ class AlgorithmSelectorCache(PersistentCache):
     doesn't depend on the output layout.
     """
 
+    FLEX_ATTENTION_TUNABLE_KEYS = tuple(
+        dict.fromkeys(
+            [
+                "num_warps",
+                "num_stages",
+                "BLOCK_M",
+                "BLOCK_N",
+                "BLOCK_M1",
+                "BLOCK_N1",
+                "BLOCK_M2",
+                "BLOCK_N2",
+                "USE_TMA",
+                "kpack",
+                "matrix_instr_nonkdim",
+                "waves_per_eu",
+            ]
+        )
+    )
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -2599,6 +2673,17 @@ class AlgorithmSelectorCache(PersistentCache):
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
         self.prescreening_cache.clear()
+
+    def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
+        assert len(choices) >= 2
+        externs = [
+            choice for choice in choices if isinstance(choice, ExternKernelChoice)
+        ]
+        if len(externs) > 0:
+            # pyrefly: ignore [bad-return]
+            return externs[0]
+        else:
+            return choices[0]
 
     def __call__(
         self,
@@ -2655,6 +2740,9 @@ class AlgorithmSelectorCache(PersistentCache):
             if not isinstance(choices[0], CUDATemplateCaller):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
+
+        if config.deterministic:
+            return self.pick_deterministic_choice(choices).output_node()
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -3090,40 +3178,89 @@ class AlgorithmSelectorCache(PersistentCache):
         # de-duplicate args
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(
-                i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override)
+                i,
+                lambda x: cls.benchmark_example_value(x, hint_override=hint_override),
+                # pyrefly: ignore [bad-argument-type]
             )(x)
             for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
-        example_inputs_extern = [
-            (
-                unique_example_inputs[input_node.get_name()]
-                if unique_example_inputs[input_node.get_name()].is_mkldnn
-                else torch.as_strided(
-                    unique_example_inputs[input_node.get_name()],
-                    V.graph.sizevars.size_hints(
-                        input_node.get_size(),
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
-                    V.graph.sizevars.size_hints(
-                        input_node.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
-                    V.graph.sizevars.size_hint(
-                        input_node.get_layout().offset,
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
+        example_inputs_extern = []
+        for input_node in input_nodes:
+            if unique_example_inputs[input_node.get_name()].is_mkldnn:
+                example_inputs_extern.append(
+                    unique_example_inputs[input_node.get_name()]
                 )
-            )
-            for input_node in input_nodes
-        ]
+            else:
+                base = unique_example_inputs[input_node.get_name()]
+                base = base if base._base is None else base._base
+                sizes = tuple(
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        size,
+                        fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override,
+                    )
+                    for size in input_node.get_size()
+                )
+                strides = tuple(
+                    V.graph.sizevars.atomically_apply_size_hint(
+                        stride,
+                        fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override,
+                    )
+                    for stride in input_node.get_stride()
+                )
+                storage_offset = V.graph.sizevars.atomically_apply_size_hint(
+                    input_node.get_layout().offset,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+
+                # Check if the required storage size exceeds the current storage
+                # to avoid illegal memory access
+                needed_size = torch._prims_common.compute_required_storage_length(
+                    sizes, strides, storage_offset
+                )
+                current_size = base.storage().size()
+
+                if needed_size > current_size:
+                    # Create a new base tensor with sufficient storage
+                    new_base = torch.randn(
+                        needed_size,
+                        dtype=base.dtype,
+                        device=base.device,
+                        requires_grad=base.requires_grad,
+                    )
+                    base = new_base.as_strided(
+                        base.size(), base.stride(), base.storage_offset()
+                    )
+
+                example_inputs_extern.append(
+                    torch.as_strided(base, sizes, strides, storage_offset)
+                )
         out = cls.benchmark_example_value(layout, hint_override=hint_override)
-        out_extern = torch.as_strided(
-            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
+
+        # Also check the output tensor for storage size
+        out_base = out if out._base is None else out._base
+        out_offset = V.graph.sizevars.size_hint(layout.offset)
+        needed_out_size = torch._prims_common.compute_required_storage_length(
+            out.size(), out.stride(), out_offset
         )
+        current_out_size = out_base.storage().size()
+
+        if needed_out_size > current_out_size:
+            # Create a new base tensor with sufficient storage
+            new_out_base = torch.randn(
+                needed_out_size,
+                dtype=out_base.dtype,
+                device=out_base.device,
+                requires_grad=out_base.requires_grad,
+            )
+            out_base = new_out_base.as_strided(
+                out_base.size(), out_base.stride(), out_base.storage_offset()
+            )
+
+        out_extern = torch.as_strided(out_base, out.size(), out.stride(), out_offset)
         expected = None
         if VERIFY:
             choices[0].benchmark(*example_inputs_extern, out=out_extern)
@@ -3137,12 +3274,15 @@ class AlgorithmSelectorCache(PersistentCache):
             expected,
         )
 
+    @staticmethod
+    def _is_extern(choice: ChoiceCaller) -> bool:
+        return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
+
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        is_extern = isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
-        benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
+        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         result = choice.benchmark(*inputs, out=output)
@@ -3168,17 +3308,16 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in choices:
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
-            except CUDACompileError as e:
+            except CUDACompileError:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 if not isinstance(choice, CUDATemplateCaller):
-                    log.error(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        e,
+                    log.exception(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
                     )
                 timing = float("inf")
-            except NotImplementedError as e:
-                log.warning("Not yet implemented: %s", e)
+            except NotImplementedError:
+                log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -3186,9 +3325,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                else:
-                    if "illegal memory access" in msg:
-                        msg += "\n\nEither error in template or triton bug.\n"
+                elif "illegal memory access" in msg:
+                    msg += "\n\nEither error in template or triton bug.\n"
+                elif "unspecified launch failure" in msg:
+                    msg += "\n\nAn unrecoverable unspecified launch failure was caught during autotuning."
+                    msg += "\nPlease try re-running with TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1.\n\n"
 
                 if isinstance(choice, CUDATemplateCaller):
                     log.debug(
@@ -3211,7 +3352,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     from triton.runtime.autotuner import OutOfResources
 
                     if isinstance(e, OutOfResources):
-                        log.warning(e)
+                        log.warning(e)  # noqa: G200
                         timing = float("inf")
                     else:
                         raise e
@@ -3249,8 +3390,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # only benchmark triton kernel in sub process for now.
         # ATen/Extern kernel are still benchmarked in the current process.
-        extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
-        triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
+        extern = [c for c in choices if cls._is_extern(c)]
+        triton = [c for c in choices if not cls._is_extern(c)]
 
         timings = cls.benchmark_in_current_process(
             extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
@@ -3436,6 +3577,74 @@ class AlgorithmSelectorCache(PersistentCache):
         return pruned_choices
 
     @staticmethod
+    def get_flex_attention_choice_info(
+        choice: ChoiceCaller, timings: dict[ChoiceCaller, float]
+    ) -> dict[str, Any]:
+        if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+            return {"type": "extern", "time": timings[choice]}
+
+        assert isinstance(choice, torch._inductor.select_algorithm.TritonTemplateCaller)
+
+        info = choice.info_dict()
+        result = {
+            "type": "triton",
+            "time": timings[choice],
+        }
+
+        for key in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS:
+            if key in info:
+                # pyrefly: ignore [unsupported-operation]
+                result[key] = info[key]
+
+        return result
+
+    @staticmethod
+    def maybe_log_flex_attention_results(
+        name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
+    ) -> None:
+        flex_attention_filename = get_flex_attention_log_filename()
+        if not flex_attention_filename or "flex_attention" not in name:
+            return
+
+        if len(input_nodes) < 3:
+            return
+
+        query_size = input_nodes[0].get_size()
+        key_size = input_nodes[1].get_size()
+        value_size = input_nodes[2].get_size()
+
+        B = query_size[0]
+        Hq = query_size[1]
+        seq_len_q = query_size[2]
+        qk_head_dim = query_size[3]
+        Hkv = key_size[1]
+        seq_len_kv = key_size[2]
+        v_head_dim = value_size[3]
+
+        kernel_type = "backward" if "backward" in name else "forward"
+        dims_key = str(
+            (
+                kernel_type,
+                B,
+                Hq,
+                Hkv,
+                seq_len_q,
+                seq_len_kv,
+                qk_head_dim,
+                v_head_dim,
+            )
+        )
+
+        sorted_choices = sorted(timings, key=timings.__getitem__)
+        out_dict = {
+            dims_key: [
+                AlgorithmSelectorCache.get_flex_attention_choice_info(choice, timings)
+                for choice in sorted_choices
+            ]
+        }
+        append_to_log(flex_attention_filename, out_dict)
+
+    @staticmethod
     def log_results(
         name: str,
         input_nodes: list[ir.IRNode],
@@ -3445,6 +3654,7 @@ class AlgorithmSelectorCache(PersistentCache):
         prescreening_elapse: Optional[float] = None,
         hint_override: Optional[int] = None,
     ):
+        """Log the autotuning results, currently only handles mm and flex"""
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
         )
@@ -3513,6 +3723,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
             append_to_log(mm_filename, out_dict)
 
+        AlgorithmSelectorCache.maybe_log_flex_attention_results(
+            name, input_nodes, timings
+        )
+
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         sys.stderr.write(f"strides: {strides}\n")
@@ -3562,23 +3776,38 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    size,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                for size in node.get_size()
             ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                for stride in node.get_stride()
             ),
             node.get_device(),
             node.get_dtype(),
-            node.layout.offset,
-            V.graph.sizevars.size_hints(
-                V.graph.get_allocation_size(node),
+            V.graph.sizevars.atomically_apply_size_hint(
+                # pyrefly: ignore [missing-attribute]
+                node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
+            ),
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    size,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                # pyrefly: ignore [bad-argument-type]
+                for size in V.graph.get_allocation_size(node)
             ),
         )
 
@@ -3620,9 +3849,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
             ),
-            *sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
+            *tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for stride in node.get_stride()
             ),
             sizevars.size_hint(
                 node.get_layout().offset,

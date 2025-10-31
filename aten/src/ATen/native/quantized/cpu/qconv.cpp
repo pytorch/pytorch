@@ -1198,7 +1198,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
   ideep::tensor src(src_desc, act_contig.data_ptr());
   // weights & bias
-  ideep::tensor& weights = *(weight_.get());
+  ideep::tensor& weights = *(weight_);
   bool with_bias = bias_.has_value();
   const auto& kernel_size = weights.get_dims();
   // dst

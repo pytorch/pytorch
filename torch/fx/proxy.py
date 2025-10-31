@@ -10,13 +10,14 @@ import operator
 import sys
 import traceback
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
+from torch._logging import getArtifactLogger
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
@@ -40,6 +41,7 @@ __all__ = [
 
 
 log = logging.getLogger(__name__)
+annotation_log = getArtifactLogger(__name__, "annotation")
 
 
 @compatibility(is_backward_compatible=False)
@@ -202,7 +204,24 @@ class TracerBase:
             # BWD pass we retrieve the sequence_nr stored on the current
             # executing autograd Node. See NOTE [ Sequence Number ].
             if current_meta.get("in_grad_fn", 0) > 0:
+                annotation_log.debug("seq_nr from current_meta")
                 new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
+
+            # See Note [Functionalization View Replay Annotation]
+            # Overriding some node meta with the original node meta of the
+            # regenerated node.
+            replay_node: Node = fx_traceback.get_current_replay_node()
+            if replay_node is not None:
+                node.meta["is_functional_regenerated"] = True
+                if "seq_nr" in replay_node.meta:
+                    annotation_log.debug("seq_nr from replay_node")
+                    new_seq_nr = replay_node.meta["seq_nr"]
+                if "custom" in replay_node.meta:
+                    node.meta["custom"] = replay_node.meta.get("custom")
+                if "stack_trace" in replay_node.meta:
+                    node.stack_trace = replay_node.meta.get("stack_trace")
+
+            annotation_log.debug("Assigning new_seq_nr %s to %s", new_seq_nr, node.name)
             node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:
@@ -816,7 +835,7 @@ _create_arg_bypass = {
     ]
 }
 _create_arg_bypass[Proxy] = lambda self, a: a.node
-_create_arg_bypass[tuple] = lambda self, a: tuple([self.create_arg(elem) for elem in a])
+_create_arg_bypass[tuple] = lambda self, a: tuple(self.create_arg(elem) for elem in a)
 _create_arg_bypass[list] = lambda self, a: [self.create_arg(elem) for elem in a]
 _create_arg_bypass[dict] = _create_arg_dict
 _create_arg_bypass[immutable_list] = _create_arg_bypass[list]

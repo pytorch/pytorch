@@ -15,10 +15,11 @@ import time
 import traceback
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -74,6 +75,10 @@ class WorkerSpec:
              takes precedence over ``redirects`` settings.
         event_log_handler: name of the event logging handler as registered in
           `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
+                                 that match _any_ of the filter strings.
+        duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
+                                 that match _any_ of the filter strings.
     """
 
     role: str
@@ -90,6 +95,8 @@ class WorkerSpec:
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
     numa_options: Optional[NumaOptions] = None
+    duplicate_stdout_filters: Optional[list[str]] = None
+    duplicate_stderr_filters: Optional[list[str]] = None
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -99,6 +106,7 @@ class WorkerSpec:
             warnings.warn(
                 "WorkerSpec.fn will be deprecated,"
                 " please use WorkerSpec.entrypoint instead",
+                stacklevel=2,
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
@@ -720,7 +728,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)
+            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)

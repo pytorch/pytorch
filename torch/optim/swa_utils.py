@@ -4,9 +4,9 @@ r"""Implementation for Stochastic Weight Averaging implementation."""
 import itertools
 import math
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, Callable, cast, Literal, Optional, Union
+from typing import Any, cast, Literal, Optional, Union
 from typing_extensions import override
 
 import torch
@@ -229,9 +229,10 @@ class AveragedModel(Module):
         use_buffers=False,
     ):  # noqa: D107
         super().__init__()
-        assert avg_fn is None or multi_avg_fn is None, (
-            "Only one of avg_fn and multi_avg_fn should be provided"
-        )
+        if avg_fn is not None and multi_avg_fn is not None:
+            raise AssertionError(
+                "Only one of avg_fn and multi_avg_fn should be provided"
+            )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
@@ -249,11 +250,13 @@ class AveragedModel(Module):
     def update_parameters(self, model: Module):
         """Update model parameters."""
         self_param = (
+            # pyrefly: ignore [bad-argument-type]
             itertools.chain(self.module.parameters(), self.module.buffers())
             if self.use_buffers
             else self.parameters()
         )
         model_param = (
+            # pyrefly: ignore [bad-argument-type]
             itertools.chain(model.parameters(), model.buffers())
             if self.use_buffers
             else model.parameters()
@@ -295,13 +298,17 @@ class AveragedModel(Module):
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
                         for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
+                            # pyrefly: ignore [missing-attribute]
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
                 for p_averaged, p_model in zip(  # type: ignore[assignment]
                     self_param_detached, model_param_detached
                 ):
+                    # pyrefly: ignore [missing-attribute]
                     n_averaged = self.n_averaged.to(p_averaged.device)
+                    # pyrefly: ignore [missing-attribute]
                     p_averaged.detach().copy_(
+                        # pyrefly: ignore [missing-attribute, bad-argument-type]
                         self.avg_fn(p_averaged.detach(), p_model, n_averaged)
                     )
 
@@ -454,8 +461,29 @@ class SWALR(LRScheduler):
             return swa_lr
         return (lr - alpha * swa_lr) / (1 - alpha)
 
+    @override
     def get_lr(self):
-        """Get learning rate."""
+        r"""Compute the next learning rate for each of the optimizer's
+        :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Uses :attr:`anneal_func` to interpolate between each group's
+        ``group["lr"]`` and ``group["swa_lr"]`` over :attr:`anneal_epochs`
+        epochs. Once :attr:`anneal_epochs` is reached, keeps the learning rate
+        fixed at ``group["swa_lr"]``.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of
+            the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the
+            same types as their current ``group["lr"]``\s.
+
+        .. note::
+            If you're trying to inspect the most recent learning rate, use
+            :meth:`get_last_lr()` instead.
+
+        .. note::
+            The returned :class:`~torch.Tensor`\s are copies, and never alias
+            the optimizer's ``group["lr"]``\s.
+        """
         # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
         # so we ignore the type error here. See `LRScheduler.step()` for more details.
         if not self._get_lr_called_within_step:
@@ -463,17 +491,20 @@ class SWALR(LRScheduler):
                 "To get the last learning rate computed by the scheduler, "
                 "please use `get_last_lr()`.",
                 UserWarning,
+                stacklevel=2,
             )
         # Set in `LRScheduler._initial_step()`
         step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)
+        # pyrefly: ignore [no-matching-overload]
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
         prev_lrs = [
             self._get_initial_lr(group["lr"], group["swa_lr"], prev_alpha)
             for group in self.optimizer.param_groups
         ]
+        # pyrefly: ignore [no-matching-overload]
         t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
         return [

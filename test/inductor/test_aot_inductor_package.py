@@ -9,8 +9,8 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from parameterized import parameterized_class
 
@@ -28,12 +28,7 @@ from torch.export.pt2_archive._package import (
     load_weights_to_pt2_contents,
 )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfRocm,
-    skipIfXpu,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -393,7 +388,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when no name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
             }
             with (
                 tempfile.TemporaryDirectory() as tmp_dir,
@@ -407,7 +402,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear",
             }
             with (
@@ -422,7 +417,7 @@ class TestAOTInductorPackage(TestCase):
 
             # test invalid model name
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear/linear",
             }
             with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
@@ -448,7 +443,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "cos",
             }
             with (
@@ -579,14 +574,48 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(10, 10, device=self.device),
         )
         metadata = {"dummy": "moo"}
-        compiled_model = self.check_model(
-            Model(),
-            example_inputs,
-            inductor_configs={"aot_inductor.metadata": metadata},
-        )
+
+        with torch.no_grad():
+            torch.manual_seed(0)
+            model = Model().to(device=self.device)
+            ref_model = copy.deepcopy(model)
+            ref_inputs = copy.deepcopy(example_inputs)
+            expected = ref_model(*ref_inputs)
+
+            inductor_configs = {
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+                "aot_inductor.metadata": metadata,
+            }
+
+            with WritableTempFile(suffix=".pt2") as f:
+                ep = torch.export.export(model, example_inputs, strict=False)
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep, package_path=f.name, inductor_configs=inductor_configs
+                )  # type: ignore[arg-type]
+
+                # We can load the metadata w/o loading the actual package
+                loaded_metadata = (
+                    torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        package_path, "model"
+                    )
+                )
+                self.assertEqual(loaded_metadata.get("dummy"), "moo")
+
+                device = loaded_metadata["AOTI_DEVICE_KEY"]
+                current_device_info = torch._inductor.codecache.get_device_information(
+                    device
+                )
+
+                for k, v in current_device_info.items():
+                    self.assertTrue(k in loaded_metadata)
+                    self.assertEqual(v, loaded_metadata[k])
+
+                compiled_model = torch._inductor.aoti_load_package(package_path)
+
+            actual = compiled_model(*example_inputs)
+            self.assertEqual(actual, expected)
 
         loaded_metadata = compiled_model.get_metadata()  # type: ignore[attr-defined]
-
         self.assertEqual(loaded_metadata.get("dummy"), "moo")
 
     def test_bool_input(self):
@@ -654,13 +683,13 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_duplicate_calls(self):
         options = {
             "aot_inductor.package": True,
         }
 
-        device = "cuda"
+        device = GPU_TYPE
 
         class Model1(torch.nn.Module):
             def __init__(self) -> None:
@@ -916,7 +945,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         class Bar(torch.nn.Module):
@@ -1000,7 +1029,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         # linear.weight's node name is linear_weight.

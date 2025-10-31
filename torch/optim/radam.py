@@ -283,12 +283,13 @@ def _single_tensor_radam(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+                )
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -322,6 +323,7 @@ def _single_tensor_radam(
         rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
+            # pyrefly: ignore [unsupported-operation]
             return (
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -336,6 +338,7 @@ def _single_tensor_radam(
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
+            # pyrefly: ignore [unsupported-operation]
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly
@@ -378,20 +381,22 @@ def _multi_tensor_radam(
     if len(params) == 0:
         return
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
     lr = _to_scalar(lr)
 

@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 
 class TestLRScheduler(TestCase):
@@ -77,7 +77,7 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [
                 {"params": self.net.conv1.parameters()},
-                {"params": self.net.conv2.parameters(), "lr": 0.5},
+                {"params": self.net.conv2.parameters(), "lr": torch.tensor(0.5)},
             ],
             lr=0.05,
         )
@@ -1509,7 +1509,7 @@ class TestLRScheduler(TestCase):
             14.0 / 3,
             29.0 / 6,
         ]
-        deltas = [2 * i for i in range(0, 2)]
+        deltas = [2 * i for i in range(2)]
         base_lrs = [1 + delta for delta in deltas]
         max_lrs = [5 + delta for delta in deltas]
         lr_targets = [[x + delta for x in lr_base_target] for delta in deltas]
@@ -2530,7 +2530,7 @@ class TestLRScheduler(TestCase):
         ],
     )
     def test_constant_initial_lr(self, LRClass):
-        # Test that the initial learning rate is constant
+        # Test that the initial learning rate is constant and that it does not alias base_lrs
         lr = torch.as_tensor(0.1)
         opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
         sch = LRClass(opt)
@@ -2544,6 +2544,7 @@ class TestLRScheduler(TestCase):
             for group, ori_group in zip(opt.param_groups, ori_param_groups):
                 self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
                 self.assertEqual(sch.base_lrs, [0.1])
+                self.assertIsNot(sch.base_lrs[0], group["initial_lr"])
 
     def test_constant_initial_params_cyclelr(self):
         # Test that the initial learning rate is constant

@@ -2,7 +2,8 @@
 import enum
 import timeit
 import textwrap
-from typing import overload, Any, Callable, NoReturn, Optional, Union
+from typing import overload, Any, NoReturn, Optional, Union
+from collections.abc import Callable
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
@@ -207,7 +208,8 @@ class Timer:
                 )
 
         elif language in (Language.CPP, "cpp", "c++"):
-            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
+            if self._timer_cls is not timeit.Timer:
+                raise AssertionError("_timer_cls has already been swapped.")
             self._timer_cls = CPPTimer
             setup = ("" if setup == "pass" else setup)
             self._language = Language.CPP
@@ -232,6 +234,7 @@ class Timer:
         setup = textwrap.dedent(setup)
         setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
 
+        # pyrefly: ignore [bad-instantiation]
         self._timer = self._timer_cls(
             stmt=stmt,
             setup=setup,
@@ -515,7 +518,8 @@ class Timer:
         # the parent process rather than the valgrind subprocess.
         self._timeit(1)
         is_python = (self._language == Language.PYTHON)
-        assert is_python or not self._globals
+        if not is_python and self._globals:
+            raise AssertionError("_timer globals are only supported for Python timers")
         result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,
