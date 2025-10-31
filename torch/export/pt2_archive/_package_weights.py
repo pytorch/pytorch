@@ -25,15 +25,15 @@ class TensorProperties:
 
         if not self.is_fake:
             # only get the storage pointer for real tensors
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.storage_ptr = tensor.untyped_storage().data_ptr()
             if self.is_contiguous:
                 # only get storage size and start/end pointers for contiguous tensors
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self.storage_size = tensor.untyped_storage().nbytes()
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self.start = tensor.data_ptr()
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self.end = _end_ptr(tensor)
 
         # info to recover tensor
@@ -108,7 +108,8 @@ def get_complete(
 
     warnings.warn(
         "No complete tensor found in the group! Returning the first one. "
-        "This may cause issues when your weights are not on CPU."
+        "This may cause issues when your weights are not on CPU.",
+        stacklevel=2,
     )
     assert len(group) > 0
     return next(iter(group))

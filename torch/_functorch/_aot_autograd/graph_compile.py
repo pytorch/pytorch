@@ -538,7 +538,7 @@ def collect_bw_donated_buffer_idxs(
         fw_ins,
         user_fw_outs,
         bw_outs,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         saved_tensors,
     )
 
@@ -1274,17 +1274,8 @@ def maybe_inline_graph_saved_tensors_hooks(
         else:
             # Keep usages of bw_g_input in inserted unpacked hook graph.
             # Replace other usages of bw_g_input with unpack_saved_tensor_n.
-            from torch._C import _fx_map_arg
-
-            def maybe_replace_node(n):
-                return unpack_saved_tensor_n if n == bw_g_input else n
-
             for use_node in original_bw_g_input_users:
-                new_args = _fx_map_arg(use_node.args, maybe_replace_node)
-                new_kwargs = _fx_map_arg(use_node.kwargs, maybe_replace_node)
-                assert isinstance(new_args, tuple)
-                assert isinstance(new_kwargs, dict)
-                use_node._update_args_kwargs(new_args, new_kwargs)
+                use_node._replace_input_with(bw_g_input, unpack_saved_tensor_n)
         bw_g.erase_node(bw_unpack_out_n)
 
     # Changing forward graph outputs,
@@ -1532,7 +1523,7 @@ def _aot_stage2a_partition(
 
             # apply joint_gm callback here
             if callable(torch._functorch.config.joint_custom_pass):
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
@@ -1802,16 +1793,8 @@ def _aot_stage2b_bw_compile(
                     # tensor which is wrong.
 
                     ph_size = ph_arg.size()
-                    # pyrefly: ignore  # bad-argument-type
-                    if len(ph_size) == 0 and len(real_stride) > 0:
-                        # Fix for 0-dimensional tensors: When a tensor becomes 0-d
-                        # (e.g., via squeeze), its stride should be () not (1,).
-                        # This mismatch can occur when dynamic shape operations produce
-                        # tensors that are later squeezed to 0-d. The stride metadata
-                        # may get preserved causing a dimension mismatch (#164814)
-                        real_stride = ()
 
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
             compiled_bw_func = None
             if (

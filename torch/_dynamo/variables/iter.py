@@ -252,6 +252,26 @@ class IteratorVariable(VariableTracker):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return True
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
+        if name == "__iter__" or name == "__next__":
+            return variables.ConstantVariable.create(True)
+        super().call_obj_hasattr(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__iter__":
+            return self
+        elif name == "__next__":
+            return self.next_variable(tx)
+        return super().call_method(tx, name, args, kwargs)
+
 
 class ObjectIteratorVariable(IteratorVariable):
     """
@@ -400,8 +420,9 @@ class ZipVariable(IteratorVariable):
             else:
                 return it.next_variable(tx)
 
+        idx: int | None = None
         try:
-            for idx, it in enumerate(self.iterables):
+            for idx, it in enumerate(self.iterables):  # noqa:B007
                 args.append(get_item(it))
         except ObservedUserStopIteration:
             if self.strict:

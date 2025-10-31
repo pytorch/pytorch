@@ -592,7 +592,7 @@ class DTensorRedistributePlanner:
                 current = current_placements[mesh_dim]
                 target = target_placements[mesh_dim]
                 # If target is not Shard, we can directly redistribute since we
-                # are traversing from innner to outer placements here
+                # are traversing from inner to outer placements here
                 if isinstance(target, Shard):
                     # If target is Shard, check for nested sharding on the
                     # tensor dim BEFORE the current mesh_dim
@@ -883,9 +883,12 @@ class Redistribute(torch.autograd.Function):
             output = local_tensor
             target_spec = current_spec
 
+        # pyrefly: ignore [bad-argument-type]
         return dtensor.DTensor(
+            # pyrefly: ignore [bad-argument-count]
             output,
             target_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=input.requires_grad,
         )
 
@@ -944,9 +947,12 @@ class Redistribute(torch.autograd.Function):
                 dtype=output.dtype,
             ),
         )
+        # pyrefly: ignore [bad-argument-type]
         output_dtensor = dtensor.DTensor(
+            # pyrefly: ignore [bad-argument-count]
             output,
             spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=grad_output.requires_grad,
         )
 
