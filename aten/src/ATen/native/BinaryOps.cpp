@@ -1014,7 +1014,15 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto self_ = (self._is_zerotensor()) ? at::_efficientzerotensor(self.sizes(), self.options().device(device_)) : self.to(device_);
+  if (self.is_wrapped_number()) {
+    self_.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  auto other_ = (other._is_zerotensor()) ? at::_efficientzerotensor(other.sizes(), other.options().device(device_)) : other.to(device_);
+  if (other.is_wrapped_number()) {
+    other_.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self_, other_);
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
@@ -1023,7 +1031,15 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto self_ = (self._is_zerotensor()) ? at::_efficientzerotensor(self.sizes(), self.options().device(device_)) : self.to(device_);
+  if (self.is_wrapped_number()) {
+    self_.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  auto other_ = (other._is_zerotensor()) ? at::_efficientzerotensor(other.sizes(), other.options().device(device_)) : other.to(device_);
+  if (other.is_wrapped_number()) {
+    other_.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self_, other_);
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
@@ -1052,8 +1068,15 @@ static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::add_Tensor::redispatch(
-      meta_dks, self.to(device_), other.to(device_), alpha);
+  auto self_ = (self._is_zerotensor()) ? at::_efficientzerotensor(self.sizes(), self.options().device(device_)) : self.to(device_);
+  if (self.is_wrapped_number()) {
+    self_.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  auto other_ = (other._is_zerotensor()) ? at::_efficientzerotensor(other.sizes(), other.options().device(device_)) : other.to(device_);
+  if (other.is_wrapped_number()) {
+    other_.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  auto meta_out = at::_ops::add_Tensor::redispatch(meta_dks, self_, other_, alpha);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
