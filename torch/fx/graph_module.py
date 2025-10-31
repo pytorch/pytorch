@@ -562,6 +562,12 @@ class GraphModule(torch.nn.Module):
         else:
             raise RuntimeError("Unsupported type " + str(root) + " passed for root!")
 
+        # Control whether to enable FX metadata registration for profiler augmentation.
+        # When enabled, generates a hash-based filename and registers node metadata
+        # in the global registry for use by the memory profiler augmentation.
+        # Can be set on individual GraphModule instances to opt-in/out.
+        # This must be set before assigning self.graph.
+        self._register_fx_metadata: bool = False
         self.graph = graph
 
         # Store the Tracer class responsible for creating a Graph separately as part of the
@@ -851,6 +857,12 @@ class {module_name}(torch.nn.Module):
             )
         return self._code
 
+    @compatibility(is_backward_compatible=False)
+    def register_fx_metadata(self, enable=True):
+        if enable != self._register_fx_metadata:
+            self.recompile()
+        self._register_fx_metadata = enable
+
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
         """
@@ -869,10 +881,8 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
 
-        # Determine the filename for the generated code
-        if co_fields and 'co_filename' in co_fields:
-            filename = co_fields['co_filename']
-        else:
+        if self._register_fx_metadata:
+            # Generate metadata and register for profiler augmentation
             node_metadata: dict[int, dict[str, Any]] = {}
             for i, node in enumerate(self._graph.nodes):
                 node_metadata[i] = {
@@ -905,12 +915,12 @@ class {module_name}(torch.nn.Module):
 
             register_fx_metadata(filename, metadata)
 
-        if torch.fx.config.codegen_record_function:
-            # Replace the placeholder in generated code with actual filename
-            self._code = self._code.replace(
-                "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
-                f"torch._C._profiler._RecordFunctionFast('## {filename} ##')"
-            )
+            if torch.fx.config.codegen_record_function:
+                # Replace the placeholder in generated code with actual filename
+                self._code = self._code.replace(
+                    "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
+                    f"torch._C._profiler._RecordFunctionFast('## {filename} ##')"
+                )
 
         cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 

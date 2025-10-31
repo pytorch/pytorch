@@ -4187,8 +4187,10 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    # TODO: consolidate two configs
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.config.patch("codegen_record_function", True)
+    @torch._dynamo.config.patch("enrich_profiler_stack_trace", True)
     def test_profiler_stack_trace_augmentation(self):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly

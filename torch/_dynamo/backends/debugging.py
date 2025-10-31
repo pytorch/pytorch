@@ -157,6 +157,10 @@ def boxed_nop(
 
     # Set the graph to use boxed codegen
     fx_g.graph.set_codegen(_BoxedCodeGen())
+    from torch._dynamo import config
+
+    if config.enrich_profiler_stack_trace:
+        fx_g.register_fx_metadata()
     fx_g.recompile()
 
     # Wrap the forward method in a function so we can set _boxed_call attribute
