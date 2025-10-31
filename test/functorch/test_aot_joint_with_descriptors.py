@@ -1069,6 +1069,31 @@ class inner_f(torch.nn.Module):
 ('call_function', 'index', {'pp_stage': 0})""",
         )
 
+    def test_static_input_indices(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3),)
+        gm = _dynamo_graph_capture_for_export(model)(*inputs)
+        fake_mode = gm.meta.get("fake_mode", None)
+
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
+                joint = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    inputs,
+                )
+        self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
+
 
 if __name__ == "__main__":
     run_tests()
