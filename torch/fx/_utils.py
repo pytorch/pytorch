@@ -71,6 +71,7 @@ def get_node_context(node, num_nodes=2) -> str:
 @dataclass
 class TimelineEvent:
     """Represents an event in the profiler timeline."""
+
     timestamp: int
     event_type: Literal["start", "end", "regular"]
     marker_type: Optional[Literal["filename", "node"]]
@@ -81,6 +82,7 @@ class TimelineEvent:
 @dataclass
 class ContextStackEntry:
     """Represents a context (filename or node) in the stack."""
+
     context_type: Literal["filename", "node"]
     identifier: str | int
     metadata: Optional[dict]
@@ -122,8 +124,12 @@ def map_recorded_events_to_aten_ops_with_stack_trace(
     def append_fx_marker_event(event_type, identifier, event):
         start_ts = event["ts"]
         end_ts = start_ts + event["dur"]
-        event_timeline.append(TimelineEvent(start_ts, "start", event_type, identifier, event))
-        event_timeline.append(TimelineEvent(end_ts, "end", event_type, identifier, event))
+        event_timeline.append(
+            TimelineEvent(start_ts, "start", event_type, identifier, event)
+        )
+        event_timeline.append(
+            TimelineEvent(end_ts, "end", event_type, identifier, event)
+        )
 
     for event in trace_events:
         if "ts" not in event or "dur" not in event:
@@ -140,7 +146,7 @@ def map_recorded_events_to_aten_ops_with_stack_trace(
                     node_index = int(content)
                 except ValueError:
                     pass
-                append_fx_marker_event("node", node_index, event)
+                append_fx_marker_event("node", node_index, event)  # type: ignore[possibly-undefined]
 
         else:
             # Regular event that needs augmentation
@@ -163,7 +169,11 @@ def map_recorded_events_to_aten_ops_with_stack_trace(
                     assert isinstance(timeline_event.identifier, str)
                     # Push filename context - query metadata registry on-demand
                     metadata = _FX_METADATA_REGISTRY.get(timeline_event.identifier)
-                    context_stack.append(ContextStackEntry("filename", timeline_event.identifier, metadata))
+                    context_stack.append(
+                        ContextStackEntry(
+                            "filename", timeline_event.identifier, metadata
+                        )
+                    )
                 elif timeline_event.marker_type == "node":
                     # Find the current filename from stack
                     current_file_metadata = None
@@ -175,14 +185,23 @@ def map_recorded_events_to_aten_ops_with_stack_trace(
                     if current_file_metadata:
                         node_metadata = current_file_metadata.get("node_metadata", {})
                         if timeline_event.identifier in node_metadata:
-                            node_meta: Optional[dict] = node_metadata[timeline_event.identifier]
-                            context_stack.append(ContextStackEntry("node", timeline_event.identifier, node_meta))
+                            node_meta: Optional[dict] = node_metadata[
+                                timeline_event.identifier
+                            ]
+                            context_stack.append(
+                                ContextStackEntry(
+                                    "node", timeline_event.identifier, node_meta
+                                )
+                            )
 
             case "end":
                 # Pop from stack - search backwards to find matching context
                 for i in range(len(context_stack) - 1, -1, -1):
                     ctx_entry = context_stack[i]
-                    if timeline_event.marker_type == ctx_entry.context_type and timeline_event.identifier == ctx_entry.identifier:
+                    if (
+                        timeline_event.marker_type == ctx_entry.context_type
+                        and timeline_event.identifier == ctx_entry.identifier
+                    ):
                         context_stack.pop(i)
                         break
 

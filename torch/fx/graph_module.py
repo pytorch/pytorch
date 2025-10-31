@@ -863,6 +863,11 @@ class {module_name}(torch.nn.Module):
             self.recompile()
         self._enrich_profiler_metadata = enable
 
+        # Recursively set for all submodules that are GraphModules
+        for submodule in self.modules():
+            if submodule is not self and isinstance(submodule, GraphModule):
+                submodule.enrich_profiler_metadata(enable)
+
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
         """
