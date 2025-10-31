@@ -2763,6 +2763,22 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_specialized_module___iter__(self):
+        ml = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+            ]
+        )
+        ml.torchdynamo_force_dynamic = False
+
+        def f(x):
+            it = ml.__iter__()
+            return next(it)(x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(10)
+        self.assertEqual(f(x), opt_f(x))
+
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
