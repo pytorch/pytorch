@@ -117,6 +117,53 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @inductor_config.patch(unroll_reductions_threshold=1)
+    def test_3layer_split_reduction(self):
+        """
+        Use a larger M and smaller N to trigger a 3 layer split reduction.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        x = torch.randn(32768 * 256, 2, dtype=torch.float, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        # We don't do mix order reduction for split redutions
+        # with more than 2 layers
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
+
+    def test_independent_split_size(self):
+        """
+        Make sure mix order reduction can pick the split size it wants
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        def check_one_split_size(split_size):
+            torch._dynamo.reset()
+
+            with inductor_config.patch(
+                "triton.mix_order_reduction_split_size", split_size
+            ):
+                self.check_numeric(f, (x,))
+                self.assertEqual(
+                    inductor_config.triton.mix_order_reduction,
+                    metrics.codegen_mix_order_reduction,
+                )
+
+                _, (code,) = utils.run_and_get_code(torch.compile(f), x)
+                self.assertTrue(f"'RSPLIT_SIZE': {split_size}" in code)
+
+        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+
+        check_one_split_size(8)
+        check_one_split_size(16)
+
     @inductor_config.patch(split_reductions=False)
     def test_non_contiguous_input(self):
         def f(x):
