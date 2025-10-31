@@ -1310,12 +1310,12 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         without_output_descs(metadata_fn),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
