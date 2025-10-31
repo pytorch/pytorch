@@ -34,7 +34,7 @@ def _is_enter_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
     return (
         node
         and node.op == "call_function"
-        and node.target == torch.amp.autocast_mode._enter_autocast
+        and node.target is torch.amp.autocast_mode._enter_autocast
     )
 
 
@@ -42,7 +42,7 @@ def _is_exit_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
     return (
         node
         and node.op == "call_function"
-        and node.target == torch.amp.autocast_mode._exit_autocast
+        and node.target is torch.amp.autocast_mode._exit_autocast
     )
 
 
