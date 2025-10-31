@@ -20,11 +20,12 @@ import itertools
 import operator
 import time
 from collections import Counter, defaultdict
-from collections.abc import Generator, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Generator, Sequence
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.external_utils import (
     call_accumulate_grad,
     call_backward,
@@ -165,7 +166,7 @@ class NaNChecker:
             if grad is not None:
                 assert not torch.isnan(grad).any(), (
                     f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                    "having NaN gradient. This is not supported. {TURN_OFF_MSG}"
+                    f"having NaN gradient. This is not supported. {TURN_OFF_MSG}"
                 )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
@@ -343,6 +344,10 @@ class AutogradCompilerInstance:
 
         self.stack.enter_context(preserve_node_meta())
         inputs_origins, sizes_origins, scalars_origins = origins
+
+        # Turn on PythonDispatcher during initial trace to make it identifiable
+        # that tracing is happening, which is needed to prevent hashing symints
+        self.stack.enter_context(enable_python_dispatcher())
 
         # tensor inputs to fake tensors
         x = inputs[0]  # mypy will complain about unbound x

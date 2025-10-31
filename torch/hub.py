@@ -279,7 +279,8 @@ def _get_cache_or_reload(
                     f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
                     "Torchhub will now assume that it's a branch. "
                     "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
-                    "refs/tags/tag_name as the ref. That might require using skip_validation=True."
+                    "refs/tags/tag_name as the ref. That might require using skip_validation=True.",
+                    stacklevel=2,
                 )
                 disambiguated_branch_ref = f"refs/heads/{ref}"
                 url = _git_archive_link(
@@ -334,11 +335,12 @@ def _check_repo_is_trusted(
         if not is_trusted:
             warnings.warn(
                 "You are about to download and run code from an untrusted repository. In a future release, this won't "
-                "be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
+                f"be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
                 f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
-                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour"
+                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour",
+                stacklevel=2,
             )
         return
 
@@ -372,7 +374,7 @@ def _check_dependencies(m):
 
     if dependencies is not None:
         missing_deps = [pkg for pkg in dependencies if not _check_module_exists(pkg)]
-        if len(missing_deps):
+        if missing_deps:
             raise RuntimeError(f"Missing dependencies: {', '.join(missing_deps)}")
 
 
@@ -406,7 +408,9 @@ def get_dir() -> str:
     """
     # Issue warning to move data if old env is set
     if os.getenv("TORCH_HUB"):
-        warnings.warn("TORCH_HUB is deprecated, please use env TORCH_HOME instead")
+        warnings.warn(
+            "TORCH_HUB is deprecated, please use env TORCH_HOME instead", stacklevel=2
+        )
 
     if _hub_dir is not None:
         return _hub_dir
@@ -853,7 +857,8 @@ def load_state_dict_from_url(
     # Issue warning to move data if old env is set
     if os.getenv("TORCH_MODEL_ZOO"):
         warnings.warn(
-            "TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead"
+            "TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead",
+            stacklevel=2,
         )
 
     if model_dir is None:

@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import collections
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -126,7 +127,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # contains a ScriptObject, equality checking results in a type error if
         # the types are different.
         if any(
-            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            type(self.unknown_value) is type(input_) and self.unknown_value == input_
             for input_ in flattened_inputs
         ):
             return self.unknown_value

@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/DTensorState.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -24,20 +25,25 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         if (num_classes == -1) {
           num_classes = self.max().item().toLong() + 1;
         }
-        at::Tensor index = at::arange(num_classes, self.options());
-        return at::eq(self.unsqueeze(-1), index).to(kLong);
+        {
+          // If `self` is a DTensor, then allow implicit replication
+          // of the `index` Tensor.
+          at::DTensorAllowImplicitReplication guard;
+          at::Tensor index = at::arange(num_classes, self.options());
+          return at::eq(self.unsqueeze(-1), index).to(kLong);
+        }
     }
 
-    auto shape = self.sizes().vec();
+    auto shape = self.sym_sizes().vec();
 
     // empty tensor could be converted to one hot representation,
     // but shape inference is not possible.
-    if (self.numel() == 0) {
+    if (self.sym_numel() == 0) {
         if (num_classes <= 0) {
             TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
-            shape.push_back(num_classes);
-            return at::empty(shape, self.options());
+            shape.emplace_back(num_classes);
+            return at::empty_symint(shape, self.options());
         }
     }
 
@@ -60,8 +66,8 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         }
     }
 
-    shape.push_back(num_classes);
-    Tensor ret = at::zeros(shape, self.options());
+    shape.emplace_back(num_classes);
+    Tensor ret = at::zeros_symint(shape, self.options());
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }

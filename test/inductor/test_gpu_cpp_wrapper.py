@@ -62,6 +62,19 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         comp()
 
+    def test_non_tensor_args_wrapped_on_cpu(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def test_fn(x, s):
+            return (x + s).sum()
+
+        compiled = torch.compile(options={"cpp_wrapper": True})(test_fn)
+        x = torch.randn(4, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
+        self.assertIn("torch.tensor(arg, device='cpu')", code)
+
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
     device = GPU_TYPE
