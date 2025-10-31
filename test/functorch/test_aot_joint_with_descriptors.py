@@ -675,7 +675,7 @@ class inner_f(torch.nn.Module):
 
             # Verify buffer handling
             buffer_count = 0
-            for desc, (node, grad_node) in input_grad_nodes.items():
+            for desc, (node, _grad_node) in input_grad_nodes.items():
                 if isinstance(desc, BufferAOTInput):
                     buffer_count += 1
                     self.assertIsNotNone(node)
@@ -764,13 +764,13 @@ class inner_f(torch.nn.Module):
                 self.assertIn(node, named_params.values())
 
             # Check that param_grads contains the same parameter nodes
-            for desc, (param_node, grad_node) in param_grads.items():
+            for desc, (param_node, _grad_node) in param_grads.items():
                 self.assertIn(param_node, param_nodes)
                 self.assertEqual(param_node, named_params[desc.target])
 
             # Check that all_input_grads contains the parameter nodes
             param_count = 0
-            for desc, (input_node, grad_node) in all_input_grads.items():
+            for desc, (input_node, _grad_node) in all_input_grads.items():
                 if isinstance(desc, ParamAOTInput):
                     param_count += 1
                     self.assertIn(input_node, param_nodes)
