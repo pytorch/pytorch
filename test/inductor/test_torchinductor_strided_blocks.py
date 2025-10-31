@@ -1417,6 +1417,7 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     @parametrize(
         "view_size,permute_order,num_tensor_descriptors,expect_transpose",
         [
+            ((128, ), (0), 3, False),
             ((128, 128), (0, 1), 3, False),
             ((128, 64), (1, 0), 3, True),
             ((256, 32, 16), (2, 0, 1), 3, True),
@@ -1449,9 +1450,8 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
             config_patches=tiled_reduction_config,
         )
 
-        if expect_transpose:
-            count = code.count("tl.trans")
-            self.assertEqual(count, 1)
+        transpose_count = code.count("tl.trans")
+        self.assertEqual(transpose_count, 1 if expect_transpose else 0)
 
 
 test_torchinductor.copy_tests(
