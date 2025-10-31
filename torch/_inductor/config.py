@@ -8,6 +8,9 @@ from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
+if TYPE_CHECKING:
+    from torch._inductor.choices import InductorChoices
+
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
 
@@ -483,6 +486,11 @@ graph_partition: bool = (
     == "1"
 )
 
+# register ops upon which inductor should partition the graph. name format should be
+# "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
+# "namespace::kernel_name.overload" (e.g., aten::mm.default).
+custom_should_partition_ops: list[str] = []
+
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
@@ -647,6 +655,9 @@ implicit_fallbacks = True
 assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
+
+# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+inductor_choices_class: Optional[Callable[[], "InductorChoices"]] = None
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -1934,6 +1945,9 @@ cpu_backend: Literal["cpp", "triton", "halide"] = "cpp"
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
 cuda_backend: Literal["triton", "halide"] = "triton"
 
+# Backend to use for XPU codegen either "triton"
+xpu_backend: Literal["triton"] = "triton"
+
 
 class halide:
     # Base halide target to use for CPU devices
@@ -2085,6 +2099,17 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 write_are_deterministic_algorithms_enabled = (
     os.getenv("TORCHINDUCTOR_WRITE_ARE_DETERMINISTIC_ALGORITHMS_ENABLED", "1") == "1"
 )
+
+
+class lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False, no
+    # hash checking is performed.
+    check_src_hash: bool = True
 
 
 class test_configs:
