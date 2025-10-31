@@ -190,8 +190,8 @@ jobs:
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
       runner: linux.12xlarge.memory
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
@@ -227,7 +227,7 @@ jobs:
     needs: build-cuda13
     if: github.event.schedule == '15 0,12 * * 1-6'
     with:
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm90
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.build-cuda13.outputs.docker-image }}
       test-matrix: ${{ needs.build-cuda13.outputs.test-matrix }}
@@ -244,7 +244,7 @@ jobs:
     needs: build-cuda13
     if: github.event.schedule == '0 7 * * 0'
     with:
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm90
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.build-cuda13.outputs.docker-image }}
       test-matrix: ${{ needs.build-cuda13.outputs.test-matrix }}
@@ -263,7 +263,7 @@ jobs:
     # needs one round of benchmark
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     with:
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm90
       dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-cudagraphs_low_precision-${{ inputs.cudagraphs || 'false' }}
       docker-image: ${{ needs.build-cuda13.outputs.docker-image }}
       test-matrix: ${{ needs.build-cuda13.outputs.test-matrix }}
