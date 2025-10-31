@@ -420,6 +420,8 @@ if __name__ == "__main__":
             self.assertEqual(copy.get_device(), original.get_device())
 
     def test_out_of_memory(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping OOM test for expandable segments allocator.")
         tensor = torch.zeros(1024, device="xpu")  # noqa: F841
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
@@ -429,6 +431,8 @@ if __name__ == "__main__":
             torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device="xpu")
 
     def test_raises_oom(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping OOM test for expandable segments allocator.")
         torch.xpu.memory.empty_cache()
         with self.assertRaises(torch.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
