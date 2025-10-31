@@ -814,7 +814,7 @@ def bisect(shape_env):
     # Bisection happens on the assertion nodes of the recorded FX graph for
     # dynamic shapes.
     assert_nodes = [
-        node for node in shape_env.graph.nodes if node.target == torch._assert
+        node for node in shape_env.graph.nodes if node.target is torch._assert
     ]
 
     # Preparing the indices for binary search.
