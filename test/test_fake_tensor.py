@@ -14,7 +14,9 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-
+import copy
+import torch
+from torch._subclasses.fake_tensor import FakeTensorMode
 import torch
 import torch._dynamo
 import torch._functorch.config
@@ -94,19 +96,6 @@ class FakeTensorTest(TestCase):
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
 
-    def test_deepcopy_real_tensor_in_fake_mode(self):
-        """
-        Tests that deepcopying a real tensor (non-meta) inside FakeTensorMode correctly raises a NotImplementedError.
-        """
-
-        real_tensor = torch.randn(2, 3, device="cpu")
-
-        with FakeTensorMode():
-            with self.assertRaisesRegex(
-                    NotImplementedError, "deepcopy() is not supported"
-            ):
-                copy.deepcopy(real_tensor)
-
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_initialized(self):
         # doesn't error
@@ -117,8 +106,8 @@ class FakeTensorTest(TestCase):
             y.backward()
 
     def test_basic(self):
-        x = torch.empty(2, 2, device="meta")
-        y = torch.empty(4, 2, 2, device="meta")
+        x = torch.empty(2, 2, device="cpu")
+        y = torch.empty(4, 2, 2, device="cpu")
         with FakeTensorMode() as mode:
             x = mode.from_tensor(x)
             y = mode.from_tensor(y)

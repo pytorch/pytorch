@@ -366,7 +366,7 @@ class FakeTensorConverter:
         trace: bool = True,
     ) -> FakeTensor:
         # see note [Tensor Fakification and Symbol Caching]
-        if not symbolic_context and not source and shape_env:
+        if not symbolic_context and not source and not shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
                 if t in tracing_context.tensor_to_context:
                     symbolic_context = tracing_context.tensor_to_context[t]
@@ -381,32 +381,12 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             return maybe_memo
         # not yet supported in metatensors
-        # HANDLE deepcopy / real tensors safely
-        if t.device.type != "meta":
-            # deepcopy() on a real tensor is not supported inside FakeTensorMode.
-            # we explicitly raise instead of attempting to patch the device to 'meta'
-            # tp prevent silent state mutation
-            raise NotImplementedError(
-                "deepcopy() is not supported on a real tensor (e.g., CPU, CUDA) "
-                "inside FakeTensorMode. This operation is not traceable."
-            )
-
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
         constant = t if make_constant else None
-
-        # import FakeTensorMode along with Faketensor
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
-        # create the FakeTensor inside the context manager
-        with FakeTensorMode():
-            fake = FakeTensor(self, t, t.device, constant=constant)
-
-        self._get_memo(t, fake)
-        return fake
 
         # This callback is used by both subclass and inner tensors. Require the
         # caller to explicitly specify the device in case outer and inner tensors
@@ -914,6 +894,23 @@ class FakeTensor(Tensor):
             return NotImplemented
 
         assert not fake_mode.in_kernel_invocation
+        
+        # Intercept deepcopy here and error only when deepcopy() is called
+        # on a real tensor inside FakeTensorMode.  This avoids making
+        # from_real_tensor() refuse non-meta tensors generally.
+        try:
+            func_name = getattr(func, "__name__", "")
+        except Exception:
+            func_name = ""
+
+        if func_name == "deepcopy":
+            # inspect all leaves of args/kwargs and raise for any real tensor
+            for leaf in pytree.arg_tree_leaves(*args, **kwargs):
+                if isinstance(leaf, torch.Tensor) and leaf.device.type != "meta":
+                    raise NotImplementedError(
+                        "deepcopy() is not supported on a real tensor (e.g., CPU, CUDA) "
+                        "inside FakeTensorMode. This operation is not traceable."
+                    )
 
         with fake_mode:
             return func(*args, **kwargs)
