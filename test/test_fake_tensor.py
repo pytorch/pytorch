@@ -512,7 +512,7 @@ class FakeTensorTest(TestCase):
     def test_upsample_bilinear_small_channels(self):
         out = []
         mode = FakeTensorMode()
-        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+        for context in [contextlib.nullcontext, lambda: mode]:
             with context():
                 arg0_1 = torch.empty_strided(
                     (3, 427, 640), (1, 1920, 3), dtype=torch.float32, device="cuda"

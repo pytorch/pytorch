@@ -72,7 +72,7 @@ def is_trivial_graph(
             return False
         return True  # party on garth
     # mask mod graph is empty if we have 4 inputs and full_default output
-    return len(placeholders) == 4 and output_val.target == torch.ops.aten.full.default
+    return len(placeholders) == 4 and output_val.target is torch.ops.aten.full.default
 
 
 def _can_use_flex_flash_attention(
