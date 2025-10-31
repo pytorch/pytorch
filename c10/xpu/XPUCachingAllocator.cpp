@@ -780,6 +780,17 @@ class DeviceCachingAllocator {
     }
   }
 
+  double getMemoryFraction() {
+    if (!set_fraction) {
+      return 1.0;
+    }
+
+    c10::xpu::DeviceProp device_prop;
+    c10::xpu::get_device_properties(&device_prop, device_index);
+    return static_cast<double>(allowed_memory_maximum) /
+        static_cast<double>(device_prop.global_mem_size);
+  }
+
   void setMemoryFraction(double fraction) {
     c10::xpu::DeviceProp device_prop;
     c10::xpu::get_device_properties(&device_prop, device_index);
@@ -950,6 +961,11 @@ class XPUAllocator : public DeviceAllocator {
     device_allocators[device]->resetAccumulatedStats();
   }
 
+  double getMemoryFraction(DeviceIndex device) {
+    assertValidDevice(device);
+    return device_allocators[device]->getMemoryFraction();
+  }
+
   void setMemoryFraction(double fraction, DeviceIndex device) {
     assertValidDevice(device);
     TORCH_CHECK_VALUE(
@@ -1001,6 +1017,10 @@ void raw_delete(void* ptr) {
 
 void recordStream(const DataPtr& dataPtr, XPUStream stream) {
   return allocator.recordStream(dataPtr, stream);
+}
+
+double getMemoryFraction(DeviceIndex device) {
+  return allocator.getMemoryFraction(device);
 }
 
 void setMemoryFraction(double fraction, DeviceIndex device) {

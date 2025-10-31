@@ -1256,7 +1256,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     # Build the graph op-by-op by starting from the node all the way to the end
     # copy_ can be not using tangents at all, we must copy it.
     for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
-        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+        if node.op == "call_function" and node.target is torch.ops.aten.copy_.default:
             insert_node_in_graph(node)
 
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
@@ -1596,7 +1596,7 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
         if node.op == "output":
             continue
 
-        is_copy_ = node.target == torch.ops.aten.copy_.default
+        is_copy_ = node.target is torch.ops.aten.copy_.default
         if is_copy_:
             if _has_tag_must_be_in_backward(node):
                 has_mutation_in_bw.add(node.args[0])
