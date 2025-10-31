@@ -250,13 +250,13 @@ class AveragedModel(Module):
     def update_parameters(self, model: Module):
         """Update model parameters."""
         self_param = (
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             itertools.chain(self.module.parameters(), self.module.buffers())
             if self.use_buffers
             else self.parameters()
         )
         model_param = (
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             itertools.chain(model.parameters(), model.buffers())
             if self.use_buffers
             else model.parameters()
@@ -298,17 +298,17 @@ class AveragedModel(Module):
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
                         for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
-                            # pyrefly: ignore  # missing-attribute
+                            # pyrefly: ignore [missing-attribute]
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
                 for p_averaged, p_model in zip(  # type: ignore[assignment]
                     self_param_detached, model_param_detached
                 ):
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     n_averaged = self.n_averaged.to(p_averaged.device)
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     p_averaged.detach().copy_(
-                        # pyrefly: ignore  # missing-attribute, bad-argument-type
+                        # pyrefly: ignore [missing-attribute, bad-argument-type]
                         self.avg_fn(p_averaged.detach(), p_model, n_averaged)
                     )
 
@@ -497,14 +497,14 @@ class SWALR(LRScheduler):
         step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
         prev_lrs = [
             self._get_initial_lr(group["lr"], group["swa_lr"], prev_alpha)
             for group in self.optimizer.param_groups
         ]
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
         return [
