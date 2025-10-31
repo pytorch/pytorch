@@ -222,7 +222,7 @@ def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
     that has the same target and args, but with the _export_root stripped from path.
     """
     for node in gm.graph.nodes:
-        if node.target == torch.ops.higher_order._export_tracepoint:
+        if node.target is torch.ops.higher_order._export_tracepoint:
             if "path" in node.kwargs:
                 path = _strip_root(node.kwargs["path"])
                 with gm.graph.inserting_before(node):

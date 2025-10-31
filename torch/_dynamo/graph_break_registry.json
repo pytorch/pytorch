@@ -2851,5 +2851,31 @@
         "Move the Placement usage outside the compiled region"
       ]
     }
+  ],
+  "GB0283": [
+    {
+      "Gb_type": "cannot resume from torch._dynamo.step_unsupported()",
+      "Context": "",
+      "Explanation": "traced torch._dynamo.step_unsupported(), but Dynamo is instructed to error on graph break. This graph break is used for debugging only.",
+      "Hints": [
+        "Remove the torch._dynamo.step_unsupported() call.",
+        "Make sure fullgraph=False and error_on_graph_break=False.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0284": [
+    {
+      "Gb_type": "unsupported type.__dict__['__annotations__'].__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` only supports calling type.__dict__['__annotations__'].__get__ on a single constant argument (i.e. a type).",
+      "Hints": [
+        "Make sure your call to type.__dict__['__annotations__'] only has ",
+        "one positional argument (no keyword arguments).",
+        "Make sure the argument to type.__dict__['__annotations__'] is a constant ",
+        "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

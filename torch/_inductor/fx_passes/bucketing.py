@@ -122,28 +122,28 @@ def bucket_reduce_scatter(
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+        and node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
     )
 
 
 def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
+        and node.target is torch.ops._c10d_functional.reduce_scatter_tensor.default
     )
 
 
 def is_wait_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.wait_tensor.default
+        and node.target is torch.ops._c10d_functional.wait_tensor.default
     )
 
 
 def is_all_reduce_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.all_reduce.default
+        and node.target is torch.ops._c10d_functional.all_reduce.default
     )
 
 
@@ -730,7 +730,7 @@ def process_collective_bucket(
             is_all_gather_into_tensor(n)
             and isinstance(node_in, torch.fx.Node)  # Add type check
             and node_in.op == "call_function"
-            and node_in.target == torch.ops.prims.convert_element_type.default
+            and node_in.target is torch.ops.prims.convert_element_type.default
             and len(node_in.users) == 1
         ):
             ag_node_to_pre_nodes[n].append(node_in)
