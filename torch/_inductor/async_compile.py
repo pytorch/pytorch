@@ -263,7 +263,9 @@ class AsyncCompile:
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(get_compile_threads(),quiesce= config.quiesce_async_compile_pool)
+            pool = SubprocPool(
+                get_compile_threads(), quiesce = config.quiesce_async_compile_pool_v2
+            )
         else:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
