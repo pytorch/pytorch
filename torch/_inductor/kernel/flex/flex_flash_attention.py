@@ -275,9 +275,7 @@ def create_flex_flash_attention_kernel(
 
             # Let the template construct its closures, then scope the indexer patch
             # to the actual render call that emits the kernel
-            def render_with_patch():
-                with patch_fixed_layout_indexer_for_cutedsl():
-                    return render()
+            render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
 
             return render_kernel, render_with_patch
 
