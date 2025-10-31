@@ -32,7 +32,8 @@ constexpr size_t NUMBER_OF_DEVICE_CAPABILITIES = NumScalarTypes;
  * @note Adding New Capabilities
  *
  * 1. Define the new capability in the `DeviceCapability` struct
- * 2. Update the support of the new capability in each accelerator implementation
+ * 2. Update the support of the new capability in each accelerator
+ *    implementation
  * 3. Add the new capability to the returned PyObject Dictionary
  */
 struct C10_API DeviceCapability {
