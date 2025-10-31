@@ -64,6 +64,22 @@ torch_device_index(DeviceHandle device, int32_t* ret_device_index);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_device_set_index(DeviceHandle device, int32_t device_index);
 
+// Parallel utility APIs for stable ABI
+// Function pointer type for parallel_for callback
+// The callback receives begin and end indices for a range to process
+typedef void (*ParallelFunc)(int64_t begin, int64_t end, void* ctx);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    ParallelFunc func,
+    void* ctx);
+
+// Get the current thread index in a parallel region
+// Returns 0 if not in a parallel region
+AOTI_TORCH_EXPORT int32_t torch_get_thread_idx();
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus
