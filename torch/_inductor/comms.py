@@ -196,7 +196,7 @@ def contains_gemm_like(snode: BaseSchedulerNode) -> bool:
         return is_gemm_like(snode.node)
 
 
-def _temp_group_visit_leaves(snode, fn):
+def _temp_group_visit_leaves(snode: BaseSchedulerNode, fn):
     from torch._inductor.scheduler import GroupedSchedulerNode
 
     if isinstance(snode, GroupedSchedulerNode) and snode.temp_grouping:
@@ -207,7 +207,7 @@ def _temp_group_visit_leaves(snode, fn):
 
 
 def wait_exposed_communication_time(
-    snodes_to_wait, runtimes
+    snodes_to_wait: list[BaseSchedulerNode], runtimes: dict[BaseSchedulerNode, float]
 ) -> tuple[float, float, str]:
     """
     Calculate exposed communication time for a wait operation by finding its corresponding
@@ -266,7 +266,7 @@ def wait_exposed_communication_time(
 
 def coll_exposed_communication_time(
     snodes: list[BaseSchedulerNode],
-    runtimes,
+    runtimes: dict[BaseSchedulerNode, float],
 ) -> tuple[float, float, str]:
     """
     Calculate exposed communication time for a collective operation by finding its corresponding
@@ -381,14 +381,16 @@ def _initialize_double_linked_list(
     return _prev, _next, _head
 
 
-def is_corresponding_collective_wait(collective_snode, wait_snode):
+def is_corresponding_collective_wait(
+    collective_snode: BaseSchedulerNode, wait_snode: BaseSchedulerNode
+) -> bool:
     """
     Check if a wait node corresponds to a given collective node by verifying if the wait
     depends on outputs from the collective.
     """
     collective_outs = OrderedSet(o.get_name() for o in collective_snode.get_outputs())
     unmet_deps = OrderedSet(d.name for d in wait_snode.unmet_dependencies)
-    return unmet_deps & collective_outs
+    return bool(unmet_deps & collective_outs)
 
 
 def _op_runtime_estimate_mult(snode):
