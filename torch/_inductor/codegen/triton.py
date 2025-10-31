@@ -3093,7 +3093,39 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
-    def _handle_pdl_before_load(self, wait_buffer):
+    def _handle_pdl_before_access(
+        self, wait_buffer, *dependencies, consider_reads=False
+    ):
+        # we can find the previous scheduler node using V.graph.scheduler and V.current_node
+        current_node_idx, _ = next(
+            iter(
+                filter(
+                    lambda x: V.kernel.current_node in x[1].get_nodes(),
+                    enumerate(V.graph.scheduler.nodes),
+                )
+            )
+        )
+        prev_node = (
+            V.graph.scheduler.nodes[current_node_idx - 1]
+            if current_node_idx > 0
+            else None
+        )
+
+        def matching_dep(dep):
+            assert prev_node is not None
+            if consider_reads:
+                if any(dep == w.name for w in prev_node.read_writes.reads):
+                    return True
+            return any(dep == w.name for w in prev_node.read_writes.writes)
+
+        # breakpoint()
+        need_wait = (
+            prev_node is None
+            or any(matching_dep(d) for d in dependencies)
+            or not dependencies
+        )
+        if not need_wait:
+            return
         GDC_WAIT = "tl.extra.cuda.gdc_wait()"
         self._load_index += 1
         if self.inside_reduction:
@@ -3103,6 +3135,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 wait_buffer.writeline(GDC_WAIT)
 
     def _handle_pdl_after_load(self, launch_buffer, result_var):
+        # always gdc_wait before gdc_launch
+        self._handle_pdl_before_access(launch_buffer)
         GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
         if self.inside_reduction:
             launch_buffer = self.post_loop_combine
@@ -3266,7 +3300,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        self._handle_pdl_before_load(load_buffer)
+        self._handle_pdl_before_access(load_buffer, name)
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
         )
@@ -3385,6 +3419,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not self.inside_reduction and self.cooperative_reduction:
             exit_stack.enter_context(self.guard_cooperative_store(name, self.stores))
 
+        self._handle_pdl_before_access(self.stores, name, consider_reads=True)
         self.stores.writeline(DeferredLine(name, line))
 
         if not self.inside_reduction:
@@ -3452,7 +3487,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "Bucketize only supports indexing with int32 and int64"
             )
 
-        self._handle_pdl_before_load(self.compute)
+        self._handle_pdl_before_access(
+            self.compute, boundaries[0], *([sorter[0]] if sorter else [])
+        )
         result = self.cse.generate(
             self.compute,
             f"triton_helpers.bucketize_binary_search({values}, "
@@ -4221,6 +4258,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             exit_stack.enter_context(
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
+
+        self._handle_pdl_before_access(self.post_loop_store, var)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             self.post_loop_store.writeline(
