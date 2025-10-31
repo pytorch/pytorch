@@ -3121,7 +3121,6 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   squareCheckInputs(input, "linalg.eigvals");
-  TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eigvals: input tensor should not contain infs or NaNs.");
 
   // unlike NumPy for real-valued inputs the output is always complex-valued
   checkLinalgCompatibleDtype("torch.linalg.eigvals", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
