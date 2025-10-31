@@ -390,6 +390,7 @@ class TritonTemplateKernel(TritonKernel):
         num_buffers_warp_spec=0,
         use_jit=False,
         tma_store=False,
+        transpose_discontiguous_tensor_descriptors_override=None,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -428,11 +429,12 @@ class TritonTemplateKernel(TritonKernel):
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
             # the loaded value.
             # The below sorts the range trees according to that required by the caller
+            prefix_to_range_tree = {rt.prefix: rt for rt in self.range_trees}
             pw_sorted_range_trees = []
             reduction_idx = None
             for i, prefix in enumerate(tiling):
-                rt = next(rt for rt in self.range_trees if rt.prefix == prefix)
-                if rt.prefix.startswith("r"):
+                rt = prefix_to_range_tree[prefix]
+                if rt.is_reduction():
                     reduction_idx = i
                     break
                 rt.index = i
@@ -441,6 +443,7 @@ class TritonTemplateKernel(TritonKernel):
                 pw_sorted_range_trees.append(rt)
             self.range_trees = pw_sorted_range_trees + self.range_trees[reduction_idx:]
 
+
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}  # type: ignore[var-annotated]
@@ -448,6 +451,7 @@ class TritonTemplateKernel(TritonKernel):
         self.kernel_name = kernel_name
         self.use_jit = use_jit
         self.tma_store = tma_store
+        self.transpose_discontiguous_tensor_descriptors_override = transpose_discontiguous_tensor_descriptors_override
         self.num_stages = num_stages
         self.num_warps = num_warps
         self.num_consumer_groups = num_consumer_groups
@@ -1576,6 +1580,7 @@ class GeneratedCodeCache:
         epilogue_fn: Optional[Callable[..., Any]],
         epilogue_fn_hash: Optional[str],
         tma_store: bool,
+        transpose_discontiguous_tensor_descriptors_override: Optional[bool],
         subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
         workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
         layout: ir.Layout,
@@ -1633,6 +1638,7 @@ class GeneratedCodeCache:
                 "num_buffers_warp_spec": num_buffers_warp_spec,
                 "epilogue_fn_hash": epilogue_fn_hash,
                 "tma_store": tma_store,
+                "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override
                 "kwargs": kwargs,
                 "hint_override": hint_override,
             }
@@ -1748,6 +1754,7 @@ class TritonTemplate(KernelTemplate):
         generate_with_caching,
         hint_override: Optional[int] = None,
         tma_store: bool = False,
+        transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1767,6 +1774,7 @@ class TritonTemplate(KernelTemplate):
                 epilogue_fn,
                 epilogue_fn_hash,
                 tma_store,
+                transpose_discontiguous_tensor_descriptors_override,
                 subgraphs,
                 workspace_arg,
                 layout,
@@ -1827,6 +1835,7 @@ class TritonTemplate(KernelTemplate):
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
+                transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
                 **kernel_options,
             )
 
@@ -1948,6 +1957,7 @@ class TritonTemplate(KernelTemplate):
         generate_with_caching=False,
         hint_override: Optional[int] = None,
         tma_store: bool = False,
+        transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -1994,6 +2004,7 @@ class TritonTemplate(KernelTemplate):
             generate_with_caching and self._cache_codegen_enabled_for_template,
             hint_override=hint_override,
             tma_store=tma_store,
+            transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override
         )
 
         # May happen as result of dev by 0.
@@ -2057,6 +2068,7 @@ class TritonTemplate(KernelTemplate):
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
+                transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
                 **options,
             )
             render = functools.partial(

@@ -12,6 +12,7 @@ import operator
 import os
 import textwrap
 from collections.abc import Callable, Iterable, Sequence
+from abc import abstractmethod
 from functools import lru_cache
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
@@ -30,7 +31,7 @@ from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-from .. import config, ir, metrics
+from .. import config, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
@@ -332,14 +333,14 @@ class BlockDescriptorOptions:
     broadcast_shape: Sequence[sympy.Expr]
     broadcasting_dims: list[bool]
     final_shape: Sequence[sympy.Expr]
+    # If the BlockParameters have been sorted using a particular stride order
+    # transpose load / store blocks at runtime using the information in
+    # stride_sorter.
+    stride_sorter: BlockParameters.StrideSorter
     _boundary_check: Optional[list[int]] = None
     # Can we safely lift the constructor
     # to the top of the kernel?
     can_lift: bool = False
-    # If the BlockParameters have been sorted by descending stride order,
-    # transpose load / store blocks at runtime using the information in
-    # desc_stride_sorter.
-    desc_stride_sorter: Optional[BlockParameters.DescStrideSorter] = None
 
     @property
     def shape(self) -> list[sympy.Expr]:
@@ -366,8 +367,8 @@ class BlockDescriptorOptions:
         range_trees: list[IterationRangesRoot],
         mask_vars: OrderedSet[str],
         get_max_block: Callable[[str], int],
-        can_lift=False,
-        transpose_contiguous=False,
+        stride_sorter_cls: type[BlockParameters.StrideSorter],
+        can_lift: bool = False,
     ) -> BlockDescriptorOptions:
         """Helper to create a BlockDescriptorOptions instance"""
 
@@ -421,9 +422,9 @@ class BlockDescriptorOptions:
                     offsets=[sympy.S.Zero],
                 )
 
-        desc_stride_sorter: Optional[BlockParameters.DescStrideSorter] = None
-        if transpose_contiguous:
-            params, desc_stride_sorter = params.maybe_sort_by_desc_stride_order()
+        params, stride_sorter = params.maybe_sort_with_stride_order(
+            stride_sorter_cls=stride_sorter_cls
+        )
 
         # Strip out dimensions of stride 0.
         # These will be restored with tl.broadcast_to.
@@ -459,16 +460,22 @@ class BlockDescriptorOptions:
             # Need to expand rank to match the rank used inside the reduction loop
             final_shape += [sympy.S.One] * reduction_ndim
 
+        if not all(isinstance(s, (int, sympy.Integer)) for s in params.strides):
+            order = list(reversed(range(len(params.shape))))
+        else:
+            # The order of parameter strides in descending
+            order = utils.argsort(params.strides, reverse=True)
+
         result = cls(
             params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            order=list(reversed(range(len(params.shape)))),
+            order=order,
             mask_vars=mask_vars,
             final_shape=final_shape,
             broadcast_shape=broadcast_shape,
             broadcasting_dims=broadcasting_dims,
+            stride_sorter=stride_sorter,
             can_lift=can_lift,
-            desc_stride_sorter=desc_stride_sorter,
         )
         result.compute_boundary_check(get_max_block, range_trees)
         return result
@@ -573,7 +580,7 @@ class BlockDescriptorOptions:
         Generate a broadcast and a reshape for the block descriptor.
         This restores stride-0 dimensions which were removed from the block descriptor.
 
-        Transposes are also applied to the input if self.desc_stride_sorter is not None.
+        Transposes are also applied to the input using self.stride_sorter:
         if for_store is True:
             - First Broadcast the value. Since self.broadcast_shape is stored in
             descending stride order, it must be reverted to the original order
@@ -594,9 +601,9 @@ class BlockDescriptorOptions:
         # with the value being stored. This is because the dimensions
         # of the value being stored are not sorted in descending stride order,
         # but the broadcasting parameters are based on the dims in sorted order
-        if for_store and self.desc_stride_sorter is not None:
-            broadcast_shape = self.desc_stride_sorter.revert(self.broadcast_shape)
-            broadcasting_dims = self.desc_stride_sorter.revert(self.broadcasting_dims)
+        if for_store:
+            broadcast_shape = self.stride_sorter.revert(self.broadcast_shape)
+            broadcasting_dims = self.stride_sorter.revert(self.broadcasting_dims)
 
         # Reshape to add singletons.
         pre_broadcast_shape = [
@@ -623,21 +630,21 @@ class BlockDescriptorOptions:
             value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
 
         old_shape = self.broadcast_shape
-        if self.desc_stride_sorter is not None:
+        if not self.stride_sorter.is_identity:
             # if for_store the transform is
             #   (non-descending strides) broadcasted kernel tile shape -> (descending strides) block descriptor shape
             # o/w if loading the transform is
             #   (descending strides) broadcasted block shape -> (non-descending) broadcasted kernel tile shape
             permute_dims = (
-                self.desc_stride_sorter.sort_idx
+                self.stride_sorter.sort_idx
                 if for_store
-                else self.desc_stride_sorter.revert_sort_idx
+                else self.stride_sorter.revert_sort_idx
             )
             value = f"tl.trans({value}, {permute_dims})"
             old_shape = (
                 self.broadcast_shape
                 if for_store
-                else self.desc_stride_sorter.revert(self.broadcast_shape)
+                else self.stride_sorter.revert(self.broadcast_shape)
             )
 
         # Reshape to the final shape.
@@ -2026,52 +2033,91 @@ class BlockParameters:
     offsets: list[sympy.Expr] = dataclasses.field(default_factory=list)
 
     @dataclasses.dataclass
-    class DescStrideSorter:
+    class StrideSorter:
         original_strides: list[int]
-        sort_idx: list[int] = dataclasses.field(default_factory=list)
-        revert_sort_idx: list[int] = dataclasses.field(default_factory=list)
+        sort_idx: list[int]
+        revert_sort_idx: list[int] = dataclasses.field(init=False)
+
+        def __post_init__(self):
+            assert len(self.original_strides) > 0
+            assert len(self.sort_idx) == len(self.original_strides)
+
+            identity_sort_idx = list(range(len(self.original_strides)))
+            self._is_identity = self.sort_idx == identity_sort_idx
+
+            # Set revert_sort_idx
+            sorted_dims_by_strides_map = {k: i for i, k in enumerate(self.sort_idx)}
+            self.revert_sort_idx = [
+                sorted_dims_by_strides_map[i]
+                for i in range(len(sorted_dims_by_strides_map))
+            ]
+
+        @property
+        def is_identity(self):
+            return self._is_identity
+
+        @classmethod
+        @abstractmethod
+        def create(
+            cls, original_strides: list[Union[int, sympy.Expr]]
+        ) -> BlockParameters.StrideSorter:
+            """Create a `StrideSorter` that can be used to sort block parameters."""
+
+        def sort(self, attr):
+            if not self.is_identity:
+                return [attr[i] for i in self.sort_idx]
+            return attr
+
+        def revert(self, attr):
+            if not self.is_identity:
+                return [attr[i] for i in self.sort_idx]
+            return attr
+
+    @dataclasses.dataclass
+    class IdentityStrideSorter(StrideSorter):
+        def __post_init__(self):
+            super().__post_init__()
 
         @classmethod
         def create(
             cls, original_strides: list[Union[int, sympy.Expr]]
-        ) -> Optional[BlockParameters.DescStrideSorter]:
+        ) -> BlockParameters.StrideSorter:
+            return cls(
+                original_strides=original_strides,
+                sort_idx=list(range(len(original_strides))),
+            )
+
+    @dataclasses.dataclass
+    class TensorDecriptorStrideSorter(StrideSorter):
+        """
+        Sorts BlockParameters dimensions with strides in descending order.
+        """
+
+        def __post_init__(self):
+            super().__post_init__()
+
+        @classmethod
+        def create(
+            cls, original_strides: list[Union[int, sympy.Expr]]
+        ) -> BlockParameters.StrideSorter:
             """
-            Create a `DescStrideSorter` which can be used to sort block parameters.
             If the strides are not all known constants or if the strides are already
-            sorted in descending order, return None
+            sorted in descending order, return identity sort.
+
+            For example if block_shape @ strides is [ZBLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
+            The indices to sort the strides in descending order will be [2, 0, 1].
+            The indices to revert back to the original order will be [1, 2, 0].
             """
             if not all(isinstance(s, (int, sympy.Integer)) for s in original_strides):
-                return None
+                # Use identity
+                sort_idx = list(range(len(original_strides)))
+            else:
+                sort_idx = utils.argsort(original_strides, reverse=True)
 
-            sorted_dims_by_strides_map = {
-                k: i
-                for i, k in enumerate(
-                    sorted(
-                        range(len(original_strides)),
-                        key=lambda x: original_strides[x],
-                        reverse=True,
-                    )
-                )
-            }
-            sort_idx = list(sorted_dims_by_strides_map.keys())
-            # Check if strides are already in descending order
-            if sort_idx == list(range(len(original_strides))):
-                return None
-            revert_sort_idx = [
-                sorted_dims_by_strides_map[i]
-                for i in range(len(sorted_dims_by_strides_map))
-            ]
             return cls(
                 original_strides=original_strides,
                 sort_idx=sort_idx,
-                revert_sort_idx=revert_sort_idx,
             )
-
-        def sort(self, attr):
-            return [attr[i] for i in self.sort_idx]
-
-        def revert(self, attr):
-            return [attr[i] for i in self.revert_sort_idx]
 
     def __add__(self, other: BlockParameters) -> BlockParameters:
         """
@@ -2081,29 +2127,25 @@ class BlockParameters:
         a, b = tuple(dataclasses.asdict(x) for x in (self, other))
         return cls(**{key: a[key] + b[key] for key in a})
 
-    def maybe_sort_by_desc_stride_order(
-        self,
-    ) -> tuple[BlockParameters, Optional[BlockParameters.DescStrideSorter]]:
+    def maybe_sort_with_stride_order(
+        self, stride_sorter_cls: StrideSorter
+    ) -> tuple[BlockParameters, BlockParameters.StrideSorter]:
         """
-        If the strides are known constants, returns block parameters sorted by strides in descending
-        order as well as DescStrideSorter which contains information on how the sort can be reverted.
-        If the strides are not known constants, returns unmodified BlockParameters and None.
-
-        For example if block_shape @ strides is [ZBLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
-        The indices to sort the strides in descending order will be [2, 0, 1].
-        The indices to revert back to the original order will be [1, 2, 0].
+        Sort `BlockParameter` with stride_sorter_cls. Returns block parameters
+        as well as a `StrideSorter` which contains information on how the sort
+        can be reverted.
         """
-        desc_stride_sorter = self.DescStrideSorter.create(self.strides)
-        if desc_stride_sorter is None:
-            return self, None
+        stride_sorter = stride_sorter_cls.create(self.strides)
+        if stride_sorter.is_identity:
+            return self, stride_sorter
 
         params = BlockParameters(
             **{
-                key: desc_stride_sorter.sort(val)
+                key: stride_sorter.sort(val)
                 for key, val in dataclasses.asdict(self).items()
             }
         )
-        return params, desc_stride_sorter
+        return params, stride_sorter
 
 
 class CooperativeReductionWorkspaceCache:
@@ -2395,6 +2437,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
+    transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None
 
     def __init__(
         self,
@@ -2867,17 +2910,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 nonlocal tma_compatibility_checker
                 if config.triton.use_block_ptr:
                     can_lift = False
-                    transpose_contiguous = False
+                    stride_sorter_cls = BlockParameters.IdentityStrideSorter
                 else:
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
                     can_lift = tma_compatibility_checker.can_lift()
+
+                    if (
+                        self.transpose_discontiguous_tensor_descriptors_override
+                        is not None
+                    ):
+                        transpose_contiguous = (
+                            self.transpose_discontiguous_tensor_descriptors_override
+                        )
+                    else:
+                        transpose_contiguous = (
+                            config.triton.transpose_discontiguous_tensor_descriptor
+                        )
+
+                    # For templates:
                     # Only try transpose if we know the output shape
                     # in case we need to transpose the data.
-                    transpose_contiguous = (
-                        copy_shape is not None
-                        or config.triton.transpose_discontiguous_tensor_descriptor
+                    if hasattr(self, "template_out_shape"):
+                        transpose_contiguous &= copy_shape is not None
+
+                    stride_sorter_cls = (
+                        BlockParameters.TensorDecriptorStrideSorter
+                        if transpose_contiguous
+                        else BlockParameters.IdentityStrideSorter
                     )
 
                 options = options_class.create(
@@ -2887,7 +2948,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     mask_vars=mask_vars,
                     get_max_block=self.max_block,
                     can_lift=can_lift,
-                    transpose_contiguous=transpose_contiguous,
+                    stride_sorter_cls=stride_sorter_cls,
                 )
                 if options_class == TensorDescriptorOptions:
                     tma_compatibility_checker = cast(
