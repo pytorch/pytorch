@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import matplotlib.pyplot as plt
+from scipy.stats import gmean
 
 import torch
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -158,12 +159,35 @@ class BenchmarkKernel:
             self.check_accuracy(args, kwargs)
 
     def visualize(self) -> None:
+        device_name = torch.cuda.get_device_name(0)
         visualize_comparison(
             self.profiling_results,
-            title=f"{self.name}",
+            title=f"{self.name} ({device_name})",
             output_path=f"{self.name}_bench",
         )
         return
+
+    def report_geomean_speedup(self) -> None:
+        print(f"Geomean speedup for benchmark {self.name}")
+        eager_result = {
+            result.setting: result for result in self.profiling_results["eager"]
+        }
+        print(f"  eager {len(eager_result)} data points")
+        for backend, backend_result in self.profiling_results.items():
+            if backend == "eager":
+                continue
+            speeduplist = []
+            for result in backend_result:
+                eager_latency = eager_result[result.setting].latency
+                backend_latency = result.latency
+                speeduplist.append(
+                    eager_latency / backend_latency if backend_latency != 0 else 0.0
+                )
+
+            if len(speeduplist) > 0:
+                print(
+                    f"  {backend} {len(speeduplist)} data points, {gmean(speeduplist):.2f}x speedup"
+                )
 
 
 def get_backend_colors() -> dict[str, str]:
@@ -252,5 +276,6 @@ def visualize_comparison(
         os.makedirs("pics", exist_ok=True)
         full_path = os.path.join("pics", output_path + ".png")
         plt.savefig(full_path, dpi=300, bbox_inches="tight", facecolor="white")
+        print(f"Chart saved to {full_path}")
 
     plt.close()
