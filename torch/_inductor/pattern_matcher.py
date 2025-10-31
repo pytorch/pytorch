@@ -743,7 +743,7 @@ class _TargetArgsExpr(_TargetExpr):
         assert len(node_items) == len(self_items)
 
         m = Match(ctx, self)
-        for i, pattern, child_node in zip(itertools.count(), self_items, node_items):
+        for pattern, child_node in zip(self_items, node_items):
             if isinstance(pattern, PatternExpr):
                 child_match = ctx.match(pattern, child_node)
                 if not is_match(child_match):

@@ -317,7 +317,7 @@ class GuardManagerWrapper:
             is_diff_guard_node = (
                 node.get_source() in self.diff_guard_sources or node.fail_count() > 0
             )
-            for idx, (key_mgr, val_mgr) in sorted(
+            for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
@@ -440,7 +440,7 @@ class GuardManagerWrapper:
             is_subtree_tag_safe = True
 
             # Recurse to get the tag safe roots from subtree.
-            for idx, (key_mgr, val_mgr) in sorted(
+            for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 if key_mgr is not None:
@@ -448,9 +448,7 @@ class GuardManagerWrapper:
                 if val_mgr is not None:
                     tag_safe_roots.extend(visit(val_mgr))
 
-            for idx, (key_mgr, val_mgr) in sorted(
-                node.get_key_value_managers().items()
-            ):
+            for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
 
