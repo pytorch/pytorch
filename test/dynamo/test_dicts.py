@@ -1079,6 +1079,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             d[0] = [
                 42,
             ]
+
             return x + 1, d
 
         x = torch.ones(2)
@@ -1087,11 +1088,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure
     def test_newly_constructed_default_dict_with_dict(self):
         def f(x):
-            d = defaultdict(dict, {2: {"a": 1}})
-            d[0] = {"b": 2}
+            d = dict([("a", 1), ("b", 2)], c=3)
+            d = defaultdict(int, d, d=4, e=5)
+            d["a"] = 42
+
             return x + 1, d
 
         x = torch.ones(2)

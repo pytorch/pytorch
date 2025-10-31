@@ -181,6 +181,7 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
+    DefaultDictClassVariable,
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
@@ -797,6 +798,8 @@ class VariableBuilder:
                 )
 
             return self.tx.output.side_effects.track_mutable(value, result)
+        elif value is collections.defaultdict:
+            return DefaultDictClassVariable()
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals

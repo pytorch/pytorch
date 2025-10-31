@@ -25,7 +25,7 @@ import functools
 import inspect
 import operator
 import types
-from collections.abc import Hashable as py_Hashable
+from collections.abc import Hashable as py_Hashable, Sequence
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -970,6 +970,39 @@ class DefaultDictVariable(ConstDictVariable):
         codegen(self.default_factory)
         self.reconstruct_kvs_into_new_dict(codegen)
         codegen.extend_output(create_call_function(2, False))
+
+
+class DefaultDictClassVariable(VariableTracker):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence["VariableTracker"],
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if len(args) == 0:
+            default_factory = None
+            dict_items = {}
+        else:
+            default_factory = args[0]
+
+            if len(args) > 1:
+                dict_var = variables.BuiltinVariable.call_custom_dict(
+                    tx, dict, *args[1:], **kwargs
+                )
+                dict_items = dict_var.items
+            else:
+                dict_items = {}
+
+        return DefaultDictVariable(
+            dict_items,
+            collections.defaultdict,
+            default_factory=default_factory,
+            source=None,
+            mutation_type=ValueMutationNew(),
+        )
 
 
 # TODO: Implementing this via inheritance rather than composition is a
