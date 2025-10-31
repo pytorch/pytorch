@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 # Type definitions for memory profiler
-class Frame(TypedDict):
+class _Frame(TypedDict):
     """Frame information from memory profiler snapshots."""
 
     filename: str
@@ -45,17 +45,17 @@ class Frame(TypedDict):
     fx_original_trace: NotRequired[str]
 
 
-class Block(TypedDict):
+class _Block(TypedDict):
     """Memory block information."""
 
     size: int
     requested_size: int
     address: int
     state: str
-    frames: list[Frame]
+    frames: list[_Frame]
 
 
-class Segment(TypedDict):
+class _Segment(TypedDict):
     """Memory segment information."""
 
     address: int
@@ -64,25 +64,25 @@ class Segment(TypedDict):
     segment_type: str
     allocated_size: int
     active_size: int
-    blocks: list[Block]
+    blocks: list[_Block]
 
 
-class TraceEntry(TypedDict):
+class _TraceEntry(TypedDict):
     """Memory trace entry information."""
 
     action: str
     addr: NotRequired[int]
-    frames: list[Frame]
+    frames: list[_Frame]
     size: int
     stream: int
     device_free: NotRequired[int]
 
 
-class Snapshot(TypedDict):
+class _Snapshot(TypedDict):
     """Memory snapshot structure."""
 
-    segments: list[Segment]
-    device_traces: NotRequired[list[list[TraceEntry]]]
+    segments: list[_Segment]
+    device_traces: NotRequired[list[list[_TraceEntry]]]
 
 
 __all__ = [
@@ -1020,7 +1020,7 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _augment_frames(frames: list[Frame]) -> int:
+def _augment_frames(frames: list[_Frame]) -> int:
     """
     Augment a list of frames with FX debug information.
 
@@ -1086,8 +1086,8 @@ def _augment_frames(frames: list[Frame]) -> int:
 
 
 def _augment_memory_snapshot_stack_traces(
-    snapshot: str | Snapshot,
-) -> Snapshot:
+    snapshot: str | _Snapshot,
+) -> _Snapshot:
     """
     Augment a memory snapshot with original source stack traces from FX metadata.
 
@@ -1104,11 +1104,11 @@ def _augment_memory_snapshot_stack_traces(
         fx_original_trace, and fx_node_info fields added to frames
     """
 
-    snapshot_dict: Snapshot
+    snapshot_dict: _Snapshot
     if isinstance(snapshot, str):
         # Load the memory snapshot
         with open(snapshot, "rb") as f:
-            snapshot_dict = cast(Snapshot, pickle.load(f))
+            snapshot_dict = cast(_Snapshot, pickle.load(f))
     else:
         snapshot_dict = snapshot
 
