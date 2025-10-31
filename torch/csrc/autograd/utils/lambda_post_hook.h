@@ -36,7 +36,7 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
 
  protected:
   std::function<variable_list(const variable_list&, const variable_list&)> fn_;
-  compiled_fn_type compiled_fn_{};
+  compiled_fn_type compiled_fn_;
 };
 
 } // namespace torch::autograd::utils

@@ -58,6 +58,7 @@ def _register_sharded_op_on_local_tensor(
     @custom_sharding_spec_op(ChunkShardingSpec, op)
     @_sharded_op_common(op, early_stop_func, extra_check)
     def sharded_tensor_op_on_local_tensor(types, args=(), kwargs=None, pg=None):
+        # pyrefly: ignore [index-error]
         st = args[0]
         sharding_spec = st.sharding_spec()
         if len(st.local_shards()) != 1:
@@ -127,7 +128,7 @@ def _handle_col_wise_sharding_base(
     # run the operator's function for all the inputs.
     results = []
     for i, inp in enumerate(gathered_inputs):
-        if op_func == torch.nn.functional.embedding_bag:
+        if op_func is torch.nn.functional.embedding_bag:
             result = op_func(
                 inp,
                 local_shard,
@@ -138,7 +139,7 @@ def _handle_col_wise_sharding_base(
                 else None,
                 padding_idx=padding_idx,
             )
-        elif op_func == torch.nn.functional.embedding:
+        elif op_func is torch.nn.functional.embedding:
             result = op_func(
                 inp,
                 local_shard,

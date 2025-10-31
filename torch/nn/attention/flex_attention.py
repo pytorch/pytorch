@@ -8,8 +8,9 @@ import itertools
 import math
 import operator
 import warnings
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor
@@ -33,7 +34,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import GetAttrKey, tree_map_only
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -74,7 +75,6 @@ __all__ = [
     "FlexKernelOptions",
     "create_block_mask",
     "create_mask",
-    "create_nested_block_mask",
     "or_masks",
     "and_masks",
     "noop_mask",
@@ -84,6 +84,7 @@ _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 
 
+# pyrefly: ignore [invalid-inheritance]
 class FlexKernelOptions(TypedDict, total=False):
     """Options for controlling the behavior of FlexAttention kernels.
 
@@ -127,78 +128,104 @@ class FlexKernelOptions(TypedDict, total=False):
     """
 
     # Performance tuning options
+    # pyrefly: ignore [invalid-annotation]
     num_warps: NotRequired[int]
     """Number of warps to use in the CUDA kernel. Higher values may improve performance
     but increase register pressure. Default is determined by autotuning."""
 
+    # pyrefly: ignore [invalid-annotation]
     num_stages: NotRequired[int]
     """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
     but increase shared memory usage. Default is determined by autotuning."""
 
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_M: NotRequired[int]
     """Thread block size for the sequence length dimension of Q in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_N: NotRequired[int]
     """Thread block size for the sequence length dimension of K/V in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
     # Backward-specific block sizes (when prefixed with 'bwd_')
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_M1: NotRequired[int]
     """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_N1: NotRequired[int]
     """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_M2: NotRequired[int]
     """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_N2: NotRequired[int]
     """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
     Default is determined by autotuning."""
 
+    # pyrefly: ignore [invalid-annotation]
     PRESCALE_QK: NotRequired[bool]
     """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
     may have more numerical error. Default: False."""
 
+    # pyrefly: ignore [invalid-annotation]
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
     """If True, guarantees that at least one value in each row is not masked out.
     Allows skipping safety checks for better performance. Only set this if you are certain
     your mask guarantees this property. For example, causal attention is guaranteed safe
     because each query has at least 1 key-value to attend to. Default: False."""
 
+    # pyrefly: ignore [invalid-annotation]
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
     Allows optimizing block traversal. For example, causal masks would satisfy this,
     but prefix_lm + sliding window would not. Default: False."""
 
+    # pyrefly: ignore [invalid-annotation]
     WRITE_DQ: NotRequired[bool]
     """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
     Setting this to False will force this to happen in the DK loop which depending on your
     specific score_mod and mask_mod might be faster. Default: True."""
 
+    # pyrefly: ignore [invalid-annotation]
     FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
     """If True, forces the use of the flex attention kernel instead of potentially using
     the more optimized flex-decoding kernel for short sequences. This can be a helpful
     option for debugging. Default: False."""
 
+    # pyrefly: ignore [invalid-annotation]
     USE_TMA: NotRequired[bool]
     """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
     This is experimental and may not work on all hardware, currently specific
     to NVIDIA GPUs Hopper+. Default: False."""
 
     # ROCm-specific options
+    # pyrefly: ignore [invalid-annotation]
     kpack: NotRequired[int]
     """ROCm-specific kernel packing parameter."""
 
+    # pyrefly: ignore [invalid-annotation]
     matrix_instr_nonkdim: NotRequired[int]
     """ROCm-specific matrix instruction non-K dimension."""
 
+    # pyrefly: ignore [invalid-annotation]
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
+
+    # pyrefly: ignore [invalid-annotation]
+    force_flash: NotRequired[bool]
+    """ If True, forces use of the cute-dsl flash attention kernel.
+
+    Raises an error if flash attention cannot be used instead of falling back
+    to the default implementation. Useful for ensuring flash attention is used
+    when expected.
+    """
 
 
 class AuxRequest(NamedTuple):
@@ -240,11 +267,20 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     considered as a score_mod function. If the function has 4 positional arguments, it is
     considered as a mask function.
     """
-    num_positional_args = sum(
-        1
-        for param in inspect.signature(fn).parameters.values()
-        if param.default == inspect.Parameter.empty
-    )
+    if hasattr(fn, "__code__"):
+        code = fn.__code__
+        num_positional_total = code.co_argcount
+        defaults = ()
+        if hasattr(fn, "__defaults__"):
+            defaults = fn.__defaults__ or ()
+        num_defaults = len(defaults)
+        num_positional_args = num_positional_total - num_defaults
+    else:
+        num_positional_args = sum(
+            1
+            for param in inspect.signature(fn).parameters.values()
+            if param.default is inspect.Parameter.empty
+        )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD
@@ -319,6 +355,33 @@ def noop_mask(
 ) -> Tensor:
     """Returns a noop mask_mod"""
     return batch.new_ones(size=(), dtype=torch.bool, device=batch.device)
+
+
+def _sliced_mask_mod_error(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    """
+    Raises helpful error when using mask_mod from a sliced BlockMask.
+
+    After slicing a BlockMask, the mask_mod is reset and cannot be used directly.
+    Users must reassign mask_mod from the original (unsliced) BlockMask.
+    """
+    raise RuntimeError(
+        "Cannot use mask_mod from a sliced BlockMask. "
+        "When you slice a BlockMask using [], the mask_mod attribute is reset. "
+        "You must set it from the original BlockMask's mask_mod."
+        "\n\nIncorrect usage:"
+        "\n  base_mask = create_block_mask(my_mask_fn, ...)"
+        "\n  sliced_mask = base_mask[:, :, block_idx]"
+        "\n  sliced_mask.mask_mod = apply_offset(sliced_mask.mask_mod, offset)  # WRONG!"
+        "\n\nCorrect usage:"
+        "\n  base_mask = create_block_mask(my_mask_fn, ...)"
+        "\n  sliced_mask = base_mask[:, :, block_idx]"
+        "\n  sliced_mask.mask_mod = apply_offset(base_mask.mask_mod, offset)  # Use base_mask!"
+    )
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
@@ -456,6 +519,24 @@ class BlockMask:
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
+    # Attribute lists for pytree flatten/unflatten
+    _TENSOR_ATTRS = [
+        "kv_num_blocks",
+        "kv_indices",
+        "full_kv_num_blocks",
+        "full_kv_indices",
+        "q_num_blocks",
+        "q_indices",
+        "full_q_num_blocks",
+        "full_q_indices",
+    ]
+
+    _CONTEXT_ATTRS = [
+        "seq_lengths",
+        "BLOCK_SIZE",
+        "mask_mod",
+    ]
+
     def __init__(
         self,
         seq_lengths: tuple[int, int],
@@ -581,6 +662,7 @@ class BlockMask:
             block_size = (self.BLOCK_SIZE,)  # type: ignore[assignment]
             seq_lengths = (self.seq_lengths,)  # type: ignore[assignment]
 
+        # pyrefly: ignore [not-iterable]
         return (
             *seq_lengths,
             self.kv_num_blocks,
@@ -649,6 +731,15 @@ class BlockMask:
                 assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
                 assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
+        index = (index,) if not isinstance(index, tuple) else index
+        padded = (*index, slice(None), slice(None), slice(None))[:3]
+        sizes = self.kv_num_blocks.shape[:3]
+        index = tuple(
+            (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
+            if isinstance(i, int)
+            else i
+            for i, n in zip(padded, sizes)
+        )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
@@ -664,7 +755,7 @@ class BlockMask:
             new_full_kv_num_blocks,
             new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
-            mask_mod=None,
+            mask_mod=_sliced_mask_mod_error,
             seq_lengths=self.seq_lengths,
             compute_q_blocks=self.q_indices is not None,
         )
@@ -744,6 +835,7 @@ class BlockMask:
         partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
         if self.full_kv_num_blocks is not None:
             assert self.full_kv_indices is not None
+            # pyrefly: ignore [bad-return]
             return partial_dense | _ordered_to_dense(
                 self.full_kv_num_blocks, self.full_kv_indices
             )
@@ -838,6 +930,32 @@ class BlockMask:
             self.as_tuple(flatten=False),
         )
         return BlockMask(*mapped_attributes)
+
+    def _flatten(self):
+        """Flatten BlockMask into a list of tensors and context."""
+        tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
+        context = tuple(getattr(self, attr) for attr in self._CONTEXT_ATTRS)
+        return tensors, context
+
+    @classmethod
+    def _unflatten(cls, tensors, context):
+        """Unflatten tensors and context back into a BlockMask."""
+        kwargs = {
+            **dict(zip(cls._CONTEXT_ATTRS, context)),
+            **dict(zip(cls._TENSOR_ATTRS, tensors)),
+        }
+        # pyrefly: ignore [bad-argument-type]
+        return cls(**kwargs)
+
+    def _flatten_with_keys(self):
+        """Flatten BlockMask with keys for better tracing."""
+        tensors = tuple(
+            (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
+        )
+        context = tuple(
+            (GetAttrKey(attr), getattr(self, attr)) for attr in self._CONTEXT_ATTRS
+        )
+        return tensors, context
 
 
 def _broadcast_to_dim(x, dim):
@@ -972,7 +1090,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: Optional[DeviceLikeType] = None,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -987,6 +1105,8 @@ def create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
+    if device is None:
+        device = torch.accelerator.current_accelerator() or "cpu"
     if B is None:
         B = 1
     if H is None:
@@ -1021,7 +1141,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: Optional[DeviceLikeType] = None,
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -1056,6 +1176,8 @@ def create_block_mask(
             value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
+    if device is None:
+        device = torch.accelerator.current_accelerator() or "cpu"
     mod_type = _get_mod_type(mask_mod)
     assert mod_type == _ModificationType.MASK_MOD, (
         f"create-block_mask requires a mask_mod function! Got {mask_mod}"
@@ -1074,6 +1196,7 @@ def create_block_mask(
         warnings.warn(
             "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future.",
             DeprecationWarning,
+            stacklevel=2,
         )
         return torch.compile(create_block_mask)(
             mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
@@ -1108,179 +1231,6 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         BLOCK_SIZE=_LARGE_SPARSE_BLOCK_SIZE,
         seq_lengths=(1, 1),
-    )
-
-
-def _nested_mod_func_adapter(
-    orig_mod_func: Union[_score_mod_signature, _mask_mod_signature],
-    q_nt: torch.Tensor,
-    kv_nt: torch.Tensor,
-    is_score_mod: bool,
-) -> Union[_score_mod_signature, _mask_mod_signature]:
-    r"""Adapter to convert a score_mod / mask_mod to be NJT-compatible. The given mod func
-    should be written as if operating over a single sequence at a item. This adapter will
-    handle conversion from indices operating over a "stacked sequence" of length ``sum(S)``
-    for sequence length ``S`` in the NJT to "sequence relative" indices in range ``[0, S)``.
-
-    Args:
-        orig_mod_func (Callable): Function to modify attention scores. It takes four or five
-            arguments, depending on whether a mask_mod or score_mod func is passed.
-        q_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for query.
-        kv_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for key / value.
-        is_score_mod (bool): Indicates whether the mod function is a score_mod.
-
-    Returns:
-        nt_score_mod: An NJT-compatible version of orig_score_mod
-    """
-
-    # Used to convert indices within the "stacked" sequence (range [0, sum(*)))
-    # to "sequence local" indices (range [0, S) for each S).
-    def _build_seq_idx(offsets, total_length):
-        range_tensor = torch.arange(
-            total_length, device=offsets.device, dtype=torch.int32
-        )
-
-        # Use searchsorted to find the index for each position
-        # NB: This assumes offsets[0] to offsets[-1] spans the packed dim of values.
-        # If we ever loosen this restriction, this logic will need to be updated.
-        seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
-        return seq_idx
-
-    q_offsets = q_nt._offsets  # type: ignore[attr-defined]
-    kv_offsets = kv_nt._offsets  # type: ignore[attr-defined]
-    q_seq_idx = _build_seq_idx(q_offsets, q_nt._values.shape[q_nt._ragged_idx - 1])  # type: ignore[attr-defined]
-    if q_nt is kv_nt:
-        kv_seq_idx = q_seq_idx
-    else:
-        # cross attention case
-        kv_seq_idx = _build_seq_idx(
-            kv_offsets,
-            kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        )
-
-    # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
-    # to the sequence length for each sequence in the NJT, for use in given
-    # score_mod. This allows the user to write a score_mod as if it were
-    # operating on a single sequence and the "stacked sequence" is split
-    # automatically into individual sequences for them.
-    if is_score_mod:
-
-        def nt_score_mod(score, b, h, q_idx, kv_idx):
-            b_nested = q_seq_idx[q_idx]
-            q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
-            kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
-            is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return torch.where(
-                is_same_sequence,
-                orig_mod_func(score, b_nested, h, q_nested, kv_nested),  # type: ignore[call-arg]
-                # don't allow inter-sequence attention
-                float("-inf"),
-            )
-
-        return nt_score_mod
-    else:
-
-        def nt_mask_mod(b, h, q_idx, kv_idx):
-            b_nested = q_seq_idx[q_idx]
-            q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
-            kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
-            # don't allow inter-sequence attention
-            is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
-
-        return nt_mask_mod
-
-
-def create_nested_block_mask(
-    mask_mod: _mask_mod_signature,
-    B: Optional[int],
-    H: Optional[int],
-    q_nt: torch.Tensor,
-    kv_nt: Optional[torch.Tensor] = None,
-    BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
-    _compile=False,
-) -> BlockMask:
-    r"""This function creates a nested tensor compatible block mask tuple from a mask_mod
-    function. The returned BlockMask will be on the device specified by the input nested tensor.
-
-    Args:
-        mask_mod (Callable): mask_mod function. This is a callable that defines the
-            masking pattern for the attention mechanism. It takes four arguments:
-            b (batch size), h (number of heads), q_idx (query index), and kv_idx (key/value index).
-            It should return a boolean tensor indicating which attention connections are allowed
-            (True) or masked out (False).
-        B (int): Batch size.
-        H (int): Number of query heads.
-        q_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for query. The block mask will be constructed to operate on a "stacked
-            sequence" of length ``sum(S)`` for sequence length ``S`` from the NJT.
-        kv_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for key / value, allowing for cross attention. The block mask will be
-            constructed to operate on a "stacked sequence" of length ``sum(S)`` for sequence
-            length ``S`` from the NJT. If this is None, ``q_nt`` is used to define the structure
-            for key / value as well. Default: None
-        BLOCK_SIZE (int or tuple[int, int]): Block size for the block mask. If a single int is
-            provided it is used for both query and key/value.
-
-    Returns:
-        BlockMask:  A BlockMask object that contains the block mask information.
-
-    Example Usage:
-        .. code-block:: python
-
-            # shape (B, num_heads, seq_len*, D) where seq_len* varies across the batch
-            query = torch.nested.nested_tensor(..., layout=torch.jagged)
-            key = torch.nested.nested_tensor(..., layout=torch.jagged)
-            value = torch.nested.nested_tensor(..., layout=torch.jagged)
-
-
-            def causal_mask(b, h, q_idx, kv_idx):
-                return q_idx >= kv_idx
-
-
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, _compile=True
-            )
-            output = flex_attention(query, key, value, block_mask=block_mask)
-
-        .. code-block:: python
-
-            # shape (B, num_heads, seq_len*, D) where seq_len* varies across the batch
-            query = torch.nested.nested_tensor(..., layout=torch.jagged)
-            key = torch.nested.nested_tensor(..., layout=torch.jagged)
-            value = torch.nested.nested_tensor(..., layout=torch.jagged)
-
-
-            def causal_mask(b, h, q_idx, kv_idx):
-                return q_idx >= kv_idx
-
-
-            # cross attention case: pass both query and key/value NJTs
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, key, _compile=True
-            )
-            output = flex_attention(query, key, value, block_mask=block_mask)
-    """
-    # use same structure for kv as for q by default
-    if kv_nt is None:
-        kv_nt = q_nt
-    if q_nt.device != kv_nt.device:
-        raise ValueError(
-            "create_nested_block_mask(): Expected q_nt and kv_nt to be on the same device"
-        )
-    return create_block_mask(
-        _nested_mod_func_adapter(mask_mod, q_nt, kv_nt, is_score_mod=False),  # type: ignore[arg-type]
-        B,
-        H,
-        q_nt._values.shape[q_nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        device=q_nt.device,  # type: ignore[arg-type]
-        # compile is important so we don't materialize a mask_tensor of
-        # shape (1, 1, total_seqlen, total_seqlen)
-        BLOCK_SIZE=BLOCK_SIZE,
-        _compile=_compile,
     )
 
 
@@ -1356,25 +1306,6 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor):
         raise ValueError(
             "FlexAttention is only supported on CUDA, CPU or HPU devices. "
             f"Found input tensors on {query.device.type} device."
-        )
-
-
-def _validate_nestedness(query: Tensor, key: Tensor, value: Tensor):
-    # Currently, inputs can only be all nested or no nested.
-    if query.is_nested != key.is_nested or key.is_nested != value.is_nested:
-        raise ValueError(
-            "FlexAttention does not support mixed nested tensor / non-nested tensor inputs. "
-            "Please file an issue requesting this if it is important to you."
-        )
-
-    if (
-        (query.is_nested and query._lengths is not None)  # type: ignore[attr-defined]
-        or (key.is_nested and key._lengths is not None)  # type: ignore[attr-defined]
-        or (value.is_nested and value._lengths is not None)  # type: ignore[attr-defined]
-    ):
-        raise ValueError(
-            "FlexAttention does not support nested tensors that are non-contiguous with holes. "
-            "Please file an issue requesting this if it is important to you."
         )
 
 
@@ -1517,7 +1448,6 @@ def flex_attention(
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
-    _validate_nestedness(query, key, value)
     query, key, value = _enforce_mem_layouts(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
@@ -1552,17 +1482,14 @@ def flex_attention(
 
     if score_mod is None:
         score_mod = _identity
-    elif query.is_nested:
-        # use same NJT if the ragged structures for sequence lengths match between q and kv
-        kv = (
-            query
-            if query.size(query._ragged_idx) == key.size(query._ragged_idx)  # type: ignore[attr-defined]
-            else key
-        )
-        score_mod = _nested_mod_func_adapter(score_mod, query, kv, is_score_mod=True)  # type: ignore[assignment]
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
+
+    # If BlockMask was sliced, its mask_mod is intentionally replaced with an error-raising stub.
+    # This guard ensures we surface the intended error message before any shape-based checks.
+    if getattr(block_mask, "mask_mod", None) is _sliced_mask_mod_error:
+        raise RuntimeError("Cannot use mask_mod from a sliced BlockMask")
 
     if (
         block_mask.BLOCK_SIZE[0] == _LARGE_SPARSE_BLOCK_SIZE
@@ -1570,12 +1497,6 @@ def flex_attention(
     ):
         # This corresponds to the case where we essentially have a "no-op" block mask.
         pass
-    elif query.is_nested:
-        if block_mask.shape[-2] != query._values.size(query._ragged_idx - 1):  # type: ignore[attr-defined]
-            raise RuntimeError(
-                f"block_mask of shape {block_mask.shape} is not compatible with nested tensor input "
-                f"with total sequence length of {query._values.size(query._ragged_idx - 1)}"  # type: ignore[attr-defined]
-            )
     else:
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
@@ -1612,7 +1533,7 @@ def flex_attention(
     elif return_lse and return_aux is None:
         _warn_once(
             "deprecated_return_lse",
-            "return_lse is deprecated and will be removed in v2.7. "
+            "return_lse is deprecated and will be removed in v2.10. "
             "Please use return_aux=AuxRequest(lse=True) instead.",
             category=FutureWarning,
         )

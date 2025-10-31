@@ -220,6 +220,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
         (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
         (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
+        (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
+        (torch.bfloat16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
@@ -295,6 +297,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
+
     test_case.assertEqual(
         orig,
         decomp,
@@ -878,7 +881,7 @@ def forward(self, scores_1, mask_1, value_1):
                     zip(real_out, decomp_out, real_out_double)
                 ):
                     if not isinstance(orig, torch.Tensor):
-                        assert type(orig) == type(decomp)
+                        assert type(orig) is type(decomp)
                         assert orig == decomp
                         continue
                     op_assert_ref(
@@ -895,7 +898,7 @@ def forward(self, scores_1, mask_1, value_1):
             else:
                 for orig, decomp in zip(real_out, decomp_out):
                     if not isinstance(orig, torch.Tensor):
-                        assert type(orig) == type(decomp)
+                        assert type(orig) is type(decomp)
                         assert orig == decomp
                         continue
                     op_assert_equal(
@@ -942,7 +945,7 @@ def forward(self, scores_1, mask_1, value_1):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and not dtype == torch.complex32
+            and dtype != torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
@@ -1342,6 +1345,55 @@ class HasDecompTest(TestCase):
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
+    def test_conv1d_decomposition(self):
+        from torch._inductor.decomposition import conv1d_to_conv2d
+
+        def check_case(
+            N=2,
+            C_in=3,
+            C_out=5,
+            L=37,
+            K=5,
+            stride=2,
+            padding=3,
+            dilation=1,
+            groups=1,
+            dtype=torch.float32,
+            device="cpu",
+        ):
+            torch.manual_seed(0)
+            x = torch.randn(N, C_in, L, dtype=dtype, device=device)
+            w = torch.randn(C_out, C_in // groups, K, dtype=dtype, device=device)
+            b = torch.randn(C_out, dtype=dtype, device=device)
+
+            ref = torch.ops.aten.conv1d.default(
+                x,
+                w,
+                b,
+                stride=[stride],
+                padding=[padding],
+                dilation=[dilation],
+                groups=groups,
+            )
+            got = conv1d_to_conv2d(
+                x,
+                w,
+                b,
+                stride=[stride],
+                padding=[padding],
+                dilation=[dilation],
+                groups=groups,
+            )
+            self.assertTrue(torch.allclose(ref, got, atol=1e-5, rtol=1e-5))
+
+        # A few cases
+        check_case()  # default
+        check_case(stride=1, padding=0, K=3)
+        check_case(stride=3, padding=4, K=7)
+        check_case(dilation=2, padding=6, K=5)  # dilation
+        check_case(groups=1, C_in=8, C_out=12)  # groups=1 bigger
+        check_case(groups=2, C_in=8, C_out=12)  # grouped conv
 
 
 if __name__ == "__main__":

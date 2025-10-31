@@ -11,16 +11,12 @@ namespace torch::utils {
 
 template <typename T>
 inline T unpackIntegral(PyObject* obj, const char* type) {
-#if PY_VERSION_HEX >= 0x030a00f0
   // In Python-3.10 floats can no longer be silently converted to integers
   // Keep backward compatible behavior for now
   if (PyFloat_Check(obj)) {
     return c10::checked_convert<T>(THPUtils_unpackDouble(obj), type);
   }
   return c10::checked_convert<T>(THPUtils_unpackLong(obj), type);
-#else
-  return static_cast<T>(THPUtils_unpackLong(obj));
-#endif
 }
 
 inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
@@ -101,7 +97,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
           at::convert<at::Float8_e8m0fnu, double>(THPUtils_unpackDouble(obj));
       break;
     default:
-      throw std::runtime_error("store_scalar: invalid type");
+      TORCH_CHECK(false, "store_scalar: invalid type");
   }
 }
 
@@ -165,7 +161,7 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
       return PyFloat_FromDouble(
           at::convert<double, at::Float8_e8m0fnu>(*(at::Float8_e8m0fnu*)data));
     default:
-      throw std::runtime_error("load_scalar: invalid type");
+      TORCH_CHECK(false, "load_scalar: invalid type");
   }
 }
 

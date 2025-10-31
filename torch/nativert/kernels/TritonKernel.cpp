@@ -16,9 +16,19 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#include <torch/nativert/executor/triton/CpuTritonKernelManager.h>
-
 namespace torch::nativert {
+
+// in this case, we want to use the symbol from torch_cpu.dll
+#ifndef NATIVERT_MSVC_TEST
+C10_DEFINE_TYPED_REGISTRY(
+    TritonKernelManagerRegistry,
+    c10::DeviceType,
+    TritonKernelManager,
+    std::unique_ptr,
+    std::string /* kernel_name */,
+    std::string /* kernel_bin_path */,
+    std::string /* kernel_launcher_bin_path */)
+#endif
 
 TritonKernel::TritonKernel(
     const Node* node,
@@ -27,20 +37,40 @@ TritonKernel::TritonKernel(
   TORCH_CHECK(reader != nullptr, "reader is null");
 
   std::string kernel_name{};
+  std::string symbol_name{};
   bool found_grid = false;
+
+  // To prevent vector reallocation and dangling pointers
+  size_t num_double_attrs = 0;
+  for (const auto& attr : node_->attributes()) {
+    if (attr.name.empty() && std::holds_alternative<double>(attr.value)) {
+      ++num_double_attrs;
+    }
+  }
+  float_attrs_.reserve(num_double_attrs);
+
   for (const auto& attr : node_->attributes()) {
     if (attr.name.empty()) {
       attr_ptrs_.emplace_back(std::visit(
-          [](auto&& arg) -> void* {
+          [this](auto&& arg) -> void* {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, None>) {
               return nullptr;
+            } else if constexpr (std::is_same_v<T, double>) {
+              // Triton always uses fp32 for floats. See create_specialize_impl
+              // in jit.py. However, due to the Thrift schema, floats are
+              // serialized as doubles here. But, Triton kernels read them as
+              // floats. So, we need to downcast double to float here.
+              float_attrs_.push_back(static_cast<float>(arg));
+              return static_cast<void*>(&float_attrs_.back());
             }
             return static_cast<void*>(const_cast<T*>(&arg));
           },
           attr.value));
     } else if (attr.name == "name") {
       kernel_name = std::get<std::string>(attr.value);
+      size_t last_underscore = kernel_name.find_last_of('_');
+      symbol_name = kernel_name.substr(0, last_underscore);
     } else if (attr.name == "grid") {
       found_grid = true;
       auto grid = std::get<std::vector<int64_t>>(attr.value);
@@ -49,6 +79,12 @@ TritonKernel::TritonKernel(
           static_cast<int>(grid[0]),
           static_cast<int>(grid[1]),
           static_cast<int>(grid[2]));
+    } else if (attr.name == "num_cpu_threads") {
+      if (const int num_cpu_threads =
+              static_cast<int>(std::get<int64_t>(attr.value));
+          num_cpu_threads >= 0) {
+        launch_params_.num_cpu_threads = num_cpu_threads;
+      }
     } else if (attr.name == "num_warps") {
       if (const int num_warps = static_cast<int>(std::get<int64_t>(attr.value));
           num_warps > 0) {
@@ -66,6 +102,7 @@ TritonKernel::TritonKernel(
   }
 
   TORCH_CHECK(!kernel_name.empty(), "kernel name not found");
+  TORCH_CHECK(!symbol_name.empty(), "symbol_name not found");
   TORCH_CHECK(found_grid, "grid attribute not found");
   TORCH_CHECK(!output_indices_.empty(), "output_indices attribute not found");
 
@@ -74,27 +111,28 @@ TritonKernel::TritonKernel(
   auto tmp_dir = extractToTemporaryFolder(*reader, kernel_prefix) + "/";
 
   if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".cubin")) {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kCUDA, symbol_name, tmp_dir + kernel_name + ".cubin", "");
     TORCH_CHECK(
-        create_cuda_triton_kernel_manager != nullptr,
+        loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
-    loader_ = create_cuda_triton_kernel_manager(
-        kernel_name, tmp_dir + kernel_name + ".cubin");
-  }
-
-  if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".hsaco")) {
+  } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".hsaco")) {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kHIP, symbol_name, tmp_dir + kernel_name + ".hsaco", "");
     TORCH_CHECK(
-        create_cuda_triton_kernel_manager != nullptr,
+        loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
-    loader_ = create_cuda_triton_kernel_manager(
-        kernel_name, tmp_dir + kernel_name + ".hsaco");
-  }
-
-  if (loader_ == nullptr) {
-    loader_ = std::unique_ptr<TritonKernelManager>(new CpuTritonKernelManager(
-        kernel_name,
+  } else {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kCPU,
+        symbol_name,
         tmp_dir + kernel_name + ".so",
-        tmp_dir + kernel_name + ".launcher.so"));
+        tmp_dir + kernel_name + ".launcher.so");
   }
+
+  TORCH_CHECK(
+      loader_ != nullptr,
+      "couldn't find triton kernel loader -- are you trying to run gpu kernels on a cpu build?");
 }
 
 TritonKernel::~TritonKernel() = default;

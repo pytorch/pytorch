@@ -7,8 +7,8 @@ import dataclasses
 import io
 import os
 import unittest
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any, Optional, Union
 
 import numpy as np
 import onnxruntime

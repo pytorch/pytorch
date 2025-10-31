@@ -6,7 +6,8 @@ Test the FX IR backend.
 import itertools
 import operator
 import unittest
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import sympy
 
@@ -17,14 +18,18 @@ from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.utils import same
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._inductor import config
-from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
+from torch._inductor.codegen.wrapper_fxir import (
+    FxConverter,
+    replace_floor_div,
+    WrapperFxCodegen,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -34,7 +39,15 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     TRITON_HAS_CPU,
 )
+from torch.utils._sympy.functions import FloorDiv
 
+
+try:
+    from .test_control_flow import CondModels
+except ImportError:
+    from test_control_flow import (
+        CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+    )
 
 if HAS_GPU:
     import triton
@@ -42,15 +55,17 @@ if HAS_GPU:
 
     from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
 
+test_config = {
+    "compile_threads": 1,
+    "alignment_asserts": False,
+    "size_asserts": False,
+    "scalar_asserts": False,
+    "nan_asserts": False,
+}
+
 
 @requires_gpu()
-@config.patch(
-    compile_threads=1,
-    alignment_asserts=False,
-    size_asserts=False,
-    scalar_asserts=False,
-    nan_asserts=False,
-)
+@config.patch(test_config)
 @instantiate_parametrized_tests
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
@@ -115,8 +130,19 @@ class FxirTestCase(InductorTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        # Register the FX backend.
-        register_backend_for_device(cls.device, TritonScheduling, WrapperFxCodegen)
+        # Register the FX backend, storing the default for later.
+        common.init_backend_registration()
+        cls._default_backend = common.device_codegens[cls.device]
+        common.register_backend_for_device(
+            cls.device, TritonScheduling, WrapperFxCodegen
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+
+        # Restore the default backend.
+        common.device_codegens[cls.device] = cls._default_backend
 
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
@@ -470,10 +496,11 @@ class FxirTestCase(InductorTestCase):
         )
         self.assertIn("ks0", triton_node.kwargs["kwargs"])
 
-    def test_dynamic_launch_grid_calc_python(self):
+    def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper using python mode
+        Test the dyanmic launch grid calculation.
         """
+
         func = torch.add
         args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
         (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
@@ -491,41 +518,6 @@ class FxirTestCase(InductorTestCase):
         self.assertEqual(grid[0].meta["val"], -(-xnumel // xblock))
         self.assertEqual(grid[1], 1)
         self.assertEqual(grid[2], 1)
-
-    def test_dynamic_launch_grid_calc_python_slow(self):
-        """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper using python_slow mode
-        """
-        from torch._inductor.runtime.triton_heuristics import GridExpr
-
-        # Mock GridExpr.from_meta to use "python_slow" mode explicitly
-        original_from_meta = GridExpr.from_meta
-
-        def mocked_from_meta(inductor_meta, cfg, mode="python"):
-            return original_from_meta(inductor_meta, cfg, mode="python_slow")
-
-        with unittest.mock.patch.object(GridExpr, "from_meta", mocked_from_meta):
-            func = torch.add
-            args = [
-                torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]
-            ]
-            (gm,) = self._compile_and_check(
-                func, args, compile_kwargs={"dynamic": True}
-            )
-
-            # Check for the precomputed size arg.
-            (triton_node,) = gm.graph.find_nodes(
-                op="call_function", target=triton_kernel_wrapper_mutation
-            )
-            self.assertIn("grid", triton_node.kwargs)
-            self.assertIn("xnumel", triton_node.kwargs["kwargs"])
-            self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
-            grid = triton_node.kwargs["grid"][0]
-            xnumel = triton_node.kwargs["kwargs"]["xnumel"].meta["val"]
-            xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
-            self.assertEqual(grid[0].meta["val"], ((xnumel + xblock - 1) // xblock))
-            self.assertEqual(grid[1], 1)
-            self.assertEqual(grid[2], 1)
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
@@ -567,21 +559,109 @@ class FxirTestCase(InductorTestCase):
 
         self.assertTrue(same(ref, result))
 
-    @torch._inductor.config.patch("graph_partition", True)
-    def test_subgraph_raises(self):
+    def test_scatter_fallback_scalar_src(self):
         """
-        Test a model with subgraphs. This is not yet supported, so check that we get the
-        expected exception.
+        Test a special case where ScatterFallback takes a scalar 'src' argument.
         """
 
-        def foo(cond, x):
-            return torch.cond(cond, torch.cos, torch.sin, [x])
+        def foo(input_):
+            dim = 0
+            src = 1.5
+            return torch.ops.aten.scatter(input_, dim, index, src)
 
-        cond = torch.tensor([True], device=self.device)
-        x = torch.ones([2, 3], device=self.device)
+        length = 8
+        index = torch.randint(length, (length,), device=self.device)
+        input_ = torch.randn(length, device=self.device)
+        with DeterministicGuard(True):
+            (gm,) = self._compile_and_check(
+                foo,
+                (input_,),
+            )
 
-        with self.assertRaisesRegex(BackendCompilerFailed, "Subgraph"):
-            self._compile_and_check(foo, [cond, x])
+        # Check for the fallback op.
+        num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
+        self.assertEqual(num_fallback, 1)
+
+    def test_index_put_fallback(self):
+        """
+        Test the deterministic fallback for index_put.
+        """
+        length = 8
+        out, values = [torch.randn(length, device=self.device) for _ in range(2)]
+        indices = (torch.randint(length, (length,), device=self.device),)
+        accumulate = True
+        with DeterministicGuard(True):
+            (gm,) = self._compile_and_check(
+                torch.index_put,
+                (out, indices, values, accumulate),
+                expected_num_triton_kernels=1,
+            )
+
+        # Check for the fallback op.
+        self.assertEqual(self._count_ops(gm, torch.ops.aten.index_put_.default), 1)
+
+    def test_scatter_reduce_fallback(self):
+        """
+        Test the customized wrapper codegen for ScatterFallback ops.
+        """
+        fallback_op = torch.ops.aten.scatter_reduce_.two
+
+        def foo(out, index, src):
+            dim = 0
+            out = fallback_op(out, dim, index, src, reduce="amax", include_self=False)
+            return out + 1
+
+        length = 8
+        out, src = [torch.randn(length, device=self.device) for _ in range(2)]
+        index = torch.randint(length, (length,), device=self.device)
+        (gm,) = self._compile_and_check(
+            foo, (out, index, src), expected_num_triton_kernels=2
+        )
+
+        # Check for the fallback.
+        self.assertEqual(self._count_ops(gm, fallback_op), 1)
+
+    @parametrize("pred", (False, True))
+    def test_cond_subgraph(self, pred: bool):
+        """
+        Test a model with subgraphs.
+        """
+
+        def foo(pred, x):
+            return torch.cond(pred, torch.cos, torch.sin, [x]) + 1
+
+        x = torch.randn((2, 3), device=self.device)
+        pred_tensor = torch.tensor([pred], device=self.device)
+        gm = self._compile_and_check(
+            foo, [pred_tensor, x], expected_num_triton_kernels=3
+        )[-1]
+
+        # Check for subgraphs.
+        subgm_getattrs = list(gm.graph.find_nodes(op="get_attr"))
+        self.assertEqual(len(subgm_getattrs), 2)
+        for subgm_getattr in subgm_getattrs:
+            target = subgm_getattr.name
+            self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
+
+    @parametrize("pred", (False, True))
+    def test_cond_no_operands(self, pred: bool):
+        """
+        Test torch.cond when the subgraphs take no inputs.
+        """
+
+        length = 8
+
+        def true_fn():
+            return torch.zeros(length, device=self.device)
+
+        def false_fn():
+            return true_fn() + 5
+
+        def foo(pred):
+            return torch.cond(pred, true_fn, false_fn, ())
+
+        pred_tensor = torch.tensor([pred], device=self.device)
+        self._compile_and_check(foo, [pred_tensor], expected_num_triton_kernels=2)
 
     def test_cpp_raises(self):
         """
@@ -681,11 +761,51 @@ class FxirTestCase(InductorTestCase):
         args = [torch.rand([4, 4, 4, 4], device=self.device)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
+    def test_fallback_tuple_constant_arg(self):
+        """
+        Test a fallback op with tuple constant argument.
+        Check that tuple arguments are not flattened during codegen.
+        """
 
+        def foo(x):
+            # permute with a tuple argument
+            return torch.permute(x, (0, 2, 1))
+
+        # Use complex64 to force permute to become a fallback op
+        args = [torch.randn(2, 3, 4, dtype=torch.complex64, device=self.device)]
+
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+        # Check for the fallback kernel with permute
+        num_fallback = self._count_ops(gm, torch.ops.aten.permute.default)
+        self.assertEqual(num_fallback, 1)
+
+        # Verify the permute node has the correct tuple argument
+        permute_node = next(
+            iter(
+                gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.permute.default
+                )
+            )
+        )
+
+        # The second argument should be the permutation (0, 2, 1)
+        # Check that it's not flattened
+        perm_arg = permute_node.args[1]
+        self.assertIsInstance(
+            perm_arg, list, "Permutation argument should not be flattened"
+        )
+        self.assertEqual(len(perm_arg), 3)
+        self.assertEqual(tuple(perm_arg), (0, 2, 1))
+
+
+@instantiate_parametrized_tests
 class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
-    def check(self, model, inp, dynamic_shapes=None, strict=False):
+    def check(
+        self, model, inp, dynamic_shapes=None, strict=False
+    ) -> torch.fx.GraphModule:
         if self.device == "xpu":
             raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
         with torch.no_grad():
@@ -693,9 +813,9 @@ class AOTFxirTestCase(InductorTestCase):
                 model, inp, dynamic_shapes=dynamic_shapes, strict=strict
             )
             gm = torch._inductor.aot_compile(
-                ep.module(), inp, options={"fx_wrapper": True}
+                ep.module(), inp, options={"fx_wrapper": True, **test_config}
             )
-            self.assertTrue(torch.allclose(model(*inp), gm(*inp)))
+            self.assertTrue(same(model(*inp), gm(*inp)))
 
             for node in gm.graph.nodes:
                 if (
@@ -703,6 +823,8 @@ class AOTFxirTestCase(InductorTestCase):
                     and node.target != triton_kernel_wrapper_mutation
                 ):
                     self.assertTrue(node.meta.get("val", None) is not None)
+
+            return gm
 
     def test_aoti_fx_add(self):
         class M(torch.nn.Module):
@@ -820,6 +942,355 @@ class AOTFxirTestCase(InductorTestCase):
 
         # Now the backend should have been called.
         self.assertTrue(called)
+
+    @parametrize(
+        "expr",
+        [
+            (2 * Dim("x") + 1),
+            (Dim("x", min=3) - 3),
+        ],
+    )
+    def test_dynamic_input_expr(self, expr: sympy.Expr):
+        """
+        Test dynamic shapes with a nontrivial input expression.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.reshape(x.shape[0] * x.shape[1]) + x.shape[1]
+
+        dynamic_shapes = {"x": {0: expr}}
+        inp = (torch.randn((5, 4), device=self.device),)
+        gm = self.check(M().to(self.device), inp, dynamic_shapes=dynamic_shapes)
+
+        # Check for dynamic size ops.
+        self.assertEqual(
+            len(
+                gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.sym_size.int
+                )
+            ),
+            1,
+        )
+
+    @parametrize("pred", (False, True))
+    def test_cond_multi_inputs_and_outputs(self, pred):
+        """
+        Test torch.cond and check the output graphs.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, pred, x, y):
+                def true_fn(x, y):
+                    return torch.tanh(x), torch.relu(y)
+
+                def false_fn(x, y):
+                    return tuple(t / 2 for t in true_fn(x, y))
+
+                return torch.cond(pred, true_fn, false_fn, (x, y))
+
+        pred = torch.tensor([True], device=self.device)
+        (x, y) = [torch.randn(8, device=self.device) for _ in range(2)]
+        gm = self.check(M(), (pred, x, y))
+
+        # Check the graph.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
+    buf1 = cond[0]
+    buf2 = cond[1];  cond = None
+    return [buf1, buf2]""",  # noqa: B950
+        )
+
+    def test_dims_dynamic_outer_static_padded_inner(self):
+        """
+        Test padding on inner dimensions, with dynamic outer dimensions.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        def get_input_padded_inner(shape):
+            full_shape = shape[:-1] + (shape[-1] * 2,)
+            full = torch.randn(full_shape, dtype=torch.float32, device=self.device)
+            view = torch.as_strided(full, shape, full.stride())
+            return view
+
+        shape = (4, 4, 4)
+        args = tuple(get_input_padded_inner(shape) for _ in range(2))
+        self.check(
+            M(),
+            args,
+            dynamic_shapes=({0: Dim.DYNAMIC, 1: Dim.DYNAMIC, 2: Dim.STATIC},) * 2,
+        )
+
+    @parametrize("length", (4, 8))
+    def test_cond_dynamic_shape_pred_scalar_closure(self, length: int):
+        """
+        Test cond using a predicate computed from dynamic shapes.
+        Also test a dynamic scalar computed outside the branches.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                z = x.reshape(-1)
+                a = y.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return true_fn(x) / 2
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (z,))
+
+        (x, y) = [
+            torch.randn(shape, device=self.device)
+            for shape in [(length // 2,) * 2, (length,)]
+        ]
+        dynamic_shapes = {
+            "x": {0: Dim.DYNAMIC},
+            "y": {0: Dim.DYNAMIC},
+        }
+        self.check(M(), (x, y), dynamic_shapes=dynamic_shapes)
+
+    def test_dynamic_scalar_output(self):
+        """
+        Test an output scalar from dynamic shapes.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.shape[0] * 3
+
+        x = torch.randn(7, device=self.device)
+        self.check(M(), (x,), dynamic_shapes=({0: Dim.DYNAMIC},))
+
+    @parametrize("dynamic", (False, True))
+    @parametrize("input_", (1.5, 2, False))
+    def test_item(self, input_, dynamic: bool):
+        """
+        Test calling Tensor.item.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x[1].item()
+
+        x = torch.tensor((input_,) * 10)
+        d = Dim("s0", min=1)
+        dynamic_shapes = ({0: 2 * d},) if dynamic else None
+        self.check(M(), (x,), dynamic_shapes=dynamic_shapes)
+
+    @parametrize("pred", (False, True))
+    def test_mismatched_branch_dynamic(self, pred: bool):
+        """
+        Test cond branches with mismatched dynamic shapes.
+        """
+
+        # Apply an offset to guarantee the truith of the predicate.
+        pred_offset = 1 if pred else -1
+
+        inputs = [
+            torch.tensor([pred], device=self.device),
+        ] + [torch.randn(10, 20, device=self.device) + pred_offset for _ in range(3)]
+        dim0_a = Dim("s0", min=4, max=1024)
+        dim0_b = Dim("s1", min=4, max=1024)
+        dynamic_shapes = {
+            "p": {},
+            "x": {0: dim0_a, 1: None},
+            "y": {0: dim0_b, 1: None},
+            "z": {0: dim0_a, 1: None},
+        }
+
+        self.check(
+            CondModels.MismatchedOutputSize(),
+            tuple(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    def test_const_folded_subgraph(self):
+        """
+        If a graph only contains a call_module node to a subgraph,
+        where the subgraph can be const-folded away,
+        validate the fake mode used in FXConverter generation is not None.
+        """
+        device = self.device
+        shape = (5, 10)
+
+        class Submodule(torch.nn.Module):
+            def forward(self):
+                return torch.randn(*shape, device=device) + 1
+
+        # Create a parent graph with this module as a subgraph and output
+        ep = torch.export.export(Submodule(), ())
+        parent_graph = torch.fx.Graph()
+        call_mod = parent_graph.call_module("sub", args=())
+        get_item = parent_graph.call_function(
+            operator.getitem, args=(call_mod, slice(None))
+        )
+        parent_graph.output((get_item,))
+        parent = torch.fx.GraphModule({"sub": ep.module()}, parent_graph)
+
+        # Verify FXConverter.generate uses non-null fake mode
+        # Intercept _set_node_metadata_hook to ensure fake_mode is not None
+        orig_set_hook = torch._inductor.codegen.wrapper_fxir._set_node_metadata_hook
+        called = False
+
+        def mock_set_hook(gm: torch.fx.GraphModule, fn):
+            nonlocal called
+            called = True
+            # Please update this check if `fake_mode` is
+            # no longer used in FXConverter call to _node_metadata_hook
+            self.assertTrue("fake_mode" in fn.keywords)
+            self.assertIsNotNone(fn.keywords["fake_mode"])
+            return orig_set_hook(gm, fn)
+
+        self.assertFalse(called)
+        with unittest.mock.patch.object(
+            torch._inductor.codegen.wrapper_fxir,
+            "_set_node_metadata_hook",
+            mock_set_hook,
+        ):
+            args = ()
+            compiled = torch._inductor.aot_compile(
+                parent, args, options={"fx_wrapper": True}
+            )
+            self.assertTrue(called)
+
+            compiled_out = compiled(*args)
+            self.assertEqual(compiled_out.shape, shape)
+
+
+class TestReplaceFloorDiv(InductorTestCase):
+    """
+    Tests for floor -> FloorDiv conversion.
+    """
+
+    def _check(self, expr: sympy.Expr) -> sympy.Expr:
+        # Check that we started with floor's.
+        num_floors = expr.count(sympy.floor)
+        self.assertGreater(num_floors, 0)
+
+        replaced = replace_floor_div(expr)
+
+        # Check that all floor's were replaced.
+        # We should have no more new FloorDiv's than floor's in the original expression,
+        # although we can have less due to simplification.
+        self.assertEqual(replaced.count(sympy.floor), 0)
+        self.assertLessEqual(
+            replaced.count(FloorDiv) - expr.count(FloorDiv), num_floors
+        )
+
+        def expand_floor_div(
+            numerator: sympy.Expr, denominator: sympy.Expr
+        ) -> sympy.Expr:
+            return sympy.floor(numerator / denominator)
+
+        # Expand FloorDiv back into floor and check for equality.
+        self.assertEqual(
+            *[
+                sympy.simplify(e.replace(FloorDiv, expand_floor_div))
+                for e in (replaced, expr)
+            ]
+        )
+
+        return replaced
+
+    def test_rewrite_floor_div_mul_pow(self):
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor(x / y)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
+        self.assertEqual(expr.count(sympy.Pow), 1)
+
+        rewritten = self._check(expr)
+        self.assertTrue(isinstance(rewritten, FloorDiv))
+        self.assertEqual(rewritten.args, (x, y))
+
+    def test_rewrite_floor_div_mul_rational(self):
+        x = sympy.Symbol("x")
+        expr = sympy.floor(x / 5)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
+        self.assertEqual(expr.count(sympy.Rational), 1)
+
+        rewritten = self._check(expr)
+        self.assertTrue(isinstance(rewritten, FloorDiv))
+        self.assertEqual(rewritten.args, (x, 5))
+
+    def test_no_rewrite_div(self):
+        x, y = sympy.symbols("x y")
+        expr = x / y
+        self.assertEqual(expr.count(FloorDiv), 0)
+
+        rewritten = replace_floor_div(expr)
+        self.assertEqual(rewritten, expr)
+
+    def test_rewrite_floor_div_nested(self):
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor((sympy.floor(x / 5) + 1) / y)
+        self.assertEqual(expr.count(FloorDiv), 0)
+
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten.count(FloorDiv), 2)
+
+    def test_rewrite_floor_div_rational_const(self):
+        expr = sympy.floor(sympy.S.One / 5, evaluate=False)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.Mul), 0)
+        self.assertEqual(expr.count(sympy.Rational), 1)
+
+        # Expression evaluates to a compile time constant
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten, sympy.S.Zero)
+
+    def test_no_distribute_mul_floordiv(self):
+        """
+        Test that multiplication doesn't distribute with floor division.
+        """
+        x = sympy.Symbol("x")
+        expr = 2 * sympy.floor(x / 2)
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten.count(sympy.Mul), 1)
+        self.assertEqual(rewritten.count(FloorDiv), 1)
+
+    def test_rational_multi_pows(self):
+        """
+        Test an expression with a rational and multiple pows.
+        """
+        x, y, z = sympy.symbols("x y z")
+        expr = sympy.floor((x / 5) * (y**2) * (z**3))
+        mul = expr.args[0]
+        self.assertTrue(isinstance(mul, sympy.Mul))
+        self.assertTrue(isinstance(mul.args[0], sympy.Rational))
+        self.assertEqual(expr.count(sympy.Pow), 2)
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten.count(FloorDiv), 1)
+
+    def test_variable_exp(self):
+        """
+        Test pow when the exponent is a variable.
+        """
+        x = sympy.Symbol("x", positive=True)
+        expr = sympy.floor(2**-x)
+        replaced = self._check(expr)
+
+        # Check that x went to the denominator.
+        self.assertEqual(replaced.args, (1, 2**x))
+
+    def test_launch_grid_dynamic_padding(self):
+        """
+        Test a complex launch grid expression arising from padding with dynamic shapes.
+        """
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor(-FloorDiv(x * y, 2) / FloorDiv(-x * y, 131070))
+        self._check(expr)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
@@ -96,10 +97,10 @@ def _find_q_dq_node_for_user(
 def _is_sym_size_node(node: Node):
     return (
         node.op == "call_function"
-        and node.target == torch.ops.aten.sym_size.default
-        or node.target == torch.ops.aten.sym_numel.default
-        or node.target == torch.ops.aten.sym_numel
-        or node.target == torch.ops.aten.sym_size
+        and node.target is torch.ops.aten.sym_size.default
+        or node.target is torch.ops.aten.sym_numel.default
+        or node.target is torch.ops.aten.sym_numel
+        or node.target is torch.ops.aten.sym_size
     )
 
 
@@ -121,7 +122,8 @@ def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
 def _get_tensor_constant_from_node(node, m):
     if node is None:
         return None
-    assert node.op == "get_attr"
+    if node.op != "get_attr":
+        raise AssertionError(f"Expected node.op to be 'get_attr', got {node.op}")
     target_atoms = node.target.split(".")
     attr_itr = m
     for i, atom in enumerate(target_atoms):
@@ -202,7 +204,7 @@ def _is_conv_transpose_fn(conv_fn: Callable):
 def _is_bn_node(n: Node):
     return (
         _is_supported_batch_norm_for_training(n)
-        or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
+        or n.target is torch.ops.aten._native_batch_norm_legit_no_training.default
     )
 
 
@@ -226,7 +228,7 @@ def fold_bn_weights_into_conv_node(
     bn_b = _get_tensor_constant_from_node(bn_args[2], m)
     bn_rm = _get_tensor_constant_from_node(bn_args[3], m)
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
-    if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
+    if bn_node.target is torch.ops.aten._native_batch_norm_legit_no_training.default:
         eps_arg_index = 6
     elif _is_supported_batch_norm_for_training(bn_node):
         eps_arg_index = 7
@@ -246,7 +248,10 @@ def fold_bn_weights_into_conv_node(
 
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
-    assert isinstance(weight_attr_name, str)
+    if not isinstance(weight_attr_name, str):
+        raise AssertionError(
+            f"Expected conv_weight_node.target to be a string attribute name, got {type(weight_attr_name)}"
+        )
     _assign_attr(fused_weight, m, weight_attr_name, _AttrKind.PARAMETER)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
@@ -263,7 +268,7 @@ def fold_bn_weights_into_conv_node(
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
     # and we want to replace the uses of getitem 0 with the output of conv
     #
-    if bn_node.target == torch.ops.aten.batch_norm.default:
+    if bn_node.target is torch.ops.aten.batch_norm.default:
         # With the new training ir, instead of batch_norm + getitem,
         # we only have the batch_norm node.
         #
@@ -353,15 +358,16 @@ def _get_aten_graph_module_for_pattern(
     """
     if is_cuda:
         example_inputs = tuple(
-            [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
+            x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs
         )
 
-    aten_pattern = torch.export.export_for_training(
-        pattern,  # type: ignore[arg-type]
-        example_inputs,
-        kwargs,
-        strict=True,
-    ).module(check_guards=False)
+    with torch._export.config.patch(use_new_tracer_experimental=True):
+        aten_pattern = torch.export.export(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
+            strict=True,
+        ).module(check_guards=False)
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
     aten_pattern.recompile()  # type: ignore[operator]
@@ -371,7 +377,7 @@ def _get_aten_graph_module_for_pattern(
     for node in aten_pattern.graph.nodes:  # type: ignore[union-attr]
         if (
             node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
+            and node.target is torch.ops.aten.copy_.default
             and len(node.users) == 0
         ):
             aten_pattern.graph.erase_node(node)  # type: ignore[operator, union-attr]
