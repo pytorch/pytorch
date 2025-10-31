@@ -38,9 +38,14 @@ static StableIValue from_ivalue(
           ivalue.toScalarType(), extension_build_version);
     }
     case c10::TypeKind::DeviceObjType: {
-      c10::Device* new_device = new c10::Device(ivalue.toDevice());
-      DeviceHandle dh = reinterpret_cast<DeviceHandle>(new_device);
-      return torch::stable::detail::_from(dh, extension_build_version);
+      // Pack device type and index into StableIValue in platform-independent
+      // format Lower 8 bits = device type, upper 32 bits = device index
+      const auto& device = ivalue.toDevice();
+      uint64_t device_type_bits =
+          static_cast<uint64_t>(static_cast<int8_t>(device.type()));
+      uint64_t device_index_bits =
+          static_cast<uint64_t>(static_cast<uint32_t>(device.index())) << 32;
+      return device_type_bits | device_index_bits;
     }
     case c10::TypeKind::LayoutType: {
       return torch::stable::detail::_from(
@@ -111,12 +116,24 @@ static c10::IValue to_ivalue(
           stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::DeviceObjType: {
-      auto deleter = [](DeviceOpaque* device) { torch_delete_device(device); };
-      auto device_ptr = std::unique_ptr<DeviceOpaque, decltype(deleter)>(
-          torch::stable::detail::_to<DeviceHandle>(
-              stable_ivalue, extension_build_version),
-          deleter);
-      return c10::IValue(*reinterpret_cast<c10::Device*>(device_ptr.get()));
+      // Unpack device type and index from StableIValue
+      // Lower 8 bits = device type, upper 32 bits = device index
+      c10::DeviceType device_type = static_cast<c10::DeviceType>(
+          static_cast<int8_t>(stable_ivalue & 0xFF));
+      int32_t device_index =
+          static_cast<int32_t>((stable_ivalue >> 32) & 0xFFFFFFFF);
+      TORCH_CHECK(
+          device_index >= std::numeric_limits<int8_t>::min() &&
+              device_index <= std::numeric_limits<int8_t>::max(),
+          "Device index ",
+          device_index,
+          " is out of range for int8_t [",
+          static_cast<int>(std::numeric_limits<int8_t>::min()),
+          ", ",
+          static_cast<int>(std::numeric_limits<int8_t>::max()),
+          "]");
+      return c10::IValue(
+          c10::Device(device_type, static_cast<int8_t>(device_index)));
     }
     case c10::TypeKind::LayoutType: {
       return c10::IValue(torch::stable::detail::_to<c10::Layout>(
@@ -228,87 +245,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
         torch::CppFunction::makeFromBoxedFunctor(
             std::make_unique<StableIValueBoxedKernel>(
                 fn, extension_build_version)));
-  });
-}
-
-AOTI_TORCH_EXPORT AOTITorchError torch_create_device(
-    int32_t device_type,
-    int32_t device_index,
-    DeviceHandle* ret_device) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    TORCH_CHECK(
-        device_index >= std::numeric_limits<int8_t>::min() &&
-            device_index <= std::numeric_limits<int8_t>::max(),
-        "Device index ",
-        device_index,
-        " is out of range for c10::DeviceIndex "
-        "(must be between ",
-        std::numeric_limits<int8_t>::min(),
-        " and ",
-        std::numeric_limits<int8_t>::max(),
-        ")");
-    c10::Device* device = new c10::Device(
-        static_cast<c10::DeviceType>(device_type),
-        static_cast<c10::DeviceIndex>(device_index));
-    *ret_device = reinterpret_cast<DeviceHandle>(device);
-  });
-}
-
-AOTI_TORCH_EXPORT AOTITorchError torch_create_device_from_string(
-    const char* device_string,
-    DeviceHandle* ret_device) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::Device* device = new c10::Device(std::string(device_string));
-    *ret_device = reinterpret_cast<DeviceHandle>(device);
-  });
-}
-
-AOTI_TORCH_EXPORT AOTITorchError
-torch_new_device_handle(DeviceHandle orig_handle, DeviceHandle* new_handle) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    const c10::Device* src_device = reinterpret_cast<c10::Device*>(orig_handle);
-    c10::Device* new_device = new c10::Device(*src_device);
-    *new_handle = reinterpret_cast<DeviceHandle>(new_device);
-  });
-}
-
-AOTI_TORCH_EXPORT AOTITorchError torch_delete_device(DeviceHandle device) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { delete reinterpret_cast<c10::Device*>(device); });
-}
-
-AOTI_TORCH_EXPORT AOTITorchError
-torch_device_type(DeviceHandle device, int32_t* ret_device_type) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    *ret_device_type =
-        static_cast<int32_t>(reinterpret_cast<c10::Device*>(device)->type());
-  });
-}
-
-AOTI_TORCH_EXPORT AOTITorchError
-torch_device_index(DeviceHandle device, int32_t* ret_device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    *ret_device_index =
-        static_cast<int32_t>(reinterpret_cast<c10::Device*>(device)->index());
-  });
-}
-
-AOTI_TORCH_EXPORT AOTITorchError
-torch_device_set_index(DeviceHandle device, int32_t device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    TORCH_CHECK(
-        device_index >= std::numeric_limits<int8_t>::min() &&
-            device_index <= std::numeric_limits<int8_t>::max(),
-        "Device index ",
-        device_index,
-        " is out of range for c10::DeviceIndex "
-        "(must be between ",
-        std::numeric_limits<int8_t>::min(),
-        " and ",
-        std::numeric_limits<int8_t>::max(),
-        ")");
-    reinterpret_cast<c10::Device*>(device)->set_index(
-        static_cast<c10::DeviceIndex>(device_index));
   });
 }
 

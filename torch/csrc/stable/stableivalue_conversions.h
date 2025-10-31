@@ -2,7 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/device_struct.h>
+#include <torch/csrc/stable/device.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/ScalarType.h>
@@ -236,7 +236,10 @@ struct FromImpl<torch::stable::Tensor> {
 };
 
 // Specialization for torch::stable::Device => StableIValue
-// Returns a new owning reference of the underlying Device.
+// Pack the device type and index into a StableIValue in a platform-independent
+// format. We use the shim representation for DeviceType (int32_t) for ABI
+// stability. StableIValue layout: DeviceType (shim int32_t) in lower 32 bits,
+// DeviceIndex in upper 32 bits
 template <>
 struct FromImpl<torch::stable::Device> {
   static StableIValue call(
@@ -245,9 +248,14 @@ struct FromImpl<torch::stable::Device> {
       bool is_internal) {
     (void)extension_build_version; // Unused parameter
     (void)is_internal; // Unused parameter
-    DeviceHandle new_dh;
-    TORCH_ERROR_CODE_CHECK(torch_new_device_handle(val.get(), &new_dh));
-    return from(new_dh);
+    // Convert DeviceType to shim representation (int32_t)
+    StableIValue device_type_shim = from(val.type());
+    // Pack: lower 32 bits = device type (shim), upper 32 bits = device index
+    uint64_t device_type_bits =
+        static_cast<uint64_t>(static_cast<uint32_t>(device_type_shim));
+    uint64_t device_index_bits =
+        static_cast<uint64_t>(static_cast<uint32_t>(val.index())) << 32;
+    return device_type_bits | device_index_bits;
   }
 };
 
@@ -442,8 +450,9 @@ struct ToImpl<torch::stable::Tensor> {
 };
 
 // Specialization for StableIValue => torch::stable::Device
-// The resulting stable::Device steals ownership of the input's
-// underlying DeviceHandle.
+// Unpack device type and index from StableIValue in platform-independent
+// format. StableIValue layout: DeviceType (shim int32_t) in lower 32 bits,
+// DeviceIndex in upper 32 bits
 template <>
 struct ToImpl<torch::stable::Device> {
   static torch::stable::Device call(
@@ -452,7 +461,11 @@ struct ToImpl<torch::stable::Device> {
       bool is_internal) {
     (void)extension_build_version; // Unused parameter
     (void)is_internal; // Unused parameter
-    return torch::stable::Device(to<DeviceHandle>(val));
+    // Unpack: lower 32 bits = device type (shim), upper 32 bits = device index
+    StableIValue device_type_shim = val & 0xFFFFFFFF;
+    DeviceType device_type = to<DeviceType>(device_type_shim);
+    int32_t device_index = static_cast<int32_t>((val >> 32) & 0xFFFFFFFF);
+    return torch::stable::Device(device_type, device_index);
   }
 };
 
