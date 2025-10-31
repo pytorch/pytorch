@@ -939,7 +939,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     # remove in place add from batchnorm tracking training stats
     for node in m.graph.nodes:
         if (
-            node.target == torch.ops.aten.add_.Tensor
+            node.target is torch.ops.aten.add_.Tensor
             and node.args[0].op == "get_attr"
             and node.args[1] == 1
             and (
