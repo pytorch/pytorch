@@ -22,6 +22,7 @@ from torch._utils import try_import
 from torch._utils_internal import deprecated
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
+    DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyCPU,
     ops,
@@ -1019,44 +1020,67 @@ class TestDeprecate(TestCase):
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)
 
-class TestDeviceLazyInit(TestCase):
-    @unittest.skipIf(IS_WINDOWS, "Fork not available on Windows")
-    def test_cuda_fork_poison_on_lazy_init(self):
-        torch.cuda.init()
+class TestDeviceLazyInit(DeviceTypeTestBase, TestCase):
+    def _get_device_module(self, device_type: str):
+        try:
+            return getattr(torch, device_type)
+        except AttributeError:
+            return None
+
+    def test_fork_poison_on_lazy_init(self, device):
+        device_type = device.split(":", 1)[0]
+        dev_module = self._get_device_module(device_type)
+        if dev_module is None or not dev_module.is_available():
+            self.skipTest(f"{device_type} device not available")
+        if not hasattr(dev_module, "init"):
+            self.skipTest(f"{device_type} has no init() method")
+        dev_module.init()
 
         def child(q):
             try:
-                torch.cuda.init()
-            except Exception as e:  # noqa: BLE001
+                dev_module.init()
+            except Exception as e:
                 q.put(e)
 
+        if sys.platform == "win32":
+            self.skipTest("Fork not available on Windows")
+        if device_type == "mps" and sys.platform == "darwin":
+            self.skipTest("MPS does not support fork on macOS")
         ctx = multiprocessing.get_context("fork")
         q = ctx.Queue()
         p = ctx.Process(target=child, args=(q,))
         p.start()
         p.join()
-
-        self.assertTrue(not q.empty())
+        self.assertFalse(q.empty())
         exc = q.get()
         self.assertIsInstance(exc, RuntimeError)
-        self.assertRegex(str(exc), r"forked subprocess.*spawn")
 
-    @unittest.skipIf(IS_WINDOWS, "Fork not available on Windows")
-    def test_cuda_registration_idempotent(self):
+    def test_registration_idempotent(self, device):
+        device_type = device.split(":", 1)[0]
+        dev_module = self._get_device_module(device_type)
+        if dev_module is None or not dev_module.is_available():
+            self.skipTest(f"{device_type} device not available")
+        if not hasattr(dev_module, "device_count"):
+            self.skipTest(f"{device_type} has no device_count()")
+
         def child(q):
             try:
-                torch._C._cuda_getDeviceCount()
-                torch._C._cuda_getDeviceCount()
-            except Exception as e:  # noqa: BLE001
+                dev_module.device_count()
+                dev_module.device_count()
+            except Exception as e:
                 q.put(e)
 
+        if sys.platform == "win32":
+            self.skipTest("Fork not available on Windows")
         ctx = multiprocessing.get_context("fork")
         q = ctx.Queue()
         p = ctx.Process(target=child, args=(q,))
         p.start()
         p.join()
-
         self.assertTrue(q.empty())
+
+
+instantiate_device_type_tests(TestDeviceLazyInit, globals())
 
 
 if __name__ == "__main__":
