@@ -16,6 +16,7 @@ from torch.distributed.tensor import (
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
@@ -231,6 +232,18 @@ class DistConvolutionOpsTest(DTensorTestBase):
         out = model_gt(x)
         self.assertEqual(out_dt.shape, out.shape)
 
+
+DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistConvolutionOpsTest,
+    # Send / recv ops are not supported
+    skipped_tests=[
+        "test_conv1d",
+        "test_conv3d",
+        "test_conv_backward_none_grad_inp",
+        "test_depthwise_convolution",
+        "test_downsampling_convolution",
+    ],
+)
 
 if __name__ == "__main__":
     run_tests()

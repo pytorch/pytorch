@@ -1256,7 +1256,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     # Build the graph op-by-op by starting from the node all the way to the end
     # copy_ can be not using tangents at all, we must copy it.
     for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
-        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+        if node.op == "call_function" and node.target is torch.ops.aten.copy_.default:
             insert_node_in_graph(node)
 
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
@@ -1481,9 +1481,7 @@ def functionalize_rng_ops(
         )
     )
 
-    for rng_count, (base_node, node_pair) in enumerate(
-        recomputable_rng_ops_map.items()
-    ):
+    for rng_count, node_pair in enumerate(recomputable_rng_ops_map.values()):
         # Step 2 - Modify the fwd pass such that
         fw_node = node_pair["fwd"]
         bw_node = node_pair["bwd"]
@@ -1598,7 +1596,7 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
         if node.op == "output":
             continue
 
-        is_copy_ = node.target == torch.ops.aten.copy_.default
+        is_copy_ = node.target is torch.ops.aten.copy_.default
         if is_copy_:
             if _has_tag_must_be_in_backward(node):
                 has_mutation_in_bw.add(node.args[0])
@@ -2714,9 +2712,7 @@ def thread_graphsafe_rng_from_hops(module, is_backward):
         subgraph = getattr(module, hop_node.args[0].target)
         if isinstance(subgraph, fx.GraphModule):
             new_rng_inputs = []
-            for idx, placeholder_node in enumerate(
-                subgraph.graph.find_nodes(op="placeholder")
-            ):
+            for placeholder_node in subgraph.graph.find_nodes(op="placeholder"):
                 if rng_string in placeholder_node.name:
                     # Found a rng state placeholder in the hop graph, lets add
                     # the corresponding node in the outer graph

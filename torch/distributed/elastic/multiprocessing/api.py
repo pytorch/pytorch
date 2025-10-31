@@ -38,7 +38,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-from torch.numa.binding import NumaOptions
+from torch.numa.binding import maybe_wrap_with_numa_binding, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -675,6 +675,7 @@ def _wrap(
     stderr_redirects: dict[int, str],  # redirect file for stderr (to console if None)
     ret_vals: dict[int, mp.SimpleQueue],
     queue_finished_reading_event: synchronize.Event,
+    numa_options: Optional[NumaOptions],
 ) -> None:
     # get the per-rank params up front so we fail fast if no mapping is found
     args_ = args[local_rank]
@@ -691,6 +692,9 @@ def _wrap(
         os.environ[k] = v
 
     with stdout_cm, stderr_cm:
+        fn = maybe_wrap_with_numa_binding(
+            fn, gpu_index=local_rank, numa_options=numa_options
+        )
         ret = record(fn)(*args_)
     ret_val_.put(ret)
     queue_finished_reading_event.wait()
@@ -755,12 +759,12 @@ class MultiprocessContext(PContext):
                 self.stderrs,
                 self._ret_vals,
                 self._worker_finished_event,
+                self._numa_options,
             ),
             nprocs=self.nprocs,
             join=False,
             daemon=False,
             start_method=self.start_method,
-            numa_options=self._numa_options,
         )
 
     def _is_done(self) -> bool:
