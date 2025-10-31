@@ -59,7 +59,7 @@ def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
         if (
             first_non_ph
             and first_non_ph.op == "call_function"
-            and first_non_ph.target == torch.amp.autocast_mode._enter_autocast
+            and first_non_ph.target is torch.amp.autocast_mode._enter_autocast
         ):
             # TODO: check if current auto-cast type is the same as the args of
             # _enter_autocast. If so, return False, i.e. do not create a submodule.
