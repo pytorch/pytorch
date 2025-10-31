@@ -817,6 +817,7 @@ class SymBool:
         Called by torch.sym_float() when casting SymBool to float.
         """
         from torch.fx.experimental.sym_node import wrap_node
+
         return wrap_node(self.node.sym_float())
 
 

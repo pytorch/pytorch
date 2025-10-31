@@ -69,9 +69,9 @@ from torch.fx.experimental.symbolic_shapes import (
     constrain_unify,
     ConstraintViolationError,
     expect_true,
+    guard_or_false,
     guard_size_oblivious,
     ShapeEnv,
-    guard_or_false
 )
 from torch.nn import functional as F
 from torch.testing import make_tensor
@@ -101,8 +101,6 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.logging_utils import logs_to_string
-
 
 
 pytree_modules = {
@@ -13644,6 +13642,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         def symbool_mul_fn(x_bool, sentinel):
             result = x_bool * sentinel
             return result
+
         x_true = torch.tensor([True], device="cuda")
         x_false = torch.tensor([False], device="cuda")
         sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
@@ -13657,7 +13656,6 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_result_true.item(), 2.0)
         self.assertEqual(compiled_result_false.item(), 0.0)
 
-
     @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
     def test_symbool_guard_or_false(self):
         def symbool_guard_fn(a_bool_tensor, b):
@@ -13667,7 +13665,10 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 return b * 10
             else:
                 return b * 100
-        compiled_guard_fn = torch.compile(symbool_guard_fn, backend="eager", dynamic=True)
+
+        compiled_guard_fn = torch.compile(
+            symbool_guard_fn, backend="eager", dynamic=True
+        )
         a_true = torch.tensor(True, device="cuda")
         a_false = torch.tensor(False, device="cuda")
         b = torch.randn(6, device="cuda")
@@ -13680,7 +13681,6 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_res_true, b * 10)
         self.assertEqual(compiled_res_false, b * 100)
 
-
     @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
     def test_symbool_tensor_mul_does_not_fail(self):
         def fuzzed_program(arg_0, sentinel):
@@ -13689,17 +13689,19 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
             var_node_0 = var_node_1.item()
             result = var_node_0 * sentinel
             if result.is_complex():
-                 result = result.real
+                result = result.real
             return result
+
         sentinel = torch.tensor(1.0, requires_grad=True, device="cuda")
         arg_0 = torch.tensor([True], dtype=torch.bool, device="cuda")
         args = (arg_0,) + (sentinel,)
         try:
-            compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+            compiled_program = torch.compile(
+                fuzzed_program, fullgraph=True, dynamic=True
+            )
             compiled_program(*args)
         except Exception as e:
             self.fail(f"torch.compile failed with error: {e}")
-
 
 
 if __name__ == "__main__":
