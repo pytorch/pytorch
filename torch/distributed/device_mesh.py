@@ -1188,7 +1188,7 @@ else:
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
             concat_dim_group_name: list[str] = []
-            flatten_rank_map = device_mesh_list[0]._flatten_rank_map
+            flatten_rank_map = device_mesh_list[0]._rank_map
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):
                     concat_sizes.append(dm._layout[i].sizes)
@@ -1197,7 +1197,10 @@ else:
                 concat_dim_group_name.extend(not_none(dm._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
                 # because the concatenated indices should be indexed by the same root mesh tensor.
-                if dm._flatten_rank_map != flatten_rank_map:
+                if (
+                    dm._rank_map.untyped_storage().data_ptr()
+                    != flatten_rank_map.untyped_storage().data_ptr()
+                ):
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes derived from different device meshs"
                     )
