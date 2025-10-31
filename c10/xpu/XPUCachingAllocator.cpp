@@ -361,7 +361,7 @@ class DeviceCachingAllocator {
   size_t allowed_memory_maximum = 0;
   bool set_fraction = false;
   std::vector<ExpandableSegment*> expandable_segments;
-  std::vector<c10::DeviceIndex> devices_with_peer_access;
+  std::vector<c10::DeviceIndex> devices_with_peer_access; // reserved
 
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
