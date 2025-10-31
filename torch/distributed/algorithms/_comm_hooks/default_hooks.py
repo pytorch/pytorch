@@ -69,7 +69,7 @@ class LowPrecisionState(DefaultState):
         self.parameter_type = parameter_type
 
 
-def _decompress(state: LowPrecisionState, grad: torch.Tensor):
+def _decompress(state: LowPrecisionState, grad: torch.Tensor) -> None:
     """
     Casts gradients back to full parameter precision so that further computation happens in full precision.
     """
@@ -92,7 +92,7 @@ def _decompress(state: LowPrecisionState, grad: torch.Tensor):
     orig_grad_data.record_stream(backend.current_stream())  # type: ignore[arg-type]
 
 
-def allreduce_hook(state: DefaultState, grad: torch.Tensor):
+def allreduce_hook(state: DefaultState, grad: torch.Tensor) -> None:
     r"""
     Implement the  FSDP communication hook for ``all_reduce`` algorithm and a necessary pre- and post-division of gradients.
 
@@ -111,7 +111,9 @@ def allreduce_hook(state: DefaultState, grad: torch.Tensor):
         grad.div_(state.gradient_postdivide_factor)
 
 
-def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.Tensor):
+def reduce_scatter_hook(
+    state: DefaultState, grad: torch.Tensor, output: torch.Tensor
+) -> None:
     r"""
     Implement the  FSDP communication hook for ``reduce_scatter`` algorithm.
 
@@ -137,7 +139,7 @@ def _low_precision_hook(
     state: LowPrecisionState,
     grad: torch.Tensor,
     output: Optional[torch.Tensor],
-):
+) -> None:
     if grad.dtype != prec:
         grad.data = grad.data.to(prec)
     if output is not None:

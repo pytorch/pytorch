@@ -845,7 +845,7 @@ class SimpleElasticAgent(ElasticAgent):
             f"torchelastic.worker.status.{state}", source=source, metadata=metadata
         )
 
-    def _record_metrics(self, group_results: RunResult):
+    def _record_metrics(self, group_results: RunResult) -> None:
         is_failed = group_results.is_failed()
         self._record_flakiness_metric(is_failed)
         spec = self._worker_group.spec
@@ -864,14 +864,14 @@ class SimpleElasticAgent(ElasticAgent):
             "run_failed_no_retries", is_failed and not restarts_happened
         )
 
-    def _record_metric_with_condition(self, metric_name, condition):
+    def _record_metric_with_condition(self, metric_name, condition) -> None:
         spec = self._worker_group.spec
         if condition:
             put_metric(f"workers.{spec.role}.{metric_name}", 1)
         else:
             put_metric(f"workers.{spec.role}.{metric_name}", 0)
 
-    def _record_flakiness_metric(self, is_failed: bool = False):
+    def _record_flakiness_metric(self, is_failed: bool = False) -> None:
         if is_failed:
             flakiness = 100.0
         else:
@@ -952,7 +952,7 @@ class SimpleElasticAgent(ElasticAgent):
                     f"[{role}] Worker group in {state.name} state"
                 )
 
-    def _exit_barrier(self):
+    def _exit_barrier(self) -> None:
         """
         Define a barrier that keeps the agent process alive until all workers finish.
 

@@ -31,7 +31,7 @@ __all__ = [
 def _post_order_apply(
     root_module: nn.Module,
     fn: Callable[[nn.Module], Optional[nn.Module]],
-):
+) -> None:
     """
     This applies ``fn`` to every module in the module tree of ``root_module``
     following a post-order traversal. If ``fn`` returns an :class:`nn.Module`,
@@ -46,7 +46,7 @@ def _post_order_apply(
         module: nn.Module,
         module_name: str,
         parent_module: Optional[nn.Module],
-    ):
+    ) -> None:
         for child_module_name, child_module in module.named_children():
             if child_module not in visited_modules:
                 visited_modules.add(child_module)

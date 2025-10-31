@@ -77,7 +77,7 @@ class Adafactor(Optimizer):
         col_vars,
         variances,
         state_steps,
-    ):
+    ) -> bool:
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -349,7 +349,7 @@ def _single_tensor_adafactor(
     eps2: float,
     maximize: bool,
     has_complex: bool,
-):
+) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Grad scaling should occur outside of optimizer.step()")
 
@@ -473,7 +473,7 @@ def _multi_tensor_adafactor(
     eps2: float,
     maximize: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -622,7 +622,7 @@ def adafactor(
     eps1: float,
     eps2: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs Adafactor algorithm computation.
 
     See :class:`~torch.optim.Adafactor` for details.

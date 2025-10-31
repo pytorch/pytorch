@@ -21,7 +21,7 @@ def _gfile_join(a, b):
         return fs.join(a, b)
 
 
-def make_tsv(metadata, save_path, metadata_header=None):
+def make_tsv(metadata, save_path, metadata_header=None) -> None:
     if not metadata_header:
         metadata = [str(x) for x in metadata]
     else:
@@ -37,7 +37,7 @@ def make_tsv(metadata, save_path, metadata_header=None):
 
 
 # https://github.com/tensorflow/tensorboard/issues/44 image label will be squared
-def make_sprite(label_img, save_path):
+def make_sprite(label_img, save_path) -> None:
     from PIL import Image
     from io import BytesIO
 
@@ -74,13 +74,13 @@ def get_embedding_info(metadata, label_img, subdir, global_step, tag):
     return info
 
 
-def write_pbtxt(save_path, contents):
+def write_pbtxt(save_path, contents) -> None:
     config_path = _gfile_join(save_path, "projector_config.pbtxt")
     with tf.io.gfile.GFile(config_path, "wb") as f:
         f.write(tf.compat.as_bytes(contents))
 
 
-def make_mat(matlist, save_path):
+def make_mat(matlist, save_path) -> None:
     with tf.io.gfile.GFile(_gfile_join(save_path, "tensors.tsv"), "wb") as f:
         for x in matlist:
             x = [str(i.item()) for i in x]

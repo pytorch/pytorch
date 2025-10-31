@@ -347,7 +347,7 @@ class FSDPState(_State):
                 t.register_hook(self._pre_backward)
         return output
 
-    def _register_root_post_backward_final_callback(self):
+    def _register_root_post_backward_final_callback(self) -> None:
         if self._state_ctx.post_backward_final_callback_queued:
             return
         self._state_ctx.post_backward_final_callback_queued = True

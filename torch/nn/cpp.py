@@ -83,7 +83,7 @@ class ModuleWrapper(nn.Module):
         return self.cpp_module.training
 
     @training.setter
-    def training(self, mode):
+    def training(self, mode) -> None:
         self.cpp_module.train(mode)
 
     def __repr__(self):

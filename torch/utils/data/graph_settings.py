@@ -58,7 +58,7 @@ def apply_sharding(
     """
     graph = traverse_dps(datapipe)
 
-    def _helper(graph, prev_applied=None):
+    def _helper(graph, prev_applied=None) -> None:
         for dp, sub_graph in graph.values():
             applied = None
             if _is_sharding_datapipe(dp):

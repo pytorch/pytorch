@@ -29,7 +29,7 @@ if not is_available():
     class _DeviceMeshStub:
         pass
 
-    def _init_device_mesh_stub():
+    def _init_device_mesh_stub() -> None:
         pass
 
     sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]

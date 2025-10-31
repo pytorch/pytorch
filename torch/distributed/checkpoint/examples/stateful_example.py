@@ -39,7 +39,7 @@ class Model(torch.nn.Module):
         return torch.rand(8, 8, device="cuda")
 
 
-def _make_stateful(model, optim):
+def _make_stateful(model, optim) -> None:
     _patch_model_state_dict(model)
     _patch_optimizer_state_dict(model, optimizers=optim)
 

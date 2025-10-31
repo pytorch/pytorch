@@ -115,7 +115,7 @@ class ColwiseParallel(ParallelStyle):
             )
         return input_tensor
 
-    def _partition_linear_fn(self, name, module, device_mesh):
+    def _partition_linear_fn(self, name, module, device_mesh) -> None:
         # colwise shard weight/bias to Shard(0), weight be Shard(0)
         # means Colwise as Linear is input * weight^T + bias, where
         # weight would become Shard(1)
@@ -127,7 +127,7 @@ class ColwiseParallel(ParallelStyle):
             )
             module.register_parameter(name, dist_param)
 
-    def _partition_embedding_fn(self, name, module, device_mesh):
+    def _partition_embedding_fn(self, name, module, device_mesh) -> None:
         # colwise shard embedding.weight is straight forward as Shard(1)
         for name, param in module.named_parameters():
             dist_param = nn.Parameter(
@@ -237,7 +237,7 @@ class RowwiseParallel(ParallelStyle):
             )
         return input_tensor
 
-    def _partition_linear_fn(self, name, module, device_mesh):
+    def _partition_linear_fn(self, name, module, device_mesh) -> None:
         # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
         # means Rowwise as nn.Linear is input * weight^T + bias, where
         # weight would become Shard(0)
@@ -266,7 +266,7 @@ class RowwiseParallel(ParallelStyle):
                 ),
             )
 
-    def _partition_embedding_fn(self, name, module, device_mesh):
+    def _partition_embedding_fn(self, name, module, device_mesh) -> None:
         # rowwise shard embedding.weight is Shard(0)
         for name, param in module.named_parameters():
             dist_param = nn.Parameter(
@@ -373,7 +373,7 @@ class SequenceParallel(ParallelStyle):
 
     def _replicate_module_fn(
         self, name: str, module: nn.Module, device_mesh: DeviceMesh
-    ):
+    ) -> None:
         for p_name, param in module.named_parameters():
             # simple replication with fixed ones_ init from LayerNorm/RMSNorm, which allow
             # us to simply just use from_local

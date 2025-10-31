@@ -110,7 +110,7 @@ def _dcp_method_logger(
     return decorator
 
 
-def _init_logger(rank: int):
+def _init_logger(rank: int) -> None:
     logger.setLevel(logging.INFO)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)

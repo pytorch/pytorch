@@ -143,7 +143,7 @@ def _lazy_init(
     return state
 
 
-def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
+def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module) -> None:
     """
     Checks that all ``FlatParameter``s in ``module`` 's tree managed by
     ``state`` are on the expected device for *lazy initialization*.
@@ -311,7 +311,7 @@ def _reshard(
     state: _FSDPState,
     handle: FlatParamHandle,
     free_unsharded_flat_param: bool,
-):
+) -> None:
     """
     Reshards the handle. ``free_unsharded_flat_param`` indicates whether to
     free the handle's padded unsharded flat parameter.
@@ -703,7 +703,7 @@ def _post_backward_hook(
     handle: FlatParamHandle,
     flat_param,
     *unused: Any,
-):
+) -> None:
     """
     Reduce-scatters the gradient of ``handle`` 's ``FlatParameter``.
 
@@ -955,7 +955,7 @@ def _post_reduce_grad_callback(
     handle: FlatParamHandle,
     # Additional arguments needed for the callback logic
     grad_to_offload: torch.Tensor,
-):
+) -> None:
     """
     This callback captures any logic to run after the gradient reduction
     finishes. Currently, this offloads the gradient to CPU if CPU offloading is
@@ -970,7 +970,7 @@ def _offload_grad(
     state: _FSDPState,
     handle: FlatParamHandle,
     grad_to_offload: torch.Tensor,
-):
+) -> None:
     if not handle._offload_params:
         return
     # Offload the gradient to CPU to ensure parameters and gradients are on the
@@ -992,7 +992,7 @@ def _offload_grad(
 
 
 @no_type_check
-def _post_backward_use_sharded_grad_views(handle: FlatParamHandle):
+def _post_backward_use_sharded_grad_views(handle: FlatParamHandle) -> None:
     if not handle._use_orig_params:
         return
     # Since the handle's `FlatParameter` completed its gradient computation, we
@@ -1031,7 +1031,7 @@ def _cast_grad_to_param_dtype(
     state: _FSDPState,
     sharded_grad: torch.Tensor,
     param: FlatParameter,
-):
+) -> None:
     """
     Casts ``sharded_grad`` back to the full parameter dtype so that the
     optimizer step runs with that dtype. This performs an actual cast if
@@ -1084,7 +1084,7 @@ def _low_precision_hook_enabled(state: _FSDPState) -> bool:
 def _post_backward_final_callback(
     state: _FSDPState,
     module: nn.Module,
-):
+) -> None:
     """
     This waits for the post-backward to finish and performs some final cleanup.
     This runs at the end of the entire backward pass and should only be called
@@ -1346,7 +1346,7 @@ def _register_post_forward_hook(
 def _register_root_pre_forward_hook(
     state: _FSDPState,
     module: nn.Module,
-):
+) -> None:
     """
     Registers root pre-forward hook on ``module``, which should be the local
     FSDP root.
@@ -1544,7 +1544,7 @@ def _wait_for_computation_stream(
     computation_stream: torch.Stream,
     unshard_stream: torch.Stream,
     pre_unshard_stream: torch.Stream,
-):
+) -> None:
     """
     Has the unshard and pre-unshard streams wait for the computation stream.
     For example, this should be called in the FSDP root's pre-forward to
@@ -1562,7 +1562,7 @@ def _wait_for_computation_stream(
 
 def _reset_flat_param_grad_info_if_needed(
     handles: list[FlatParamHandle],
-):
+) -> None:
     """
     Clears the original parameters' gradients if needed. This method's CPU
     overhead is minimal, so we may call it throughout FSDP methods, which serve

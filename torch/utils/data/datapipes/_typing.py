@@ -388,7 +388,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
             reset_func = namespace["reset"]
 
             @functools.wraps(reset_func)
-            def conditional_reset(*args, **kwargs):
+            def conditional_reset(*args, **kwargs) -> None:
                 r"""
                 Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`.
 
@@ -413,7 +413,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 
-def _dp_init_subclass(sub_cls, *args, **kwargs):
+def _dp_init_subclass(sub_cls, *args, **kwargs) -> None:
     # Add function for datapipe instance to reinforce the type
     sub_cls.reinforce_type = reinforce_type
 

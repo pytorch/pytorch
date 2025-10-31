@@ -144,7 +144,7 @@ def shorten_filename(fn, *, base=None):
         return fn[len(prefix) + 1 :]
 
 
-def format_frame(frame, *, base=None, line=False):
+def format_frame(frame, *, base=None, line=False) -> str:
     """
     Format a FrameSummary in a short way, without printing full absolute path or code.
 
@@ -168,7 +168,7 @@ class CapturedTraceback:
         self.tb = tb
         self.skip = skip
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self.tb = None
 
     def summary(self):

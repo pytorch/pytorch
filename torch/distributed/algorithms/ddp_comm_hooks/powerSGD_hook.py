@@ -16,7 +16,7 @@ __all__ = ["PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"]
 logger = logging.getLogger(__name__)
 
 
-def _orthogonalize(matrices, epsilon=0):
+def _orthogonalize(matrices, epsilon=0) -> None:
     """
     Decide between Gram-Schmidt or QR factorization to orthogonalize a batch of matrices.
 
@@ -41,7 +41,7 @@ def _orthogonalize(matrices, epsilon=0):
         )
 
 
-def _orthogonalize_gram_schmidt(matrices, epsilon=0):
+def _orthogonalize_gram_schmidt(matrices, epsilon=0) -> None:
     """
     Apply Gram-Schmidt procedure to orthogonalize a batch of matrices.
 
@@ -103,7 +103,7 @@ def _should_compress(
     )
 
 
-def _report_compression_stats(bucket, state):
+def _report_compression_stats(bucket, state) -> None:
     """Report compression stats at frequency of ``compression_stats_logging_frequency`` specified in PowerSGD state."""
     if bucket.is_last() and state.iter >= state.next_stats_report:
         stats = state.compression_stats()

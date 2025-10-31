@@ -115,7 +115,7 @@ def create_c10d_store(
                 raise
 
 
-def _check_full_rank(store, world_size, timeout):
+def _check_full_rank(store, world_size, timeout) -> None:
     try:
         barrier(store, world_size, key_prefix=_TCP_STORE_INIT, barrier_timeout=timeout)
     except RuntimeError as e:

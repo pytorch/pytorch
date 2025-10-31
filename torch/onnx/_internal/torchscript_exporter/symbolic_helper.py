@@ -715,7 +715,7 @@ def _onnx_opset_unsupported_detailed(
 
 
 def _block_list_in_opset(name: str):
-    def symbolic_fn(*args, **kwargs):
+    def symbolic_fn(*args, **kwargs) -> NoReturn:
         raise errors.OnnxExporterError(
             f"ONNX export failed on {name}, which is not implemented for opset "
             f"{GLOBALS.export_onnx_opset_version}. "
@@ -896,7 +896,7 @@ def _lt_helper(g: jit_utils.GraphContext, input, other):
         return _lt9(g, input, other)
 
 
-def _interpolate_warning(interpolate_mode):
+def _interpolate_warning(interpolate_mode) -> None:
     onnx_op = (
         "onnx:Resize" if GLOBALS.export_onnx_opset_version >= 10 else "onnx:Upsample"
     )
@@ -1386,7 +1386,7 @@ def _arange_cast_helper(
     _C.Value | None,
     _C.Value | None,
 ]:
-    def _is_all_integral(scalars):
+    def _is_all_integral(scalars) -> bool:
         for scalar in scalars:
             scalar_type = _type_utils.JitScalarType.from_value(
                 scalar, _type_utils.JitScalarType.UNDEFINED
@@ -1606,7 +1606,7 @@ def _flatten_helper(g: jit_utils.GraphContext, input, start_dim, end_dim, dim):
     return _reshape_from_tensor(g, input, final_shape)
 
 
-def _is_split_static(split_size_or_sizes, _outputs):
+def _is_split_static(split_size_or_sizes, _outputs) -> bool:
     if _outputs is None:
         return False
     if (

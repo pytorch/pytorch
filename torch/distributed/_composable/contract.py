@@ -16,7 +16,7 @@ _T = TypeVar("_T", covariant=True)
 _P = ParamSpec("_P")
 
 
-def generate_state_key(string="__composable_api_state_key"):
+def generate_state_key(string="__composable_api_state_key") -> str:
     return f"{string}_{str(uuid.uuid4())}"
 
 
@@ -183,7 +183,9 @@ def contract(
                     f"Outputs: {num_new_modules} modules"
                 )
 
-            def check_fqn(orig_fqns: list[str], new_fqns: list[str], check_key: str):
+            def check_fqn(
+                orig_fqns: list[str], new_fqns: list[str], check_key: str
+            ) -> None:
                 if orig_fqns == new_fqns:
                     return
 

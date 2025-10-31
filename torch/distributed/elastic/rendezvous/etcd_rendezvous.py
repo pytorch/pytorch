@@ -888,7 +888,7 @@ class EtcdRendezvous:
         # release the Python's GIL! An example of this is calling a pybind11
         # extension function that is blocking / long-running, but is not
         # doing a scoped release of the GIL.
-        def lease_worker(client, path, ttl, stop_event):
+        def lease_worker(client, path, ttl, stop_event) -> None:
             while True:
                 try:
                     client.refresh(path, ttl=ttl)

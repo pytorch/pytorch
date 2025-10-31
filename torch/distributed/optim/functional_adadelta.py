@@ -53,7 +53,7 @@ class _FunctionalAdadelta:
 
         self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]) -> None:
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

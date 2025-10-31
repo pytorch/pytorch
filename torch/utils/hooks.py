@@ -124,7 +124,7 @@ class BackwardHook:
 
         return tuple(res)
 
-    def _set_user_hook(self, grad_fn):
+    def _set_user_hook(self, grad_fn) -> None:
         def hook(grad_input, _):
             if self.grad_outputs is None:
                 # This happens because the gradient in your nn.Module flows to
@@ -190,7 +190,7 @@ class BackwardHook:
         return out, tensors_idx
 
     def setup_input_hook(self, args):
-        def fn(grad_fn):
+        def fn(grad_fn) -> None:
             self._set_user_hook(grad_fn)
 
         res, input_idx = self._apply_on_tensors(fn, args)
@@ -199,7 +199,7 @@ class BackwardHook:
         return res
 
     def setup_output_hook(self, args):
-        def fn(grad_fn):
+        def fn(grad_fn) -> None:
             def hook(_, grad_output):
                 self.grad_outputs = self._pack_with_none(self.output_tensors_index,
                                                          grad_output,

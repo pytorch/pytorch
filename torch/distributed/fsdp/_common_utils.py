@@ -187,7 +187,7 @@ class HandleTrainingState(Enum):
     SUMMON_FULL_PARAMS = auto()
 
 
-def _is_composable(state: _FSDPState):
+def _is_composable(state: _FSDPState) -> bool:
     # TODO: This is a temporary hack for differentiate between code paths.
     return not isinstance(state, nn.Module)
 
@@ -305,7 +305,7 @@ def _get_param_to_fqns(
             includes the FQNs across all encounters. (Default: ``True``)
     """
 
-    def module_fn(module, prefix, tree_level, param_to_fqns):
+    def module_fn(module, prefix, tree_level, param_to_fqns) -> None:
         for param_name, param in _named_parameters_with_duplicates(
             module, recurse=False
         ):
@@ -400,7 +400,9 @@ def _apply_to_modules(
     to remove the prefix.
     """
 
-    def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
+    def f(
+        module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs
+    ) -> None:
         # Call the module function before recursing over children (pre-order)
         module_fn(module, prefix, tree_level, *args, **kwargs)
         for submodule_name, submodule in module.named_children():

@@ -89,7 +89,9 @@ def _param_groups_val_list(optimizer: Optimizer, key: str) -> list[Any]:
     ]
 
 
-def _update_param_group_val(param_group: dict[str, Any], key: str, val: float | Tensor):
+def _update_param_group_val(
+    param_group: dict[str, Any], key: str, val: float | Tensor
+) -> None:
     """Set param_group[key] to val without aliasing or assignment when they're
     both tensors. Raises a KeyError if param_group[key] does not exist.
     """
@@ -288,7 +290,7 @@ class LRScheduler:
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self._update_lr(epoch)
 
-    def _update_lr(self, epoch: Optional[int] = None):
+    def _update_lr(self, epoch: Optional[int] = None) -> None:
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
@@ -1685,7 +1687,7 @@ class ReduceLROnPlateau(LRScheduler):
         )
         self._reset()
 
-    def _reset(self):
+    def _reset(self) -> None:
         """Reset num_bad_epochs counter and cooldown counter."""
         self.best = self.mode_worse
         self.cooldown_counter = 0
@@ -1718,7 +1720,7 @@ class ReduceLROnPlateau(LRScheduler):
 
         self._last_lr = _param_groups_val_list(self.optimizer, "lr")
 
-    def _reduce_lr(self, epoch):
+    def _reduce_lr(self, epoch) -> None:
         if len(self.optimizer.param_groups) != len(self.min_lrs):
             if self.default_min_lr is None:
                 raise RuntimeError(
@@ -1759,7 +1761,7 @@ class ReduceLROnPlateau(LRScheduler):
         else:  # mode == 'max' and epsilon_mode == 'abs':
             return a > best + self.threshold
 
-    def _init_is_better(self, mode, threshold, threshold_mode):
+    def _init_is_better(self, mode, threshold, threshold_mode) -> None:
         if mode not in {"min", "max"}:
             raise ValueError("mode " + mode + " is unknown!")
         if threshold_mode not in {"rel", "abs"}:
@@ -1961,7 +1963,7 @@ class CyclicLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
         self.base_lrs = base_lrs
 
-    def _init_scale_fn(self):
+    def _init_scale_fn(self) -> None:
         if self._scale_fn_custom is not None:
             return
         if self.mode == "triangular":

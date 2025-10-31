@@ -365,7 +365,7 @@ def _single_tensor_adam(
     capturable: bool,
     differentiable: bool,
     decoupled_weight_decay: bool,
-):
+) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
@@ -572,7 +572,7 @@ def _multi_tensor_adam(
     capturable: bool,
     differentiable: bool,
     decoupled_weight_decay: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 

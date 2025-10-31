@@ -106,7 +106,7 @@ def auto_quantize(func, qtype, quant_loss=None):
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args, **kwargs) -> None:
         group = kwargs.get("group")
         async_op = kwargs.get("async_op", False)
         if async_op is True:

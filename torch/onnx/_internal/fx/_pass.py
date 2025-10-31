@@ -66,7 +66,7 @@ def _patch_difflib_sequence_matcher_init():
     """
     original_init = difflib.SequenceMatcher.__init__
 
-    def patched_init(self, isjunk=None, a="", b="", autojunk=True):
+    def patched_init(self, isjunk=None, a="", b="", autojunk=True) -> None:
         original_init(self, isjunk, a, b, autojunk=False)
 
     difflib.SequenceMatcher.__init__ = patched_init  # type: ignore[assignment]

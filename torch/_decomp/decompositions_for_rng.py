@@ -3,6 +3,7 @@
 import functools
 from collections import defaultdict
 from collections.abc import Callable
+from typing import NoReturn
 
 import torch
 import torch._decomp as decomp
@@ -19,7 +20,7 @@ def register_rng_decomposition(aten_op):
     return decomp.register_decomposition(aten_op, rng_decompositions)
 
 
-def throw_on_non_cuda(device):
+def throw_on_non_cuda(device) -> NoReturn:
     raise RuntimeError(
         f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
         f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
@@ -74,20 +75,20 @@ class PhiloxState:
     def __init__(self) -> None:
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.seed = torch.tensor(())
         self.base_offset = torch.tensor(())
         self.relative_offset = 0
         self.offset_advanced_alteast_once = False
 
-    def validate_state(self):
+    def validate_state(self) -> None:
         assert self.seed.numel() != 0 and self.base_offset.numel() != 0
 
-    def advance_offset(self, consumed_offset):
+    def advance_offset(self, consumed_offset) -> None:
         self.offset_advanced_alteast_once = True
         self.relative_offset = self.relative_offset + consumed_offset
 
-    def set_state(self, seed, base_offset, relative_offset=0):
+    def set_state(self, seed, base_offset, relative_offset=0) -> None:
         self.seed = seed
         self.base_offset = base_offset
         self.relative_offset = relative_offset
@@ -101,7 +102,7 @@ class PhiloxState:
         self.validate_state()
         return torch.stack([self.seed, self.base_offset + self.relative_offset])
 
-    def set_state_from_tensor(self, state):
+    def set_state_from_tensor(self, state) -> None:
         # Only needed because we override set_rng_state.
         self.seed, self.base_offset = torch.unbind(state)
         self.relative_offset = 0

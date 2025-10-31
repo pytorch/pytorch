@@ -732,7 +732,7 @@ class _WorldMeta(type):
         return _world.default_pg
 
     @WORLD.setter
-    def WORLD(cls, pg: Optional[ProcessGroup]):
+    def WORLD(cls, pg: Optional[ProcessGroup]) -> None:
         _world.default_pg = pg
 
 
@@ -1178,7 +1178,7 @@ def _canonicalize_group_rank(
     return group_rank
 
 
-def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
+def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str) -> None:
     if group.rank() == rank:
         raise ValueError(
             f"Invalid {rank_type} rank: {rank_type} rank should not be the same as "
@@ -1830,7 +1830,7 @@ def init_process_group(
     old_hook = sys.excepthook
     excepthook_prefix = f"[rank{get_rank()}]"
 
-    def _distributed_excepthook(*args):
+    def _distributed_excepthook(*args) -> None:
         old_stderr = sys.stderr
         sys.stderr = buf = io.StringIO()
         try:
@@ -2293,7 +2293,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _unregister_process_group(pg.group_name)
 
 
-def _abort_process_group(group: Optional[ProcessGroup] = None):
+def _abort_process_group(group: Optional[ProcessGroup] = None) -> None:
     """
     Abort a given process group. If group.WORLD (i.e. `None`) is given, all
     process groups including the default one will be aborted.
@@ -2610,11 +2610,11 @@ class _CoalescingManager:
     def __init__(self) -> None:
         self.works: list[Work] = []
 
-    def append(self, work: Optional[Work] = None):
+    def append(self, work: Optional[Work] = None) -> None:
         if work:
             self.works.append(work)
 
-    def wait(self):
+    def wait(self) -> None:
         for work in self.works:
             work.wait()
 
@@ -4237,7 +4237,7 @@ def all_gather_coalesced(
     # Otherwise, the backend has sync'ed at CPP level
 
 
-def _validate_output_list_for_rank(my_rank, dst, gather_list):
+def _validate_output_list_for_rank(my_rank, dst, gather_list) -> None:
     if dst == my_rank:
         if not gather_list:
             raise ValueError(

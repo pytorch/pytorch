@@ -46,7 +46,9 @@ def get_inductor_decomp_graphs(model: nn.Module, args, kwargs):
     return graphs
 
 
-def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=False):
+def print_op_coverage_summary(
+    model: nn.Module, args, kwargs, *, output_csv=False
+) -> None:
     """
     Util to print the operator coverage summary of a certain model with tabulute.
 

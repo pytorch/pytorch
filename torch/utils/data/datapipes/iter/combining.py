@@ -283,7 +283,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.end_ptr = None
         self._child_stop = [True for _ in range(self.num_instances)]
 
-    def _cleanup(self):
+    def _cleanup(self) -> None:
         while self.buffer:
             d = self.buffer.popleft()
             StreamWrapper.close_streams(d)
@@ -582,7 +582,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self._child_stop = [True for _ in range(self.num_instances)]
         self.main_datapipe_exhausted = False
 
-    def _cleanup(self, instance_id: Optional[int] = None):
+    def _cleanup(self, instance_id: Optional[int] = None) -> None:
         ids = (
             range(self.num_instances)
             if instance_id is None

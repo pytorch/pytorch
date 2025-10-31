@@ -147,25 +147,25 @@ class GraphPy:
         self.shallowest_scope_name = "default"
         self.scope_name_appeared = []
 
-    def append(self, x):
+    def append(self, x) -> None:
         if isinstance(x, NodePyIO):
             self.nodes_io[x.debugName] = x
         if isinstance(x, NodePyOP):
             self.nodes_op.append(x)
 
-    def printall(self):
+    def printall(self) -> None:
         print("all nodes")
         for node in self.nodes_op:
             print(node)
         for key in self.nodes_io:
             print(self.nodes_io[key])
 
-    def find_common_root(self):
+    def find_common_root(self) -> None:
         for fullscope in self.scope_name_appeared:
             if fullscope:
                 self.shallowest_scope_name = fullscope.split("/")[0]
 
-    def populate_namespace_from_OP_to_IO(self):
+    def populate_namespace_from_OP_to_IO(self) -> None:
         for node in self.nodes_op:
             for node_output, outputSize in zip(node.outputs, node.outputstensor_size):
                 self.scope_name_appeared.append(node.scopeName)

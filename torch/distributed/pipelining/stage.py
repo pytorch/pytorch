@@ -212,7 +212,7 @@ class _PipelineStageBase(ABC):
         return self._has_backward
 
     @has_backward.setter
-    def has_backward(self, has_backward: bool):
+    def has_backward(self, has_backward: bool) -> None:
         self._has_backward = has_backward
 
     @property
@@ -229,7 +229,7 @@ class _PipelineStageBase(ABC):
         """
         return self.stage_index == self.num_stages - 1
 
-    def _check_chunk_id(self, chunk_id: int):
+    def _check_chunk_id(self, chunk_id: int) -> None:
         if self.chunks is None:
             raise RuntimeError(
                 "Attempted to access chunk_id before chunks have been configured."
@@ -239,7 +239,7 @@ class _PipelineStageBase(ABC):
                 f"Chunk id {chunk_id} is out of range [0, {self.chunks})"
             )
 
-    def _configure_outputs_meta(self, outputs_meta: tuple[torch.Tensor, ...]):
+    def _configure_outputs_meta(self, outputs_meta: tuple[torch.Tensor, ...]) -> None:
         """
         Track the output shapes/dtype of this stage since they determine the send operation(s) which must match
         recv operations of the next stage.  The next stage _will_ be freezing its recv buffers based on its initial
@@ -292,7 +292,7 @@ class _PipelineStageBase(ABC):
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def _prepare_backward_infra(self, num_microbatches: int):
+    def _prepare_backward_infra(self, num_microbatches: int) -> None:
         # TODO: this is needed for backward_maybe_with_nosync
         self.chunks = num_microbatches
 
@@ -733,7 +733,7 @@ class _PipelineStageBase(ABC):
         loss=None,
         full_backward: bool = True,
         last_backward=False,
-    ):
+    ) -> None:
         """
         Perform backward pass on the module.
         This should only be called once per microbatch.
@@ -837,7 +837,7 @@ class _PipelineStageBase(ABC):
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
-    def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False):
+    def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False) -> None:
         # skip backward computation if backward is not enabled
         if not self.has_backward:
             return
@@ -880,7 +880,7 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs, last_backward=last_backward
                 )
 
-    def _validate_fwd_input(self, args, kwargs):
+    def _validate_fwd_input(self, args, kwargs) -> None:
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
 
         if self.is_first:
@@ -911,7 +911,7 @@ class _PipelineStageBase(ABC):
             f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
         )
 
-    def _validate_fwd_outputs(self, outputs: tuple[torch.Tensor, ...]):
+    def _validate_fwd_outputs(self, outputs: tuple[torch.Tensor, ...]) -> None:
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
         Most likely, this could be cause either by incorrect user specification of output shapes, or because
         shape inference was done on the original model but then at runtime the model is wrapped with something like
@@ -978,7 +978,7 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def _post_backward(self, grad_scale_factor: int):
+    def _post_backward(self, grad_scale_factor: int) -> None:
         # Manually call post backward for FSDP
         if isinstance(self.submod, FSDPModule):
             fsdp_module = self.submod
@@ -1061,7 +1061,7 @@ class _PipelineStage(_PipelineStageBase):
         # Cast submodule to device
         self._move_submod_to_device()
 
-    def _move_submod_to_device(self):
+    def _move_submod_to_device(self) -> None:
         # Move submodule to indicated device if possible
         # Note: we cannot move meta module to real devices because meta tensors
         # do not support to() method. One needs to do an in-place tensor swap in

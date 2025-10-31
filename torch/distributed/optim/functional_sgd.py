@@ -56,7 +56,7 @@ class _FunctionalSGD:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def step_param(self, param: Tensor, grad: Optional[Tensor]) -> None:
         """Similar to self.step, but operates on a single parameter and
         its gradient.
         """
@@ -106,7 +106,7 @@ class _FunctionalSGD:
         if momentum_buffer is not None:
             state["momentum_buffer"] = momentum_buffer
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]) -> None:
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

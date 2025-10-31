@@ -66,7 +66,7 @@ def _init_model(rank, world_size):
     return model, optim
 
 
-def _print(msg):
+def _print(msg) -> None:
     if dist.get_rank() == 0:
         print(msg)
 

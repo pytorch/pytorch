@@ -156,7 +156,7 @@ class WeakIdKeyDictionary(MutableMapping):
 
         self.ref_type = ref_type  # CHANGED
 
-        def remove(k, selfref=ref(self)):
+        def remove(k, selfref=ref(self)) -> None:
             self = selfref()
             if self is not None:
                 if self._iterating:
@@ -175,7 +175,7 @@ class WeakIdKeyDictionary(MutableMapping):
         if dict is not None:
             self.update(dict)
 
-    def _commit_removals(self):
+    def _commit_removals(self) -> None:
         # NOTE: We don't need to call this method before mutating the dict,
         # because a dead weakref never compares equal to a live weakref,
         # even if they happened to refer to equal objects.
@@ -193,7 +193,7 @@ class WeakIdKeyDictionary(MutableMapping):
             except KeyError:
                 pass
 
-    def _scrub_removals(self):
+    def _scrub_removals(self) -> None:
         d = self.data
         self._pending_removals = [k for k in self._pending_removals if k in d]
         self._dirty_len = False

@@ -239,7 +239,7 @@ def _single_tensor_adamax(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -319,7 +319,7 @@ def _multi_tensor_adamax(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if differentiable:
         raise AssertionError("_foreach ops don't support autograd")
 

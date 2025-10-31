@@ -1241,7 +1241,7 @@ def is_pruned(module):
     return False
 
 
-def _validate_pruning_amount_init(amount):
+def _validate_pruning_amount_init(amount) -> None:
     r"""Validate helper to check the range of amount at init.
 
     Args:
@@ -1271,7 +1271,7 @@ def _validate_pruning_amount_init(amount):
         )
 
 
-def _validate_pruning_amount(amount, tensor_size):
+def _validate_pruning_amount(amount, tensor_size) -> None:
     r"""Validate that the pruning amount is meaningful wrt to the size of the data.
 
     Validation helper to check that the amount of parameters to prune
@@ -1295,7 +1295,7 @@ def _validate_pruning_amount(amount, tensor_size):
         )
 
 
-def _validate_structured_pruning(t):
+def _validate_structured_pruning(t) -> None:
     r"""Validate that the tensor to be pruned is at least 2-Dimensional.
 
     Validation helper to check that the tensor to be pruned is multi-
@@ -1342,7 +1342,7 @@ def _compute_nparams_toprune(amount, tensor_size):
         return round(amount * tensor_size)
 
 
-def _validate_pruning_dim(t, dim):
+def _validate_pruning_dim(t, dim) -> None:
     r"""Validate that the pruning dimension is within the bounds of the tensor dimension.
 
     Args:

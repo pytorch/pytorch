@@ -409,7 +409,7 @@ def init_from_local_shards(
     )
 
 
-def state_dict_hook(module, destination, prefix, local_metadata):
+def state_dict_hook(module, destination, prefix, local_metadata) -> None:
     """
     Hook to add ShardedTensor to Module's ``state_dict``. Needs to be
     registered to the Module using
@@ -432,7 +432,7 @@ def pre_load_state_dict_hook(
     missing_keys,
     unexpected_keys,
     error_msgs,
-):
+) -> None:
     """
     Pre-load state dict hook to add ShardedTensor to the module.
     """

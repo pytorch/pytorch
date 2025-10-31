@@ -106,7 +106,7 @@ class LocalShardsWrapper(torch.Tensor):
         return self.local_shards
 
     @shards.setter
-    def shards(self, local_shards: list[torch.Tensor]):
+    def shards(self, local_shards: list[torch.Tensor]) -> None:
         self.local_shards = local_shards
 
     @cached_property

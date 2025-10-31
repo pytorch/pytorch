@@ -921,7 +921,7 @@ def im2col(
     torch._check(len(padding) == 2, lambda: "im2col(): only 2D padding supported")
     torch._check(len(stride) == 2, lambda: "im2col(): only 2D stride supported")
 
-    def check_positive(param, param_name, strict=True):
+    def check_positive(param, param_name, strict=True) -> None:
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
             cond, lambda: f"{param_name} should be greater than zero, but got {param}"
@@ -1006,7 +1006,7 @@ def col2im(
     torch._check(len(padding) == 2, lambda: "only 2D padding supported")
     torch._check(len(stride) == 2, lambda: "only 2D stride supported")
 
-    def check_positive(param, param_name, strict=True):
+    def check_positive(param, param_name, strict=True) -> None:
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
             cond, lambda: f"{param_name} should be greater than zero, but got {param}"
@@ -1301,7 +1301,7 @@ def _pad_chunk(
     return padded_tensors
 
 
-def have_same_ndims(tensors: list[Tensor]):
+def have_same_ndims(tensors: list[Tensor]) -> bool:
     ndim = tensors[0].ndim
     for tensor in tensors:
         if tensor.ndim != ndim:
@@ -1309,7 +1309,7 @@ def have_same_ndims(tensors: list[Tensor]):
     return True
 
 
-def leading_dimension_matches(tensors: list[Tensor], dim: int):
+def leading_dimension_matches(tensors: list[Tensor], dim: int) -> None:
     leading_dim_sizes = tensors[0].size()[:dim]
     for tensor in tensors:
         torch._check(
@@ -3598,7 +3598,7 @@ def select_one_layer_lstm_function(input, hx, params):
         * params: the weight and bias tensors of LSTM
     """
 
-    def use_mkldnn(input, hx, params):
+    def use_mkldnn(input, hx, params) -> bool:
         if not torch._C._get_mkldnn_enabled():
             return False
 

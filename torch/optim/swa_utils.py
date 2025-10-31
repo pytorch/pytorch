@@ -43,7 +43,9 @@ def get_ema_multi_avg_fn(decay=0.999):
         )
 
     @torch.no_grad()
-    def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
+    def ema_update(
+        ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(
             ema_param_list[0]
@@ -64,7 +66,7 @@ def get_swa_multi_avg_fn():
         averaged_param_list: PARAM_LIST,
         current_param_list: PARAM_LIST,
         num_averaged: Union[Tensor, int],
-    ):
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
             averaged_param_list[0]
@@ -512,7 +514,7 @@ class SWALR(LRScheduler):
             for group, lr in zip(self.optimizer.param_groups, prev_lrs)
         ]
 
-    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]) -> None:
         self._anneal_strategy = anneal_strategy
         if anneal_strategy == "cos":
             self.anneal_func = self._cosine_anneal

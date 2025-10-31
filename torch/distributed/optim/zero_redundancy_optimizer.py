@@ -128,7 +128,7 @@ class _ZeROJoinHook(JoinHook):
         self.zero = zero
         super().__init__()
 
-    def main_hook(self):
+    def main_hook(self) -> None:
         """
         Perform an optimizer step.
 
@@ -807,7 +807,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 )
         return handles
 
-    def _sync_params(self):
+    def _sync_params(self) -> None:
         r"""
         Sync all parameter shards across the ranks.
 
@@ -1598,7 +1598,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         )
         return bucket_index % self.world_size
 
-    def _check_overlap_initialized(self):
+    def _check_overlap_initialized(self) -> None:
         r"""
         Check the delayed initialization depending on the value of ``overlap_with_ddp``.
 

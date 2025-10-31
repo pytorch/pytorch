@@ -91,7 +91,7 @@ class _Row:
         self._columns: tuple[_Column, ...] = ()
         self._num_threads = num_threads
 
-    def register_columns(self, columns: tuple[_Column, ...]):
+    def register_columns(self, columns: tuple[_Column, ...]) -> None:
         self._columns = columns
 
     def as_column_strings(self):

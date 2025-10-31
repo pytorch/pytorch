@@ -5,7 +5,9 @@ from typing import Optional
 from torch.distributed._shard.metadata import ShardMetadata
 
 
-def _check_shard_metadata_pair_overlap(shard1: ShardMetadata, shard2: ShardMetadata):
+def _check_shard_metadata_pair_overlap(
+    shard1: ShardMetadata, shard2: ShardMetadata
+) -> bool:
     """
     Checks if two shards overlap.
     """
@@ -70,7 +72,7 @@ def _find_1d_overlapping_shards(
     return None
 
 
-def validate_non_overlapping_shards_metadata(shards: list[ShardMetadata]):
+def validate_non_overlapping_shards_metadata(shards: list[ShardMetadata]) -> None:
     """
     Ensures none of the shards overlap with each other.
 

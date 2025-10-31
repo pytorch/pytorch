@@ -235,7 +235,7 @@ def _single_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -306,7 +306,7 @@ def _multi_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 

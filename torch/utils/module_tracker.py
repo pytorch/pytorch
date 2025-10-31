@@ -68,12 +68,12 @@ class ModuleTracker:
         self._has_callback = False
         self._hooks: list[RemovableHandle] = []
 
-    def _maybe_set_engine_callback(self):
+    def _maybe_set_engine_callback(self) -> None:
         # This assumes no concurrent calls to backward
         if self._has_callback:
             return
 
-        def callback():
+        def callback() -> None:
             self.parents = {"Global"}
             self._has_callback = False
 
@@ -99,7 +99,7 @@ class ModuleTracker:
         return mod_name
 
     def _get_append_fn(self, name, is_bw):
-        def fn(*args):
+        def fn(*args) -> None:
             if is_bw:
                 self._maybe_set_engine_callback()
             if name in self.parents:
@@ -113,7 +113,7 @@ class ModuleTracker:
         return fn
 
     def _get_pop_fn(self, name, is_bw):
-        def fn(*args):
+        def fn(*args) -> None:
             if name in self.parents:
                 self.parents.remove(name)
             else:
@@ -125,7 +125,7 @@ class ModuleTracker:
 
         return fn
 
-    def _fw_pre_hook(self, mod, input):
+    def _fw_pre_hook(self, mod, input) -> None:
         name = self._get_mod_name(mod)
         self._get_append_fn(name, False)()
 
@@ -136,7 +136,7 @@ class ModuleTracker:
                 register_multi_grad_hook(tensors, self._get_pop_fn(name, True))
             )
 
-    def _fw_post_hook(self, mod, input, output):
+    def _fw_post_hook(self, mod, input, output) -> None:
         name = self._get_mod_name(mod)
         self._get_pop_fn(name, False)()
 

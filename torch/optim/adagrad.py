@@ -336,7 +336,7 @@ def _single_tensor_adagrad(
     maximize: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
@@ -402,7 +402,7 @@ def _multi_tensor_adagrad(
     maximize: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if differentiable:
         raise AssertionError("_foreach ops don't support autograd")
     if grad_scale is not None or found_inf is not None:

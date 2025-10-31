@@ -38,7 +38,7 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
-        def register(target):
+        def register(target) -> None:
             if not isinstance(target, torch._ops.OpOverloadPacket):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
@@ -619,7 +619,7 @@ def convert_num_with_suffix(number, suffix):
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
-def convert_to_percent_str(num, denom):
+def convert_to_percent_str(num, denom) -> str:
     if denom == 0:
         return "0%"
     return f"{num / denom:.2%}"

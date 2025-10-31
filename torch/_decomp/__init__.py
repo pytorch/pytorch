@@ -61,7 +61,7 @@ def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
     return op == torch.ops.aten.native_batch_norm.default
 
 
-def _add_op_to_registry(registry, op, fn):
+def _add_op_to_registry(registry, op, fn) -> None:
     """
     This is an internal API for adding an op to the decomposition table.
 
@@ -211,7 +211,7 @@ def register_decomposition(
         if registry is None:
             registry = global_decomposition_table[type]
 
-        def register(op):
+        def register(op) -> None:
             _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once

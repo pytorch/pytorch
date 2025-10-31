@@ -106,7 +106,7 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
 
     def module_fn(
         module, prefix, tree_level, sharded_tree_info, sharded_module_name_to_fqns
-    ):
+    ) -> None:
         num_spaces = tree_level * 4
         trimed_prefix = (
             prefix[:-1] if (len(prefix) > 0 and prefix[-1] == ".") else prefix

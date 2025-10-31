@@ -1555,7 +1555,7 @@ def _patch_model_state_dict(
         options=options,
     )
 
-    def load_state_dict_call(state_dict: dict[str, Any]):
+    def load_state_dict_call(state_dict: dict[str, Any]) -> None:
         _load_state_dict_call(model_state_dict=state_dict)
 
     model.load_state_dict = load_state_dict_call
@@ -1614,7 +1614,7 @@ def _patch_optimizer_state_dict(
         options=options,
     )
 
-    def load_state_dict_call(state_dict: dict[str, Any]):
+    def load_state_dict_call(state_dict: dict[str, Any]) -> None:
         _load_state_dict_call(optim_state_dict=state_dict)
 
     _patched_state_dict.add(state_dict_call)

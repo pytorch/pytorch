@@ -33,7 +33,7 @@ def sparse_adam(
     beta2: float,
     lr: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs Sparse Adam algorithm computation.
 
     See :class:`~torch.optim.SparseAdam` for details.

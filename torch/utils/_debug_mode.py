@@ -334,19 +334,19 @@ class DebugMode(TorchDispatchMode):
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
 
-    def module_tracker_setup(self):
+    def module_tracker_setup(self) -> None:
         from torch.distributed._tools.mod_tracker import ModTracker
 
         self.module_tracker = ModTracker()
 
         # module pre-fw hook: record module call
-        def pre_fw_hook(module, input):
+        def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
             self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
             self.call_depth += 1
 
         # module post-fw hook: decrement call depth
-        def post_fw_hook(module, input, output):
+        def post_fw_hook(module, input, output) -> None:
             self.call_depth -= 1
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)

@@ -57,7 +57,7 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    def lazy_init(self, device: torch.device):
+    def lazy_init(self, device: torch.device) -> None:
         self.device_handle = _get_device_handle(device.type)
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
@@ -247,7 +247,7 @@ class FSDPParamGroup:
             )
         self._reduce_dtype = next(iter(reduce_dtypes)) if trainable_params else None
 
-    def lazy_init(self):
+    def lazy_init(self) -> None:
         # Lazy init should be idempotent
         # Users may change or register parameters after construction time.
         # For example, DoRA (https://arxiv.org/abs/2402.09353) initializes linear magnitudes based on
@@ -299,7 +299,7 @@ class FSDPParamGroup:
         )
 
     # Runtime #
-    def unshard(self, async_op: bool = False):
+    def unshard(self, async_op: bool = False) -> None:
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
@@ -340,7 +340,7 @@ class FSDPParamGroup:
                 self._all_gather_comm,
             )
 
-    def wait_for_unshard(self):
+    def wait_for_unshard(self) -> None:
         """
         1. In forward with implicit prefetching, to overlap the current copy-out
         with the next all-gather, we save a reference to the current all-gather
@@ -412,14 +412,14 @@ class FSDPParamGroup:
 
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
-    def _wait_all_gather_streams_on_event(self, event: Optional[torch.Event]):
+    def _wait_all_gather_streams_on_event(self, event: Optional[torch.Event]) -> None:
         # Calling `unshard` before lazy init means streams are not initialized
         if hasattr(self.comm_ctx, "all_gather_copy_in_stream") and event is not None:
             self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
         if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
-    def reshard(self):
+    def reshard(self) -> None:
         if self._training_state == TrainingState.FORWARD:
             if not self._reshard_after_forward:
                 return
@@ -466,7 +466,7 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
-    def pre_backward(self, default_prefetch: bool, *unused: Any):
+    def pre_backward(self, default_prefetch: bool, *unused: Any) -> None:
         if (
             compiled_autograd_enabled()
             and self._training_state == TrainingState.PRE_BACKWARD
@@ -485,7 +485,7 @@ class FSDPParamGroup:
             if default_prefetch and not compiled_autograd_enabled():
                 self._backward_prefetch()
 
-    def post_backward(self, *unused: Any):
+    def post_backward(self, *unused: Any) -> None:
         # This method should be idempotent and safe to call even when this
         # FSDP parameter group was not used in backward (should be a no-op)
         if not compiled_autograd_enabled():
@@ -582,7 +582,7 @@ class FSDPParamGroup:
                     all_reduce_input, all_reduce_event
                 )
 
-    def finalize_backward(self):
+    def finalize_backward(self) -> None:
         self._wait_for_post_backward()
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
@@ -599,7 +599,7 @@ class FSDPParamGroup:
             self._all_gather_result = None
         self._post_forward_indices.clear()
 
-    def _wait_for_post_backward(self):
+    def _wait_for_post_backward(self) -> None:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
@@ -644,19 +644,19 @@ class FSDPParamGroup:
             target_fsdp_param_group.unshard(async_op)
 
     # Utilities #
-    def _to_sharded(self):
+    def _to_sharded(self) -> None:
         if not self.is_sharded:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
 
-    def _to_sharded_post_forward(self):
+    def _to_sharded_post_forward(self) -> None:
         if not self.is_sharded_post_forward:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
 
-    def _to_unsharded(self):
+    def _to_unsharded(self) -> None:
         if not self.is_unsharded:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_unsharded()
@@ -790,7 +790,7 @@ class FSDPParamGroup:
     def __repr__(self):
         return f"FSDPParamGroup(fqn={self._module_fqn})"
 
-    def _validate_no_meta_params(self):
+    def _validate_no_meta_params(self) -> None:
         param_names_on_meta = [
             fsdp_param._param_fqn
             for fsdp_param in self.fsdp_params
@@ -804,7 +804,7 @@ class FSDPParamGroup:
                 "call module.reset_parameters() on each module to initialize values."
             )
 
-    def _validate_cpu_offload_params(self):
+    def _validate_cpu_offload_params(self) -> None:
         if not isinstance(self.offload_policy, CPUOffloadPolicy):
             return
         fsdp_params_not_on_cpu = [

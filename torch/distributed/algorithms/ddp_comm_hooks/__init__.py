@@ -30,7 +30,7 @@ from . import (
 __all__ = ["DDPCommHookType", "register_ddp_comm_hook"]
 
 
-def _ddp_comm_hook_wrapper(comm_hook, model, state):
+def _ddp_comm_hook_wrapper(comm_hook, model, state) -> None:
     model.register_comm_hook(state, comm_hook)
 
 
@@ -40,7 +40,7 @@ def _powerSGD_comm_hook_wrapper(
     state,
     matrix_approximation_rank,
     start_powerSGD_iter=1_000,
-):
+) -> None:
     """
     Wrap PowerSGD communication hook.
 

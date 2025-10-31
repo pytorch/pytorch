@@ -287,7 +287,7 @@ def _load_state_dict(
         central_plan = global_plan[0]
 
     @_dcp_method_logger(**ckpt_kwargs)
-    def read_data():
+    def read_data() -> None:
         if planner is None:
             raise AssertionError("planner is None")
         if central_plan is None:
