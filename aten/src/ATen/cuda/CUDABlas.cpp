@@ -513,24 +513,16 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   if (mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major == 10) {
-     TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoInit(ltHandle,
-                           computeType,
-                           scaleType,
-                           abType,
-                           abType,
-                           cType,
-                           cType,
-                           24,
-                           &heuristicResult.algo));
-     constexpr int sm = CUBLASLT_SEARCH_LIMITED_BY_ALGO_ID;
-     preference.setAttribute(CUBLASLT_MATMUL_PREF_SEARCH_MODE, sm);
+     CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, ldb, opb == CUBLAS_OP_T);
+     CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, ldc);
+
      TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
         ltHandle,
         computeDesc.descriptor(),
         Adesc.descriptor(),
-        Bdesc.descriptor(),
-        Cdesc.descriptor(),
-        Cdesc.descriptor(),
+        FakeBdesc.descriptor(),
+        FakeCdesc.descriptor(),
+        FakeCdesc.descriptor(),
         preference.descriptor(),
         1,
         &heuristicResult,
