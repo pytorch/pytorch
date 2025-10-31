@@ -37,6 +37,7 @@ TritonKernel::TritonKernel(
   TORCH_CHECK(reader != nullptr, "reader is null");
 
   std::string kernel_name{};
+  std::string symbol_name{};
   bool found_grid = false;
   for (const auto& attr : node_->attributes()) {
     if (attr.name.empty()) {
@@ -51,6 +52,8 @@ TritonKernel::TritonKernel(
           attr.value));
     } else if (attr.name == "name") {
       kernel_name = std::get<std::string>(attr.value);
+      size_t last_underscore = kernel_name.find_last_of('_');
+      symbol_name = kernel_name.substr(0, last_underscore);
     } else if (attr.name == "grid") {
       found_grid = true;
       auto grid = std::get<std::vector<int64_t>>(attr.value);
@@ -59,6 +62,12 @@ TritonKernel::TritonKernel(
           static_cast<int>(grid[0]),
           static_cast<int>(grid[1]),
           static_cast<int>(grid[2]));
+    } else if (attr.name == "num_cpu_threads") {
+      if (const int num_cpu_threads =
+              static_cast<int>(std::get<int64_t>(attr.value));
+          num_cpu_threads >= 0) {
+        launch_params_.num_cpu_threads = num_cpu_threads;
+      }
     } else if (attr.name == "num_warps") {
       if (const int num_warps = static_cast<int>(std::get<int64_t>(attr.value));
           num_warps > 0) {
@@ -76,6 +85,7 @@ TritonKernel::TritonKernel(
   }
 
   TORCH_CHECK(!kernel_name.empty(), "kernel name not found");
+  TORCH_CHECK(!symbol_name.empty(), "symbol_name not found");
   TORCH_CHECK(found_grid, "grid attribute not found");
   TORCH_CHECK(!output_indices_.empty(), "output_indices attribute not found");
 
@@ -85,20 +95,20 @@ TritonKernel::TritonKernel(
 
   if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".cubin")) {
     loader_ = TritonKernelManagerRegistry()->Create(
-        at::kCUDA, kernel_name, tmp_dir + kernel_name + ".cubin", "");
+        at::kCUDA, symbol_name, tmp_dir + kernel_name + ".cubin", "");
     TORCH_CHECK(
         loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
   } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".hsaco")) {
     loader_ = TritonKernelManagerRegistry()->Create(
-        at::kHIP, kernel_name, tmp_dir + kernel_name + ".hsaco", "");
+        at::kHIP, symbol_name, tmp_dir + kernel_name + ".hsaco", "");
     TORCH_CHECK(
         loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
   } else {
     loader_ = TritonKernelManagerRegistry()->Create(
         at::kCPU,
-        kernel_name,
+        symbol_name,
         tmp_dir + kernel_name + ".so",
         tmp_dir + kernel_name + ".launcher.so");
   }
