@@ -37,27 +37,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-# TODO: Move both of them to Windows AMI
-python -m pip install tensorboard==2.13.0 protobuf==5.29.4 pytest-subtests==0.13.1
-
-# Copied from https://github.com/pytorch/test-infra/blob/be01a40157c36cd5a48391fdf44a7bc3ebd4c7e3/aws/ami/windows/scripts/Installers/Install-Pip-Dependencies.ps1#L16 with some adjustments
-# pytest-rerunfailures==10.3 as 10.2 fails with INTERNALERROR> pluggy._manager.PluginValidationError: unknown hook 'pytest_configure_node'
-# scipy from 1.6.3 to 1.10
-# expecttest from 0.1.3 to 0.3.0
-# xdoctest from 1.0.2 to 1.3.0
-python -m pip install "future==0.18.2" "hypothesis==5.35.1" "expecttest==0.3.0" "librosa>=0.6.2" "scipy==1.10.1" "psutil==5.9.1" "pynvml==11.4.1" "pillow==9.2.0" "unittest-xml-reporting<=3.2.0,>=2.0.0" "pytest==7.1.3" "pytest-xdist==2.5.0" "pytest-flakefinder==1.1.0" "pytest-rerunfailures==10.3" "pytest-shard==0.1.2" "sympy==1.11.1" "xdoctest==1.3.0" "pygments==2.12.0" "opt-einsum>=3.3" "networkx==2.8.8" "mpmath==1.2.1" "pytest-cpp==2.3.0" "boto3==1.35.42"
-
-# Install Z3 optional dependency for Windows builds.
-python -m pip install z3-solver==4.15.1.0
-
-# Install tlparse for test\dynamo\test_structured_trace.py UTs.
-python -m pip install tlparse==0.4.0
-
-# Install parameterized
-python -m pip install parameterized==0.8.1
-
-# Install pulp for testing ilps under torch\distributed\_tools
-python -m pip install pulp==2.9.0
+# TODO: Move this to .ci/docker/requirements-ci.txt
+python -m pip install "psutil==5.9.1" nvidia-ml-py "pytest-shard==0.1.2"
 
 run_tests() {
     # Run nvidia-smi if available

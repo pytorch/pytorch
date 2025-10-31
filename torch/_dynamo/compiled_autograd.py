@@ -20,8 +20,8 @@ import itertools
 import operator
 import time
 from collections import Counter, defaultdict
-from collections.abc import Generator, Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Generator, Sequence
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -166,7 +166,7 @@ class NaNChecker:
             if grad is not None:
                 assert not torch.isnan(grad).any(), (
                     f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                    "having NaN gradient. This is not supported. {TURN_OFF_MSG}"
+                    f"having NaN gradient. This is not supported. {TURN_OFF_MSG}"
                 )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
@@ -969,7 +969,8 @@ class AutogradCompilerInstance:
 
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
         unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
-        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
+        i: int | None = None
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):  # noqa: B007
             unpack_nodes.update(node.users.keys())
         assert i == len(_graph_placeholders) - 1
 

@@ -20,8 +20,9 @@ from ...select_algorithm import (
 from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
+    freeze_irnodes,
     get_fwd_subgraph_outputs,
-    load_template,
+    load_flex_template,
     maybe_realize,
     set_head_dim_values,
 )
@@ -96,9 +97,9 @@ def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, me
 flex_decoding_template = TritonTemplate(
     name="flex_decoding",
     grid=flex_decoding_grid,
-    source=load_template("flex_decode")
-    + load_template("utilities")
-    + load_template("common"),
+    source=load_flex_template("flex_decode")
+    + load_flex_template("utilities")
+    + load_flex_template("common"),
 )
 
 
@@ -207,6 +208,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
 
     choices: list[Any] = []
     dtype = key.get_dtype()
@@ -363,6 +367,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     ]
 
     inputs_for_flex_decoding = (
+        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,

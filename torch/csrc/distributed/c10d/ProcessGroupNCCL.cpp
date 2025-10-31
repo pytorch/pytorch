@@ -165,7 +165,7 @@ ncclRedOpRAII getNcclReduceOp(
 }
 
 // Get a key string from device
-inline std::string getKeyFromDevice(at::Device& device) {
+inline std::string getKeyFromDevice(const at::Device& device) {
   return std::to_string(device.index());
 }
 
@@ -391,6 +391,10 @@ static std::
       std::string,
       std::unordered_map<std::string, std::string>>();
 #endif // (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+}
+
+void reset_nccl_trace() {
+  FlightRecorderCUDA::get()->reset_all();
 }
 
 std::string dump_nccl_trace(
@@ -1426,17 +1430,41 @@ bool ProcessGroupNCCL::abortComms(
   return true;
 }
 
+void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
+  // This extra dump is intended to capture the current snapshot of collectives
+  // When this process group is terminated for some exception out of NCCL
+  bool dumpExtraOnExec_ = getCvarBool(TORCH_NCCL_EXTRA_DUMP_ON_EXEC, false);
+  if (dumpExtraOnExec_) {
+    bool should_dump_local = false;
+    bool succeeded = shouldDump_.compare_exchange_strong(
+        should_dump_local,
+        true,
+        std::memory_order_release,
+        std::memory_order_acquire);
+    if (succeeded) {
+      LOG(INFO) << logPrefix() << "Sending extra dumping signal";
+      broadcastDumpSignal();
+      // When this routine is called, exception is captured so
+      // dumping by default_pg is not guaranteed due to early termination of
+      // process So we call dumping manually here
+      bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
+      // Stacktrace is not included at the moment to prevent deadlock due to GIL
+      dumpDebuggingInfo(false, onlyActive);
+    }
+  }
+}
+
 // Abort this backend.
 void ProcessGroupNCCL::abort() {
   // This will log counter for how long the abort actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__abort);
 
+  dumpExtraDebuggingInfo();
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
   watchdog_->notify();
-
   // launch abort asynchronously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchronously.";
@@ -1564,7 +1592,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   }
 }
 
-bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
+bool ProcessGroupNCCL::dumpDebuggingInfo(
+    bool includeStackTrace /*=true*/,
+    bool onlyActive /*=false*/) {
   // This will log counter for how long dumpDebuggingInfo actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
 
@@ -1575,12 +1605,12 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
   LOG(ERROR)
       << logPrefix()
       << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
-      << includeStackTrace;
+      << includeStackTrace << ", only active collectives: " << onlyActive;
   if (traceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace(true, includeStackTrace, false);
+    auto ncclTrace = dump_nccl_trace(true, includeStackTrace, onlyActive);
     // dump_nccl_trace will hang so we don't grab the global lock until we get
     // the trace.
     std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
@@ -1848,10 +1878,11 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // recorder and dump. After dump, the training should continue.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
       // best effort dump, not waiting for the dump here
+      bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
       LOG(INFO) << pg_->logPrefix()
                 << "Dump signal received through pipe, triggering FR dump.";
-      futures.emplace_back(std::async(std::launch::async, [this]() {
-        return this->pg_->dumpDebuggingInfo();
+      futures.emplace_back(std::async(std::launch::async, [this, onlyActive]() {
+        return this->pg_->dumpDebuggingInfo(false, onlyActive);
       }));
     }
   }
@@ -1869,7 +1900,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
-    bool dumpStackTrace = true;
+    bool dumpStackTrace = getCvarBool(TORCH_INCLUDE_STACK_TRACE, true);
+    bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
     ::c10d::C10dLoggingData debugLog;
     debugLog.integers["pg_id"] = static_cast<int64_t>(pg_->getUid());
     debugLog.integers["rank"] = pg_->getRank();
@@ -1878,8 +1910,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
     for (int i = 0; i < 2; i++) {
       std::future<bool> asyncDebugDump =
-          std::async(std::launch::async, [this, dumpStackTrace]() {
-            return this->pg_->dumpDebuggingInfo(dumpStackTrace);
+          std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
+            return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
           });
 
       // wait for the dump until timeout - log data
@@ -2041,6 +2073,9 @@ void ProcessGroupNCCL::Watchdog::run() {
     VLOG(2) << pg_->logPrefix()
             << "Process group watchdog thread terminated normally";
   } catch (std::exception& e) {
+    // This condition is triggered when any routine in watchdog gets an
+    // exception
+    pg_->dumpExtraDebuggingInfo();
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       VLOG(2)
@@ -3217,9 +3252,15 @@ void check_gpu_single_tensor(
   if (!tensor.is_cuda() || tensor.is_sparse()) {
     C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
   }
-  // Skip the following requirements for P2P operations
+  // Check memory format
   if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
+    // P2P is a bit relaxed, supporting transfer of a transposed tensor
     if (p2p) {
+      // But must be dense still
+      if (!tensor.is_non_overlapping_and_dense()) {
+        C10_THROW_ERROR(
+            ValueError, "Tensors for P2P must be non-overlapping and dense");
+      }
       TORCH_WARN_ONCE(
           "Detected non-contiguous tensor in P2P operations. It is user "
           "responsibility to guarantee that source and destination tensors have "
@@ -3504,6 +3545,30 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   if (enqueue) {
     workEnqueue(work);
+  }
+
+  {
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStream);
+    std::vector<at::Device> devices{device};
+    work->future_ = c10::make_intrusive<at::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()), devices);
+
+    // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+    // future blocks the stream this callback runs on the corresponding
+    // ncclEndEvents_ ensuring appropriate synchronization.
+    if (work->recordFunctionEndCallback_) {
+      work->future_->addCallback(
+          [work](at::ivalue::Future& /* unused */) {
+            work->recordFunctionEndCallback_();
+          },
+          // uses_future = false allows us to skip synchronization in
+          // ivalue::Future, but is only valid as long as the lambda doesn't use
+          // the "Future" argument.
+          /*uses_future=*/false);
+    }
+    // Mark the future as completed since coalesced operations complete
+    // immediately
+    work->future_->markCompleted(at::IValue(std::vector<at::Tensor>{}));
   }
 
   // Reset coalescing state
@@ -4705,6 +4770,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   bool same_size = check_same_size(outputTensors_);
   if (same_size) {
     // Flatten a vector of tensors into a single, stacked tensor.
+    // we can handle only contiguous inputs, because we are
+    // just sending ptr and numel to nccl
+    inputTensor = inputTensor.contiguous();
     at::Tensor outputFlattened = newLikeFlat(outputTensors_);
 
     return collective(
@@ -4852,6 +4920,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   bool same_size = check_same_size(inputTensors_);
   if (same_size) {
     // Flatten a vector of tensors into a single, stacked tensor.
+    outputTensor = outputTensor.contiguous();
     at::Tensor inputFlattened = newLikeFlat(inputTensors_);
 
     return collective(
@@ -5771,6 +5840,139 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   LOG(INFO) << logPrefix() << "Allocated tensor of size " << size
             << " from memory pool";
   return tensor;
+}
+
+#ifdef NCCL_HAS_COMM_SHRINK
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
+    const std::vector<int64_t>& ranks_to_exclude,
+    int shrink_flags,
+    const c10::intrusive_ptr<Backend::Options>& opts_override) {
+  // Runtime version check with better error message
+  auto runtime_version = torch::cuda::nccl::version();
+  TORCH_CHECK(
+      runtime_version >= NCCL_VERSION(2, 27, 0),
+      "ProcessGroupNCCL::shrink requires NCCL version 2.27.0 or later. "
+      "Found version: ",
+      runtime_version);
+
+  // Early validation with detailed error messages
+  TORCH_CHECK_VALUE(
+      !ranks_to_exclude.empty(), "ranks_to_exclude cannot be empty");
+  TORCH_CHECK_VALUE(
+      static_cast<int>(ranks_to_exclude.size()) < size_,
+      "Cannot exclude all ranks (",
+      ranks_to_exclude.size(),
+      " >= ",
+      size_,
+      ")");
+
+  // Validate ranks and convert to int efficiently
+  std::vector<int> int_ranks_to_exclude;
+  int_ranks_to_exclude.reserve(ranks_to_exclude.size());
+  for (int64_t rank : ranks_to_exclude) {
+    TORCH_CHECK_VALUE(
+        rank >= 0 && rank < size_,
+        "Invalid rank ",
+        rank,
+        " for group size ",
+        size_);
+    int_ranks_to_exclude.push_back(static_cast<int>(rank));
+  }
+
+  // Get primary communicator with better error context
+  auto primary_device_index = guessDeviceId();
+  auto primary_device = at::Device(at::kCUDA, primary_device_index);
+  const auto primary_key = getKeyFromDevice(primary_device);
+
+  std::shared_ptr<NCCLComm> primary_comm = getNCCLComm(primary_key);
+  TORCH_CHECK(
+      primary_comm,
+      "Primary NCCL communicator for device ",
+      primary_device,
+      " (key: ",
+      primary_key,
+      ") is not initialized");
+
+  // Cache device index before shrink operation
+  at::DeviceIndex parent_device_index = primary_comm->getDeviceIndex();
+
+  ncclConfig_t* config = nullptr;
+  // Default to inheriting from parent options
+  bool high_priority_stream = options_->is_high_priority_stream;
+  if (opts_override) {
+    auto nccl_opts =
+        c10::static_intrusive_pointer_cast<ProcessGroupNCCL::Options>(
+            opts_override);
+    config = &nccl_opts->config;
+    // If user provided override options, honor is_high_priority_stream as well
+    high_priority_stream = nccl_opts->is_high_priority_stream;
+  }
+
+  std::shared_ptr<NCCLComm> shrunk_comm = NCCLComm::shrink(
+      primary_comm.get(),
+      int_ranks_to_exclude,
+      (config != nullptr ? config : &options_->config),
+      shrink_flags);
+
+  // Calculate new size and get NCCL-assigned rank
+  int new_size = size_ - static_cast<int>(ranks_to_exclude.size());
+  int new_rank = shrunk_comm->rank_;
+
+  // Create new ProcessGroupNCCL with optimized options cloning
+  auto new_store = store_->clone();
+  auto new_opts = ProcessGroupNCCL::Options::create(high_priority_stream);
+  new_opts->timeout = options_->timeout;
+  if (config != nullptr) {
+    new_opts->config = *config;
+  } else {
+    new_opts->config = options_->config;
+  }
+
+  auto new_pg = c10::make_intrusive<ProcessGroupNCCL>(
+      new_store, new_rank, new_size, new_opts);
+
+  // Set up the new process group with optimized device setup
+  new_pg->initializeDeviceStateForComm(
+      at::Device(at::kCUDA, parent_device_index), shrunk_comm);
+
+  return c10::static_intrusive_pointer_cast<Backend>(new_pg);
+}
+
+#else // !NCCL_HAS_COMM_SHRINK
+// Backend interface override: raise consistent error when shrink is
+// unsupported.
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
+    const std::vector<int64_t>& /*ranks_to_exclude*/,
+    int /*shrink_flags*/,
+    const c10::intrusive_ptr<Backend::Options>& /*opts_override*/) {
+  TORCH_CHECK(
+      false,
+      "ProcessGroupNCCL::shrink requires NCCL version 2.27.0 or later, "
+      "but PyTorch was built with an older version or without NCCL shrink support.");
+}
+
+#endif // NCCL_HAS_COMM_SHRINK
+
+void ProcessGroupNCCL::initializeDeviceStateForComm(
+    const at::Device& device,
+    std::shared_ptr<NCCLComm> comm) {
+  const auto key = getKeyFromDevice(device);
+  std::unique_lock<std::mutex> lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+  auto stream = at::cuda::getStreamFromPool(
+      options_->is_high_priority_stream || force_high);
+
+  devNCCLCommMap_[key] = comm;
+  ncclStreams_.emplace(key, stream);
+  ncclEvents_.emplace(key, at::cuda::CUDAEvent(cudaEventDisableTiming));
+  usedDeviceIdxs_.insert(device.index());
+
+  if (shouldAllCommunicatorsRegisterAllTensors()) {
+    std::lock_guard<std::mutex> map_lock(ncclCommMemPoolMapMutex);
+    ncclCommMemPoolMap.emplace(std::move(comm), MemPoolSet{});
+  }
 }
 
 } // namespace c10d

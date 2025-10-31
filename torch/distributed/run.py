@@ -373,8 +373,9 @@ import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
+from collections.abc import Callable
 from importlib import metadata
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -397,6 +398,13 @@ logger = get_logger(__name__)
 def get_args_parser() -> ArgumentParser:
     """Parse the command line options."""
     parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher")
+
+    def comma_separated_list(value):
+        placeholder = "<COMMA_PLACEHOLDER>"
+        value = value.replace(",,", placeholder)
+        items = value.split(",")
+        items = [item.replace(placeholder, ",") for item in items]
+        return items
 
     #
     # Worker/node size related arguments.
@@ -568,6 +576,28 @@ def get_args_parser() -> ArgumentParser:
         help="Only show logs from specified ranks in console (e.g. [--local_ranks_filter=0,1,2] will "
         "only show logs from rank 0, 1 and 2). This will only apply to stdout and stderr, not to"
         "log files saved via --redirect or --tee",
+    )
+
+    parser.add_argument(
+        "--duplicate-stdout-filters",
+        "--duplicate_stdout_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stdout to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
+    )
+
+    parser.add_argument(
+        "--duplicate-stderr-filters",
+        "--duplicate_stderr_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stderr to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
     )
 
     #
@@ -770,14 +800,9 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     logs_specs_cls = None
     if logs_specs_name is not None:
         eps = metadata.entry_points()
-        if hasattr(eps, "select"):  # >= 3.10
-            group = eps.select(group="torchrun.logs_specs")
-            if group.select(name=logs_specs_name):
-                logs_specs_cls = group[logs_specs_name].load()
-
-        elif specs := eps.get("torchrun.logs_specs"):  # < 3.10
-            if entrypoint_list := [ep for ep in specs if ep.name == logs_specs_name]:
-                logs_specs_cls = entrypoint_list[0].load()
+        group = eps.select(group="torchrun.logs_specs")
+        if group.select(name=logs_specs_name):
+            logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
             raise ValueError(
@@ -844,6 +869,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
+    # pyrefly: ignore [bad-instantiation]
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
@@ -874,6 +900,8 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         event_log_handler=args.event_log_handler,
         numa_options=numa_options,
         signals_to_handle=args.signals_to_handle,
+        duplicate_stdout_filters=args.duplicate_stdout_filters,
+        duplicate_stderr_filters=args.duplicate_stderr_filters,
     )
 
     with_python = not args.no_python

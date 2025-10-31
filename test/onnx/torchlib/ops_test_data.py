@@ -39,7 +39,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
 import numpy as np
@@ -52,7 +52,7 @@ from torch.testing._internal.opinfo import definitions as opinfo_definitions
 
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Callable, Collection
 
 
 # Create a copy of the op_db to modify
@@ -275,7 +275,7 @@ def _empty_input_wrangler(
 def _grid_sample_input_wrangler(
     args: list[Any], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
-    # Convert string attriute to int as input
+    # Convert string attribute to int as input
     inter_mode_options = {"bilinear": 0, "nearest": 1, "bicubic": 2}
     padding_mode_options = {"zeros": 0, "border": 1, "reflection": 2}
     args.append(inter_mode_options[kwargs["mode"]])

@@ -121,7 +121,7 @@ void cufft_set_plan_cache_max_size_impl(DeviceIndex device_index, int64_t max_si
     "cufft_set_plan_cache_max_size: expected 0 <= device_index < ",
     at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
-  return cufft_get_plan_cache(device_index).resize(max_size);
+  cufft_get_plan_cache(device_index).resize(max_size);
 }
 
 int64_t cufft_get_plan_cache_size_impl(DeviceIndex device_index) {
@@ -137,7 +137,7 @@ void cufft_clear_plan_cache_impl(DeviceIndex device_index) {
     "cufft_clear_plan_cache: expected 0 <= device_index < ",
     at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
-  return cufft_get_plan_cache(device_index).clear();
+  cufft_get_plan_cache(device_index).clear();
 }
 
 } // namespace at::native::detail
@@ -163,7 +163,7 @@ bool has_large_prime_factor(int64_t n) {
 }
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
-static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
+const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();

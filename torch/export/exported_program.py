@@ -8,9 +8,9 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -281,7 +281,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
         # due to core aten decomp table having non-functional entries. Once we have
-        # a tigher check around core aten decomp, we should warn users about them.
+        # a tighter check around core aten decomp, we should warn users about them.
         # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
 
         # if it is a valid CIA op we can mess with in export, we check if it is:
@@ -532,16 +532,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
+        gm, new_graph_signature = _remove_unnecessary_copy_op_pass(
             gm, new_graph_signature
         )
 
-        # When we apply parameterixzation rule to unwrap
+        # When we apply parameterization rule to unwrap
         # subclasses, the state dict will now have different
         # desugared parameters. We need to manually filter those
         # and update the ep.state_dict. Ideally, we should just return
         # the state dict of ep.module but ep.module only stores params
-        # buffers that participate in forward. If we undo this behaviour,
+        # buffers that participate in forward. If we undo this behavior,
         # it would break some downstream users.
         new_state_dict = {
             **ep.state_dict,
@@ -590,7 +590,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             ep.graph_module,
             fake_args,
             decompositions=python_decomp_table,
-            trace_joint=True if joint_loss_index is not None else False,
+            trace_joint=joint_loss_index is not None,
             output_loss_index=(
                 joint_loss_index if joint_loss_index is not None else None
             ),
@@ -781,7 +781,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     return gm, new_graph_signature, ep.state_dict
 
 
-def _remove_unneccessary_copy_op_pass(
+def _remove_unnecessary_copy_op_pass(
     gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature
 ) -> tuple[torch.fx.GraphModule, ExportGraphSignature]:
     """
@@ -894,7 +894,7 @@ def _get_updated_module_call_graph(
                     user_input_counter += 1
 
     # For all the parameters and buffers, we first see
-    # if they are result of paramerizaitons and if they
+    # if they are result of parametrizations and if they
     # are, we log them and error later
     old_param_to_desugared = defaultdict(list)
     for name, target in new_graph_params_buffers.items():
@@ -1500,6 +1500,7 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
+        # pyrefly: ignore [missing-attribute]
         if transformed_gm is self.graph_module and not res.modified:
             return self
 
@@ -1578,6 +1579,7 @@ class ExportedProgram:
             verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
+        # pyrefly: ignore [missing-attribute]
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
@@ -1682,7 +1684,8 @@ def _create_graph_module_for_export(root, graph):
             "Unable to execute the generated python source code from "
             "the graph. The graph module will no longer be directly callable, "
             "but you can still run the ExportedProgram, and if needed, you can "
-            "run the graph module eagerly using torch.fx.Interpreter."
+            "run the graph module eagerly using torch.fx.Interpreter.",
+            stacklevel=2,
         )
         gm = torch.fx.GraphModule(root, torch.fx.Graph())
         gm._graph = graph

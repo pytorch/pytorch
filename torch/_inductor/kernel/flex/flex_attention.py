@@ -26,15 +26,20 @@ from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     create_placeholder,
+    freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
-    load_template,
+    load_flex_template,
     maybe_realize,
     set_head_dim_values,
     SubgraphResults,
 )
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
+from .flex_flash_attention import (
+    _use_flex_flash_attention,
+    create_flex_flash_attention_kernel,
+)
 
 
 if TYPE_CHECKING:
@@ -74,9 +79,9 @@ def get_float32_precision():
 flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
-    source=load_template("flex_attention")
-    + load_template("utilities")
-    + load_template("common"),
+    source=load_flex_template("flex_attention")
+    + load_flex_template("utilities")
+    + load_flex_template("common"),
 )
 
 
@@ -149,6 +154,7 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
+    freeze_irnodes(subgraph_buffer)
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -162,6 +168,7 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    freeze_irnodes(mask_graph_buffer)
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -175,6 +182,24 @@ def flex_attention(
     )
     if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            kernel_options,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    if _use_flex_flash_attention(
+        subgraph,
+        mask_graph,
+        kernel_options,
+        num_score_mod_placeholders=len(placeholder_inps),
+    ):
+        return create_flex_flash_attention_kernel(
             query,
             key,
             value,
@@ -217,6 +242,9 @@ def flex_attention(
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
@@ -441,7 +469,7 @@ def flex_attention_backward_grid(
 flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
-    source=load_template("flex_backwards") + load_template("utilities"),
+    source=load_flex_template("flex_backwards") + load_flex_template("utilities"),
 )
 
 
@@ -563,6 +591,7 @@ def flex_attention_backward(*args, **kwargs):
         query,
         key,
         value,
+        logsumexp,
         grad_out,
         kv_num_blocks,
         kv_indices,
@@ -577,6 +606,7 @@ def flex_attention_backward(*args, **kwargs):
             query,
             key,
             value,
+            logsumexp,
             grad_out,
             kv_num_blocks,
             kv_indices,
@@ -625,6 +655,7 @@ def flex_attention_backward(*args, **kwargs):
     fw_subgraph_buffer = build_subgraph_buffer(
         fwd_placeholder_inps + list(score_mod_other_buffers), fw_graph
     )
+    freeze_irnodes(fw_subgraph_buffer)
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
@@ -640,6 +671,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
+    freeze_irnodes(all_joint_outputs)
 
     joint_outputs = process_joint_outputs(
         all_joint_outputs, len(joint_placeholder_inps)
@@ -657,8 +689,7 @@ def flex_attention_backward(*args, **kwargs):
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-
-    mask_graph_buffer = mask_graph_buffer
+    freeze_irnodes(mask_graph_buffer)
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
@@ -812,6 +843,7 @@ def flex_attention_backward(*args, **kwargs):
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
+        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,
@@ -882,9 +914,11 @@ def get_bwd_subgraph_outputs(
     joint_outputs: JointOutputResult,
 ) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
     subgraph_buffer = (
+        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
+        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
@@ -896,4 +930,5 @@ def get_bwd_subgraph_outputs(
         *joint_outputs.mutated_grads,
     ]
 
+    # pyrefly: ignore [not-iterable]
     return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]

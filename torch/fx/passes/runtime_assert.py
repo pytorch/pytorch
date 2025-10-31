@@ -61,7 +61,7 @@ def insert_deferred_runtime_asserts(
     """
     During tracing, we may have discovered that some data-dependent values
     had runtime assert on them; e.g., torch.empty(x.item()) induces a runtime
-    that x.item() >= 0.  This asserts can happen unpredictably during fake
+    that x.item() >= 0.  These asserts can happen unpredictably during fake
     tensor propagation, so we cannot conveniently insert them into the FX graph
     when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
     pass insert them into the graph as proper tests.
@@ -299,9 +299,11 @@ def insert_deferred_runtime_asserts(
                     ):
                         with _set_node_metadata_hook(gm, _node_metadata_hook):
                             expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
+
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
                 match_symbol(example_value, lambda: node)
+
                 if isinstance(t := example_value, torch.Tensor):
                     for i, s in enumerate(t.size()):
                         match_symbol(
@@ -358,6 +360,7 @@ def insert_deferred_runtime_asserts(
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
                 def has_new_untracked_symbols():
+                    # pyrefly: ignore [missing-attribute]
                     for symbol in sym_expr.free_symbols:
                         if symbol not in expr_to_proxy:
                             return True
@@ -373,6 +376,7 @@ def insert_deferred_runtime_asserts(
                 assert resolved_unbacked_bindings is not None
 
                 def has_new_unbacked_bindings():
+                    # pyrefly: ignore [missing-attribute]
                     for key in resolved_unbacked_bindings.keys():
                         if key not in expr_to_proxy:
                             return True
@@ -399,19 +403,25 @@ def insert_deferred_runtime_asserts(
                             ),
                         ):
                             expr_to_proxy[sym_expr] = _sympy_interp(
-                                expr_to_proxy, sym_expr
+                                expr_to_proxy,
+                                sym_expr,
                             )  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
                     hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
                     log.debug(
-                        "CSE node %s -> %s for expr %s", node, hash_node, sym_expr
+                        "CSE node %s -> %s for expr %s",
+                        node,
+                        hash_node,
+                        sym_expr,
                     )
 
                 # store node in hash cons, don't delete/replace
+
                 elif sym_expr not in expr_to_proxy and not isinstance(
-                    sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
+                    sym_expr,
+                    (sympy.Number, sympy.logic.boolalg.BooleanAtom),
                 ):  # don't hash cons primitives
                     expr_to_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)  # type: ignore[arg-type]
 
