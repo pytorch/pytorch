@@ -7,7 +7,8 @@ from __future__ import annotations
 import builtins
 import functools
 import operator
-from typing import Callable, TYPE_CHECKING, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeVar
 
 from ..decorators import substitute_in_graph
 

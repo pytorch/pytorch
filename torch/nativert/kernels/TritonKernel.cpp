@@ -16,9 +16,19 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#include <torch/nativert/executor/triton/CpuTritonKernelManager.h>
-
 namespace torch::nativert {
+
+// in this case, we want to use the symbol from torch_cpu.dll
+#ifndef NATIVERT_MSVC_TEST
+C10_DEFINE_TYPED_REGISTRY(
+    TritonKernelManagerRegistry,
+    c10::DeviceType,
+    TritonKernelManager,
+    std::unique_ptr,
+    std::string /* kernel_name */,
+    std::string /* kernel_bin_path */,
+    std::string /* kernel_launcher_bin_path */)
+#endif
 
 TritonKernel::TritonKernel(
     const Node* node,
@@ -74,27 +84,28 @@ TritonKernel::TritonKernel(
   auto tmp_dir = extractToTemporaryFolder(*reader, kernel_prefix) + "/";
 
   if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".cubin")) {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kCUDA, kernel_name, tmp_dir + kernel_name + ".cubin", "");
     TORCH_CHECK(
-        create_cuda_triton_kernel_manager != nullptr,
+        loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
-    loader_ = create_cuda_triton_kernel_manager(
-        kernel_name, tmp_dir + kernel_name + ".cubin");
-  }
-
-  if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".hsaco")) {
+  } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".hsaco")) {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kHIP, kernel_name, tmp_dir + kernel_name + ".hsaco", "");
     TORCH_CHECK(
-        create_cuda_triton_kernel_manager != nullptr,
+        loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
-    loader_ = create_cuda_triton_kernel_manager(
-        kernel_name, tmp_dir + kernel_name + ".hsaco");
-  }
-
-  if (loader_ == nullptr) {
-    loader_ = std::unique_ptr<TritonKernelManager>(new CpuTritonKernelManager(
+  } else {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kCPU,
         kernel_name,
         tmp_dir + kernel_name + ".so",
-        tmp_dir + kernel_name + ".launcher.so"));
+        tmp_dir + kernel_name + ".launcher.so");
   }
+
+  TORCH_CHECK(
+      loader_ != nullptr,
+      "couldn't find triton kernel loader -- are you trying to run gpu kernels on a cpu build?");
 }
 
 TritonKernel::~TritonKernel() = default;

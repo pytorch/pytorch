@@ -1041,8 +1041,8 @@ std::string generate_code(
   // and `extra_args` for computation call if
   // extra arguments to capture runtime state are passed.
   // (look at polygamma for example).
-  std::string extra_params = "";
-  std::string extra_args = "";
+  std::string extra_params;
+  std::string extra_args;
   for (size_t i = 0; i < extra_args_typenames.size(); i++) {
     auto type = std::string(extra_args_typenames[i]);
     auto name = "extra_arg_" + std::to_string(i);
@@ -1352,7 +1352,7 @@ std::string generate_reduction_code(
     int vec_size,
     int max_threads_codegen) {
   TORCH_INTERNAL_ASSERT(desc.nInputs == 1);
-  TORCH_INTERNAL_ASSERT(desc.extra_args_types.size() == 0);
+  TORCH_INTERNAL_ASSERT(desc.extra_args_types.empty());
 
   return generate_reduction_code(
       desc.nOutputs,
@@ -1451,7 +1451,7 @@ std::optional<std::string> get_cache_dir() {
   std::string cache_dir;
   char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
   // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
-  std::string kernels_cache_dir = "";
+  std::string kernels_cache_dir;
   if (ptkcp != nullptr) {
     cache_dir = std::string(ptkcp);
   } else {
@@ -1532,7 +1532,7 @@ NvrtcFunction jit_pwise_function(
 
   std::string file_path;
   if (cache_dir.has_value()) {
-    // Attemps to read from the cache.
+    // Attempts to read from the cache.
     // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
     // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
     //   because we hash on the CUDA code, but we save the compiled ptx or sass

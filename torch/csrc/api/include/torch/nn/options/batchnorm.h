@@ -73,9 +73,9 @@ namespace functional {
 /// F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(0.1).eps(1e-05).training(false));
 /// ```
 struct TORCH_API BatchNormFuncOptions {
-  TORCH_ARG(Tensor, weight) = Tensor();
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = Tensor();
+  TORCH_ARG(Tensor, bias);
 
   TORCH_ARG(bool, training) = false;
 

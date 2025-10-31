@@ -65,7 +65,7 @@ Tensor& addmv_out_sparse_compressed(
       return result.zero_();
     } else {
       return at::mul_out(
-          const_cast<Tensor&>(result),
+          result,
           self,
           at::native::scalar_tensor(
               beta,

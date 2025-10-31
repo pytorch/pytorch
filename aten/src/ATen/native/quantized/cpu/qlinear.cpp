@@ -812,7 +812,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
 
   auto is_input_qint8 = input.scalar_type() == c10::ScalarType::QInt8;
   auto input_contig = input.expect_contiguous();
-  auto& w = *(weight_.get());
+  auto& w = *weight_;
   auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
   auto input_dims = {M, K};
   auto input_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
@@ -1388,7 +1388,7 @@ namespace at::native {
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
         "onednn int8 linear: act scale/zp size should be 1/<=1");
     static std::optional<at::Tensor> other = std::nullopt;
-    static const std::string_view binary_post_op = "none";
+    constexpr std::string_view binary_post_op = "none";
     int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zp,

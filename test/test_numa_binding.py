@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from multiprocessing.context import SpawnProcess
 from typing import Any, Optional
-from unittest import skipIf, skipUnless
+from unittest import skipUnless
 from unittest.mock import mock_open, patch
 
 import torch
@@ -22,7 +22,7 @@ from torch.numa.binding import (
     AffinityMode,
     NumaOptions,
 )
-from torch.testing._internal.common_utils import IS_MACOS, run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 @dataclass(frozen=True)
@@ -549,7 +549,7 @@ class NumaBindingTest(TestCase):
             bound_logical_cpu_indices_0,
             # Gets an extra physical core due to odd number of physical cores on numa node
             # 3 physical cores total, 2 GPUs: GPU 0 gets 2 physical cores (CPUs 0-3)
-            set(range(0, 4)),
+            set(range(4)),
         )
 
         bound_logical_cpu_indices_1 = (
@@ -677,10 +677,9 @@ class NumaBindingTest(TestCase):
             # 1 numa node, 2 L3 caches, 1 physical core per L3 cache = 2 logical CPUs per cache
             # L3 cache 0: CPUs 0-1, L3 cache 1: CPUs 2-3
             # Both have same number of CPUs, so prefer lower cache key (0)
-            set(range(0, 2)),
+            set(range(2)),
         )
 
-    @skipIf(IS_MACOS, "sched_getaffinity doesn't exist")
     def test_binds_to_node_0_if_node_stored_as_minus_one(self) -> None:
         self._add_mock_hardware(
             num_sockets=1,
@@ -710,7 +709,7 @@ class NumaBindingTest(TestCase):
             # GPU 0 has numa node stored as -1, which is treated as numa node 0
             # Each numa node has 1 * 1 * 2 = 2 logical CPUs
             # Numa node 0 has CPUs 0-1
-            set(range(0, 2)),
+            set(range(2)),
         )
 
     def test_callable_entrypoint_basic(self) -> None:

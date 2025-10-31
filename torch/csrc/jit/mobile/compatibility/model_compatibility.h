@@ -93,7 +93,7 @@ enum ModelCompatibilityStatus {
 
 struct ModelCompatCheckResult {
   ModelCompatibilityStatus status;
-  std::vector<std::string> errors{};
+  std::vector<std::string> errors;
 };
 // Takes in information about a runtime and a model and returns if the two are
 // compatible with one another.
