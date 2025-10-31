@@ -78,8 +78,8 @@ def aten_rms_norm(
 
     # Create weight tensor if not provided
     if weight is None:
-        weight = op23.Constant(
-            value=ir.tensor([1.0] * len(input.shape), dtype=input.dtype)
+        weight = op23.ConstantOfShape(
+            op23.Shape(input), value=ir.tensor([1], dtype=input.dtype)
         )
 
     return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
