@@ -35,7 +35,7 @@ at::Tensor allocate_all_gather_output(
     int64_t group_size) {
   TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
-  if (output_size.size() == 0) {
+  if (output_size.empty()) {
     output_size.push_back(group_size);
   } else {
     output_size[0] *= group_size;

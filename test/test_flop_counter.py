@@ -13,9 +13,9 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -463,7 +463,6 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -683,7 +682,6 @@ class TestFlopCounter(TestCase):
             ),
         )
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -856,7 +854,7 @@ class TestFlopCounter(TestCase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_scaled_mm(self):
-        dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        dtype = e4m3_type
         with FlopCounterMode() as mode:
             torch._scaled_mm(
                 torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),

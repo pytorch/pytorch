@@ -7,12 +7,11 @@ from .base import TemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
-    from ..ir import Layout
     from ..kernel_inputs import KernelInputs
 
 
 class GemmMaxAutotuneTemplateConfigHeuristics(TemplateConfigHeuristics):
-    def should_run(self, inputs: KernelInputs, layout: Layout) -> bool:
+    def should_run(self, inputs: KernelInputs) -> bool:
         """
         simple base override for GEMM family templates that run only in max-autotune
         """

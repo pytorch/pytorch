@@ -707,9 +707,8 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
 }
 
 void GraphTask::exec_post_processing() {
-  if (!not_ready_.empty()) {
-    throw std::runtime_error("could not compute gradients for some functions");
-  }
+  TORCH_CHECK(
+      not_ready_.empty(), "could not compute gradients for some functions");
 
   // set the thread_local current_graph_task_ as more callbacks can be installed
   // by existing final callbacks.
@@ -949,15 +948,17 @@ static void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
-        grad.scalar_type()) {
-      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
-    }
-    if (grad.dtype() != metadata.dtype()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected dtype ";
-      ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+
+    if (metadata.grad_dtype().has_value()) {
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        grad = grad.to(metadata.grad_dtype().value());
+      }
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected dtype ";
+        ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
+        TORCH_CHECK(false, format_error(ss.str()));
+      }
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
@@ -1149,12 +1150,13 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
-        std::stringstream ss;
-        ss << "Function '" << fn.name() << "' returned nan values in its " << i
-           << "th output.";
-        throw std::runtime_error(ss.str());
-      }
+      TORCH_CHECK(
+          !output.defined() || !isnan(output)._is_any_true().item<bool>(),
+          "Function '",
+          fn.name(),
+          "' returned nan values in its ",
+          i,
+          "th output.");
     }
   }
 
@@ -1175,7 +1177,7 @@ void Engine::evaluate_function(
 
     if (it == dependencies.end()) {
       auto name = next.function->name();
-      throw std::runtime_error(std::string("dependency not found for ") + name);
+      TORCH_CHECK(false, "dependency not found for ", name);
     } else if (--it->second == 0) {
       dependencies.erase(it);
       is_ready = true;
