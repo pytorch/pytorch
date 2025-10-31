@@ -610,13 +610,9 @@ void boxed_test_device_is_cpu(
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
-<<<<<<< HEAD
-  m.def("test_device_constructor(bool is_cuda, DeviceIndex index, bool use_str) -> Device");
-=======
   m.def("test_tensor_device(Tensor t) -> Device");
   m.def(
       "test_device_constructor(bool is_cuda, DeviceIndex index, bool use_str) -> Device");
->>>>>>> be1c371dd79 (Add stable::Tensor.device())
   m.def("test_device_equality(Device d1, Device d2) -> bool");
   m.def("test_device_set_index(Device device, DeviceIndex index) -> Device");
   m.def("test_device_index(Device device) -> DeviceIndex");
