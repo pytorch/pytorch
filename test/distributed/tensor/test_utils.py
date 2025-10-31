@@ -781,19 +781,21 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
 
     @with_comms
     def test_StridedShard_to_shard_order(self):
-        mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(2, 2, 2, 2, 2))
-        shard_iter = generate_shard_orders(mesh, 3)
-        # It takes ~30min to complete total 2520 shard order combinations here
-        # using LocalTensor. So we only randomly pick 100 shard orders to test.
-        all_shard_order = list(shard_iter)
-        import random
-
-        shard_order_choices = random.sample(
-            all_shard_order, min(100, len(all_shard_order))
-        )
         with LocalTensorMode(ranks=self.world_size):
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(2, 2, 2, 2, 2))
+            shard_iter = generate_shard_orders(mesh, 3)
+            # It takes ~4.8h to complete total 2520 shard order combinations here
+            # using LocalTensor. So we only randomly pick 25 shard orders to test.
+            all_shard_order = list(shard_iter)
+            import random
+
+            shard_order_choices = random.sample(
+                all_shard_order, min(25, len(all_shard_order))
+            )
             x = torch.randn(32, 32, 32)
+            cnt = 0
             for shard_order in shard_order_choices:
+                cnt += 1
                 placement_without_stridedshard = shard_order_to_placement(
                     shard_order, mesh
                 )
@@ -813,17 +815,18 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
 
     @with_comms
     def test_StridedShard_not_convertible_to_shard_order(self):
-        mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(4, 8))
-        unconvertible_placements_list = [
-            [_StridedShard(0, split_factor=2), _StridedShard(1, split_factor=2)],
-            [_StridedShard(0, split_factor=2), Shard(1)],
-            [_StridedShard(1, split_factor=16), Shard(1)],
-        ]
-        for placements in unconvertible_placements_list:
-            shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
-                tuple(placements), mesh
-            )
-            self.assertIsNone(shard_order)
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(4, 8))
+            unconvertible_placements_list = [
+                [_StridedShard(0, split_factor=2), _StridedShard(1, split_factor=2)],
+                [_StridedShard(0, split_factor=2), Shard(1)],
+                [_StridedShard(1, split_factor=16), Shard(1)],
+            ]
+            for placements in unconvertible_placements_list:
+                shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                    tuple(placements), mesh
+                )
+                self.assertIsNone(shard_order)
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
