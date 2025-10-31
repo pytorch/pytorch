@@ -34,7 +34,9 @@ from ...virtualized import V
 from ..common import IndentedBuffer
 from . import utils as cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
-from .presets import gen_cutlass_presets
+from .cuda_template import CUTLASSTemplate
+from .cutlass_python_evt import CutlassEVTCodegen, scaled_mm_evt
+from .cutlass_utils import (
 from .python_evt import CutlassEVTCodegen, scaled_mm_evt
 from .template import CUTLASSTemplate
 from .utils import (
@@ -976,27 +978,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return None
 
         # Apply regex filters at the end when configuration name doesn't change anymore
-        if (
-            inductor_cutlass_config.cutlass_op_allowlist_regex
-            or inductor_cutlass_config.cutlass_presets
-        ):
-            patterns = []
-            if inductor_cutlass_config.cutlass_op_allowlist_regex:
-                patterns.append(inductor_cutlass_config.cutlass_op_allowlist_regex)
-            if inductor_cutlass_config.cutlass_presets:
-                presets = gen_cutlass_presets()
-                preset_nums = [
-                    int(x) for x in inductor_cutlass_config.cutlass_presets.split(",")
-                ]
-                for preset_num in preset_nums:
-                    preset = presets.get(preset_num, {}).get(
-                        inductor_cutlass_config.cutlass_instantiation_level, []
-                    )
-
-                    patterns.extend(preset)
-
-            pattern = "|".join(patterns)
-            if pattern and not re.search(pattern, op.configuration_name()):
+        if inductor_cutlass_config.cutlass_op_allowlist_regex:
+            if not re.search(
+                inductor_cutlass_config.cutlass_op_allowlist_regex,
+                op.configuration_name(),
+            ):
                 return None
         if inductor_cutlass_config.cutlass_op_denylist_regex is not None:
             if re.search(

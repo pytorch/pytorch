@@ -39,7 +39,7 @@ struct AllocAligned {
 #elif defined(_MSC_VER)
     p = _aligned_malloc(sizeof(T), kGEMMLOWPCacheLineSize);
 #else
-    auto res = posix_memalign((void**)&p, kGEMMLOWPCacheLineSize, sizeof(T));
+    auto res = posix_memalign(&p, kGEMMLOWPCacheLineSize, sizeof(T));
     (void)res;
 #endif
 

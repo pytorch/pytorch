@@ -131,14 +131,14 @@ class TestUtils(TestCase):
                 (
                     torch.ops.aten.convolution,
                     (
-                        torch.Tensor(2, 3, 3),
+                        torch.Tensor(2, 2, 3),
                         torch.Tensor(2, 2, 2),
                         torch.Tensor(2),
-                        (1, 1),
-                        (0, 0),
-                        (1, 1),
+                        (1,),
+                        (0,),
+                        (1,),
                         True,
-                        (0, 0),
+                        (0,),
                         1,
                     ),
                     {},
@@ -198,7 +198,7 @@ class TestUtils(TestCase):
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, dtype):
         ret = get_device_tflops(dtype)
-        self.assertTrue(type(ret) == float)
+        self.assertTrue(type(ret) is float)
 
 
 instantiate_device_type_tests(TestUtils, globals())

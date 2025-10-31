@@ -284,7 +284,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
         reduceOp(std::move(reduceOp)),
         tag(tag) {}
 
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const ReduceOp reduceOp;
   const uint32_t tag;
 
@@ -399,7 +399,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         inputs(inputs),
         tag(tag) {}
 
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const uint32_t tag;
 
   // We share dimensionality about the sparse tensors before collecting
