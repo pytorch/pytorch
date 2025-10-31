@@ -506,7 +506,7 @@ void boxed_test_tensor_device(
 
 torch::stable::Device test_device_constructor(
     bool is_cuda,
-    int32_t index,
+    torch::stable::DeviceIndex index,
     bool use_str) {
   using torch::stable::Device;
   using torch::stable::DeviceType;
@@ -534,7 +534,7 @@ void boxed_test_device_constructor(
     uint64_t num_outputs) {
   torch::stable::Device res = test_device_constructor(
       torch::stable::detail::to<bool>(stack[0]),
-      torch::stable::detail::to<int32_t>(stack[1]),
+      torch::stable::detail::to<torch::stable::DeviceIndex>(stack[1]),
       torch::stable::detail::to<bool>(stack[2]));
   stack[0] = torch::stable::detail::from(res);
 }
@@ -555,7 +555,7 @@ void boxed_test_device_equality(
 
 torch::stable::Device test_device_set_index(
     torch::stable::Device device,
-    int32_t index) {
+    torch::stable::DeviceIndex index) {
   device.set_index(index);
   return device;
 }
@@ -566,11 +566,11 @@ void boxed_test_device_set_index(
     uint64_t num_outputs) {
   torch::stable::Device res = test_device_set_index(
       torch::stable::detail::to<torch::stable::Device>(stack[0]),
-      torch::stable::detail::to<int32_t>(stack[1]));
+      torch::stable::detail::to<torch::stable::DeviceIndex>(stack[1]));
   stack[0] = torch::stable::detail::from(res);
 }
 
-int32_t test_device_index(torch::stable::Device device) {
+torch::stable::DeviceIndex test_device_index(torch::stable::Device device) {
   return device.index();
 }
 
@@ -578,7 +578,7 @@ void boxed_test_device_index(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  int32_t res = test_device_index(
+  torch::stable::DeviceIndex res = test_device_index(
       torch::stable::detail::to<torch::stable::Device>(stack[0]));
   stack[0] = torch::stable::detail::from(res);
 }
@@ -610,12 +610,16 @@ void boxed_test_device_is_cpu(
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+<<<<<<< HEAD
+  m.def("test_device_constructor(bool is_cuda, DeviceIndex index, bool use_str) -> Device");
+=======
   m.def("test_tensor_device(Tensor t) -> Device");
   m.def(
-      "test_device_constructor(bool is_cuda, int index, bool use_str) -> Device");
+      "test_device_constructor(bool is_cuda, DeviceIndex index, bool use_str) -> Device");
+>>>>>>> be1c371dd79 (Add stable::Tensor.device())
   m.def("test_device_equality(Device d1, Device d2) -> bool");
-  m.def("test_device_set_index(Device device, int index) -> Device");
-  m.def("test_device_index(Device device) -> int");
+  m.def("test_device_set_index(Device device, DeviceIndex index) -> Device");
+  m.def("test_device_index(Device device) -> DeviceIndex");
   m.def("test_device_is_cuda(Device device) -> bool");
   m.def("test_device_is_cpu(Device device) -> bool");
 }
