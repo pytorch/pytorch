@@ -421,6 +421,8 @@ static void nllnd_loss_forward_impl(Tensor& output,
                                     int64_t reduction,
                                     int64_t ignore_index,
                                     bool is2D) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(output.scalar_type()),
+                              "nlld_loss for complex is not supported for MPS");
   std::vector<long long> reshapedTarget(target_arg.sizes().begin(), target_arg.sizes().end());
   reshapedTarget.push_back(1);
 
