@@ -17,7 +17,8 @@ from torch.utils import _pytree as torch_pytree
 
 class _WithExport:
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
-        model = model.eval()
+        if isinstance(model, torch.nn.Module):
+            model = model.eval()
         onnx_program = torch.onnx.export(
             model,
             args,
