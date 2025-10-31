@@ -841,18 +841,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
                 # Call fill_ method on the empty tensor
                 return empty_result.call_method(tx, "fill_", [fill_value], {})
-            else:
-                # For Python scalars and other non-tensor types, use default lowering
-                from .builder import wrap_fx_proxy
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch.ops.aten.full.default,
-                        *proxy_args_kwargs([size, fill_value], kwargs),
-                    ),
-                )
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
