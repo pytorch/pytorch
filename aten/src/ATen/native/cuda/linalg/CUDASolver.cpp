@@ -2096,7 +2096,7 @@ void xgeev_bufferSize<c10::complex<double>>(
 }
 
 template <>
-void at::cuda::solver::xgeev<float>(
+void xgeev<float>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t jobvl,
@@ -2144,7 +2144,7 @@ void at::cuda::solver::xgeev<float>(
 
 
 template <>
-void at::cuda::solver::xgeev<double>(
+void xgeev<double>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t jobvl,
@@ -2190,7 +2190,7 @@ void at::cuda::solver::xgeev<double>(
 }
 
 template <>
-void at::cuda::solver::xgeev<c10::complex<float>>(
+void xgeev<c10::complex<float>>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t jobvl,
@@ -2235,7 +2235,7 @@ void at::cuda::solver::xgeev<c10::complex<float>>(
 }
 
 template <>
-void at::cuda::solver::xgeev<c10::complex<double>>(
+void xgeev<c10::complex<double>>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t jobvl,
