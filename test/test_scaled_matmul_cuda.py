@@ -42,12 +42,13 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.common_quantized import (
-    _f32_to_floatx_unpacked,
+    _bfloat16_to_float4_e2m1fn_x2,
     _floatx_unpacked_to_f32,
     ceil_div, to_blocked,
-    to_mxfp8,
+    to_mxfp,
     from_blocked_format,
     generate_jagged_offs,
+    pack_uint4,
 )
 
 
@@ -143,42 +144,36 @@ def infer_scale_swizzle(mat, scale):
         ] == math.ceil(mat.shape[1] // 128):
             return ScalingType.BlockWise128x128, SwizzleType.NO_SWIZZLE
 
+    # if we're checking for nvfp4, need to adjust for packed-K
+    K_multiplier = 2 if mat.dtype == torch.float4_e2m1fn_x2 else 1
     # NVFP4
     if (
         (scale.numel()
-            == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
+            == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 16), 4)
             or scale.numel()
-            == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4))
+            == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 16), 4))
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e4m3fn
     ):
         return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
-    # MXFP4 w/o swizzle
-    if (
-        (scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
-            or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0])
-        and mat.dtype == torch.float4_e2m1fn_x2
-        and scale.dtype == torch.float8_e8m0fnu
-    ):
-        return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
-
+    # MX formats
     if not torch.version.hip:
-        # MXFP8 w/ swizzle
+        # MX w/swizzle (NVIDIA)
         if (
             (scale.numel()
-                == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
+                == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 32), 4)
                 or scale.numel()
-                == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4))
+                == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 32), 4))
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
 
     else:
-        # MXFP8 w/o swizzle
+        # MX w/o swizzle (AMD)
         if (
-            (scale.numel() == math.ceil(mat.shape[0] // 32) * mat.shape[1]
-                or scale.numel() == math.ceil(mat.shape[1] // 32) * mat.shape[0])
+            (scale.numel() == math.ceil(mat.shape[0] // 32) * K_multiplier * mat.shape[1]
+                or scale.numel() == math.ceil(K_multiplier * mat.shape[1] // 32) * mat.shape[0])
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
@@ -451,18 +446,6 @@ def data_to_nvfp4_with_global_scale(x, block_size):
     return x_fp4, S_dec_b_e4m3, S_dec.float()
 
 
-def down_size(size):
-    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
-    return (*size[:-1], size[-1] // 2)
-
-
-def pack_uint4(uint8_data) -> torch.Tensor:
-    # converting to uint8 for operations
-    shape = uint8_data.shape
-    assert shape[-1] % 2 == 0
-    uint8_data = uint8_data.contiguous().view(-1)
-    return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
-
 def unpack_uint4(uint8_data) -> torch.Tensor:
     # Take a packed uint8 tensor (i.e. nvfp4) and unpack into
     # a tensor twice as wide. Useful for dequant operations.
@@ -481,13 +464,6 @@ def unpack_uint4(uint8_data) -> torch.Tensor:
     out[::2] = uint8_data_as_uint8 & 15
 
     return out.view(shape)
-
-def _bfloat16_to_float4_e2m1fn_x2(x):
-    assert x.dtype == torch.bfloat16
-    x = _f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS)
-    x = pack_uint4(x)
-    x = x.view(torch.float4_e2m1fn_x2)
-    return x
 
 def _convert_to_nvfp4_with_hp_ref(t):
     # Convert a tensor to nvfp4, returning:
@@ -509,17 +485,34 @@ def _convert_to_nvfp4_with_hp_ref(t):
 
     return t_hp, t_lp, t_scale, t_global_scale
 
+def _convert_to_mxfp4_with_hp_ref(t):
+    # Convert a tensor to mxfp8, returning:
+    #   t_hp : reconstructed bf16 version of t_lp
+    #   t_lp : fp8_e4m3 tensor
+    #   t_scale: fp8_e8m0 block-wise scaling factors (non-swizzled)
+    t_scale, t_lp = to_mxfp(t, format="mxfp4")
+    t_hp = from_blocked_format(
+        _floatx_unpacked_to_f32(
+            unpack_uint4(t_lp),
+            FP4_EBITS,
+            FP4_MBITS),
+        t_scale,
+        blocksize=32
+    )
+
+    return t_hp, t_lp, t_scale
+
 def _convert_to_mxfp8_with_hp_ref(t):
     # Convert a tensor to mxfp8, returning:
     #   t_hp : reconstructed bf16 version of t_lp
     #   t_lp : fp8_e4m3 tensor
     #   t_scale: fp8_e8m0 block-wise scaling factors (non-swizzled)
-    t_scale, t_lp = to_mxfp8(t)
+    t_scale, t_lp = to_mxfp(t, format="mxfp8")
     t_hp = from_blocked_format(t_lp, t_scale, blocksize=32)
 
     return t_hp, t_lp, t_scale
 
-def _2d_grouped_tensor_to_mxfp8_blocked_scaled(t, MN, G, offs, format='mxfp8'):
+def _2d_grouped_tensor_to_blocked_scaled(t, MN, G, offs, format='mxfp8'):
     # Convert scales to blocked format. either mxfp8 or nvfp4
     th_list = []
     t_list = []
@@ -547,15 +540,18 @@ def _2d_grouped_tensor_to_mxfp8_blocked_scaled(t, MN, G, offs, format='mxfp8'):
                     t_slice,
                 )
                 t_global_scale_list.append(tq_global)
+            elif format == 'mxfp4':
+                th_slice, tq_slice, t_scale_slice = _convert_to_mxfp4_with_hp_ref(t_slice)
             else:
                 raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
             t_list.append(tq_slice)
             th_list.append(th_slice)
 
             # Convert scales to blocked format.
-            t_scale_slice_blocked = to_blocked(
-                t_scale_slice
-            )  # (round_up(M, 128), round_up(K_group//32, 4))
+            if torch.version.cuda:
+                t_scale_slice_blocked = to_blocked(
+                    t_scale_slice
+                )  # (round_up(M, 128), round_up(K_group//32, 4))
             t_blocked_scale_list.append(t_scale_slice_blocked)
 
     # Assemble the full XQ and WQ
@@ -576,15 +572,18 @@ def _2d_grouped_tensor_to_mxfp8_blocked_scaled(t, MN, G, offs, format='mxfp8'):
 
 def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     # Build some standard args that are wordy
-    # Note: if/when ROCm support added, need to change swizzle handling
+    swizzle = SwizzleType.NO_SWIZZLE
+    if torch.version.cuda:
+        swizzle = SwizzleType.SWIZZLE_32_4_4
+
     kwargs = {
         'mxfp8': {
             'scale_a': scale_a,
             'scale_b': scale_b,
             'scale_recipe_a': ScalingType.BlockWise1x32,
             'scale_recipe_b': ScalingType.BlockWise1x32,
-            'swizzle_a': SwizzleType.SWIZZLE_32_4_4,
-            'swizzle_b': SwizzleType.SWIZZLE_32_4_4,
+            'swizzle_a': swizzle,
+            'swizzle_b': swizzle,
             'offs': offs,  # (G,)
             'out_dtype': torch.bfloat16,
             'wrap_v2': True,
@@ -594,13 +593,15 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
             'scale_b': scale_b,
             'scale_recipe_a': [ScalingType.BlockWise1x16, ScalingType.TensorWise],
             'scale_recipe_b': [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-            'swizzle_a': SwizzleType.SWIZZLE_32_4_4,
-            'swizzle_b': SwizzleType.SWIZZLE_32_4_4,
+            'swizzle_a': swizzle,
+            'swizzle_b': swizzle,
             'offs': offs,  # (G,)
             'out_dtype': torch.bfloat16,
             'wrap_v2': True,
         },
     }
+    # MXFP4 is exactly the same setup as mxfp8
+    kwargs['mxfp4'] = kwargs['mxfp8']
     return kwargs[format]
 
 class TestFP8Matmul(TestCase):
@@ -665,7 +666,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
-    @parametrize("format", ["mxfp8"] + (["nvfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format):
         torch.manual_seed(42)
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
@@ -675,14 +676,14 @@ class TestFP8Matmul(TestCase):
         X = torch.randn((M, total_K), dtype=torch.bfloat16, device="cuda") * 0.1
         W = torch.randn((N, total_K), dtype=torch.bfloat16, device="cuda") * 0.01
 
-        xh, xq, x_blocked_scales, x_global_scales = _2d_grouped_tensor_to_mxfp8_blocked_scaled(
+        xh, xq, x_blocked_scales, x_global_scales = _2d_grouped_tensor_to_blocked_scaled(
             X, M, G, input_group_end_offsets, format=format
         )
-        wh, wq, w_blocked_scales, w_global_scales = _2d_grouped_tensor_to_mxfp8_blocked_scaled(
+        wh, wq, w_blocked_scales, w_global_scales = _2d_grouped_tensor_to_blocked_scaled(
             W, N, G, input_group_end_offsets, format=format
         )
 
-        if format == "mxfp8":
+        if format in ["mxfp4", "mxfp8"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
                 x_blocked_scales,
                 w_blocked_scales,
@@ -697,7 +698,7 @@ class TestFP8Matmul(TestCase):
                 format,
             )
         else:
-            raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
+            raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
 
         if format == 'nvfp4':
             assert x_global_scales.numel() == w_global_scales.numel()
@@ -718,7 +719,7 @@ class TestFP8Matmul(TestCase):
         )
 
         # Assert no NaNs
-        assert not y_lp.isnan().any(), "mxfp8 output contains NaN"
+        assert not y_lp.isnan().any(), "low-precision output contains NaN"
 
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
@@ -728,7 +729,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
         torch.manual_seed(42)
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
@@ -752,15 +753,17 @@ class TestFP8Matmul(TestCase):
                 if format == "mxfp8":
                     wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(W[i])
                 elif format == "nvfp4":
-                    w_scale, wq = to_mxfp8(W[i])
+                    w_scale, wq = to_mxfp(W[i], format="mxfp8")
                     wh, wq, w_scale, w_global_scale = _convert_to_nvfp4_with_hp_ref(W[i])
                     w_global_scale_list.append(w_global_scale)
+                elif format == "mxfp4":
+                    wh, wq, w_scale = _convert_to_mxfp4_with_hp_ref(W[i])
                 else:
-                    raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
+                    raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
 
                 # Swizzle scaled
-                # TODO(slayton): gate on cuda/hip
-                w_scale = to_blocked(w_scale)
+                if torch.version.cuda:
+                    w_scale = to_blocked(w_scale)
 
                 wh_list.append(wh)
                 wq_list.append(wq)
@@ -795,10 +798,13 @@ class TestFP8Matmul(TestCase):
                     elif format == "nvfp4":
                         xh, xq, x_scale, x_global_scale = _convert_to_nvfp4_with_hp_ref(x_slice)
                         x_global_scale_list.append(x_global_scale)
+                    elif format == "mxfp4":
+                        xh, xq, x_scale = _convert_to_mxfp4_with_hp_ref(x_slice)
                     else:
-                        raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
+                        raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
 
-                    x_scale = to_blocked(x_scale)
+                    if torch.version.cuda:
+                        x_scale = to_blocked(x_scale)
                     xh_list.append(xh)
                     xq_list.append(xq)
                     x_scale_list.append(x_scale)
@@ -817,7 +823,7 @@ class TestFP8Matmul(TestCase):
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
 
-        if format == "mxfp8":
+        if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
                 x_blocked_scales,
                 w_blocked_scales,
@@ -1337,6 +1343,56 @@ class TestFP8Matmul(TestCase):
         # Verify that emulated F8 mm doesn't error
         mm_float8_emulated_block(x_fp8, x_scales, y_fp8.t(), y_scales.t(), output_dtype)
 
+    @skipIfRocm
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(IS_SM90, "cuBLAS blockwise scaling works on sm90")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @parametrize("output_dtype", [torch.bfloat16, ])
+    @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
+    @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
+    def test_scaled_mm_deepseek_error_messages(
+        self, output_dtype, lhs_block, rhs_block, M, N, K
+    ):
+        torch.manual_seed(42)
+
+        x = torch.randn(M, K, device="cuda", dtype=output_dtype).pow(3)
+        y = torch.randn(N, K, device="cuda", dtype=output_dtype).pow(3)
+
+        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
+        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
+
+        # 1x128 blocks need scales to be outer-dim-major
+        if lhs_block == 1:
+            x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.BlockWise1x128
+        else:
+            lhs_recipe = ScalingType.BlockWise128x128
+
+        if rhs_block == 1:
+            y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.BlockWise1x128
+        else:
+            rhs_recipe = ScalingType.BlockWise128x128
+
+        # Verify that actual F8 mm doesn't error
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
+        ):
+            scaled_mm_wrap(
+                x_fp8,
+                y_fp8.t(),
+                scale_a=x_scales,
+                scale_recipe_a=lhs_recipe,
+                scale_b=y_scales.t(),
+                scale_recipe_b=rhs_recipe,
+                out_dtype=output_dtype,
+            )
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("which_dim_zero", [0, 1, 2])
     @parametrize("use_torch_compile", [False, True])
@@ -1484,8 +1540,13 @@ class TestFP8Matmul(TestCase):
 
         A, A_scale, A_global_scale = data_to_nvfp4_with_global_scale(A_ref, BLOCK_SIZE)
         B, B_scale, B_global_scale = data_to_nvfp4_with_global_scale(B_ref, BLOCK_SIZE)
-        A_scale = to_blocked(A_scale)
-        B_scale = to_blocked(B_scale)
+
+        if torch.version.cuda:
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+            swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
+        else:
+            swizzle = [SwizzleType.NO_SWIZZLE, SwizzleType.NO_SWIZZLE]
 
         C_ref = A_ref @ B_ref.t()
 
@@ -1496,8 +1557,8 @@ class TestFP8Matmul(TestCase):
             scale_recipe_a=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
             scale_b=[B_scale, B_global_scale],
             scale_recipe_b=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
-            swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
-            swizzle_b=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+            swizzle_a=swizzle,
+            swizzle_b=swizzle,
             output_dtype=torch.bfloat16,
         )
 
@@ -1540,7 +1601,7 @@ class TestFP8Matmul(TestCase):
         (127, 96, 1024),
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
-    @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
+    @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
@@ -1554,8 +1615,12 @@ class TestFP8Matmul(TestCase):
             if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
                 raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
 
-        fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
-        BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
+        fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
+        BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
+
+        if K % BLOCK_SIZE != 0:
+            raise unittest.SkipTest(f"K ({K}) must be divisible by BLOCK_SIZE ({BLOCK_SIZE}), skipping")
+
         require_exact_match = True
         approx_match_sqnr_target = 22.0
 
@@ -1733,7 +1798,7 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val)
                 B = _bfloat16_to_float4_e2m1fn_x2(B)
 
-                approx_match_sqnr_target = 15 if torch.version.hip else 15.8
+                approx_match_sqnr_target = 15 if recipe == "mxfp4" else 15.8
 
         C_ref = A_ref @ B_ref.t()
 
