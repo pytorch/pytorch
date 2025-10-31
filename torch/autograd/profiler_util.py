@@ -639,6 +639,7 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
+                DeviceType.XPU,
             ]:
                 raise AssertionError(
                     f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
@@ -667,6 +668,7 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
+                DeviceType.XPU,
             ]:
                 raise AssertionError(
                     f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
