@@ -347,10 +347,11 @@ class DTensor(torch.Tensor):
         # subclasses and would have to special-case the DTensor dispatch key. We provide
         # this implementation to maintain composability with these other parts of
         # PyTorch.
-        #
-        # TODO: add RecordFunction to make it clearer in profiles when this slow path is
-        # being hit?
-        return func(*args, **kwargs)
+        return DTensor._op_dispatcher.dispatch(
+            func,
+            args,
+            kwargs or {},
+        )
 
     @staticmethod
     def from_local(

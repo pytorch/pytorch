@@ -172,6 +172,19 @@ class OpDispatcher:
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+    ) -> object:
+        # Leave a working implementation (this will hit the DTensor dispatch key) here
+        # so that any code that thinks it can use this will still work.
+        #
+        # TODO: add RecordFunction to make it clearer in profiles when this slow path is
+        # being hit?
+        return op_call(*args, **kwargs)
+
+    def _dispatch_fast_path_python_tail(
+        self,
+        op_call: torch._ops.OpOverload,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
         op_info: OpInfo,
     ) -> object:
         """
