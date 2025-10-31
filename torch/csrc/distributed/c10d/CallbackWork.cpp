@@ -3,8 +3,8 @@
 namespace c10d {
 CallbackWork::~CallbackWork() {
   py::gil_scoped_acquire ag;
-  cb_.dec_ref();
-  cb_.ptr() = nullptr;
+  callback_.dec_ref();
+  callback_.ptr() = nullptr;
 }
 
 } // namespace c10d
