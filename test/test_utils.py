@@ -529,32 +529,32 @@ class TestCheckpoint(TestCase):
     def test_infer_device_state_recursive_multi_gpu(self):
         # Check that no warning is issued for either gpu:0, gpu:1 or
         # gpu:0, gpu:0 cases since they are both the same device type
-        global g_device_type
+        global device_type
         inp = {
-            "foo": torch.rand(10, device=f"{g_device_type}:0"),
-            "bar": [torch.rand(10, device=f"{g_device_type}:1")],
+            "foo": torch.rand(10, device=f"{device_type}:0"),
+            "bar": [torch.rand(10, device=f"{device_type}:1")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             _device_type = _infer_device_type(inp)
-            self.assertEqual(g_device_type, _device_type)
+            self.assertEqual(device_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device=f"{g_device_type}:0"),
-            "bar": [torch.rand(10, device=f"{g_device_type}:0")],
+            "foo": torch.rand(10, device=f"{device_type}:0"),
+            "bar": [torch.rand(10, device=f"{device_type}:0")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             _device_type = _infer_device_type(inp)
-            self.assertEqual(g_device_type, _device_type)
+            self.assertEqual(device_type, _device_type)
         # Check that a warning is issued for gpu:0, meta and that it includes
         # device type information
         inp = {
-            "foo": torch.rand(10, device=f"{g_device_type}:0"),
+            "foo": torch.rand(10, device=f"{device_type}:0"),
             "bar": [torch.rand(10, device="meta")],
         }
         with warnings.catch_warnings(record=True) as w:
             _device_type = _infer_device_type(inp)
-            self.assertEqual(g_device_type, _device_type)
+            self.assertEqual(device_type, _device_type)
         self.assertEqual(len(w), 1)
         warning_msg = str(w[-1].message)
         self.assertTrue(
