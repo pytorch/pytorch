@@ -4189,7 +4189,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     # TODO: consolidate two configs
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @torch._dynamo.config.patch("enrich_profiler_stack_trace", True)
+    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
@@ -4237,7 +4237,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             prof.export_chrome_trace(trace_file)
 
             # Load the trace data
-            with open(trace_file, 'r') as f:
+            with open(trace_file) as f:
                 trace_data = json.load(f)
 
             # Augment the trace with stack traces

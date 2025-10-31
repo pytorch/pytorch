@@ -1244,12 +1244,14 @@ def _canonicalize_profiler_events(events):
         lines = [s.strip() for s in stack_trace.split("\n") if s.strip()]
         stack_trace = lines[-1] if lines else ""
 
-        events_with_traces.append({
-            "event_name": event_name[:20],
-            "node_name": node_name,
-            "stack_trace": stack_trace,
-            "start_time": event.get("ts", 0)
-        })
+        events_with_traces.append(
+            {
+                "event_name": event_name[:20],
+                "node_name": node_name,
+                "stack_trace": stack_trace,
+                "start_time": event.get("ts", 0),
+            }
+        )
 
     # Sort by node_name for deterministic ordering
     events_with_traces.sort(key=lambda x: x["start_time"])

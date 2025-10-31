@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
-from typing import Optional
+from dataclasses import dataclass
+from typing import Any, Literal, Optional
 
 import torch
 from torch._logging import LazyString
@@ -67,7 +68,27 @@ def get_node_context(node, num_nodes=2) -> str:
     return "\n".join(node_contexts[::-1])
 
 
-def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_events=False):
+@dataclass
+class TimelineEvent:
+    """Represents an event in the profiler timeline."""
+    timestamp: int
+    event_type: Literal["start", "end", "regular"]
+    marker_type: Optional[Literal["filename", "node"]]
+    identifier: Optional[str | int]
+    event: dict[str, Any]
+
+
+@dataclass
+class ContextStackEntry:
+    """Represents a context (filename or node) in the stack."""
+    context_type: Literal["filename", "node"]
+    identifier: str | int
+    metadata: Optional[dict]
+
+
+def map_recorded_events_to_aten_ops_with_stack_trace(
+    traced_data, remove_fx_events=False
+):
     """
     Maps recorded profiler events to their corresponding fx nodes and adds stack traces.
 
@@ -87,102 +108,107 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data, remove_fx_even
 
     trace_events = traced_data.get("traceEvents", [])
 
-    # Create event timeline: (timestamp, event_type, event_data)
-    # event_type: 'start' or 'end'
-    event_timeline = []
+    # Create event timeline
+    event_timeline: list[TimelineEvent] = []
     fx_marker_events = []  # Track FX marker events to optionally remove them
 
+    def is_fx_marker_event(event):
+        return (
+            event.get("cat") == "cpu_op"
+            and event.get("name", "").startswith("## ")
+            and event.get("name", "").endswith(" ##")
+        )
+
+    def append_fx_marker_event(event_type, identifier, event):
+        start_ts = event["ts"]
+        end_ts = start_ts + event["dur"]
+        event_timeline.append(TimelineEvent(start_ts, "start", event_type, identifier, event))
+        event_timeline.append(TimelineEvent(end_ts, "end", event_type, identifier, event))
+
     for event in trace_events:
-        # TODO: do not drop any event. The output should have everything in the input AND the additional information (except those removed by remove_fx_events)
         if "ts" not in event or "dur" not in event:
             continue
 
-        start_ts = event["ts"]
-        end_ts = start_ts + event["dur"]
-
-        # Check if this is an FX marker event
-        if (event.get("cat") == "cpu_op" and
-            event.get("name", "").startswith("## ") and
-            event.get("name", "").endswith(" ##")):
+        if is_fx_marker_event(event):
             fx_marker_events.append(event)
             content = event["name"][3:-3]
 
-            # Parse the content
             if content.endswith(".py"):
-                # This is a graph entry event
-                event_timeline.append((start_ts, 'start', 'filename', content, event))
-                event_timeline.append((end_ts, 'end', 'filename', content, event))
+                append_fx_marker_event("filename", content, event)
             else:
-                # Try to parse as node index
                 try:
                     node_index = int(content)
-                    event_timeline.append((start_ts, 'start', 'node', node_index, event))
-                    event_timeline.append((end_ts, 'end', 'node', node_index, event))
                 except ValueError:
                     pass
+                append_fx_marker_event("node", node_index, event)
+
         else:
             # Regular event that needs augmentation
-            event_timeline.append((start_ts, 'regular', None, None, event))
+            start_ts = event["ts"]
+            event_timeline.append(TimelineEvent(start_ts, "regular", None, None, event))
 
     # Sort by timestamp
-    event_timeline.sort(key=lambda x: x[0])
+    event_timeline.sort(key=lambda x: x.timestamp)
 
     # Process events in chronological order with a stack
-    context_stack = []  # Stack of (type, identifier, metadata)
-    # type can be 'filename' or 'node'
-    # identifier is the filename or node_index
-    # metadata is the corresponding metadata dict
+    context_stack: list[ContextStackEntry] = []
 
     # Invariant: all start event has a corresponding end event
-    for timestamp, event_type, marker_type, identifier, event in event_timeline:
-        if event_type == 'start':
-            if marker_type == 'filename':
-                # Push filename context - query metadata registry on-demand
-                metadata = _FX_METADATA_REGISTRY.get(identifier)
-                context_stack.append(('filename', identifier, metadata))
-            elif marker_type == 'node':
-                # Find the current filename from stack
-                current_file_metadata = None
-                for ctx_type, ctx_id, ctx_meta in reversed(context_stack):
-                    if ctx_type == 'filename':
-                        current_file_metadata = ctx_meta
+    for timeline_event in event_timeline:
+        match timeline_event.event_type:
+            case "start":
+                assert timeline_event.identifier is not None
+
+                if timeline_event.marker_type == "filename":
+                    assert isinstance(timeline_event.identifier, str)
+                    # Push filename context - query metadata registry on-demand
+                    metadata = _FX_METADATA_REGISTRY.get(timeline_event.identifier)
+                    context_stack.append(ContextStackEntry("filename", timeline_event.identifier, metadata))
+                elif timeline_event.marker_type == "node":
+                    # Find the current filename from stack
+                    current_file_metadata = None
+                    for ctx_entry in reversed(context_stack):
+                        if ctx_entry.context_type == "filename":
+                            current_file_metadata = ctx_entry.metadata
+                            break
+
+                    if current_file_metadata:
+                        node_metadata = current_file_metadata.get("node_metadata", {})
+                        if timeline_event.identifier in node_metadata:
+                            node_meta: Optional[dict] = node_metadata[timeline_event.identifier]
+                            context_stack.append(ContextStackEntry("node", timeline_event.identifier, node_meta))
+
+            case "end":
+                # Pop from stack - search backwards to find matching context
+                for i in range(len(context_stack) - 1, -1, -1):
+                    ctx_entry = context_stack[i]
+                    if timeline_event.marker_type == ctx_entry.context_type and timeline_event.identifier == ctx_entry.identifier:
+                        context_stack.pop(i)
                         break
 
-                if current_file_metadata:
-                    node_metadata = current_file_metadata.get("node_metadata", {})
-                    if identifier in node_metadata:
-                        node_meta = node_metadata[identifier]
-                        context_stack.append(('node', identifier, node_meta))
+            case "regular":
+                # Apply metadata from current context stack
+                # Find the most specific context (node takes precedence over filename)
+                current_stack_trace = None
+                current_node_name = None
 
-        elif event_type == 'end':
-            # Pop from stack - search backwards to find matching context
-            for i in range(len(context_stack) - 1, -1, -1):
-                ctx_type, ctx_id, ctx_meta = context_stack[i]
-                if marker_type == ctx_type and identifier == ctx_id:
-                    context_stack.pop(i)
-                    break
+                for ctx_entry in reversed(context_stack):
+                    if ctx_entry.context_type == "node" and ctx_entry.metadata:
+                        current_stack_trace = ctx_entry.metadata.get(
+                            "stack_trace", "No model stack trace available"
+                        )
+                        current_node_name = ctx_entry.metadata.get("name", "")
+                        # Do we want to only attach the stack trace of the lowest node or stack trace of all nodes
+                        # if nodes are nested, e.g. in nested graph modules
+                        break
 
-        elif event_type == 'regular':
-            # Apply metadata from current context stack
-            # Find the most specific context (node takes precedence over filename)
-            current_stack_trace = None
-            current_node_name = None
-
-            for ctx_type, ctx_id, ctx_meta in reversed(context_stack):
-                if ctx_type == 'node' and ctx_meta:
-                    current_stack_trace = ctx_meta.get("stack_trace", "No model stack trace available")
-                    current_node_name = ctx_meta.get("name", "")
-                    # Do we want to only attach the stack trace of the lowest node or stack trace of all nodes
-                    # if nodes are nested, e.g. in nested graph modules
-                    break
-
-            # Augment the event
-            if current_stack_trace or current_node_name:
-                args = event.setdefault("args", {})
-                if current_stack_trace:
-                    args["stack_trace"] = current_stack_trace
-                if current_node_name:
-                    args["node_name"] = current_node_name
+                # Augment the event
+                if current_stack_trace or current_node_name:
+                    args = timeline_event.event.setdefault("args", {})
+                    if current_stack_trace:
+                        args["stack_trace"] = current_stack_trace
+                    if current_node_name:
+                        args["node_name"] = current_node_name
 
     # Remove FX marker events if requested
     if remove_fx_events:

@@ -800,7 +800,9 @@ class CodeGen:
             raise NotImplementedError(f"node: {node.op} {node.target}")
 
         if record_func:
-            body.append("_rf = torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##'); _rf.__enter__()\n")
+            body.append(
+                "_rf = torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##'); _rf.__enter__()\n"
+            )
         for i, node in enumerate(nodes):
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
@@ -810,9 +812,15 @@ class CodeGen:
             # node index, which will be deleted later
             # after going through _body_transformer
             body.append(f"# COUNTER: {i}\n")
-            do_record = record_func and node.op in ("call_function", "call_method", "call_module")
+            do_record = record_func and node.op in (
+                "call_function",
+                "call_method",
+                "call_module",
+            )
             if do_record:
-                body.append(f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {i} ##'); _rf_{node.name}.__enter__()\n")
+                body.append(
+                    f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {i} ##'); _rf_{node.name}.__enter__()\n"
+                )
             emit_node(node)
             delete_unused_values(node)
             if do_record:
@@ -1769,7 +1777,7 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
-        record_func:bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
