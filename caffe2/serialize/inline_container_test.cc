@@ -519,7 +519,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoadWithAllocator) {
   std::tie(data_ptr, size) = reader.getRecord("key1", &overrideAllocator);
   EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
   EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes);
-  // allcoate with base allocator
+  // allocate with base allocator
   std::tie(data_ptr, size) = reader.getRecord("key1");
   EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
   EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1);
