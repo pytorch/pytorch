@@ -676,8 +676,9 @@ def forward(self, x):
                 self.assertIsNotNone(args[i].as_tensor)
 
             self.assertEqual(args[3].as_int, 3)
-
-            self.assertEqual(kwargs[0].as_string, "add_kernel")  # name
+            kernel_name = kwargs[0].as_string
+            symbol_name = kernel_name.rpartition("_")[0]
+            self.assertEqual(symbol_name, "add_kernel")  # symbol name
             self.assertEqual(kwargs[1].as_ints, [1, 1, 1])  # grid
             self.assertEqual(kwargs[2].as_ints, [2])  # output indices
             self.assertEqual(
@@ -2000,7 +2001,7 @@ class TestSaveLoad(TestCase):
 
     def test_save_load_with_multiple_empty_tensors(self) -> None:
         # Test scenario where models have multiple empty tensors
-        # but with differnt data types.
+        # but with different data types.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
