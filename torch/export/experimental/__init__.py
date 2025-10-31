@@ -50,7 +50,7 @@ def _remove_detach_pass(
             if node.op != "call_function":
                 continue
             if (
-                node.target == torch.ops.aten.detach.default
+                node.target is torch.ops.aten.detach.default
                 and len(node.users) == 1
                 and next(iter(node.users)).target == torch.ops.aten.detach.default
             ):
