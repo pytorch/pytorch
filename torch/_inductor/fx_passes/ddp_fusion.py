@@ -92,7 +92,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
     first_user = next(iter(comm_node.users))
     if (
         len(comm_node.users) == 1
-        and first_user.target == torch.ops._c10d_functional.wait_tensor.default
+        and first_user.target is torch.ops._c10d_functional.wait_tensor.default
     ):
         # Collective with only one output
         node_list = [comm_node, first_user]

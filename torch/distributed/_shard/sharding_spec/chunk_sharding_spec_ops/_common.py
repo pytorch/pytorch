@@ -128,7 +128,7 @@ def _handle_col_wise_sharding_base(
     # run the operator's function for all the inputs.
     results = []
     for i, inp in enumerate(gathered_inputs):
-        if op_func == torch.nn.functional.embedding_bag:
+        if op_func is torch.nn.functional.embedding_bag:
             result = op_func(
                 inp,
                 local_shard,
@@ -139,7 +139,7 @@ def _handle_col_wise_sharding_base(
                 else None,
                 padding_idx=padding_idx,
             )
-        elif op_func == torch.nn.functional.embedding:
+        elif op_func is torch.nn.functional.embedding:
             result = op_func(
                 inp,
                 local_shard,

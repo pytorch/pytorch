@@ -17,7 +17,7 @@ from ..decorators import substitute_in_graph
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from typing_extensions import Self
 
 
@@ -348,6 +348,113 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec]:
         return isinstance(obj, PyTreeSpec)
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        optree.treespec_leaf,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )
+    def treespec_leaf(
+        *,
+        none_is_leaf: bool = False,
+        namespace: str = "",  # unused
+    ) -> PyTreeSpec:
+        return PyTreeSpec(
+            (),
+            None,
+            None,
+            (),
+            None,
+            none_is_leaf=none_is_leaf,
+            namespace="",
+        )
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        optree.treespec_tuple,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )
+    def treespec_tuple(
+        iterable: Iterable[PyTreeSpec] = (),
+        /,
+        *,
+        none_is_leaf: bool = False,
+        namespace: str = "",
+    ) -> PyTreeSpec:
+        children = tuple(iterable)
+        if any(not _is_pytreespec_instance(child) for child in children):
+            raise ValueError(f"Expected a tuple of PyTreeSpecs, got: {children!r}.")
+        if any(child.none_is_leaf != none_is_leaf for child in children):
+            raise ValueError(
+                "All children PyTreeSpecs must have the same `none_is_leaf` value "
+                f"as the parent; expected {none_is_leaf}, got: {children!r}.",
+            )
+        if any(child.namespace not in (namespace, "") for child in children):
+            raise ValueError(
+                "All children PyTreeSpecs must have the same `namespace` value "
+                f"as the parent; expected {namespace!r}, got: {children!r}.",
+            )
+        handler = optree.register_pytree_node.get(tuple, namespace=namespace)  # type: ignore[attr-defined]
+        assert handler is not None
+        return PyTreeSpec(
+            tuple(children),
+            tuple,
+            None,
+            tuple(range(len(children))),
+            handler.unflatten_func,
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
+        )
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        optree.treespec_dict,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )
+    def treespec_dict(
+        mapping: Mapping[Any, PyTreeSpec] | Iterable[tuple[Any, PyTreeSpec]] = (),
+        /,
+        *,
+        none_is_leaf: bool = False,
+        namespace: str = "",
+        **kwargs: PyTreeSpec,
+    ) -> PyTreeSpec:
+        dct = dict(mapping, **kwargs)
+        if any(not _is_pytreespec_instance(child) for child in dct.values()):
+            raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")
+        if any(child.none_is_leaf != none_is_leaf for child in dct.values()):
+            raise ValueError(
+                "All children PyTreeSpecs must have the same `none_is_leaf` value "
+                f"as the parent; expected {none_is_leaf}, got: {dct!r}.",
+            )
+        if any(child.namespace not in (namespace, "") for child in dct.values()):
+            raise ValueError(
+                "All children PyTreeSpecs must have the same `namespace` value "
+                f"as the parent; expected {namespace!r}, got: {dct!r}.",
+            )
+
+        (
+            children,
+            metadata,
+            entries,
+            unflatten_func,
+        ) = optree.tree_flatten_one_level(  # type: ignore[assignment,var-annotated]
+            dct,  # type: ignore[arg-type]
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
+        )
+        return PyTreeSpec(
+            tuple(children),  # type: ignore[arg-type]
+            dict,
+            metadata,
+            entries,
+            unflatten_func,
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
+        )
 
     @substitute_in_graph(  # type: ignore[arg-type]
         optree.tree_flatten,
