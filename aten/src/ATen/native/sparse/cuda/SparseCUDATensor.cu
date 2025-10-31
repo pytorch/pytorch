@@ -275,7 +275,7 @@ Tensor view_as_complex_sparse_cuda(const Tensor& self) {
 
   int64_t new_nnz = 0;
 
-  AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "view_as_complex_sparse_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, values.scalar_type(), "view_as_complex_sparse_cuda", [&] {
     using complex_t = c10::complex<scalar_t>;
 
     int64_t threads = 256;

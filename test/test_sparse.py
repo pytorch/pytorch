@@ -5620,6 +5620,24 @@ class TestSparseAny(TestCase):
                     RuntimeError, r"memory pinning of \w*indices \(=0\) must match memory pinning of values \(=1\)"):
                 generic_constructor(*args2, **kwargs)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    def test_view_as_complex(self, device, dtype):
+        indices = torch.tensor([[0, 2, 3, 2, 2], [0, 1, 2, 1, 1], [0, 0, 1, 1, 1]], device=device)
+        x = torch.tensor([2., 1., 3., 4., .5], dtype=dtype, device=device)
+        size = torch.Size([4, 3, 2])
+        xs = torch.sparse_coo_tensor(indices, x, size, dtype=dtype)
+        res = torch.view_as_complex(xs).coalesce()
+
+        zt = torch.tensor(0., dtype=dtype)
+        x = x.cpu()
+        res = res.cpu()
+        self.assertEqual(res.indices(), torch.tensor([[0, 2, 3], [0, 1, 2]]))
+        self.assertEqual(res.values()[0], torch.complex(x[0], zt))
+        self.assertEqual(res.values()[1], torch.complex(x[1], x[3] + x[4]))
+        self.assertEqual(res.values()[2], torch.complex(zt, x[2]))
+        self.assertEqual(res.shape, xs.shape[:2])
+
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')

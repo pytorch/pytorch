@@ -47,7 +47,7 @@ Tensor view_as_complex_sparse_cpu(const Tensor& self) {
   auto flatten_indices_accessor = sorted_flatten_indices.accessor<int64_t, 1>();
   auto last_dim_indices_accessor = last_dim_indices.accessor<int64_t, 1>();
 
-  AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "view_as_complex_sparse_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, values.scalar_type(), "view_as_complex_sparse_cpu", [&] {
     using complex_t = c10::complex<scalar_t>;
     std::unordered_set<int64_t> skip_cols;
     std::vector<int64_t> keep_cols;

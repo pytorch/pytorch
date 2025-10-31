@@ -375,6 +375,17 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+        # sparse matrix
+        x = torch.tensor([2.0, 3.0], device=device)
+        indices = torch.tensor([[0, 0], [0, 0], [0, 1]], device=device)
+        size = torch.Size([3, 3, 2])
+        xs = torch.sparse_coo_tensor(indices, x, size)
+        res = torch.view_as_complex(xs).coalesce()
+        # self.is_view_of() does not work with sparse tensors
+        self.assertTrue(res._is_view())
+        self.assertIs(res._base, xs)
+        self.assertEqual(res.shape, xs.shape[:2])
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     @dtypesIfMPS(torch.cfloat, torch.chalf)
