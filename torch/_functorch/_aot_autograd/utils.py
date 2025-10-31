@@ -249,7 +249,7 @@ def maybe_to_fresh_input(idx, t, meta):
 def is_with_effects(node):
     return (
         node.op == "call_function"
-        and node.target == torch.ops.higher_order.with_effects
+        and node.target is torch.ops.higher_order.with_effects
     )
 
 
