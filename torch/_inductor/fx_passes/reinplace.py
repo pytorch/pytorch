@@ -434,7 +434,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default and node.args[0].op in (
+        if node.target is aten.copy_.default and node.args[0].op in (
             "placeholder",
             "get_attr",
         ):
@@ -448,7 +448,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
-                or (src.args[0].target == torch.ops.higher_order.auto_functionalized)
+                or (src.args[0].target is torch.ops.higher_order.auto_functionalized)
             ):
                 src = src.args[0]
 
