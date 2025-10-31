@@ -2090,7 +2090,7 @@ class CommonTemplate:
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
         size_hints = {"x": 67108864, "r0_": 8192}
-        for i in range(4):
+        for _ in range(4):
             size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
@@ -5033,13 +5033,13 @@ class CommonTemplate:
 
         def run_weights_sharing_model(m, inp):
             with torch.no_grad():
-                for i in range(num_run):
+                for _ in range(num_run):
                     y = m(inp)
 
         numb_instance = 2
         threads = []
         compiled_m = torch.compile(model)
-        for i in range(1, numb_instance + 1):
+        for _ in range(1, numb_instance + 1):
             thread = threading.Thread(
                 target=run_weights_sharing_model, args=(compiled_m, inp)
             )
