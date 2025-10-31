@@ -59,6 +59,12 @@ TritonKernel::TritonKernel(
           static_cast<int>(grid[0]),
           static_cast<int>(grid[1]),
           static_cast<int>(grid[2]));
+    } else if (attr.name == "num_cpu_threads") {
+      if (const int num_cpu_threads =
+              static_cast<int>(std::get<int64_t>(attr.value));
+          num_cpu_threads >= 0) {
+        launch_params_.num_cpu_threads = num_cpu_threads;
+      }
     } else if (attr.name == "num_warps") {
       if (const int num_warps = static_cast<int>(std::get<int64_t>(attr.value));
           num_warps > 0) {

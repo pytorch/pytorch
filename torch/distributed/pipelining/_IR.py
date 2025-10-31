@@ -282,7 +282,7 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)
@@ -924,7 +924,7 @@ class Pipe(torch.nn.Module):
                 pass
 
         # This is done by (1) `_sink_params` at each submodule;
-        for name, submod in split.named_children():
+        for submod in split.children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()
