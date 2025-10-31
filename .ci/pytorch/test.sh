@@ -572,6 +572,8 @@ fi
 
 if [[ "${TEST_CONFIG}" == *cpu* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
+elif [[ "${TEST_CONFIG}" == *xpu* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--device xpu)
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
@@ -665,6 +667,8 @@ test_perf_for_dashboard() {
     device=cuda_b200
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
+  elif [[ "${TEST_CONFIG}" == *xpu* ]]; then
+    device=xpu
   fi
 
   for mode in "${modes[@]}"; do
@@ -1757,7 +1761,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   else
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"

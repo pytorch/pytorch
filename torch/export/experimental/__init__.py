@@ -52,7 +52,7 @@ def _remove_detach_pass(
             if (
                 node.target is torch.ops.aten.detach.default
                 and len(node.users) == 1
-                and next(iter(node.users)).target == torch.ops.aten.detach.default
+                and next(iter(node.users)).target is torch.ops.aten.detach.default
             ):
                 next(iter(node.users)).replace_all_uses_with(node)
 

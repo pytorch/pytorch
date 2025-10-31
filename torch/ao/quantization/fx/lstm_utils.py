@@ -212,7 +212,7 @@ def _get_reference_quantized_lstm_module(
                 arg = node.args[0]
                 # Remove quantize(x), quantize(hidden[0]), and quantize(hidden[1])
                 if arg.target == "x" or (
-                    arg.target == operator.getitem and arg.args[0].target == "hidden"
+                    arg.target is operator.getitem and arg.args[0].target == "hidden"
                 ):
                     with cell.graph.inserting_before(node):
                         node.replace_all_uses_with(arg)
