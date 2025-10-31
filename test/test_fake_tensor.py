@@ -1,3 +1,6 @@
+# Owner(s): ["module: meta tensors"]
+# ruff: noqa: F841
+
 
 import contextlib
 import copy
@@ -509,7 +512,7 @@ class FakeTensorTest(TestCase):
     def test_upsample_bilinear_small_channels(self):
         out = []
         mode = FakeTensorMode()
-        for context in [contextlib.nullcontext, lambda: mode]:
+        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
             with context():
                 arg0_1 = torch.empty_strided(
                     (3, 427, 640), (1, 1920, 3), dtype=torch.float32, device="cuda"
