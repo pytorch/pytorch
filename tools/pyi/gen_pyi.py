@@ -1724,7 +1724,6 @@ def gen_pyi(
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "is_wrapped_number": ["is_wrapped_number: _bool"],
             "storage_offset": [defs("storage_offset", ["self"], "_int | SymInt")],
             "to": [
                 (
