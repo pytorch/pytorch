@@ -50,10 +50,9 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
 from .. import config
+from .aot_autograd_result import GenericAOTAutogradResult, serialize_graph_module
 from .autograd_cache import (
     AOTAutogradCache,
-    GenericAOTAutogradCacheEntry,
-    serialize_graph_module,
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
@@ -397,7 +396,7 @@ def _cache_inference_info(
         else:
             return hasattr(compiled_fw, "_fx_graph_cache_key")
 
-    entry: Optional[GenericAOTAutogradCacheEntry] = None
+    entry: Optional[GenericAOTAutogradResult] = None
     if cache_info is not None and should_save_cache():
         time_taken_ns = time.time_ns() - cache_info.start_time_ns
         guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
@@ -2031,7 +2030,7 @@ def _cache_autograd_info(
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     try_save_cache_entry: Optional[Callable] = None
-    entry: Optional[GenericAOTAutogradCacheEntry] = None
+    entry: Optional[GenericAOTAutogradResult] = None
 
     if aot_config.cache_info is not None:
         forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
@@ -2044,7 +2043,7 @@ def _cache_autograd_info(
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
-        ) -> Optional[GenericAOTAutogradCacheEntry]:
+        ) -> Optional[GenericAOTAutogradResult]:
             cache_info = aot_config.cache_info
 
             def should_save_cache():
