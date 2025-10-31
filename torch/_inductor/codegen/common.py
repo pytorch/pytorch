@@ -59,7 +59,15 @@ from ..utils import (
     triton_type,
     unique,
 )
-from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
+from ..virtualized import (
+    NullHandler,
+    ops,
+    OpsHandler,
+    OpsValue,
+    ReductionType,
+    StoreMode,
+    V,
+)
 
 
 if TYPE_CHECKING:
@@ -712,11 +720,20 @@ def check_shape(
 ) -> None:
     backend = get_current_backend()
     assert shape is not None
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
+
+
+def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
+    backend = get_current_backend()
+    if backend == "triton":
+        msg = "NaN or Inf found"
+        buffer.writeline(
+            f"tl.device_assert(({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf')), '{msg}')"
+        )
 
 
 class DataTypePropagation:
@@ -2063,6 +2080,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
 
+        self.atomic_add_found = False
         self.num_load = 0
         self.num_store = 0
         self.num_reduction = 0
@@ -2160,6 +2178,14 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        raise NotImplementedError
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: CSEVariable,
+    ) -> None:
         raise NotImplementedError
 
     def scan(
@@ -2607,6 +2633,9 @@ class CSEProxy(DefaultHandler):
                 assert output_shape is not None
                 check_shape(V.kernel.compute, csevar, output_shape)
 
+            if config.runtime_triton_nan_asserts:
+                check_nan(V.kernel.compute, csevar)
+
             return csevar
 
         return pytree.tree_map(do_cse, value)
@@ -2624,6 +2653,9 @@ class CSEProxy(DefaultHandler):
             return ValueRanges.unknown()
 
         if isinstance(V.kernel, CUDATemplateKernel):
+            return ValueRanges.unknown()
+
+        if isinstance(V.interpreter, NullHandler):
             return ValueRanges.unknown()
 
         fx_node = V.interpreter.current_node
@@ -2752,6 +2784,10 @@ class CSEProxy(DefaultHandler):
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
+
+    # pyrefly: ignore [bad-override]
+    def partial_accumulate(self, *args: Any) -> None:
+        self.kernel.partial_accumulate(*args)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
