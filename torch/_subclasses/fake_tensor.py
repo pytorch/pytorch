@@ -894,7 +894,7 @@ class FakeTensor(Tensor):
             return NotImplemented
 
         assert not fake_mode.in_kernel_invocation
-        
+
         # Intercept deepcopy here and error only when deepcopy() is called
         # on a real tensor inside FakeTensorMode.  This avoids making
         # from_real_tensor() refuse non-meta tensors generally.

@@ -14,10 +14,8 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-import copy
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
-import torch
 import torch._dynamo
 import torch._functorch.config
 import torch._prims as prims
@@ -35,7 +33,6 @@ from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
     FakeTensorConverter,
-    FakeTensorMode,
     MetadataMismatchError,
     unset_fake_temporarily,
     UnsupportedOperatorException,
