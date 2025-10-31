@@ -497,7 +497,7 @@ def forward(self, x_1, output_1):
             x: torch.Tensor,
             y: torch.Tensor,
         ):
-            for i in range(4):
+            for _ in range(4):
                 x = add_in_loop(x, y)
             return x
 
@@ -2971,7 +2971,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
             output = tl.zeros((n_elements,), dtype=tl.float32)
-            for i in range(4):
+            for _ in range(4):
                 output += x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
@@ -3041,8 +3041,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
             output = tl.zeros((n_elements,), dtype=tl.float32)
-            for i in range(2):
-                for j in range(2):
+            for _ in range(2):
+                for _ in range(2):
                     output += x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
@@ -3078,8 +3078,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
             y = tl.load(in_ptr1 + offsets, mask=mask)
             output1 = tl.zeros((n_elements,), dtype=tl.float32)
             output2 = tl.zeros((n_elements,), dtype=tl.float32)
-            for i in range(2):
-                for j in range(2):
+            for _ in range(2):
+                for _ in range(2):
                     output1 += y
                     output2 += x
             output = output1 + output2
