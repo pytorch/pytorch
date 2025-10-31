@@ -530,7 +530,8 @@ def _create_stateful_graph_module(
                 f"A model attribute `{constant_fqn}` requires gradient. "
                 f"but it's not properly registered as a parameter. "
                 f"torch.export will detach it and treat it as a constant tensor "
-                f"but please register it as parameter instead."
+                f"but please register it as parameter instead.",
+                stacklevel=2,
             )
             detached_buffer = buffer.detach()
             original_tensor_to_detached_tensor[buffer] = detached_buffer
@@ -549,7 +550,8 @@ def _create_stateful_graph_module(
                         f"A model attribute `{const_name}` requires gradient "
                         f"but it's not properly registered as a parameter. "
                         f"torch.export will detach it and treat it as a constant tensor "
-                        f"but please register it as parameter instead."
+                        f"but please register it as parameter instead.",
+                        stacklevel=2,
                     )
                     if value in original_tensor_to_detached_tensor:
                         value = original_tensor_to_detached_tensor[value]
