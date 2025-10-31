@@ -4763,6 +4763,10 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
+def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
+    return torch._C.Stream(*args, **kwargs)
+
+
 class CompileTimeInstructionCounter:
     _counter: int = 0
     _id: int = -1
