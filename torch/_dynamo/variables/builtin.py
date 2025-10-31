@@ -1182,7 +1182,6 @@ class BuiltinVariable(VariableTracker):
 
         if kwargs and not self.tensor_args(*args, *kwargs.values()):
             return
-        
         # insert handling for torch function here
         from .builder import SourcelessBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
