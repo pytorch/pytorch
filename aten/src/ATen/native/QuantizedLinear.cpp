@@ -68,7 +68,6 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   const float* input_ptr = input_contig.const_data_ptr<float>();
 
   TORCH_CHECK(input.dim() >= 2);
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t K = input.size(input.dim() - 1);
   TORCH_CHECK(weight.dim() == 2);

@@ -52,19 +52,6 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CONSTANT)
 #undef DEFINE_CONSTANT
 
-inline const char* toString(ScalarType t) {
-#define DEFINE_CASE(_, name) \
-  case ScalarType::name:     \
-    return #name;
-
-  switch (t) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
-    default:
-      return "UNKNOWN_SCALAR";
-  }
-#undef DEFINE_CASE
-}
-
 inline size_t elementSize(ScalarType t) {
 #define CASE_ELEMENTSIZE_CASE(ctype, name) \
   case ScalarType::name:                   \
@@ -145,22 +132,6 @@ inline ScalarType toQIntType(ScalarType t) {
       return ScalarType::QInt8;
     case ScalarType::Int:
       return ScalarType::QInt32;
-    default:
-      return t;
-  }
-}
-
-inline ScalarType toUnderlying(ScalarType t) {
-  switch (t) {
-    case ScalarType::QUInt8:
-    case ScalarType::QUInt4x2:
-      [[fallthrough]];
-    case ScalarType::QUInt2x4:
-      return ScalarType::Byte;
-    case ScalarType::QInt8:
-      return ScalarType::Char;
-    case ScalarType::QInt32:
-      return ScalarType::Int;
     default:
       return t;
   }
@@ -307,12 +278,6 @@ inline bool canCast(const ScalarType from, const ScalarType to) {
 }
 
 C10_API ScalarType promoteTypes(ScalarType a, ScalarType b);
-
-inline std::ostream& operator<<(
-    std::ostream& stream,
-    at::ScalarType scalar_type) {
-  return stream << toString(scalar_type);
-}
 
 // Returns a pair of strings representing the names for each dtype.
 // The returned pair is (name, legacy_name_if_applicable)
