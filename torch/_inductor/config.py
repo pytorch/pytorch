@@ -954,6 +954,10 @@ quiesce_async_compile_pool: bool = Config(
     default=False,
 )
 
+quiesce_async_compile_time: int = Config(
+    default=60,
+)
+
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
