@@ -1066,7 +1066,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
         else:
             new_obj_dict[name] = sub_module
 
-    for k, v in new_obj_dict.items():
+    for v in new_obj_dict.values():
         obj.__dict__[name] = v
 
     return obj
