@@ -2,8 +2,8 @@
 """Module for handling symbolic function registration."""
 
 import warnings
-from collections.abc import Collection, Sequence
-from typing import Callable, Generic, Optional, TypeVar, Union
+from collections.abc import Callable, Collection, Sequence
+from typing import Generic, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 from torch.onnx import _constants, errors
@@ -164,6 +164,7 @@ class _SymbolicFunctionGroup:
                 f"Replacing the existing function with new function. This is unexpected. "
                 f"Please report it on {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
                 errors.OnnxExporterWarning,
+                stacklevel=2,
             )
         self._functions.set_base(opset, func)
 
@@ -184,7 +185,8 @@ class _SymbolicFunctionGroup:
         """
         if not self._functions.overridden(opset):
             warnings.warn(
-                f"No custom function registered for '{self._name}' opset {opset}"
+                f"No custom function registered for '{self._name}' opset {opset}",
+                stacklevel=2,
             )
             return
         self._functions.remove_override(opset)

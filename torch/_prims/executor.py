@@ -1,4 +1,5 @@
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 from torch._prims.context import TorchRefsMode

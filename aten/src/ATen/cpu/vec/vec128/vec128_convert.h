@@ -5,6 +5,129 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 #if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
+
+// Enable auto-vectorization for GCC-13+ and clang-17+
+// GCC-12 has a bug: gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
+#if __GNUC__ > 12 || (defined(__clang__) && (__clang_major__ >= 17))
+
+template <typename from_type, typename to_type>
+inline void convertImpl(
+    const from_type* __restrict src,
+    to_type* __restrict dst,
+    int64_t n) {
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = static_cast<to_type>(src[i]);
+  }
+}
+
+#define CONVERT_TEMPLATE(from_type, to_type)                           \
+  template <>                                                          \
+  inline void convert(const from_type* src, to_type* dst, int64_t n) { \
+    return convertImpl<from_type, to_type>(src, dst, n);               \
+  }
+
+CONVERT_TEMPLATE(uint8_t, uint8_t)
+CONVERT_TEMPLATE(uint8_t, int8_t)
+CONVERT_TEMPLATE(uint8_t, int16_t)
+CONVERT_TEMPLATE(uint8_t, int32_t)
+CONVERT_TEMPLATE(uint8_t, int64_t)
+CONVERT_TEMPLATE(uint8_t, float)
+CONVERT_TEMPLATE(uint8_t, double)
+CONVERT_TEMPLATE(int8_t, uint8_t)
+CONVERT_TEMPLATE(int8_t, int8_t)
+CONVERT_TEMPLATE(int8_t, int16_t)
+CONVERT_TEMPLATE(int8_t, int32_t)
+CONVERT_TEMPLATE(int8_t, int64_t)
+CONVERT_TEMPLATE(int8_t, float)
+CONVERT_TEMPLATE(int8_t, double)
+CONVERT_TEMPLATE(int16_t, uint8_t)
+CONVERT_TEMPLATE(int16_t, int8_t)
+CONVERT_TEMPLATE(int16_t, int16_t)
+CONVERT_TEMPLATE(int16_t, int32_t)
+CONVERT_TEMPLATE(int16_t, int64_t)
+CONVERT_TEMPLATE(int16_t, float)
+CONVERT_TEMPLATE(int16_t, double)
+CONVERT_TEMPLATE(int32_t, uint8_t)
+CONVERT_TEMPLATE(int32_t, int8_t)
+CONVERT_TEMPLATE(int32_t, int16_t)
+CONVERT_TEMPLATE(int32_t, int32_t)
+CONVERT_TEMPLATE(int32_t, int64_t)
+CONVERT_TEMPLATE(int32_t, float)
+CONVERT_TEMPLATE(int32_t, double)
+CONVERT_TEMPLATE(int64_t, uint8_t)
+CONVERT_TEMPLATE(int64_t, int8_t)
+CONVERT_TEMPLATE(int64_t, int16_t)
+CONVERT_TEMPLATE(int64_t, int32_t)
+CONVERT_TEMPLATE(int64_t, int64_t)
+CONVERT_TEMPLATE(int64_t, float)
+CONVERT_TEMPLATE(int64_t, double)
+CONVERT_TEMPLATE(float, uint8_t)
+CONVERT_TEMPLATE(float, int8_t)
+CONVERT_TEMPLATE(float, int16_t)
+CONVERT_TEMPLATE(float, int32_t)
+CONVERT_TEMPLATE(float, int64_t)
+CONVERT_TEMPLATE(float, float)
+CONVERT_TEMPLATE(float, double)
+CONVERT_TEMPLATE(double, uint8_t)
+CONVERT_TEMPLATE(double, int8_t)
+CONVERT_TEMPLATE(double, int16_t)
+CONVERT_TEMPLATE(double, int32_t)
+CONVERT_TEMPLATE(double, int64_t)
+CONVERT_TEMPLATE(double, float)
+CONVERT_TEMPLATE(double, double)
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+
+#define CONVERT_FROM_FP16_TEMPLATE(to_type)                            \
+  template <>                                                          \
+  inline void convert(const at::Half* src, to_type* dst, int64_t n) {  \
+    const float16_t* srcPtr = reinterpret_cast<const float16_t*>(src); \
+    return convertImpl<float16_t, to_type>(srcPtr, dst, n);            \
+  }
+
+#define CONVERT_TO_FP16_TEMPLATE(from_type)                             \
+  template <>                                                           \
+  inline void convert(const from_type* src, at::Half* dst, int64_t n) { \
+    float16_t* dstPtr = reinterpret_cast<float16_t*>(dst);              \
+    return convertImpl<from_type, float16_t>(src, dstPtr, n);           \
+  }
+
+CONVERT_FROM_FP16_TEMPLATE(uint8_t)
+CONVERT_FROM_FP16_TEMPLATE(int8_t)
+CONVERT_FROM_FP16_TEMPLATE(int16_t)
+CONVERT_FROM_FP16_TEMPLATE(int32_t)
+CONVERT_FROM_FP16_TEMPLATE(int64_t)
+CONVERT_FROM_FP16_TEMPLATE(float16_t)
+CONVERT_FROM_FP16_TEMPLATE(float)
+CONVERT_FROM_FP16_TEMPLATE(double)
+CONVERT_TO_FP16_TEMPLATE(uint8_t)
+CONVERT_TO_FP16_TEMPLATE(int8_t)
+CONVERT_TO_FP16_TEMPLATE(int16_t)
+CONVERT_TO_FP16_TEMPLATE(int32_t)
+CONVERT_TO_FP16_TEMPLATE(int64_t)
+CONVERT_TO_FP16_TEMPLATE(float)
+CONVERT_TO_FP16_TEMPLATE(double)
+#endif
+#ifdef __ARM_FEATURE_BF16
+CONVERT_TEMPLATE(bfloat16_t, uint8_t)
+CONVERT_TEMPLATE(bfloat16_t, int8_t)
+CONVERT_TEMPLATE(bfloat16_t, int16_t)
+CONVERT_TEMPLATE(bfloat16_t, int32_t)
+CONVERT_TEMPLATE(bfloat16_t, int64_t)
+CONVERT_TEMPLATE(bfloat16_t, bfloat16_t)
+CONVERT_TEMPLATE(bfloat16_t, float)
+CONVERT_TEMPLATE(bfloat16_t, double)
+CONVERT_TEMPLATE(uint8_t, bfloat16_t)
+CONVERT_TEMPLATE(int8_t, bfloat16_t)
+CONVERT_TEMPLATE(int16_t, bfloat16_t)
+CONVERT_TEMPLATE(int32_t, bfloat16_t)
+CONVERT_TEMPLATE(int64_t, bfloat16_t)
+CONVERT_TEMPLATE(float, bfloat16_t)
+CONVERT_TEMPLATE(double, bfloat16_t)
+#endif
+
+#endif
+
 template <typename src_t>
 struct VecConvert<
     float,

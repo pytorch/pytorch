@@ -121,6 +121,20 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_conv_train(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161905
+        def fn(x, y):
+            return torch.nn.functional.conv2d(x, y, None, 1, 1, 1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(4, 512, 7, 7, requires_grad=True),
+                torch.rand(512, 512, 3, 3),
+            ),
+            check_gradient=True,
+        )
+
     def test_cholesky(self):
         def fn(x):
             return (
@@ -133,6 +147,13 @@ class MPSBasicTests(TestCase):
     def test_reduced_max(self):
         # inductor test do not validate that max of say 16K half elements can be computed
         self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
+
+    def test_linalg_inv(self):
+        def fn(x):
+            return torch.linalg.inv(torch.linalg.cholesky(x))
+
+        A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
+        self.common(fn, (A,), check_lowp=False)
 
 
 class MPSBasicTestsAOTI(TestCase):
@@ -249,7 +270,7 @@ class MPSBasicTestsAOTI(TestCase):
         ep = torch.export.export(model, example_inputs)
         package_path = torch._export.aot_compile(ep.module(), example_inputs)
 
-        target_str = 'mps_lib_0.getKernelFunction("generated_kernel")'
+        target_str = "aoti_torch_mps_get_kernel_function("
         target_count = 1
 
         with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:

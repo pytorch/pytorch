@@ -128,12 +128,10 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     uint32_t numWarps,
     uint32_t sharedMemory,
     void** params,
-    sycl::queue* queuePtr) {
+    sycl::queue* queuePtr,
+    uint32_t threadsPerWarp) {
   std::string kernelName =
       kernelPtr->get_info<sycl::info::kernel::function_name>();
-  // Currently threadsPerWarp is hard code to 32 from torch.compile to triton
-  // stack.
-  int threadsPerWarp = 32;
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
   size_t globalRangeX = gridX * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
