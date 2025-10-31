@@ -107,7 +107,7 @@ struct TargetTraits {
 };
 
 template <class T>
-inline void maybe_incref_pyobject(T* self, uint64_t combined) {
+inline void maybe_incref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
   if constexpr (TargetTraits<T>::can_have_pyobject) {
     // If the refcount transitioned from 1 to 2, we need to incref the PyObject.
     // In other words, we need to ensure that the PyObject stays alive if
@@ -124,7 +124,7 @@ inline void maybe_incref_pyobject(T* self, uint64_t combined) {
 }
 
 template <class T>
-inline void maybe_decref_pyobject(T* self, uint64_t combined) {
+inline void maybe_decref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
   if constexpr (TargetTraits<T>::can_have_pyobject) {
     // If the refcount transitioned from 2 to 1, we need to decref the PyObject.
     // In other words, we don't want to keep the PyObject alive if there are
