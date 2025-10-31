@@ -45,7 +45,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 def create_sharded_tensor(rank, world_size, shards_per_rank):
     shards_metadata = []
     local_shards = []
-    for idx in range(0, world_size * shards_per_rank):
+    for idx in range(world_size * shards_per_rank):
         shard_rank = idx // shards_per_rank
         shard_md = ShardMetadata(
             shard_offsets=[idx * 8], shard_sizes=[8], placement=f"rank:{shard_rank}/cpu"
@@ -199,7 +199,7 @@ class TestReaderView(TestCase):
 class TestDistWrapper(DTensorTestBase):
     @property
     def world_size(self):
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(4)

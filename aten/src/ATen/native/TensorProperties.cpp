@@ -18,6 +18,7 @@
 #include <ATen/ops/is_set_to_native.h>
 #include <ATen/ops/size_native.h>
 #include <ATen/ops/stride_native.h>
+#include <ATen/ops/sym_is_contiguous_native.h>
 #include <ATen/ops/sym_numel_native.h>
 #include <ATen/ops/sym_size_native.h>
 #include <ATen/ops/sym_storage_offset_native.h>
@@ -57,6 +58,12 @@ c10::SymInt sym_size(const Tensor& self, int64_t dim) {
   return self.sym_size(dim);
 }
 
+c10::SymBool sym_is_contiguous(
+    const Tensor& self,
+    c10::MemoryFormat memory_format) {
+  return self.sym_is_contiguous(memory_format);
+}
+
 c10::SymInt sym_stride(const Tensor& self, int64_t dim) {
   return self.sym_stride(dim);
 }
@@ -83,9 +90,6 @@ bool cudnn_is_acceptable(const TensorBase& self) {
   if (!globalContext().userEnabledCuDNN())
     return false;
   if (!self.is_cuda())
-    return false;
-  auto st = self.scalar_type();
-  if (!(st == kDouble || st == kFloat || st == kHalf))
     return false;
   if (!detail::getCUDAHooks().compiledWithCuDNN())
     return false;
