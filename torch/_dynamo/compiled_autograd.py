@@ -573,7 +573,7 @@ class AutogradCompilerInstance:
                     result.name = make_unique(node.name)
                     value_remap[node] = result
                 elif node.op == "call_function":
-                    if node.target == torch.ops.aten.view.default:
+                    if node.target is torch.ops.aten.view.default:
                         # this aot bwd graph is being lazily compiled
                         # we must manually apply the view_to_reshape post grad pass
                         # since it was already applied to the aot fwd, and baked into the gradients
@@ -1241,7 +1241,7 @@ class AutogradCompilerInstance:
             to_append = []
             hook_block = [node]  # contain the hook and hook args getitem
             for n in input_nodes:
-                if n.op == "call_function" and n.target == operator.getitem:
+                if n.op == "call_function" and n.target is operator.getitem:
                     to_append.append(n.args[0])
                     to_remove.append(n)
                     hook_block.append(n)
@@ -1314,7 +1314,7 @@ class AutogradCompilerInstance:
             # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if n.op == "call_function" and n.target == call_accumulate_grad:
+                if n.op == "call_function" and n.target is call_accumulate_grad:
                     acc_grad_node = n
                     break
 
@@ -1369,7 +1369,7 @@ class AutogradCompilerInstance:
                 for n in list(param_node.users.keys()):
                     if (
                         n.op == "call_function"
-                        and n.target == call_hook
+                        and n.target is call_hook
                         and n.kwargs.get("hook_type", None) == "post_acc_grad_hook"
                     ):
                         post_acc_grad_hook_node = n

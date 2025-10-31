@@ -2080,6 +2080,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
 
+        self.atomic_add_found = False
         self.num_load = 0
         self.num_store = 0
         self.num_reduction = 0
