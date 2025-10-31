@@ -20,7 +20,7 @@ mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RE
 
 # Fetch magma sources and verify checksum
 pushd ${PACKAGE_DIR}
-git clone https://bitbucket.org/icl/magma.git
+git clone https://github.com/icl-utk-edu/magma
 pushd magma
 git checkout ${MAGMA_VERSION}
 popd
