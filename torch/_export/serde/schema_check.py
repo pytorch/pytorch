@@ -88,7 +88,7 @@ def _staged_schema():
                         f"std::optional<{cpp_type}>",
                         f"optional {thrift_type}",
                     )
-                elif o == Annotated:
+                elif o is Annotated:
                     return dump_type(t.__origin__, level)
                 else:
                     raise AssertionError(f"Type {t} is not supported in export schema.")

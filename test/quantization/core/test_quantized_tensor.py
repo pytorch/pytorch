@@ -586,7 +586,7 @@ class TestQuantizedTensor(TestCase):
         ]
         axis = 1
         device = torch.device('cuda')
-        for i in range(20):
+        for _ in range(20):
             for dtype, zero_type in dtype_and_zero_types:
                 r = torch.rand(2, 2) * 10
                 r[0, 0] = 2.5
@@ -1113,7 +1113,7 @@ class TestQuantizedTensor(TestCase):
             zero_point = 10
             types = [torch.qint8, torch.quint8, torch.qint32]
             for qtype in types:
-                for i in range(3):
+                for _ in range(3):
                     m = random.randint(10, 20)
                     elems = random.randint(20000, 30000)
                     values = torch.rand(elems, device=device)

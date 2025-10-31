@@ -139,7 +139,7 @@ def fork_wait_graph_exception(input1, input2):
 
 def loop_graph(a, b, iters: int):
     c = a + b * 2
-    for i in range(iters):
+    for _ in range(iters):
         c = c + b
         c *= 2
         c -= a
