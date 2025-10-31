@@ -485,7 +485,7 @@ class TestCustomOpAutoTune(TestCase):
             (3, 16),  # einsum, chunk_size ignored
         ]
 
-        for i, (scale_mode, chunk_size) in enumerate(configs):
+        for scale_mode, chunk_size in configs:
             result = multi_param_scaling(
                 test_x, test_factor, scale_mode=scale_mode, chunk_size=chunk_size
             )

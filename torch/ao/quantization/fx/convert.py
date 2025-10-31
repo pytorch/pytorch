@@ -643,7 +643,7 @@ def _get_module_path_and_prefix(
         first_linear_use_or_first_use = users[0] if users else None
         linear_node = None
         for n in users:
-            if n.op == "call_function" and n.target == torch.nn.functional.linear:
+            if n.op == "call_function" and n.target is torch.nn.functional.linear:
                 linear_node = n
                 break
         if linear_node:
