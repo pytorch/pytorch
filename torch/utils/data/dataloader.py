@@ -826,6 +826,16 @@ class _BaseDataLoaderIter:
                 self._dataset, self._world_size, self._rank
             )
 
+    def _create_fetcher(self):
+        """Create the dataset fetcher based on dataset kind."""
+        return _DatasetKind.create_fetcher(
+            self._dataset_kind,
+            self._dataset,
+            self._auto_collation,
+            self._collate_fn,
+            self._drop_last,
+        )
+
     def _reset(self, loader, first_iter=False):
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
@@ -889,13 +899,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 
         self._apply_dataset_sharding()
 
-        self._dataset_fetcher = _DatasetKind.create_fetcher(
-            self._dataset_kind,
-            self._dataset,
-            self._auto_collation,
-            self._collate_fn,
-            self._drop_last,
-        )
+        self._dataset_fetcher = self._create_fetcher()
 
     def _next_data(self):
         index = self._next_index()  # may raise StopIteration
@@ -1012,7 +1016,7 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
         self._load_dataset_state(state_dict)
 
         # Create fetcher
-        self._create_fetcher()
+        self._dataset_fetcher = self._create_fetcher()
 
         # Load dataset-kind-specific state
         if self._dataset_kind == _DatasetKind.Iterable:
@@ -1056,16 +1060,6 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
     def _load_dataset_state(self, state_dict):
         """Load dataset state if it's stateful."""
         _try_load_state_dict(self._dataset, state_dict[_StateKeys.DATASET_STATE])
-
-    def _create_fetcher(self):
-        """Create the dataset fetcher."""
-        self._dataset_fetcher = _DatasetKind.create_fetcher(
-            self._dataset_kind,
-            self._dataset,
-            self._auto_collation,
-            self._collate_fn,
-            self._drop_last,
-        )
 
     def _load_iterable_dataset_state(self, state_dict):
         """Load state specific to iterable datasets."""
