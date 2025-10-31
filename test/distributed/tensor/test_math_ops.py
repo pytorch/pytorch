@@ -60,9 +60,9 @@ class DistMathOpsTest(DTensorTestBase):
         shard_spec = [Shard(0)]
 
         tensor = torch.randn(12, 8, 8)
-        # TODO: check `all` correctness and test `all` on a bool tensor
-        if op_str in ("any"):
-            # test out a bool tensor for any
+        if op_str in ("any", "all"):
+            # Test bool tensor for any() and all() reduction ops
+            # Previously all() had a bug using sum reduction instead of product
             tensor = tensor < 0
         dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
