@@ -453,8 +453,8 @@ class TestCheckpoint(TestCase):
                 # emptied at each step)
                 def hook(_unused):
                     self.assertEqual(len(stats), idx)
-                    torch.get_device_module(device_type).synchronize()
-                    stats.append(torch.get_device_module(device_type).memory_allocated())
+                    torch.accelerator.synchronize()
+                    stats.append(torch.accelerator.memory_allocated())
                     if idx > 0:
                         if should_free:
                             self.assertLess(stats[idx], stats[idx - 1])
@@ -874,6 +874,8 @@ class TestDeviceUtils(TestCase):
 
             torch.set_default_device(device_type)
             torch.get_device_module(device_type).set_device(f"{device_type}:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.accelerator.set_device_index(1)
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
