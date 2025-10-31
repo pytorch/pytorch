@@ -1273,7 +1273,7 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
             post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to store an object's attribute:
+Graph Break Reason: Encountered graph break when attempting to store an object's attribute (STORE_ATTR):
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
@@ -1587,7 +1587,7 @@ from user code:
             munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to store an object's attribute:
+Graph Break Reason: Encountered graph break when attempting to store an object's attribute (STORE_ATTR):
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
