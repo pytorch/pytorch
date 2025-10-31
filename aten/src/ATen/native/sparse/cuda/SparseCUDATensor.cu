@@ -21,6 +21,7 @@
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -202,13 +203,12 @@ __global__ void _get_real_imag_kernel(
     const int64_t* __restrict__ last_dim_indices,
     const scalar_t* __restrict__ values,
     c10::complex<scalar_t>* __restrict__ complex_values,
-    int64_t nnz,
-    int64_t ndim) {
+    int64_t nnz) {
 
   int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (idx < nnz) {
-    int64_t last_idx = last_dim_indices[ndim * nnz - nnz + idx]; // indices[last_dim][idx]
+    int64_t last_idx = last_dim_indices[idx]; // indices[last_dim][idx]
 
     if (last_idx == 0) {
       // Real part
@@ -254,43 +254,46 @@ Tensor view_as_complex_sparse_cuda(const Tensor& self) {
   // values after complex_values in the same position are combined
   Tensor reduced_values = at::empty({nnz}, complex_values.options());
 
+  at::cuda::ThrustAllocator allocator;
+  auto policy = thrust::cuda::par(allocator).on(stream);
+
+  // Create a flattened hash for sorting
+  Tensor indices_hash = at::sparse::flatten_indices(new_indices, new_sizes);
+
+  // Sort columns by new_indices and reorder indices/values
+  auto sort_result = indices_hash.sort();
+  Tensor sorted_hash = std::get<0>(sort_result);
+  Tensor sort_perm = std::get<1>(sort_result);
+  new_indices = new_indices.index_select(1, sort_perm);
+
+  typedef thrust::device_ptr<int64_t> int_ptr;
+  int_ptr hash_begin(sorted_hash.data_ptr<int64_t>());
+  int_ptr hash_end = hash_begin + nnz;
+
+  Tensor unique_hash = at::empty({nnz}, sorted_hash.options());
+  int_ptr unique_hash_begin(unique_hash.data_ptr<int64_t>());
+
+  int64_t new_nnz = 0;
+
   AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "view_as_complex_sparse_cuda", [&] {
     using complex_t = c10::complex<scalar_t>;
 
     int64_t threads = 256;
     int64_t blocks = (nnz + threads - 1) / threads;
+    auto last_dim_indices = indices.select(0, ndim-1);
 
     _get_real_imag_kernel<scalar_t><<<blocks, threads, 0, stream>>>(
-        indices.data_ptr<int64_t>(),
+        last_dim_indices.data_ptr<int64_t>(),
         values.data_ptr<scalar_t>(),
         complex_values.data_ptr<complex_t>(),
-        nnz,
-        ndim
-    );
+        nnz
+      );
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    at::cuda::ThrustAllocator allocator;
-    auto policy = thrust::cuda::par(allocator).on(stream);
-
-    // Create a flattened hash for sorting
-    Tensor indices_hash = at::sparse::flatten_indices(new_indices, new_sizes);
-
-    // Sort columns by new_indices and reorder indices/values
-    auto sort_result = indices_hash.sort();
-    Tensor sorted_hash = std::get<0>(sort_result);
-    Tensor sort_perm = std::get<1>(sort_result);
-    new_indices = new_indices.index_select(1, sort_perm);
     complex_values = complex_values.index_select(0, sort_perm);
 
-    typedef thrust::device_ptr<int64_t> int_ptr;
     typedef thrust::device_ptr<complex_t> complex_ptr;
-
-    int_ptr hash_begin(sorted_hash.data_ptr<int64_t>());
-    int_ptr hash_end = hash_begin + nnz;
     complex_ptr vals_begin(complex_values.data_ptr<complex_t>());
-
-    Tensor unique_hash = at::empty({nnz}, sorted_hash.options());
-    int_ptr unique_hash_begin(unique_hash.data_ptr<int64_t>());
     complex_ptr reduced_vals_begin(reduced_values.data_ptr<complex_t>());
 
     // Use Thrust to group by indices and sum complex values
@@ -304,29 +307,42 @@ Tensor view_as_complex_sparse_cuda(const Tensor& self) {
         thrust::equal_to<int64_t>(),
         thrust::plus<complex_t>()
     );
-
-    int64_t new_nnz = new_end.first - unique_hash_begin;
-    reduced_values = reduced_values.narrow(0, 0, new_nnz);
-
-    // Create mask to remove indices with the same position.
-    Tensor keep_mask = at::empty({nnz}, at::TensorOptions().dtype(at::kBool).device(self.device()));
-    typedef thrust::device_ptr<bool> bool_ptr;
-    bool_ptr mask_begin(keep_mask.data_ptr<bool>());
-
-    // Mark positions where hash changes (keep first of each group)
-    thrust::adjacent_difference(
-        policy,
-        hash_begin,
-        hash_end,
-        mask_begin,
-        thrust::not_equal_to<int64_t>()
-    );
-    // First element is always kept
-    keep_mask[0] = true;
-
-    Tensor kept_positions = keep_mask.nonzero().squeeze(1);
-    new_indices = new_indices.index_select(1, kept_positions);
+    new_nnz = new_end.first - unique_hash_begin;
   });
+
+  reduced_values = reduced_values.narrow(0, 0, new_nnz);
+
+  // Create mask to remove indices with the same position.
+  Tensor keep_mask = at::empty({nnz}, at::TensorOptions().dtype(at::kBool).device(self.device()));
+  typedef thrust::device_ptr<bool> bool_ptr;
+  bool_ptr mask_begin(keep_mask.data_ptr<bool>());
+
+  // Mark positions where hash changes (keep first of each group)
+  thrust::adjacent_difference(
+      policy,
+      hash_begin,
+      hash_end,
+      mask_begin,
+      thrust::not_equal_to<int64_t>()
+  );
+  // First element is always kept
+  thrust::fill_n(policy, mask_begin, 1, true);
+
+  // Below does the same as kept_positions = keep_mask.nonzero().squeeze(1);
+  // but keeps data in GPU (nonzero() moves data to CPU).
+  Tensor kept_positions = at::empty({nnz}, indices.options());
+  auto positions = at::arange(nnz, indices.options());
+  thrust::copy_if(
+      policy,
+      thrust::device_ptr<int64_t>(positions.data_ptr<int64_t>()),
+      thrust::device_ptr<int64_t>(positions.data_ptr<int64_t>()) + nnz,
+      mask_begin,
+      thrust::device_ptr<int64_t>(kept_positions.data_ptr<int64_t>()),
+      thrust::identity<bool>()
+  );
+  kept_positions = kept_positions.narrow(0, 0, new_nnz);
+
+  new_indices = new_indices.index_select(1, kept_positions);
 
   return at::_sparse_coo_tensor_with_dims_and_tensors(
       self.sparse_dim() - 1,
@@ -335,7 +351,7 @@ Tensor view_as_complex_sparse_cuda(const Tensor& self) {
       new_indices,
       reduced_values,
       self.options().dtype(complex_type),
-      self.is_coalesced()
+      true
   );
 }
 
