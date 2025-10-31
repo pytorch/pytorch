@@ -799,6 +799,9 @@ static Tensor make_tensor_for_subclass_helper(
   return tensor;
 }
 
+static py::handle get_dtensor_class();
+static bool checked_issubclass(PyObject* cls, PyObject* cls2);
+
 static PyObject* THPVariable_make_wrapper_subclass(
     PyObject* /*unused*/,
     PyObject* args,
@@ -847,12 +850,21 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // TODO: This check is not complete; because the user can disable torch
   // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
   // to delete this function entirely
-  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
-  TORCH_CHECK_TYPE(
-      attr.ptr() != nullptr &&
-          attr.ptr() != torch::disabled_torch_dispatch_impl(),
-      ((PyTypeObject*)cls)->tp_name,
-      " must define __torch_dispatch__");
+
+  // DTensor is known to have __torch_dispatch__ and we have to check
+  // for it so that we correctly set up the DTensor dispatch key
+  // anyway.
+  const auto dtensor = get_dtensor_class();
+  const bool is_dtensor =
+      cls == dtensor.ptr() || checked_issubclass(cls, dtensor.ptr());
+  if (!is_dtensor) {
+    py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+    TORCH_CHECK_TYPE(
+        attr.ptr() != nullptr &&
+            attr.ptr() != torch::disabled_torch_dispatch_impl(),
+        ((PyTypeObject*)cls)->tp_name,
+        " must define __torch_dispatch__");
+  }
 
   const auto options = TensorOptions()
                            .dtype(r.scalartype(5))
@@ -868,13 +880,19 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // data
   auto sym_sizes = r.symintlist(1);
   auto sym_strides_own = r.symintlistOptional(2);
+  std::optional<DispatchKeySet> extra_dispatch_keys =
+      r.toDispatchKeySetOptional(13);
+  if (is_dtensor) {
+    extra_dispatch_keys = extra_dispatch_keys.value_or(DispatchKeySet())
+                              .add(c10::DispatchKey::DTensor);
+  }
   Tensor tensor = make_tensor_for_subclass_helper(
       /*sym_sizes=*/r.symintlist(1),
       /*sym_strides=*/r.symintlistOptional(2),
       /*sym_storage_offset=*/r.toSymIntOptional(3),
       options,
       /*storage_size=*/r.toSymIntOptional(14),
-      r.toDispatchKeySetOptional(13));
+      extra_dispatch_keys);
 
   const auto sizes_strides_policy = r.stringViewOptional(10);
   if (sizes_strides_policy.has_value()) {
@@ -976,6 +994,14 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_op_dispatcher")
         .attr("dispatch"))
 
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_output_sharding_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("_op_schema")
+        .attr("OutputSharding"))
+
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();
   if (py::isinstance(arg, dtensor_spec_class)) {
@@ -1006,6 +1032,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(_spec)                                                    \
   _(args_schema)                                              \
   _(device_mesh)                                              \
+  _(dtype)                                                    \
   _(kwargs_schema)                                            \
   _(ndim)                                                     \
   _(needs_pytree)                                             \
@@ -1041,6 +1068,14 @@ static bool intern_dtensor_strings() {
   FOR_EACH_DTENSOR_INTERNED_STRING(INTERN_DTENSOR_STRING);
 #undef INTERN_DTENSOR_STRING
   return true;
+}
+
+static bool checked_issubclass(PyObject* cls, PyObject* cls2) {
+  int result = PyObject_IsSubclass(cls, cls2);
+  if (result == -1) {
+    throw py::error_already_set();
+  }
+  return result;
 }
 
 static bool checked_not(PyObject* obj) {
@@ -1264,7 +1299,6 @@ void callDTensorOpDispatch(
     torch::jit::Stack* stack) {
   // We're called from dispatch and the dispatcher drops the GIL.
   py::gil_scoped_acquire guard;
-
   const auto py_op = torch::detail::getTorchApiFunction(op);
   auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
   py::handle cached_sharding;
@@ -1294,13 +1328,10 @@ void callDTensorOpDispatch(
         args.ptr(),
         kwargs.ptr(),
         py_op_info.ptr());
-    if (sharding.is_none()) {
+    if (!py::isinstance(sharding, get_output_sharding_class())) {
       stack->clear();
-      pushPyOutToStack(
-          op,
-          stack,
-          py::reinterpret_borrow<py::object>(Py_NotImplemented),
-          "DTensor op dispatch");
+      pushPyOutToStack(op, stack, std::move(sharding), "DTensor op dispatch");
+      return;
     }
     cached_sharding = sharding;
     if (opt_native_op_schema.has_value()) {
@@ -1405,7 +1436,7 @@ static PyObject* THPVariable_dtensor_new(
 }
 
 struct NativeRuntimeSchemaInfo {
-  py::list static_kwargkey;
+  py::object static_kwargkey;
   size_t static_argnum;
 };
 
@@ -1457,16 +1488,18 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
   }
   PyObject* comparison_key = nullptr;
   if (native_info.static_kwargkey && !native_info.static_kwargkey.is_none()) {
+    py::list static_kwargkey =
+        py::reinterpret_borrow<py::list>(native_info.static_kwargkey);
     auto raw_kwargs_schema =
         self_handle.attr(dtensor_interned_strings.kwargs_schema);
     if (!PyDict_Check(raw_kwargs_schema.ptr())) {
       PyErr_SetString(PyExc_TypeError, "self.kwargs_schema must be a dict!");
       return false;
     }
-    py::tuple kwargs_to_hash(native_info.static_kwargkey.size());
+    py::tuple kwargs_to_hash(static_kwargkey.size());
     int idx = 0;
     auto kwargs_schema = py::reinterpret_borrow<py::dict>(raw_kwargs_schema);
-    for (const auto& k : native_info.static_kwargkey) {
+    for (const auto& k : static_kwargkey) {
       PyObject* item = PyDict_GetItemWithError(kwargs_schema.ptr(), k.ptr());
       if (item) {
         kwargs_to_hash[idx++] = py::reinterpret_borrow<py::object>(item);
@@ -1582,6 +1615,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       }
       const auto mesh_dim_size = py::cast<int64_t>(mesh_size(idx));
       tensor_shape[shard_dim] *= mesh_dim_size;
+      // recover tensor stride by modifying the strides that are
+      // larger than the current stride on the shard_dim.
       for (const auto i : c10::irange(tensor_strides.size())) {
         if (static_cast<int64_t>(i) != shard_dim &&
             tensor_strides[i] >= tensor_strides[shard_dim]) {
@@ -1720,8 +1755,9 @@ static py::object try_find_mesh_from_args(
 static /*DTensorSpec*/ py::object try_replicate_spec_for_scalar_tensor(
     bool allow_implicit_replication,
     py::handle op_call,
-    const Tensor& tensor_arg,
+    py::handle py_tensor,
     py::handle compute_mesh) {
+  const Tensor& tensor_arg = THPVariable_Unpack(py_tensor.ptr());
   const bool numel_is_one = tensor_arg.numel() == 1;
   if (numel_is_one && tensor_arg.dim() == 1) {
     TORCH_WARN(
@@ -1748,13 +1784,16 @@ static /*DTensorSpec*/ py::object try_replicate_spec_for_scalar_tensor(
         py::reinterpret_borrow<py::object>(replicate).release().ptr());
   }
 
-  return get_dtensor_spec_class()(
-      compute_mesh,
-      placements_tuple,
-      get_tensor_meta_class()(
-          tensor_arg.sym_sizes(),
-          tensor_arg.sym_strides(),
-          tensor_arg.dtype()));
+  return checked_vectorcall(
+      get_dtensor_spec_class().ptr(),
+      compute_mesh.ptr(),
+      placements_tuple.ptr(),
+      checked_vectorcall(
+          get_tensor_meta_class().ptr(),
+          py_tensor.attr(dtensor_interned_strings.shape).ptr(),
+          py_tensor.attr(dtensor_interned_strings.stride)().ptr(),
+          py_tensor.attr(dtensor_interned_strings.dtype).ptr())
+          .ptr());
 }
 
 // May return nullptr, in which case there was no runtime schema info.
@@ -1804,16 +1843,27 @@ static std::optional<NativeOpSchema> create_native_op_schema(
       [&comparison_key, &comparison_key_hash, &native_info](
           size_t idx, c10::IValue arg) {
         if (idx >= native_info.static_argnum) {
+          if (arg.isList()) {
+            const auto& list = arg.toList();
+            if (list.empty()) {
+              arg = c10::ivalue::Tuple::create({});
+            } else {
+              // WARNING: here we rely on c10::List being represented
+              // by a contiguous array of IValue for efficiency!
+              arg = c10::ivalue::Tuple::create(c10::ArrayRef<c10::IValue>(
+                  &(*list.begin()).get(), list.size()));
+            }
+          }
           comparison_key_hash =
               c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
           comparison_key.emplace_back(std::move(arg));
         }
       };
   const auto handle_dtensor_arg = [&comparison_key,
-                                   &comparison_key_hash](py::handle arg) {
+                                   &comparison_key_hash](py::object arg) {
     comparison_key_hash = c10::hash_combine(
         comparison_key_hash, static_cast<size_t>(py::hash(arg)));
-    comparison_key.emplace_back(py::reinterpret_borrow<py::object>(arg));
+    comparison_key.emplace_back(std::move(arg));
   };
 
   Py_ssize_t idx = 0;
@@ -1827,10 +1877,7 @@ static std::optional<NativeOpSchema> create_native_op_schema(
     switch (tensor_flavor) {
       case TensorFlavor::EXACTLY_DTENSOR:
       case TensorFlavor::DTENSOR_SUBCLASS: {
-        handle_dtensor_arg(py::reinterpret_borrow<py::object>(
-                               py_tensor.attr(dtensor_interned_strings._spec))
-                               .release()
-                               .ptr());
+        handle_dtensor_arg(py_tensor.attr(dtensor_interned_strings._spec));
         if (compute_mesh.is_none()) {
           compute_mesh = py::reinterpret_borrow<py::object>(
               py_tensor.attr(dtensor_interned_strings.device_mesh));
@@ -1843,12 +1890,7 @@ static std::optional<NativeOpSchema> create_native_op_schema(
           compute_mesh = try_find_mesh_from_args(op, args_kwargs);
         }
         handle_dtensor_arg(try_replicate_spec_for_scalar_tensor(
-                               allow_implicit_replication,
-                               py_op,
-                               THPVariable_Unpack(py_tensor.ptr()),
-                               compute_mesh)
-                               .release()
-                               .ptr());
+            allow_implicit_replication, py_op, py_tensor, compute_mesh));
         break;
       }
       case TensorFlavor::NON_TENSOR: {
@@ -1895,10 +1937,7 @@ static std::optional<NativeOpSchema> create_native_op_schema(
         case TensorFlavor::EXACTLY_TENSOR:
         case TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS: {
           handle_dtensor_arg(try_replicate_spec_for_scalar_tensor(
-              allow_implicit_replication,
-              py_op,
-              THPVariable_Unpack(py_tensor.ptr()),
-              compute_mesh));
+              allow_implicit_replication, py_op, py_tensor, compute_mesh));
           break;
         }
         case TensorFlavor::NON_TENSOR: {

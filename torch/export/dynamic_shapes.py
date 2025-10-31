@@ -1332,7 +1332,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             roots.add(c.root.__name__)  # type: ignore[attr-defined]
 
     # check keys are existing dims or new roots
-    for k, c in shape_fixes.items():
+    for k in shape_fixes.keys():
         assert k in name_to_dim or k in roots
 
     # cache so we don't produce multiple derived dim objects
