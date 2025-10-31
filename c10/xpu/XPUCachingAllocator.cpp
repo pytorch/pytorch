@@ -154,31 +154,66 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
 
+    // Ensure handles_ vector is large enough to hold all segments.
     while (end > handles_.size()) {
       handles_.emplace_back(std::nullopt);
     }
+
+    // Allocate physical memory for each segment.
+    // Note: allocation here may over-subscribe the device memory (no OOM yet),
+    // as physical_mem construction reserves memory but does not map it.
     for (const auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
       try {
-        // Construct the physical_mem directly in the optional to avoid copies.
+        // Construct the physical_mem in-place to avoid copies.
         handles_.at(i).emplace(
             xpu::get_raw_device(device_),
             xpu::get_device_context(),
             segment_size_);
       } catch (const sycl::exception& e) {
-        if (e.code() == sycl::errc::memory_allocation) {
-          // Rollback previously allocated handles.
-          for (const auto j : c10::irange(begin, i)) {
-            handles_.at(j) = std::nullopt;
-          }
-          trimHandles();
-          return rangeFromHandles(begin, begin);
-        } else {
-          return SegmentRange(nullptr, 0);
+        // Mapping failed (likely sycl::errc::memory_allocation). Roll back all
+        // segments allocated in this operation.
+        for (const auto j : c10::irange(begin, i)) {
+          handles_.at(j) = std::nullopt;
         }
+        trimHandles();
+        return rangeFromHandles(begin, begin);
       }
     }
-    mapAndSetAccess(begin, end);
+
+    // Map each allocated segment to virtual memory.
+    // Note: mapping may fail due to over-subscription (OOM), even if allocation
+    // succeeded.
+    for (const auto i : c10::irange(begin, end)) {
+      try {
+        handles_.at(i).value().map(
+            ptr_ + i * segment_size_,
+            segment_size_,
+            sycl::ext::oneapi::experimental::address_access_mode::read_write);
+      } catch (const sycl::exception& e) {
+        // Mapping failed (likely sycl::errc::runtime). Roll back all segments
+        // allocated beyond the failure point.
+        for (const auto j : c10::irange(i, end)) {
+          handles_.at(j) = std::nullopt;
+        }
+        // Roll back all segments allocated or mapped in this operation.
+        for (const auto j : c10::irange(begin, i)) {
+          sycl::ext::oneapi::experimental::unmap(
+              reinterpret_cast<void*>(ptr_ + segment_size_ * j),
+              segment_size_,
+              xpu::get_device_context());
+          handles_.at(j) = std::nullopt;
+        }
+        trimHandles();
+        return rangeFromHandles(begin, begin);
+      }
+    }
+
+    // Set access permissions for this device and all peer devices.
+    setAccess(device_, begin, end);
+    for (const auto p : peers_) {
+      setAccess(p, begin, end);
+    }
     return rangeFromHandles(begin, end);
   }
 
@@ -227,20 +262,6 @@ struct ExpandableSegment {
         (end - begin) * segment_size_,
         sycl::ext::oneapi::experimental::address_access_mode::read_write,
         xpu::get_device_context());
-  }
-
-  // Maps physical memory handles and sets access permissions for the segment.
-  void mapAndSetAccess(size_t begin, size_t end) {
-    for (const auto i : c10::irange(begin, end)) {
-      handles_.at(i).value().map(
-          ptr_ + i * segment_size_,
-          segment_size_,
-          sycl::ext::oneapi::experimental::address_access_mode::read_write);
-    }
-    setAccess(device_, begin, end);
-    for (const auto p : peers_) {
-      setAccess(p, begin, end);
-    }
   }
 
   // Unmaps the physical memory handles in the range [begin, end) from the
