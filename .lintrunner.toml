@@ -1,6 +1,6 @@
 [[linter]]
 code = 'TYPOS'
-include_patterns = ['**/*.py']
+include_patterns = ['torch/**/*.py']
 exclude_patterns = [
 
 ]
