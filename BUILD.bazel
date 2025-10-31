@@ -206,6 +206,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_zendnn_cpp",
+    srcs = glob(["aten/src/ATen/native/zendnn/*.cpp"]),
+)
+
+filegroup(
     name = "aten_base_vulkan",
     srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
 )
@@ -285,6 +290,7 @@ header_template_rule(
         "@AT_BLAS_USE_CBLAS_DOT@": "1",
         "@AT_KLEIDIAI_ENABLED@": "0",
         "@AT_USE_EIGEN_SPARSE@": "0",
+        "@AT_ZENDNN_ENABLED@": "0",
     },
 )
 
@@ -365,6 +371,7 @@ cc_library(
         ":aten_native_sparse_cpp",
         ":aten_native_transformers_cpp",
         ":aten_native_xnnpack",
+        ":aten_native_zendnn_cpp",
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,

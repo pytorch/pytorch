@@ -9,6 +9,9 @@ namespace at::cpu {
 TORCH_API bool is_avx2_supported();
 TORCH_API bool is_avx512_supported();
 
+// Detect if CPU is AMD Zen4 or newer.
+TORCH_API bool is_amd_cpu();
+
 // Detect if CPU support Vector Neural Network Instruction.
 TORCH_API bool is_avx512_vnni_supported();
 
@@ -29,5 +32,8 @@ TORCH_API uint32_t L1d_cache_size();
 
 // Get the L2 cache size per core in Byte
 TORCH_API uint32_t L2_cache_size();
+
+// Detect if CPU is AMD.
+TORCH_API bool is_amd_cpu();
 
 } // namespace at::cpu

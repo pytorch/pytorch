@@ -1,0 +1,8 @@
+if(NOT EXISTS ${PROJECT_SOURCE_DIR}/third_party/ZenDNN)
+  message(WARNING "(ZENDNNL) Library not found at ${PROJECT_SOURCE_DIR}/third_party/ZenDNN")
+else()
+  find_package(ZENDNN QUIET)
+  if(ZENDNN_FOUND)
+    message(STATUS, "(ZENDNN) ZenDNN library was built successfully.")
+  endif(ZENDNN_FOUND)
+endif()

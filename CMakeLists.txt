@@ -326,6 +326,21 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
                        OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
+
+# currently ZenDNN is kept off and enabled only through user setting on X86_64/AMD64
+option(USE_ZENDNN
+       "Build with ZENDNN support"
+       OFF)
+if(USE_ZENDNN AND NOT CPU_INTEL)
+    message(WARNING
+        "USE_ZENDNN was requested, but the target processor "
+        "(${CMAKE_SYSTEM_PROCESSOR}) is not AMD64/x86_64. "
+        "ZENDNN support will be disabled.")
+
+    # Switch it off in the cache so the GUI / subsequent runs see the change
+    set(USE_ZENDNN OFF CACHE BOOL "Build with ZENDNN support" FORCE)
+endif()
+
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
   "USE_DISTRIBUTED" OFF)
@@ -1337,6 +1352,7 @@ if(BUILD_SHARED_LIBS)
           ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/public/zendnn.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake

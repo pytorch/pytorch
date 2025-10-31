@@ -2478,6 +2478,48 @@ def meta_conv(
     return out
 
 
+if torch._C.has_zendnn:  # type: ignore[attr-defined]
+
+    @register_meta(aten.zendnn_linear_unary.default)
+    def meta_zendnn_linear_unary(
+        input, weight, bias=None, is_weight_prepacked=False, post_op="none"
+    ):
+        out_dim = list(input.size())
+        out_dim[-1] = weight.size(0)
+        return input.new_empty(out_dim)
+
+    @register_meta(aten.zendnn_linear_binary_binary.default)
+    def meta_zendnn_linear_binary_binary(
+        input,
+        weight,
+        binary_input_1,
+        binary_input_2,
+        bias=None,
+        is_weight_prepacked=False,
+        post_op_1="none",
+        post_op_2="none",
+    ):
+        return binary_input_2.new_empty(binary_input_2.shape)
+
+    @register_meta(aten.zendnn_linear_unary_binary.default)
+    def meta_zendnn_linear_unary_binary(
+        input,
+        weight,
+        binary_input,
+        bias=None,
+        is_weight_prepacked=False,
+        post_op_1="none",
+        post_op_2="none",
+    ):
+        return binary_input.new_empty(binary_input.shape)
+
+    @register_meta(aten.zendnn_weight_prepack_for_linear.default)
+    def meta_zendnn_weight_prepack_for_linear(
+        weight,
+    ):
+        return weight.new_empty(weight.shape)
+
+
 if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
         "mkldnn", "IMPL", "Meta"
