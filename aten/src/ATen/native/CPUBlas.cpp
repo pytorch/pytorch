@@ -991,7 +991,7 @@ std::size_t UnsafeUkernelKeyHasher<PackKey>::operator()(const PackKey& key) cons
 template <typename key_t, typename value_t>
 struct KernelCache  {
   using kstore_t = std::unordered_map<key_t, std::shared_ptr<value_t>, UnsafeUkernelKeyHasher<key_t>>;
-  static inline std::shared_ptr<value_t>&& fetch_or_create(
+  static std::shared_ptr<value_t>&& fetch_or_create(
       const key_t& key,
       const std::function<std::shared_ptr<value_t>()>& callback) {
     auto&& search = get_store().find(key);
@@ -1003,7 +1003,7 @@ struct KernelCache  {
     }
   }
 
-  static inline kstore_t& get_store() {
+  static kstore_t& get_store() {
     static thread_local kstore_t cache_kernels;
     return cache_kernels;
   }
@@ -1067,7 +1067,7 @@ struct GemmHelper {
 struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
   // Fetch/create GemmHelper object and execute brgemm with batch size = 1
   template <typename scalar_t_a, typename scalar_t_b, typename scalar_t_c>
-  static inline void call(
+  static void call(
       int64_t M,
       int64_t N,
       int64_t K,
@@ -1118,12 +1118,12 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
         .execute(A, B, (*value).A_B_offsets, C, (*value).scratchpad.data());
   }
 
-  static inline std::shared_ptr<GemmHelper>& get_current() {
+  static std::shared_ptr<GemmHelper>& get_current() {
     static thread_local std::shared_ptr<GemmHelper> current;
     return current;
   }
 
-  static inline bool device_check(ScalarType dtype) {
+  static bool device_check(ScalarType dtype) {
     if (!at::globalContext().userEnabledMkldnn()) {
       return false;
     }
@@ -1153,7 +1153,7 @@ using pack_t = dnnl::ukernel::brgemm_pack_B;
 using pack_t = dnnl::ukernel::transform;
 #endif
 struct Pack : public KernelCache <PackKey, pack_t> {
-  static inline void call(
+  static void call(
       int64_t K,
       int64_t N,
       int64_t ld_in,
@@ -1182,7 +1182,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     }
   }
 
-  static inline bool could_pack(ScalarType dtype) {
+  static bool could_pack(ScalarType dtype) {
     if (!at::globalContext().userEnabledMkldnn()) {
       return false;
     }

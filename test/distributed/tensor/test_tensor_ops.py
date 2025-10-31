@@ -1,6 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import itertools
+
 import torch
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -15,6 +17,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorConverter,
     DTensorTestBase,
     with_comms,
@@ -92,6 +95,19 @@ class DistTensorOpsTest(DTensorTestBase):
             dst_dtensor.copy_(src_dtensor)
             dst_tensor.copy_(src_tensor)
             self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+
+        # as a pointwise op, need to keep Partial placements without redistribute
+        src_tensor = torch.randn((64, 1))
+        dst_tensor = torch.zeros(16, 32, 64, 128)
+        src_specs = [[Partial()]]
+        dst_specs = [[Partial()]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = DTensor.from_local(src_tensor, device_mesh, src_spec)
+            dst_dtensor = DTensor.from_local(dst_tensor, device_mesh, dst_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.placements, (Partial(),))
+            self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
 
     @with_comms
     def test_contiguous(self):
@@ -689,6 +705,12 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_dtype_conversion(self):
+        from torch.distributed.tensor.debug import (
+            _clear_sharding_prop_cache,
+            _get_sharding_prop_cache_info,
+        )
+
+        _clear_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
@@ -706,8 +728,6 @@ class DistTensorOpsTest(DTensorTestBase):
         bf16_sharded_dtensor1 = fp32_sharded_dtensor.type_as(bf16_sharded_dtensor)
         self.assertEqual(bf16_sharded_dtensor1.dtype, torch.bfloat16)
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
-
-        from torch.distributed.tensor.debug import _get_sharding_prop_cache_info
 
         # by this point we only have cache misses
         hits, misses, _, _ = _get_sharding_prop_cache_info()
@@ -760,7 +780,7 @@ class DistTensorOpsTest(DTensorTestBase):
         )
 
     def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
-        torch.manual_seed(self.rank)
+        self.init_manual_seed_for_rank()
         mesh = self.build_device_mesh()
 
         partial_tensor = torch.randn(8, 8, device=self.device_type)
@@ -776,6 +796,40 @@ class DistTensorOpsTest(DTensorTestBase):
             dim=split_dim,
         )
 
+    @with_comms
+    def test_unbind(self):
+        device_mesh = self.build_device_mesh()
+        shard_dims = [0, 1]
+        unbind_dims = [0, 1]
+        local_tensor = torch.randn(4, 8, requires_grad=True)
+        for shard_dim, unbind_dim in itertools.product(shard_dims, unbind_dims):
+            dist_tensor = distribute_tensor(
+                local_tensor, device_mesh, (Shard(shard_dim),)
+            )
+
+            if shard_dim == unbind_dim:
+                with self.assertRaisesRegex(
+                    RuntimeError, "Sharding propagation failed"
+                ):
+                    dist_tensor.unbind(dim=unbind_dim)
+            else:
+                unbinded_dist_tensors = dist_tensor.unbind(dim=unbind_dim)
+                new_shard_dim = shard_dim if shard_dim < unbind_dim else shard_dim - 1
+                self.assertTrue(
+                    all(
+                        elem.placements[0].is_shard(dim=new_shard_dim)
+                        for elem in unbinded_dist_tensors
+                    )
+                )
+                for x, y in zip(
+                    unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
+                ):
+                    self.assertEqual(x.full_tensor(), y)
+
+
+DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()

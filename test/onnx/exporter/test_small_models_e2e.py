@@ -806,6 +806,36 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         # Test with reference evaluator because ORT does not support the op as of version 1.22
         onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
+    def test_enable_gqa_in_attention_23_with_dropout(self):
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v):
+                return torch.nn.functional.scaled_dot_product_attention(  # pylint: disable=not-callable
+                    q, k, v, enable_gqa=True, dropout_p=0.1
+                )
+
+        model = Model()
+
+        query = torch.randn(2, 4, 8, 16)
+        key = torch.randn(2, 2, 8, 16)
+        value = torch.randn(2, 2, 8, 16)
+
+        onnx_program = self.export(
+            model,
+            (
+                query,
+                key,
+                value,
+            ),
+            opset_version=23,
+        )
+        # opset23 only uses manually gqa path when dropout is enabled,
+        # and dropout makes the output non-deterministic,
+        # so we check for the presence of the ops used in that path.
+        all_ops = [node.op_type for node in onnx_program.model.graph]
+        self.assertIn("Unsqueeze", all_ops)
+        self.assertIn("Expand", all_ops)
+        self.assertIn("Reshape", all_ops)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

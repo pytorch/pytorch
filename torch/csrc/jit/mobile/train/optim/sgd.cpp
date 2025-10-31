@@ -84,7 +84,7 @@ Tensor SGD::step(const LossClosure& closure) {
     loss = closure();
   }
   for (auto& group : param_groups_) {
-    auto& options = static_cast<SGDOptions&>(group.options());
+    auto& options = group.options();
     auto weight_decay = options.weight_decay();
     auto momentum = options.momentum();
     auto dampening = options.dampening();
