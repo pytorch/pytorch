@@ -1078,9 +1078,7 @@ class BuiltinVariable(VariableTracker):
             ) -> VariableTracker | None:
                 try:
                     # pyrefly: ignore [not-callable]
-                    result = self_handler(tx, *args, **kwargs)
-                    if result is not None:
-                        return result
+                    return self_handler(tx, *args, **kwargs)
                 except TypeError:
                     # Check if binding is bad. inspect signature bind is expensive.
                     # So check only when handler call fails.
@@ -1109,6 +1107,7 @@ class BuiltinVariable(VariableTracker):
                         raise
                     # Actually, we will handle this just fine
                     exc.remove_from_stats()
+                return None
 
             handlers.append(call_self_handler)
 
@@ -1122,7 +1121,7 @@ class BuiltinVariable(VariableTracker):
                     tx: "InstructionTranslator",
                     args: Sequence[VariableTracker],
                     kwargs: dict[str, VariableTracker],
-                ) -> VariableTracker:
+                ) -> VariableTracker | None:
                     # fast path
                     try:
                         res = fn(
@@ -1177,6 +1176,7 @@ class BuiltinVariable(VariableTracker):
                             )
                         # pyrefly: ignore [unbound-name]
                         return VariableTracker.build(tx, res)
+                    return None
 
             handlers.append(constant_fold_handler)
 
@@ -1203,24 +1203,25 @@ class BuiltinVariable(VariableTracker):
 
             def builtin_dispatch(
                 tx: "InstructionTranslator", args: Any, kwargs: Any
-            ) -> VariableTracker:
+            ) -> VariableTracker | None:
                 rv = handler(tx, args, kwargs)
                 if rv:
                     return rv
                 call_unimplemented_v2(args)
-                return rv  # type: ignore[return-value]
+                return rv
 
         else:
 
             def builtin_dispatch(
                 tx: "InstructionTranslator", args: Any, kwargs: Any
-            ) -> VariableTracker:
+            ) -> VariableTracker | None:
+                rv = None
                 for fn in handlers:
                     rv = fn(tx, args, kwargs)
                     if rv:
                         return rv
                 call_unimplemented_v2(args)
-                return rv  # type: ignore[return-value]
+                return rv
 
         return builtin_dispatch
 
@@ -1413,10 +1414,11 @@ class BuiltinVariable(VariableTracker):
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
-            self.call_function_handler_cache[key] = handler = self._make_handler(
+            self.call_function_handler_cache[key] = handler = self._make_handler(  # type: ignore[assignment]
                 self.fn, [type(x) for x in args], bool(kwargs)
             )
-        return handler(tx, args, kwargs)
+        assert handler is not None
+        return handler(tx, args, kwargs)  # type: ignore[return-value]
 
     def call_method(
         self,
@@ -1620,7 +1622,7 @@ class BuiltinVariable(VariableTracker):
                     return variables.ConstantVariable.create(value=str_method())
                 except AttributeError:
                     # Graph break
-                    return
+                    return None
             # pyrefly: ignore [unbound-name]
             elif is_wrapper_or_member_descriptor(str_method):
                 unimplemented_v2(
@@ -1640,7 +1642,7 @@ class BuiltinVariable(VariableTracker):
                 except AssertionError:
                     # Won't be able to do inline the str method, return to avoid graph break
                     log.warning("Failed to create UserFunctionVariable", exc_info=True)
-                    return
+                    return None
 
                 # Inline the user function
                 return user_func_variable.call_function(tx, [arg], {})
@@ -1680,7 +1682,7 @@ class BuiltinVariable(VariableTracker):
         if a is None or b is None:
             # a or b could be none if we reduce and _call_min_max_binary failed
             # to return something
-            return
+            return None
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
@@ -1774,6 +1776,7 @@ class BuiltinVariable(VariableTracker):
                 b.as_python_constant(),
             )
             return ConstantVariable(value)
+        return None
 
     call_min = _call_min_max
     call_max = _call_min_max
@@ -2014,6 +2017,8 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             return variables.ConstantVariable.create(False)
+        else:
+            return None
 
     def call_cast(self, _: Any, *args: Any, **kwargs: Any) -> VariableTracker | None:
         if len(args) == 2:
@@ -2033,6 +2038,7 @@ class BuiltinVariable(VariableTracker):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
+        return None
 
     def call_dict(
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
@@ -2252,8 +2258,6 @@ class BuiltinVariable(VariableTracker):
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
 
-        isinstance_type_const = isinstance_type.as_python_constant()
-
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
 
             def _tensor_isinstance(tensor_var: Any, tensor_type: Any) -> bool:
@@ -2300,19 +2304,19 @@ class BuiltinVariable(VariableTracker):
             and "__instancecheck__" in isinstance_type.__class__.__dict__
         ):
             return variables.ConstantVariable.create(
-                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
+                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)  # type: ignore[call-arg]
             )
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
             # pyrefly: ignore [unbound-name]
-            return ConstantVariable.create(isinstance(arg_type, isinstance_type))
+            return ConstantVariable.create(isinstance(arg_type, isinstance_type))  # type: ignore[arg-type]
 
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, type) or callable(
             # E.g. isinstance(obj, typing.Sequence)
             getattr(isinstance_type, "__instancecheck__", None)
         ):
-            isinstance_type_tuple = (isinstance_type,)
+            isinstance_type_tuple = (isinstance_type,)  # type: ignore[assignment]
         elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
@@ -2565,6 +2569,8 @@ class BuiltinVariable(VariableTracker):
                 return variables.TorchInGraphFunctionVariable(member, source=source)
             elif name in cmp_name_to_op_mapping:
                 return variables.GetAttrVariable(obj, name, source=source)
+            else:
+                return None
         elif isinstance(obj, DummyModule):
             # TODO(mlazos) - Do we need this?
             if obj.is_torch or name not in obj.value.__dict__:
@@ -2997,6 +3003,7 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker | None:
         if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__isub__", [b], {})
+        return None
 
     def call_and_(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
