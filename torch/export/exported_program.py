@@ -391,7 +391,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # aot_export expect the return type to always be a tuple.
         assert out_spec is not None
         if out_spec.type not in (list, tuple):
-            out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+            out_spec = pytree.treespec_tuple([out_spec])
 
         mod.graph._codegen = _PyTreeCodeGen(
             _PyTreeInfo(
@@ -798,7 +798,7 @@ def _remove_unnecessary_copy_op_pass(
                     ):
                         if (
                             out.op == "call_function"
-                            and out.target == torch.ops.aten.copy.default
+                            and out.target is torch.ops.aten.copy.default
                         ):
                             out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
                             gm.graph.erase_node(out)
