@@ -414,6 +414,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model = Model().to(self.device)
+            model.emb.weight.requires_grad = False
             model_compiled = torch.compile(model)
             inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
             out = model_compiled(inp, self.world_size, **self.get_world_trs())
@@ -1340,13 +1341,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3  # It generates 2 getattr to unpack the array
         assert same(out, correct)
 
+    # This doesn't work in all cases, and now we properly loudly error.
+    # See: https://github.com/pytorch/pytorch/issues/151240
+    # When differentiable funcols are implemented can revert.
+    @unittest.expectedFailure
     def test_backwards(self):
-        """
-        It's probably not that common to need backwards support for collectives.
-
-        However, I wanted to at least see if it was possible to support it as a design goal.
-        """
-
         def func(inp):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
