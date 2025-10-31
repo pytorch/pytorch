@@ -519,6 +519,9 @@ class DebugMode(TorchDispatchMode):
                 )
 
         def _dispatch_hash_hook(func, types, args, kwargs, result):
+            if "empty" in str(func) or "profiler" in str(func):
+                return None
+
             out = {}
             out["hash"] = _tree_hash(result)
             if hash_inputs:
