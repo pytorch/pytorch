@@ -1398,27 +1398,6 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
 }
 #endif
 
-#if AT_ZENDNN_ENABLED()
-static inline bool apply_zendnn_matmul_heur(const Tensor& batch1, const Tensor& batch2, const Tensor& out) {
-
-  // Check if either batch has zero strides - return false if so
-  auto batch1_strides = batch1.strides();
-  auto batch2_strides = batch2.strides();
-  auto out_strides    = out.strides();
-
-  for (int64_t stride : batch1_strides) {
-    if (stride == 0) return false;
-  }
-  for (int64_t stride : batch2_strides) {
-    if (stride == 0) return false;
-  }
-  for (int64_t stride : out_strides) {
-    if (stride == 0) return false;
-  }
-  return true;
-}
-#endif
-
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1751,7 +1730,6 @@ static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const T
         result.data_ptr<scalar_t>(), ldc, result_strides[0]);
   });
 }
-
 // This tries to apply some optimizations to bmm/baddbmm:
 // - When the operand size is small, computation are parallelized over the batch
 //   dimension using OMP and naive matrix multiplication is applied.
@@ -1773,6 +1751,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   int64_t contraction_size = batch1_sizes[2];
   int64_t res_rows = batch1_sizes[1];
   int64_t res_cols = batch2_sizes[2];
+
 
   // handle pathological cases that blas may not like
   if (self_or_result.numel() == 0) {
@@ -1796,17 +1775,14 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   };
 
 #if AT_ZENDNN_ENABLED()
-  const auto value = c10::utils::get_env("TORCHINDUCTOR_ENABLE_ZENDNN");
-  if((!value.has_value() || value.value() == "1") && at::cpu::is_amd_cpu()
+  if(at::cpu::is_amd_cpu()
       && at::cpu::is_avx512_supported()
-      && self_or_result.scalar_type() == kBFloat16)
+      && self_or_result.scalar_type() == kBFloat16
+      && self_or_result.is_contiguous()
+      && self_or_result.sizes()[0] > 1)
   {
-    bool apply_heur_zen = apply_zendnn_matmul_heur(batch1, batch2, self_or_result);
-    if(apply_heur_zen)
-    {
       zendnn_baddbmm(self_or_result, batch1, batch2, beta.to<float>(), alpha.to<float>());
       return;
-    }
   }
 #endif
 
@@ -3659,7 +3635,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
-    } catch (const std::exception& e) {
+    } catch ([[maybe_unused]] const std::exception& e) {
       TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
     }
   }

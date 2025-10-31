@@ -603,7 +603,7 @@ class Tracer(TracerBase):
                             in inspect.signature(self.create_proxy).parameters
                         ):
                             kwargs["proxy_factory_fn"] = (
-                                # pyrefly: ignore  # unsupported-operation
+                                # pyrefly: ignore [unsupported-operation]
                                 None
                                 if not self.param_shapes_constant
                                 else lambda node: ParameterProxy(

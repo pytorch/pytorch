@@ -397,7 +397,7 @@ inline Vectorized<bool> operator&&(
   const __m512i* other_ = reinterpret_cast<const __m512i*>(other.as_bytes());
   __m512i out = _mm512_and_si512(*self_, *other_);
   Vectorized<bool> ret;
-  // We do not have a constructer that takes __m512i, so we need to memcpy
+  // We do not have a constructor that takes __m512i, so we need to memcpy
   std::memcpy(ret, &out, ret.size() * sizeof(bool));
   return ret;
 }
