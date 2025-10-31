@@ -1207,7 +1207,7 @@ class TestFP8Lowering(TestCase):
             permute_6 = (
                 torch.ops.aten.permute.default(view_19, [0, 2, 1, 3])
             )
-            clone_3:  = (
+            clone_3 = (
                 torch.ops.aten.clone.default(
                     permute_6, memory_format=torch.contiguous_format
                 )
