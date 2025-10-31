@@ -1417,7 +1417,7 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     @parametrize(
         "view_size,permute_order,num_tensor_descriptors,expect_transpose",
         [
-            ((128, ), (0), 3, False),
+            ((128,), (0), 3, False),
             ((128, 128), (0, 1), 3, False),
             ((128, 64), (1, 0), 3, True),
             ((256, 32, 16), (2, 0, 1), 3, True),
