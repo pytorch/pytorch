@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import io
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -49,6 +50,7 @@ def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
     """
+    # pyrefly: ignore [not-iterable]
     return torch.compile(*args, **kwargs)
 
 
@@ -500,7 +502,12 @@ def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
     - Execute torch.compile
     - Call torch.compiler.save_cache_artifacts()
     """
-    from ._cache import CacheArtifactManager, CacheInfo
+    from ._cache import CacheArtifactManager
+
+    if torch._dynamo.config.caching_precompile:
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        PrecompileContext.save_to_dynamo_cache()
 
     return CacheArtifactManager.serialize()
 
@@ -643,7 +650,7 @@ def nested_compile_region(fn=None):
     return _mark_compile_region(fn)
 
 
-def load_compiled_function(file: io.IOBase):
+def load_compiled_function(file: io.IOBase) -> Callable[..., Any]:
     """
     Load an aot-compiled function from a file.
 
@@ -657,7 +664,7 @@ def load_compiled_function(file: io.IOBase):
     Returns:
         A torch-compiled function with compilation preloaded from disk.
     """
-    from torch._dynamo.aot_compile import CompileArtifacts
+    from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return CompileArtifacts.deserialize(data).compiled_function()
+    return AOTCompiledFunction.deserialize(data)
