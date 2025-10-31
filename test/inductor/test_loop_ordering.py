@@ -1273,7 +1273,7 @@ class TestIndexInversion(TestCase):
             (4 * p, False, 64),  # expr and inverse not bijections
             # when sorted, invertible
             (ModularIndexing(p, 1, 10) + 10 * ModularIndexing(p, 10, 10), True, None),
-            # Wrong coefficient ratios: 4 ≠ 1×2 ❌
+            # Wrong coefficient ratios: 4 ≠ 1×2
             (4 * ModularIndexing(p, 1, 8) + ModularIndexing(p, 8, 2), False, None),
             (
                 100 * FloorDiv(p, 100) + 7 * ModularIndexing(p, 1, 100),
