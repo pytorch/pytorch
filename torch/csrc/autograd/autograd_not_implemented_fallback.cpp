@@ -50,7 +50,6 @@ AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Warn;
 } // namespace
 
 void setAutogradFallbackMode(AutogradFallbackMode mode) {
-  TORCH_CHECK(mode != AutogradFallbackMode::Error, "NYI: mode='error'");
   kAutogradFallbackMode = mode;
 }
 
@@ -58,41 +57,61 @@ AutogradFallbackMode getAutogradFallbackMode() {
   return kAutogradFallbackMode;
 }
 
-static void warnAutogradNotImplemented(const std::string& op_name) {
-  TORCH_WARN(
-      op_name,
-      ": an autograd kernel was not registered to the Autograd key(s) ",
-      "but we are trying to backprop through it. This may lead to silently incorrect behavior. ",
-      "This behavior is deprecated and will be removed in a future version of PyTorch. ",
-      "If your operator is differentiable, please ensure you have registered an "
-      "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
-      "DispatchKey::CompositeImplicitAutograd). If your operator is not "
-      "differentiable, or to squash this warning and use the previous behavior, "
-      "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.");
+static void reportAutogradNotImplemented(
+    const std::string& op_name,
+    bool is_warn) {
+  if (is_warn) {
+    TORCH_WARN(
+        op_name,
+        ": an autograd kernel was not registered to the Autograd key(s) ",
+        "but we are trying to backprop through it. This may lead to silently incorrect behavior. ",
+        "This behavior is deprecated and will be removed in a future version of PyTorch. ",
+        "If your operator is differentiable, please ensure you have registered an "
+        "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
+        "DispatchKey::CompositeImplicitAutograd). If your operator is not "
+        "differentiable, or to squash this warning and use the previous behavior, "
+        "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.");
+  } else {
+    TORCH_CHECK(
+        0,
+        op_name,
+        ": an autograd kernel was not registered to the Autograd key(s) ",
+        "but we are trying to backprop through it. This can lead to silently incorrect behavior. ",
+        "If your operator is differentiable, please ensure you have registered an "
+        "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
+        "). If your operator is not "
+        "differentiable and ensure NO gradients flow through this operator, "
+        "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.")
+  }
 }
 
-struct WarnNotImplemented : public Node {
-  WarnNotImplemented(
+struct NotImplementedBackward : public Node {
+  NotImplementedBackward(
       std::string op_name,
       size_t num_outputs,
+      bool is_warn,
       edge_list&& next_edges)
       : Node(std::move(next_edges)),
         op_name(std::move(op_name)),
-        num_outputs(num_outputs) {}
+        num_outputs(num_outputs),
+        is_warn(is_warn) {}
 
-  WarnNotImplemented(std::string op_name, size_t num_outputs)
-      : op_name(std::move(op_name)), num_outputs(num_outputs) {}
+  NotImplementedBackward(std::string op_name, size_t num_outputs, bool is_warn)
+      : op_name(std::move(op_name)),
+        num_outputs(num_outputs),
+        is_warn(is_warn) {}
 
   variable_list apply(variable_list&& inputs) override;
 
   std::string op_name;
   size_t num_outputs;
+  bool is_warn;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
+auto NotImplementedBackward::apply(variable_list&& inputs) -> variable_list {
   auto inputsLocal = std::move(inputs);
-  warnAutogradNotImplemented(op_name);
+  reportAutogradNotImplemented(op_name, is_warn);
   std::vector<at::Tensor> output(num_outputs);
   return output;
 }
@@ -111,8 +130,6 @@ static void basicAutogradNotImplementedFallbackImpl(
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
     return;
   }
-  TORCH_INTERNAL_ASSERT(
-      getAutogradFallbackMode() == AutogradFallbackMode::Warn);
 
   bool any_input_requires_grad = false;
   _foreach_tensor(
@@ -128,7 +145,9 @@ static void basicAutogradNotImplementedFallbackImpl(
   // by putting it after the requires_grad checks.
   any_input_requires_grad = any_input_requires_grad && GradMode::is_enabled();
 
-  std::shared_ptr<WarnNotImplemented> grad_fn;
+  bool is_warn = getAutogradFallbackMode() == AutogradFallbackMode::Warn;
+
+  std::shared_ptr<NotImplementedBackward> grad_fn;
   if (any_input_requires_grad) {
     // NB: It is standard to collect edges from all tensors
     // (see generated/VariableTypeEverything.cpp for examples)
@@ -140,8 +159,9 @@ static void basicAutogradNotImplementedFallbackImpl(
         stack,
         stack_start,
         num_arguments);
-    grad_fn = std::shared_ptr<WarnNotImplemented>(
-        new WarnNotImplemented(op_name, all_tensors_on_stack.size()),
+    grad_fn = std::shared_ptr<NotImplementedBackward>(
+        new NotImplementedBackward(
+            op_name, all_tensors_on_stack.size(), is_warn),
         deleteNode);
     grad_fn->set_next_edges(collect_next_edges(all_tensors_on_stack));
   }
@@ -177,8 +197,8 @@ static void basicAutogradNotImplementedFallbackImpl(
           // >>> y = op(k)
           // >>> torch.autograd.grad(z.sum(), w)
           if (t.requires_grad()) {
-            t.register_hook([op_name](const at::Tensor& grad) {
-              warnAutogradNotImplemented(op_name);
+            t.register_hook([op_name, is_warn](const at::Tensor& grad) {
+              reportAutogradNotImplemented(op_name, is_warn);
             });
             // If history is rebased, then we will attempt to warn
             // on the view's base. This will catch most cases (because
@@ -188,18 +208,19 @@ static void basicAutogradNotImplementedFallbackImpl(
               const auto& base = t._base();
               if (base.requires_grad()) {
                 // Can only register_hook on tensors that require grad.
-                base.register_hook([op_name](const at::TensorBase& grad) {
-                  warnAutogradNotImplemented(op_name);
-                });
+                base.register_hook(
+                    [op_name, is_warn](const at::TensorBase& grad) {
+                      reportAutogradNotImplemented(op_name, is_warn);
+                    });
               }
             }
             return;
           }
 
           // If the post-autograd implementation returns any Tensors that
-          // don't require grad, then we install the WarnNotImplemented grad_fn.
-          // This grad_fn warns in backward and returns undefined tensor
-          // gradients.
+          // don't require grad, then we install the NotImplementedBackward
+          // grad_fn. This grad_fn warns in backward and returns undefined
+          // tensor gradients.
           //
           // NOTE [autograd fallback and in-place operations]
           // If the schema says the output is mutable, and the output
