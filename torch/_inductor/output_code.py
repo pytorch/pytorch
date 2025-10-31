@@ -110,7 +110,7 @@ _StrideExprStr: TypeAlias = str
 # to achieve writing to all values of that dimension of the input tensor
 def get_expanded_dims(t: torch.Tensor) -> list[int]:
     if not isinstance(t, torch.Tensor):
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return None
     return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
 
@@ -677,7 +677,7 @@ class CompiledFxGraph(OutputCode):
                     ]
                 else:
                     # On the forward we don't know whether or not
-                    # boxed_foward_device_index is set yet
+                    # boxed_forward_device_index is set yet
                     boxed_forward_device_index = graph_kwargs.get(
                         "boxed_forward_device_index", None
                     )
