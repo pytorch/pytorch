@@ -83,6 +83,7 @@ __all__ = [
 ]
 
 
+# pyrefly: ignore [invalid-inheritance]
 class QConfig(namedtuple("QConfig", ["activation", "weight"])):
     """
     Describes how to quantize a layer or a part of the network by providing
@@ -120,6 +121,7 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
     "`QConfigDynamic` is going to be deprecated in PyTorch 1.12, please use `QConfig` instead",
     category=FutureWarning,
 )
+# pyrefly: ignore [invalid-inheritance]
 class QConfigDynamic(namedtuple("QConfigDynamic", ["activation", "weight"])):
     """
     Describes how to dynamically quantize a layer or a part of the network by providing
@@ -290,7 +292,8 @@ def get_default_qconfig(backend="x86", version=0):
             if not torch.cpu._is_vnni_supported():
                 warnings.warn(
                     "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
-                    "on CPU without Vector Neural Network Instruction support."
+                    "on CPU without Vector Neural Network Instruction support.",
+                    stacklevel=2,
                 )
             qconfig = QConfig(
                 activation=HistogramObserver.with_args(reduce_range=False),

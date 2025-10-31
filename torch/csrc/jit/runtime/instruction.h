@@ -95,6 +95,5 @@ std::ostream& operator<<(std::ostream& out, Instruction inst);
 bool isOpSupportedInMobile(OpCode op);
 char const* toString(OpCode op);
 OpCode parseOpCode(const char* str);
-std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 } // namespace torch::jit

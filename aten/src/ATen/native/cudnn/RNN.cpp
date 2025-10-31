@@ -245,7 +245,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       datatype,
       input_datatype,
       algo,
-      at::globalContext().allowTF32CuDNN("rnn"));
+      at::globalContext().allowTF32CuDNN(at::Float32Op::RNN));
 #else
     rnn_desc.set(
         handle,
@@ -261,7 +261,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
         datatype,
         input_datatype,
         algo,
-        at::globalContext().allowTF32CuDNN("rnn"));
+        at::globalContext().allowTF32CuDNN(at::Float32Op::RNN));
 #endif
   return rnn_desc;
 }
@@ -1222,7 +1222,7 @@ cudnnRNNAlgo_t get_algo(
 }
 
 cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
-  if (dtype == CUDNN_DATA_HALF) {
+  if (dtype == CUDNN_DATA_HALF || dtype == CUDNN_DATA_BFLOAT16) {
     return CUDNN_DATA_FLOAT;
   }
   return dtype;

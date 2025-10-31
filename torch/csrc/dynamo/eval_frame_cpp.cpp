@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
@@ -23,10 +24,8 @@ static py::object dynamo_call_callback(
     CacheEntry* cache_entry,
     FrameState* frame_state) {
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
-  if (frame == nullptr) {
-    throw std::runtime_error(
-        "Dynamo failed to initialize CPython interpreter frame wrapper");
-  }
+  TORCH_CHECK(
+      frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
   py::object cache_entry_obj = py::none();

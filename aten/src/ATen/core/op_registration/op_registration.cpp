@@ -73,7 +73,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(
 
   std::optional<FunctionSchema> inferred_schema = std::nullopt;
   for (const auto& kernel : options.kernels) {
-    if (nullptr != kernel.inferred_function_schema.get()) {
+    if (nullptr != kernel.inferred_function_schema) {
       if (!inferred_schema.has_value()) {
         inferred_schema = *kernel.inferred_function_schema;
         break;
