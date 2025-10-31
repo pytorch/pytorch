@@ -135,7 +135,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - fix errors with this
         if (
             node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
+            and node.target is aten._efficientzerotensor.default
         ):
             return self.unknown_value
 

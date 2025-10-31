@@ -827,7 +827,7 @@ class FakeTensor(Tensor):
     ) -> object:
         # need to handle here to avoid infinite recursion
         # see [in_kernel_invocation]
-        if func == torch.ops.prim.device.default:
+        if func is torch.ops.prim.device.default:
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
             if args[0].fake_mode.in_kernel_invocation:
                 return torch.device("meta")
@@ -2378,12 +2378,12 @@ class FakeTensorMode(TorchDispatchMode):
         avoiding_device_init = False
         if self.avoid_device_init:
             if (
-                func == torch.ops.aten._to_copy.default
+                func is torch.ops.aten._to_copy.default
                 and "device" in kwargs
                 and kwargs["device"].type != "cpu"  # type: ignore[attr-defined]
             ):
                 avoiding_device_init = True
-            if func == torch.ops.prims.device_put.default:
+            if func is torch.ops.prims.device_put.default:
                 avoiding_device_init = True
 
         # skip const prop for aten._to_copy if
@@ -3226,7 +3226,7 @@ class FakeCopyMode(TorchFunctionMode):
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
-        if func == torch._C.TensorBase.clone:
+        if func is torch._C.TensorBase.clone:
             assert isinstance(args[0], Tensor)
             return func(
                 self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs

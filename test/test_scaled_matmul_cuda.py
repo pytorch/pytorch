@@ -144,42 +144,36 @@ def infer_scale_swizzle(mat, scale):
         ] == math.ceil(mat.shape[1] // 128):
             return ScalingType.BlockWise128x128, SwizzleType.NO_SWIZZLE
 
+    # if we're checking for nvfp4, need to adjust for packed-K
+    K_multiplier = 2 if mat.dtype == torch.float4_e2m1fn_x2 else 1
     # NVFP4
     if (
         (scale.numel()
-            == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
+            == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 16), 4)
             or scale.numel()
-            == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4))
+            == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 16), 4))
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e4m3fn
     ):
         return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
-    # MXFP4 w/o swizzle
-    if (
-        (scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
-            or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0])
-        and mat.dtype == torch.float4_e2m1fn_x2
-        and scale.dtype == torch.float8_e8m0fnu
-    ):
-        return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
-
+    # MX formats
     if not torch.version.hip:
-        # MXFP8 w/ swizzle
+        # MX w/swizzle (NVIDIA)
         if (
             (scale.numel()
-                == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
+                == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 32), 4)
                 or scale.numel()
-                == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4))
+                == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 32), 4))
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
 
     else:
-        # MXFP8 w/o swizzle
+        # MX w/o swizzle (AMD)
         if (
-            (scale.numel() == math.ceil(mat.shape[0] // 32) * mat.shape[1]
-                or scale.numel() == math.ceil(mat.shape[1] // 32) * mat.shape[0])
+            (scale.numel() == math.ceil(mat.shape[0] // 32) * K_multiplier * mat.shape[1]
+                or scale.numel() == math.ceil(K_multiplier * mat.shape[1] // 32) * mat.shape[0])
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
@@ -1607,7 +1601,7 @@ class TestFP8Matmul(TestCase):
         (127, 96, 1024),
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
-    @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
+    @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
@@ -1621,8 +1615,12 @@ class TestFP8Matmul(TestCase):
             if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
                 raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
 
-        fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
-        BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
+        fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
+        BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
+
+        if K % BLOCK_SIZE != 0:
+            raise unittest.SkipTest(f"K ({K}) must be divisible by BLOCK_SIZE ({BLOCK_SIZE}), skipping")
+
         require_exact_match = True
         approx_match_sqnr_target = 22.0
 
@@ -1800,7 +1798,7 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val)
                 B = _bfloat16_to_float4_e2m1fn_x2(B)
 
-                approx_match_sqnr_target = 15 if torch.version.hip else 15.8
+                approx_match_sqnr_target = 15 if recipe == "mxfp4" else 15.8
 
         C_ref = A_ref @ B_ref.t()
 

@@ -236,10 +236,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     kwargs,
                     meta,
                 )
-            elif target == torch.ops.higher_order.cond:
+            elif target is torch.ops.higher_order.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == torch.ops.higher_order.map_impl:
+            elif target is torch.ops.higher_order.map_impl:
                 f, mapped_args, operands = args  # type: ignore[assignment]
                 return self.callback.call_map(f, mapped_args, operands, meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
