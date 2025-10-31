@@ -679,18 +679,18 @@ class _BaseDataLoaderIter:
         # behavior in forked implementations using _BaseDataLoaderIter.
         self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
 
-        # Set pin memory device based on the current accelerator.
-        pin_memory_device = (
-            acc.type
-            if self._pin_memory
-            and (acc := torch.accelerator.current_accelerator()) is not None
-            else None
-        )
-
         # Currently, pin_memory would raise error on the MPS backend (see
         # https://github.com/pytorch/pytorch/issues/86060), so forcibly
         # disable pin_memory on MPS. Remove this restriction once pinned
         # memory allocation for MPS is fixed.
+
+        # Set pin memory device based on the current accelerator.
+        pin_memory_device = (
+            acc.type
+            if self._pin_memory
+               and (acc := torch.accelerator.current_accelerator()) is not None
+            else None
+        )
         if pin_memory_device == "mps":
             self._pin_memory = False
             warn_msg = (
