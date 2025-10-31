@@ -27,7 +27,7 @@ def find_repo_root() -> Path:
         )
         return Path(result.stdout.strip())
     except subprocess.CalledProcessError:
-        sys.exit("❌ Not in a git repository")
+        sys.exit("Not in a git repository")
 
 
 def install_packages(dry_run: str) -> bool:
@@ -61,10 +61,10 @@ def install_packages(dry_run: str) -> bool:
     result = subprocess.run(cmd)
 
     if result.returncode != 0:
-        print("❌ Failed to install packages", file=sys.stderr)
+        print("Failed to install packages", file=sys.stderr)
         return False
 
-    print("✅ Packages installed successfully")
+    print("Packages installed successfully")
     return True
 
 
@@ -96,16 +96,16 @@ def generate_stub_files() -> bool:
     """Generate .pyi stub files by running generation scripts."""
     repo_root = find_repo_root()
 
-    print("🔧 Generating .pyi stub files...")
+    print("Generating .pyi stub files...")
 
     # Step 1: Generate torch version
-    print("  → Generating torch version...")
+    print("Generating torch version...")
     result = subprocess.run(
         [sys.executable, "-m", "tools.generate_torch_version", "--is_debug=false"],
         cwd=repo_root,
     )
     if result.returncode != 0:
-        print("❌ Failed to generate torch version", file=sys.stderr)
+        print("Failed to generate torch version", file=sys.stderr)
         return False
 
     # Step 2: Generate main stub files
@@ -125,7 +125,7 @@ def generate_stub_files() -> bool:
         cwd=repo_root,
     )
     if result.returncode != 0:
-        print("❌ Failed to generate main stub files", file=sys.stderr)
+        print("Failed to generate main stub files", file=sys.stderr)
         return False
 
     # Step 3: Generate DataPipe stub files
@@ -135,10 +135,10 @@ def generate_stub_files() -> bool:
         cwd=repo_root,
     )
     if result.returncode != 0:
-        print("❌ Failed to generate DataPipe stub files", file=sys.stderr)
+        print("Failed to generate DataPipe stub files", file=sys.stderr)
         return False
 
-    print("✅ All stub files generated successfully")
+    print("All stub files generated successfully")
     return True
 
 
@@ -162,13 +162,13 @@ def main() -> None:
         sys.exit(1)
 
     # Step 2: Check stub files
-    print("\n📋 Checking for .pyi stub files...")
+    print("\n Checking for .pyi stub files...")
     all_exist, missing_files = check_stub_files()
 
     if all_exist:
-        print("✅ All .pyi stub files already exist")
+        print("All .pyi stub files already exist")
     else:
-        print(f"⚠️  Missing {len(missing_files)} stub file(s):")
+        print(f"Missing {len(missing_files)} stub file(s):")
         for missing in missing_files:
             print(f"     - {missing}")
 
@@ -183,16 +183,16 @@ def main() -> None:
             all_exist, still_missing = check_stub_files()
             if not all_exist:
                 print(
-                    f"❌ Failed to generate {len(still_missing)} stub file(s)",
+                    f"Failed to generate {len(still_missing)} stub file(s)",
                     file=sys.stderr,
                 )
                 for missing in still_missing:
                     print(f"     - {missing}", file=sys.stderr)
                 sys.exit(1)
 
-            print("✅ All stub files verified")
+            print("All stub files verified")
 
-    print("\n✨ Pyrefly initialization complete!")
+    print("\n Pyrefly initialization complete!")
 
 
 if __name__ == "__main__":

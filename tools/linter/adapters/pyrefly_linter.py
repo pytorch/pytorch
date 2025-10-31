@@ -106,20 +106,69 @@ def check_pyrefly_installed(code: str) -> list[LintMessage]:
         ]
 
 
-def check_nightly_run(code: str) -> list[LintMessage]:
+def find_repo_root() -> str:
+    """Find repository root using git, or fallback to current directory."""
+    from pathlib import Path
+
+    # Try git first
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Fallback: use current working directory
+    cwd = Path.cwd()
+
+    # Verify it looks like a PyTorch repo by checking for torch/ directory
+    if (cwd / "torch").is_dir():
+        return str(cwd)
+
+    # Search up the directory tree for a torch/ directory
+    for parent in cwd.parents:
+        if (parent / "torch").is_dir():
+            return str(parent)
+
+    # Last resort: just use cwd
+    return str(cwd)
+
+
+def check_stubs_exist(code: str) -> list[LintMessage]:
     """Check if make setup-env has been run successfully.
 
-    This checks for the presence of pytorch-nightly.pth file that is created
-    when installing nightly binaries and type stubs.
+    This checks for:
+    2. The existence of required stub files
     """
-    import site
     from pathlib import Path
 
     try:
-        site_packages = Path(site.getsitepackages()[0])
-        pth_file = site_packages / "pytorch-nightly.pth"
+        # Check for stub files (reused from pyrefly_init.py)
+        # TODO: Consolidate the check / logic
+        repo_root = find_repo_root()
 
-        if not pth_file.exists():
+        expected_stub_files = [
+            "torch/_C/__init__.pyi",
+            "torch/_C/_VariableFunctions.pyi",
+            "torch/_C/_nn.pyi",
+            "torch/_VF.pyi",
+            "torch/return_types.pyi",
+            "torch/nn/functional.pyi",
+            "torch/utils/data/datapipes/datapipe.pyi",
+        ]
+
+        missing_files = []
+        repo_path = Path(repo_root)
+        for stub_file in expected_stub_files:
+            file_path = repo_path / stub_file
+            if not file_path.exists():
+                missing_files.append(stub_file)
+
+        if len(missing_files) > 0:
             return [
                 LintMessage(
                     path=None,
@@ -127,13 +176,13 @@ def check_nightly_run(code: str) -> list[LintMessage]:
                     char=None,
                     code=code,
                     severity=LintSeverity.WARNING,
-                    name="nightly-wheel-not-run",
+                    name="stub-files-missing",
                     original=None,
                     replacement=None,
                     description=(
-                        "pytorch-nightly.pth not found. "
-                        "You may need to run make setup-env "
-                        "to install nightly binaries and type stubs."
+                        f"Missing {len(missing_files)} stub file(s). "
+                        "You may need to run lintrunner init to generate them.\n"
+                        f"Missing files: {', '.join(missing_files)}"
                     ),
                 )
             ]
@@ -150,7 +199,7 @@ def check_nightly_run(code: str) -> list[LintMessage]:
                 original=None,
                 replacement=None,
                 description=(
-                    f" Could not check for pytorch-nightly {e.__class__.__name__}:\n{e}"
+                    f"Could not check for stub files {e.__class__.__name__}:\n{e}"
                 ),
             )
         ]
@@ -287,7 +336,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         required=True,
-        help="path to an mypy .ini config file",
+        help="path to an pyrefly.toml config file",
     )
     args = parser.parse_args()
 
@@ -297,14 +346,17 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    nightly_check = check_nightly_run(args.code)
-    if len(nightly_check) != 0:
-        print(json.dumps(nightly_check[0]._asdict()), flush=True)
+    stubs_exist = check_stubs_exist(args.code)
+    stubs_exist = [LintMessage()]
+    if len(stubs_exist) > 0:
+        for lint_message in stubs_exist:
+            print(json.dumps(lint_message._asdict()), flush=True)
         return
 
     lint_messages = check_pyrefly_installed(args.code) + check_files(
         args.code, args.config
     )
+
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 
