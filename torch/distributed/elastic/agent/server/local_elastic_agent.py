@@ -302,7 +302,6 @@ class LocalElasticAgent(SimpleElasticAgent):
         )
         for worker in worker_group.workers:
             local_rank = worker.local_rank
-
             worker_env = {
                 "RANK": str(worker.global_rank),
                 "GROUP_RANK": str(worker_group.group_rank),
@@ -363,11 +362,14 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         return self._pcontext.pids()
 
-    def _set_local_rank_env(self, worker_env: dict[str, object], local_rank: int, spec: WorkerSpec) -> None:
+    def _set_local_rank_env(
+        self, worker_env: dict[str, str | None], local_rank: int, spec: WorkerSpec
+    ) -> None:
         # Set ROCR/CUDA_VISIBLE_DEVICES and LOCAL_RANK based on virtual_local_rank mode.
         # Virtual mode: Each worker sees only its assigned GPU as device 0, LOCAL_RANK=0
         # Traditional mode: Workers see all GPUs, LOCAL_RANK matches actual local rank
         import torch
+
         if torch.version.cuda:
             visible_devices_var = "CUDA_VISIBLE_DEVICES"
         elif torch.version.hip:
