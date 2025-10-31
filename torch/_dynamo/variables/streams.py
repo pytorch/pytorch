@@ -1,14 +1,15 @@
 import collections
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
+from torch._dynamo.variables.dicts import ConstDictVariable
+from torch._dynamo.variables.lists import TupleVariable
 from torch.fx import Proxy
 
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..device_interface import get_interface_for_device
 from ..exc import TYPE_CHECKING, unimplemented_v2
-from ..source import AttrSource, CallFunctionNoArgsSource, TorchSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
@@ -323,11 +324,20 @@ class StreamVariable(StreamContextVariable):
             codegen.append_output(codegen.create_load_global(name, add=True))
 
     @staticmethod
-    def construct_in_graph_stream(index: int, codegen: "PyCodegen") -> None:
-        # Use source to create the right bytecode, this
-        # isn't an actual input
-        source = CallFunctionNoArgsSource(AttrSource(TorchSource(), "Stream"))
-        codegen(source)
+    def make_construct_in_graph_stream_fn(
+        args: TupleVariable, kwargs: ConstDictVariable
+    ) -> Callable[[int, "PyCodegen"], None]:
+        def fn(index: int, codegen: "PyCodegen") -> None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.utils.__name__, "build_stream"
+                )
+            )
+            codegen(args)
+            codegen(kwargs)
+            codegen.extend_output(create_call_function(2, False))
+
+        return fn
 
     def _get_target_values(self) -> list["StreamVariable"]:
         return [self]
