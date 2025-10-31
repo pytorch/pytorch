@@ -478,7 +478,7 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
     for node in joint_graph.nodes:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.flex_lib.zeros_and_scatter.default
+            and node.target is torch.ops.flex_lib.zeros_and_scatter.default
         ):
             for user in node.users:
                 if user.op != "output":

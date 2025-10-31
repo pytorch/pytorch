@@ -227,7 +227,8 @@ class UniformValueConstantFolder(ConstantFolder):
         self.symint_nodes = _SymHashingDict()
         for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
-                self.symint_nodes[n.meta["val"]] = n
+                if n.meta["val"] not in self.symint_nodes:
+                    self.symint_nodes[n.meta["val"]] = n
 
         # reference from torch/_funtorch/partitioners.py:get_default_op_list
         self.view_op_packets = [
@@ -315,7 +316,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # single-elem attrs
         if node.op == "get_attr" or (
             node.op == "call_function"
-            and node.target == torch.ops.aten.lift_fresh_copy.default
+            and node.target is torch.ops.aten.lift_fresh_copy.default
         ):
             out = super(ConstantFolder, self).run_node(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:

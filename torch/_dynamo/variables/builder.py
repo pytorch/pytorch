@@ -46,7 +46,7 @@ import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
-    get_external_object_by_index,
+    get_user_object_by_index,
     register_user_object,
 )
 from torch._dynamo.utils import (
@@ -1057,7 +1057,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
-                "call_function", get_external_object_by_index, (index,), {}
+                "call_function", get_user_object_by_index, (index,), {}
             )
             set_example_value(stream_proxy.node, value)
             var = StreamVariable(
@@ -1078,7 +1078,7 @@ class VariableBuilder:
             index = register_user_object(value, self.source)
             event_proxy = self.tx.output.create_proxy(
                 "call_function",
-                get_external_object_by_index,
+                get_user_object_by_index,
                 (index,),
                 {},
             )
@@ -2930,12 +2930,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         hasattr(proxy.node.target, "__name__")
         and proxy.node.target.__name__ == "set_state"
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
-        or proxy.node.target == torch.random.set_rng_state
+        or proxy.node.target is torch.random.set_rng_state
     ):
         return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
-        proxy.node.target == torch._C._DisableFuncTorch
-        or proxy.node.target == torch.cuda._is_in_bad_fork
+        proxy.node.target is torch._C._DisableFuncTorch
+        or proxy.node.target is torch.cuda._is_in_bad_fork
     ):
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, torch.Size) and all(
@@ -3006,8 +3006,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
-        isinstance(example_value, torch.Stream)
-        and proxy.node.target == get_external_object_by_index
+        inspect.isclass(proxy.node.target)
+        and issubclass(proxy.node.target, torch.Stream)
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
@@ -3743,7 +3743,7 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(value, types.GenericAlias):
+        elif isinstance(value, (types.GenericAlias, types.UnionType)):
             return TypingVariable(value)
         elif is_namedtuple(value):
             output = [

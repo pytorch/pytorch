@@ -69,7 +69,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
     flatten_node = curr_module_users[0]
     assert (
         flatten_node.op == "call_function"
-        and flatten_node.target == fx_pytree.tree_flatten_spec
+        and flatten_node.target is fx_pytree.tree_flatten_spec
     )
 
     flatten_getitem_users = _get_getitem_users(flatten_node)
@@ -85,7 +85,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
     unflatten_node = next(iter(flatten_getitem_users))
     if not (
         unflatten_node.op == "call_function"
-        and unflatten_node.target == pytree.tree_unflatten
+        and unflatten_node.target is pytree.tree_unflatten
     ):
         log.debug(
             "Flatten node %s's user is not a pytree.tree_unflatten. "
