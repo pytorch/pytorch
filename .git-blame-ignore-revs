@@ -28,8 +28,6 @@ e3900d2ba5c9f91a24a9ce34520794c8366d5c54
 b0043072529b81276a69df29e00555333117646c
 # 2021-08-25 Reformat run_test.py
 67d8e7b659b19e1ee68208b28bfa7dba73375dbc
-# 2025-10-30 Refactor AOTAutogradCacheEntry into AOTAutogradResult and extract to aot_autograd_result.py
-36bbfcc0dab2592a1da71d29b1c44aaf24c99a8e
 # 2022-06-09 Apply clang-format to ATen headers
 95b15c266baaf989ef7b6bbd7c23a2d90bacf687
 # 2022-06-11 [lint] autoformat test/cpp and torch/csrc
