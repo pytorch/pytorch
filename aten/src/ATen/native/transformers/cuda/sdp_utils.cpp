@@ -308,7 +308,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
         }
         return false;
     }
-#if AOTRITON_VERSION_MINOR >= 9
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
     if (aotriton::isArchExperimentallySupported(stream)) {
       static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
       if (!enable_experimental) {
@@ -365,7 +365,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
         }
         return false;
     }
-#if AOTRITON_VERSION_MINOR >= 9
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
     if (aotriton::isArchExperimentallySupported(stream)) {
       static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
       if (!enable_experimental) {
