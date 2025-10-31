@@ -329,7 +329,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # constructors ops
         if (
             node.op == "call_function"
-            and node.target == aten.full.default
+            and node.target is aten.full.default
             and len(node.args) == 2
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -340,7 +340,7 @@ class UniformValueConstantFolder(ConstantFolder):
                 return aten.full.default(*new_args, **node.kwargs)
 
         # handle before view ops because this changes value
-        if node.target == aten.view.dtype:
+        if node.target is aten.view.dtype:
             return super(ConstantFolder, self).run_node(node)
 
         # view ops, return input tensor, the first argument
@@ -438,7 +438,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 # the conversion from tensor and back to value can be lossy, just use the original full ctor value
                 if (
                     node.op == "call_function"
-                    and node.target == aten.full.default
+                    and node.target is aten.full.default
                     and len(node.args) == 2
                 ):
                     value = node.args[1]
