@@ -66,16 +66,14 @@ def _fixed_indexer_cute(
         if not index:
             return Integer(0)
 
-        base = index[0]
-        terms: list[Expr] = [base]
+        result = index[0]
         runner = size[0]
 
-        for idx, sz in zip(index[1:], size[1:]):
-            term = sympy.Mul(runner, Identity(idx), evaluate=False)
-            terms.append(term)
-            runner = sympy.Mul(runner, sz, evaluate=True)
+        for idx, sz in zip(index[1:], size[1:], strict=True):
+            result = result + runner * Identity(idx)
+            runner = runner * sz
 
-        return sympy.Add(*terms, evaluate=False)
+        return result
 
     return indexer
 
