@@ -740,7 +740,7 @@ enable_aot_compile = False
 _custom_ops_profile: Optional[Any] = None
 
 # Experimental: If True, default aot_eager run will register the graph module's fx metadata
-enrich_profiler_stack_trace: bool = (
+enrich_profiler_metadata: bool = (
     os.environ.get("TORCH_ENRICH_RPOFILER_STACK_TRACE", "0") == "1"
 )
 
