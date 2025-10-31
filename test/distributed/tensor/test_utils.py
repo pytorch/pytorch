@@ -793,9 +793,7 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
                 all_shard_order, min(25, len(all_shard_order))
             )
             x = torch.randn(32, 32, 32)
-            cnt = 0
             for shard_order in shard_order_choices:
-                cnt += 1
                 placement_without_stridedshard = shard_order_to_placement(
                     shard_order, mesh
                 )

@@ -5969,13 +5969,11 @@ def generate_shard_orders(mesh, tensor_rank):
     # Generate all possible sharding placement of tensor with rank
     # `tensor_rank` over mesh.
     def _split_list(lst: list, N: int):
-        def compositions(n, k):
-            if k == 1:
-                yield [n]
-            else:
-                for i in range(1, n - k + 2):
-                    for tail in compositions(n - i, k - 1):
-                        yield [i] + tail
+        def compositions(n: int, k: int):
+            # yields lists of length k, positive ints summing to n
+            for cuts in itertools.combinations(range(1, n), k - 1):
+                # add 0 and n as sentinels, then take consecutive differences
+                yield [b - a for a, b in itertools.pairwise((0, *cuts, n))]
 
         length = len(lst)
         for comp in compositions(length, N):

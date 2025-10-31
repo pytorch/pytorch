@@ -132,9 +132,7 @@ class DTensorSpec:
     def _maybe_convert_StridedShard_to_shard_order(
         placements: tuple[Placement, ...], mesh: DeviceMesh
     ) -> Optional[ShardOrder]:
-        """
-        Try convert _StridedShard to ShardOrder.
-        """
+        """Try convert _StridedShard to ShardOrder."""
         if not any(isinstance(p, _StridedShard) for p in placements):
             return DTensorSpec.compute_default_shard_order(placements)
         max_tensor_dim = max([i.dim for i in placements if isinstance(i, Shard)])
@@ -171,9 +169,7 @@ class DTensorSpec:
     def _convert_shard_order_to_StridedShard(
         shard_order: ShardOrder, placements: tuple[Placement, ...], mesh: DeviceMesh
     ) -> tuple[Placement, ...]:
-        """
-        Convert ShardOrder to _StridedShard.
-        """
+        """Convert ShardOrder to _StridedShard."""
         placements_list = list(placements)
         for entry in shard_order:
             tensor_dim = entry.tensor_dim
