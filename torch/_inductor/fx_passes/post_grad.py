@@ -1893,7 +1893,7 @@ class ConstructorMoverPass:
                 noop_device_puts = [
                     user
                     for user in gpu_node.users
-                    if user.target == torch.ops.prims.device_put.default
+                    if user.target is torch.ops.prims.device_put.default
                     and user.args[1] == target_device
                 ]
                 for noop in noop_device_puts:
