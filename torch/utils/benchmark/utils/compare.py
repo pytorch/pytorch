@@ -157,7 +157,8 @@ class Table:
             trim_significant_figures: bool,
             highlight_warnings: bool
     ):
-        assert len({r.label for r in results}) == 1
+        if len({r.label for r in results}) != 1:
+            raise AssertionError("All results must share the same label")
 
         self.results = results
         self._colorize = colorize

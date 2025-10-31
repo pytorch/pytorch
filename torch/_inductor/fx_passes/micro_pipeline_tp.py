@@ -4,7 +4,7 @@ import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
 from math import prod
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -25,6 +25,10 @@ from ..pattern_matcher import (
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 patterns = PatternMatcherPass()
+
+
+def _is_last_dim(t: torch.Tensor, dim: int) -> bool:
+    return dim == t.ndim - 1 or dim == -1
 
 
 def _is_backward(graph: torch.fx.Graph) -> bool:
@@ -374,8 +378,8 @@ class _Matmul:
     arg_ancestor_nodes: OrderedSet[torch.fx.Node] = field(init=False)
     A_node: torch.fx.Node
     B_node: torch.fx.Node
-    pre_mm_reshape: Optional[torch.fx.Node]
-    post_mm_reshape: Optional[torch.fx.Node]
+    pre_mm_reshape: torch.fx.Node | None
+    post_mm_reshape: torch.fx.Node | None
 
     def __post_init__(self):
         assert len(self.nodes) in (1, 3)
@@ -450,12 +454,12 @@ class _Matmul:
 class _ScaledMatmul(_Matmul):
     A_scale_node: torch.fx.Node
     B_scale_node: torch.fx.Node
-    bias_node: Optional[torch.fx.Node]
-    result_scale_node: Optional[torch.fx.Node]
-    out_dtype: Optional[torch.dtype]
+    bias_node: torch.fx.Node | None
+    result_scale_node: torch.fx.Node | None
+    out_dtype: torch.dtype | None
     use_fast_accum: bool
-    pre_mm_reshape: Optional[torch.fx.Node]
-    post_mm_reshape: Optional[torch.fx.Node]
+    pre_mm_reshape: torch.fx.Node | None
+    post_mm_reshape: torch.fx.Node | None
 
     def __post_init__(self):
         super().__post_init__()
@@ -645,9 +649,17 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
-        return
+    filter_matmul = None
+    if _is_last_dim(_get_tensor(shard_node), gather_dim):
+        # Decomposed mms should not be too small
+        if _get_tensor(shard_node).shape[-1] < 1024:
+            return
+
+        # scaled_mm is not supported yet for last dim
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
 
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
@@ -663,18 +675,29 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
         return
 
+    if _is_last_dim(_get_tensor(shard_node), gather_dim) and len(
+        all_gather.res_node.users
+    ) > len(matmuls):
+        # The result of ag-split-cat is used not only in matmuls.
+        # Then it has to be materialized, which can have overhead.
+        return
+
+    if filter_matmul and not filter_matmul(matmuls[0]):
+        return
+
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
-        if "val" in shard_node.meta:
-            restrided = restride_A_shard_for_fused_all_gather_matmul(
-                _get_tensor(shard_node),
-                gather_dim,
-            )
-            shard_node = graph.call_function(
-                inductor_prims.force_stride_order,
-                args=(shard_node, restrided.stride()),
-            )
+        if not _is_last_dim(_get_tensor(shard_node), gather_dim):
+            if "val" in shard_node.meta:
+                restrided = restride_A_shard_for_fused_all_gather_matmul(
+                    _get_tensor(shard_node),
+                    gather_dim,
+                )
+                shard_node = graph.call_function(
+                    inductor_prims.force_stride_order,
+                    args=(shard_node, restrided.stride()),
+                )
 
         fused_node = _insert_fused_all_gather_matmul(
             graph, matmuls, shard_node, gather_dim, group_name
@@ -763,7 +786,7 @@ def _scatter_dim_after_reshape(
     return 0 if leading_dims_collapsed else 1
 
 
-def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
+def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
     """
     Returns producer matmul node if found, otherwise returns None.
     """
@@ -802,7 +825,7 @@ def _insert_fused_matmul_reduce_scatter(
     scatter_dim_after_reshape: int,  # only used for reshape -> scaled_mm -> reshape pattern
     output_shape: list[int],  # only used for reshape -> scaled_mm -> reshape pattern
 ) -> torch.fx.Node:
-    if type(matmul) == _Matmul:
+    if type(matmul) is _Matmul:
         return graph.call_function(
             torch.ops.symm_mem.fused_matmul_reduce_scatter.default,
             args=(
@@ -813,7 +836,7 @@ def _insert_fused_matmul_reduce_scatter(
                 group_name,
             ),
         )
-    elif type(matmul) == _ScaledMatmul:
+    elif type(matmul) is _ScaledMatmul:
         return graph.call_function(
             torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter.default,
             args=(
@@ -880,6 +903,14 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
+    filter_matmul = None
+    if _is_last_dim(_get_tensor(input_node), orig_scatter_dim):
+        # scaled_mm is not supported yet for last dim mm+rs
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
+
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
     # so we can't apply the fusion if the matmul result is used by multiple
     # users. This is not a fundamental limitation of the fused op and can be
@@ -891,10 +922,14 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     matmul = _find_producer_matmul(input_node)
+
     if matmul is None:
         log.warning(
             "no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion"
         )
+        return
+
+    if filter_matmul and not filter_matmul(matmul):
         return
 
     if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
@@ -1025,7 +1060,7 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     """
 
     def _is_compute_intensive(node: torch.fx.Node) -> bool:
-        return node.target in [torch.ops.aten.mm.default]
+        return node.target is torch.ops.aten.mm.default
 
     collective_to_overlapping_candidates = defaultdict(list)
     available_nodes = OrderedSet[torch.fx.Node]()

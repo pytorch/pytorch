@@ -3,7 +3,7 @@
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,6 +34,10 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 invoke_subgraph_counter = 0
@@ -82,6 +86,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         return super().__call__(subgraph, identifier, *operands)
 
+    # pyrefly: ignore  # bad-override
     def gen_schema(self, subgraph, identifier, *operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import (
@@ -89,11 +94,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             materialize_as_graph,
         )
 
-        gm: torch.fx.GraphModule = (
-            subgraph
-            if isinstance(subgraph, torch.fx.GraphModule)
-            else materialize_as_graph(subgraph, operands)
-        )
+        gm: torch.fx.GraphModule = materialize_as_graph(subgraph, operands)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
@@ -104,7 +105,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(gm, operands)
+        ) = check_input_alias_and_mutation_return_outputs(gm)
         for idx, arg in enumerate(operands):
             schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
         for out in outputs:
@@ -401,6 +402,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         subgraph,
@@ -477,6 +479,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         for tangent in filtered_grad_outs:
             metadata = extract_tensor_metadata(tangent)
             metadata._flatten_into(tangent_metadata, fake_mode, state)
+        # pyrefly: ignore  # bad-assignment
         tangent_metadata = tuple(tangent_metadata)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and

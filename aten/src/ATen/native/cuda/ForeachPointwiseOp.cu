@@ -57,7 +57,7 @@ std::vector<Tensor> foreach_pointwise_op(
             scalar.to<opmath_t>());
       });
 
-  return tensor_lists[3];
+  return std::move(tensor_lists[3]);
 }
 
 template <template <class> class Op>
@@ -160,7 +160,7 @@ std::vector<Tensor> foreach_pointwise_op(
             Op<opmath_t>());
       });
 
-  return tensor_lists[3];
+  return std::move(tensor_lists[3]);
 }
 
 #define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                           \

@@ -842,10 +842,7 @@ bool Value::isValidName(const std::string& name) {
 }
 
 Value* Value::setDebugName(const std::string& name) {
-  if (!isValidName(name)) {
-    throw std::runtime_error("Invalid name: '" + name + "'");
-  }
-
+  TORCH_CHECK(isValidName(name), "Invalid name: '", name, "'")
   auto& names = node()->owningGraph()->unique_names_;
 
   // clear any old name from the map
@@ -970,8 +967,7 @@ static size_t findArgument(
       return i;
     }
   }
-  throw std::runtime_error(
-      std::string("Couldn't find an argument called ") + unqualName);
+  TORCH_CHECK(false, "Couldn't find an argument called ", unqualName);
 }
 
 static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
@@ -1179,12 +1175,10 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-#if !defined(USE_ROCM)
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
     case cuda::synchronize:
-#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1773,7 +1767,7 @@ Node* Graph::createTupleSlice(
 
   int64_t i = beg;
   for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
-    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto idx = insertConstant(IValue(i));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
     new_vals.push_back(tupleIndex->output());

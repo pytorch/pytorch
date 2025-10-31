@@ -50,7 +50,7 @@ struct RawTensors {
   }
 
   template <typename T>
-  void operator()(T&) {}
+  void operator()(T& /*unused*/) {}
 
   std::vector<RawTensorInfo> tensors_;
 };
