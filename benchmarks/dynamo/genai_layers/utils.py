@@ -159,9 +159,10 @@ class BenchmarkKernel:
             self.check_accuracy(args, kwargs)
 
     def visualize(self) -> None:
+        device_name = torch.cuda.get_device_name(0)
         visualize_comparison(
             self.profiling_results,
-            title=f"{self.name}",
+            title=f"{self.name} ({device_name})",
             output_path=f"{self.name}_bench",
         )
         return
@@ -275,5 +276,6 @@ def visualize_comparison(
         os.makedirs("pics", exist_ok=True)
         full_path = os.path.join("pics", output_path + ".png")
         plt.savefig(full_path, dpi=300, bbox_inches="tight", facecolor="white")
+        print(f"Chart saved to {full_path}")
 
     plt.close()
