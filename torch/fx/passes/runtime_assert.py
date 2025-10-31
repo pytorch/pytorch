@@ -606,7 +606,7 @@ def insert_deferred_runtime_asserts(
 
                     if (
                         expr_to_proxy[i0].node.target
-                        != cast_symbool_to_symint_guardless
+                        is not cast_symbool_to_symint_guardless
                     ):
                         # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
                         # raises AOTAutograd errors on cast_symbool_to_symint_guardless
