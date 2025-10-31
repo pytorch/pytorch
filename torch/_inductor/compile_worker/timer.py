@@ -1,6 +1,6 @@
 from threading import Lock, Thread
-from time import sleep, monotonic
-from typing import Optional, Union, Callable
+from time import monotonic, sleep
+from typing import Callable, Optional, Union
 
 
 class Timer:
