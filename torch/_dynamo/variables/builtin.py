@@ -2289,18 +2289,18 @@ class BuiltinVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         arg: VariableTracker,
-        isinstance_type: VariableTracker,
+        isinstance_type_var: VariableTracker,
     ) -> VariableTracker:
         try:
             arg_type = arg.python_type()
         except NotImplementedError:
             unimplemented_v2(
                 gb_type="builtin isinstance() cannot determine type of argument",
-                context=f"isinstance({arg}, {isinstance_type})",
+                context=f"isinstance({arg}, {isinstance_type_var})",
                 explanation=f"Dynamo doesn't have a rule to determine the type of argument {arg}",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
-
+        isinstance_type = isinstance_type_var.as_python_constant()
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
 
             def _tensor_isinstance(
@@ -2349,19 +2349,19 @@ class BuiltinVariable(VariableTracker):
             and "__instancecheck__" in isinstance_type.__class__.__dict__
         ):
             return variables.ConstantVariable.create(
-                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)  # type: ignore[call-arg]
+                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
             # pyrefly: ignore [unbound-name]
-            return ConstantVariable.create(isinstance(arg_type, isinstance_type))  # type: ignore[arg-type]
+            return ConstantVariable.create(isinstance(arg_type, isinstance_type))
 
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, type) or callable(
             # E.g. isinstance(obj, typing.Sequence)
             getattr(isinstance_type, "__instancecheck__", None)
         ):
-            isinstance_type_tuple = (isinstance_type,)  # type: ignore[assignment]
+            isinstance_type_tuple = (isinstance_type,)
         elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
@@ -2460,7 +2460,7 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
-            mutation_type=ValueMutationNew()
+            mutation_type=ValueMutationNew(),
         )
 
     def call_filter(
@@ -2472,7 +2472,7 @@ class BuiltinVariable(VariableTracker):
         return variables.FilterVariable(
             fn,
             seq_or_list,  # type: ignore[arg-type]
-            mutation_type=ValueMutationNew()
+            mutation_type=ValueMutationNew(),
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
