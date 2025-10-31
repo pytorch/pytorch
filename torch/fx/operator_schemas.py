@@ -5,7 +5,8 @@ import numbers
 import types
 import typing
 import warnings
-from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 from torch._jit_internal import boolean_dispatched
@@ -120,6 +121,7 @@ def _torchscript_schema_to_signature_impl(
             # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
+
             for idx, p in enumerate(parameters):
                 assert p.kind == Parameter.POSITIONAL_OR_KEYWORD
                 parameters[idx] = Parameter(
@@ -128,6 +130,7 @@ def _torchscript_schema_to_signature_impl(
                     default=p.default,
                     annotation=p.annotation,
                 )
+
         parameters.append(
             Parameter(name=name, kind=kind, default=default, annotation=arg_type)
         )

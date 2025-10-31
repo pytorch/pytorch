@@ -121,13 +121,6 @@ TORCH_API mobile::Module parse_flatbuffer_no_object(
     size_t size,
     std::optional<at::Device> device);
 
-TORCH_API mobile::Module parse_and_initialize_mobile_module(
-    void* data,
-    size_t,
-    std::optional<at::Device>,
-    ExtraFilesMap* extra_files,
-    bool should_copy_tensor_memory);
-
 // no op, TODO(qihan) delete
 TORCH_API bool register_flatbuffer_loader();
 

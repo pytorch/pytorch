@@ -1,6 +1,6 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import update_wrapper
-from typing import Any, Callable, Final, Generic, Optional, overload, TypeVar, Union
+from typing import Any, Final, Generic, Optional, overload, TypeVar, Union
 
 import torch
 import torch.nn.functional as F

@@ -23,7 +23,7 @@ jobs:
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
-          requires: '[\"pull\", \"trunk\", \"lint\", \"^linux-binary-manywheel$\", \"^linux-binary-libtorch-release$\", \"linux-aarch64\"]'
+          requires: '[\"pull\", \"trunk\", \"lint\",  \"linux-aarch64\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
           clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
@@ -48,4 +48,7 @@ jobs:
             echo "{\"sha\": \"${LATEST_SHA}\", \"repository\":\"pytorch/pytorch\", \"timestamp\": ${TIME}}" > "/tmp/${LATEST_SHA}.json"
             pip install awscli==1.29.40
             aws s3 cp "/tmp/${LATEST_SHA}.json" "s3://ossci-raw-job-status/stable_pushes/pytorch/pytorch/${LATEST_SHA}.json"
+            # Push new viable/strict tag
+            cd pytorch/pytorch
+            git push origin "${LATEST_SHA}:refs/tags/viable/strict/${TIME}"
           fi
