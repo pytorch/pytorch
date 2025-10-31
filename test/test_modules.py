@@ -328,7 +328,7 @@ class TestModule(TestCase):
 
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when
-        # non-leafs are present in the graph.
+        # non-leaves are present in the graph.
         def inner_retain_grad(obj):
             if obj.requires_grad:
                 obj.retain_grad()
