@@ -2090,7 +2090,7 @@ class CommonTemplate:
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
         size_hints = {"x": 67108864, "r0_": 8192}
-        for i in range(4):
+        for _ in range(4):
             size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
@@ -5033,13 +5033,13 @@ class CommonTemplate:
 
         def run_weights_sharing_model(m, inp):
             with torch.no_grad():
-                for i in range(num_run):
+                for _ in range(num_run):
                     y = m(inp)
 
         numb_instance = 2
         threads = []
         compiled_m = torch.compile(model)
-        for i in range(1, numb_instance + 1):
+        for _ in range(1, numb_instance + 1):
             thread = threading.Thread(
                 target=run_weights_sharing_model, args=(compiled_m, inp)
             )
@@ -6474,7 +6474,11 @@ class CommonTemplate:
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
-    @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    @torch._inductor.config.patch(
+        joint_graph_constant_folding=True,
+        # Numerical accuracy failure for triton fp16
+        max_autotune_gemm_backends="ATEN",
+    )
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -6902,7 +6906,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
-    @config.patch(force_disable_caches=True)
+    @config.patch(
+        force_disable_caches=True,
+        # Test expects a single (fused) kernel to be generated
+        max_autotune_gemm_backends="ATEN",
+    )
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
@@ -14131,6 +14139,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
         return code_allowed != code_disallowed
 
+    # If matmul is implemented by triton there is more reuse
+    @config.patch(max_autotune_gemm_backends="ATEN")
     @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile

@@ -3622,8 +3622,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: logaddexp_out
-    MPS: logaddexp_out_mps
+    CPU, CUDA, MPS: logaddexp_out
   tags: pointwise
 
 - func: logaddexp(Tensor self, Tensor other) -> Tensor
@@ -3635,8 +3634,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: logaddexp2_out
-    MPS: logaddexp2_out_mps
+    CPU, CUDA, MPS: logaddexp2_out
   tags: pointwise
 
 - func: logaddexp2(Tensor self, Tensor other) -> Tensor
@@ -15097,7 +15095,7 @@
     CPU: _scaled_dot_product_flash_attention_cpu
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None, bool compute_log_sumexp=True) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable
     XPU: _scaled_dot_product_fused_attention_overrideable_xpu
@@ -15121,6 +15119,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable_backward
+    XPU: _scaled_dot_product_fused_attention_overrideable_backward_xpu
 
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:

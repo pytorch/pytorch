@@ -1363,7 +1363,7 @@ class AutogradCompilerInstance:
                 )
 
             arg = max(input_nodes_and_users)  # last input users
-            if arg.op == "call_function" and arg.target == call_accumulate_grad:
+            if arg.op == "call_function" and arg.target is call_accumulate_grad:
                 param_node = arg.args[0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
