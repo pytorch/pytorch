@@ -161,12 +161,6 @@ struct ExpandableSegment {
         return rangeFromHandles(begin, begin);
       }
     }
-
-    // Set access permissions for this device and all peer devices.
-    setAccess(device_, begin, end);
-    for (const auto p : peers_) {
-      setAccess(p, begin, end);
-    }
     return rangeFromHandles(begin, end);
   }
 
@@ -192,13 +186,6 @@ struct ExpandableSegment {
     return max_handles_ * segment_size_;
   }
 
-  // Registers a new peer device and updates access permissions.
-  void addPeer(c10::DeviceIndex device) {
-    peers_.push_back(device);
-    forEachAllocatedRange(
-        [&](size_t begin, size_t end) { setAccess(device, begin, end); });
-  }
-
   ~ExpandableSegment() {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
@@ -207,16 +194,6 @@ struct ExpandableSegment {
   }
 
  private:
-  // Sets access permissions for the specified device on the segment range
-  // [begin, end).
-  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
-    sycl::ext::oneapi::experimental::set_access_mode(
-        reinterpret_cast<void*>(ptr_ + begin * segment_size_),
-        (end - begin) * segment_size_,
-        sycl::ext::oneapi::experimental::address_access_mode::read_write,
-        xpu::get_device_context());
-  }
-
   // Unmaps the physical memory handles in the range [begin, end) from the
   // segment.
   void unmapHandles(size_t begin, size_t end) {
@@ -302,7 +279,7 @@ struct ExpandableSegment {
   // Physical memory handles for the segments.
   std::vector<std::optional<sycl::ext::oneapi::experimental::physical_mem>>
       handles_{};
-  // Peer devices on which this memory should be mapped and accessible.
+  // Peer devices on which this memory could be accessible, reserved.
   std::vector<c10::DeviceIndex> peers_{};
 };
 
