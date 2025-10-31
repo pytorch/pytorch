@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
     load_tests,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU, get_gpu_type
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
 from torch.utils._traceback import (
@@ -54,6 +55,9 @@ from torch.utils.data import DataLoader
 load_tests = load_tests  # noqa: PLW0127
 
 HAS_CUDA = torch.cuda.is_available()
+HAS_XPU = torch.xpu.is_available()
+HAS_GPU = HAS_CUDA or HAS_XPU
+device_type = get_gpu_type()
 
 
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -302,24 +306,24 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_checkpoint_rng_cuda(self):
+    @unittest.skipIf(not HAS_GPU, "No GPU")
+    def test_checkpoint_rng_gpu(self):
         for _ in range(5):
-            inp = torch.randn(20000, device="cuda").requires_grad_()
+            inp = torch.randn(20000, device=device_type).requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
 
             def run_fn(input):
                 return phase2(input)
 
-            state = torch.cuda.get_rng_state()
+            state = torch.get_device_module(device_type).get_rng_state()
 
             out = phase1(inp)
             out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
-            torch.cuda.set_rng_state(state)
+            torch.get_device_module(device_type).set_rng_state(state)
 
             inp.grad = None
 
@@ -330,9 +334,9 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
+    @unittest.skipIf(not HAS_GPU, "No GPU")
     def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
-        inp = torch.randn(2, device="cuda").requires_grad_()
+        inp = torch.randn(2, device=device_type).requires_grad_()
         layer = torch.nn.Dropout()
 
         def run_fn(input):
@@ -435,10 +439,10 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not HAS_GPU, "Test requires GPU")
     def test_checkpointing_without_reentrant_early_free(self):
         # I don't know how to check if the temporary saved variable buffer
-        # get de-allocated directly. So using cuda memory usage as a proxy
+        # get de-allocated directly. So using GPU memory usage as a proxy
 
         def _do_test(fn, should_free):
             stats: list[int] = []
@@ -449,8 +453,8 @@ class TestCheckpoint(TestCase):
                 # emptied at each step)
                 def hook(_unused):
                     self.assertEqual(len(stats), idx)
-                    torch.cuda.synchronize()
-                    stats.append(torch.cuda.memory_allocated())
+                    torch.get_device_module(device_type).synchronize()
+                    stats.append(torch.get_device_module(device_type).memory_allocated())
                     if idx > 0:
                         if should_free:
                             self.assertLess(stats[idx], stats[idx - 1])
@@ -475,7 +479,7 @@ class TestCheckpoint(TestCase):
 
             return stats
 
-        x = torch.zeros(10, device="cuda", requires_grad=True)
+        x = torch.zeros(10, device=device_type, requires_grad=True)
         x.grad = torch.zeros_like(x)
 
         # In a regular backward, buffers get eagerly freed
@@ -505,8 +509,8 @@ class TestCheckpoint(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_device_states_recursive(self):
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{device_type}:0"),
+            "bar": [torch.rand(10, device=f"{device_type}:1")],
         }
         device_ids, device_states = get_device_states(inp)
         self.assertEqual(2, len(device_ids))
@@ -522,42 +526,43 @@ class TestCheckpoint(TestCase):
         self.assertEqual("meta", device_type)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_infer_device_state_recursive_multi_cuda(self):
-        # Check that no warning is issued for either cuda:0, cuda:1 or
-        # cuda:0, cuda:0 cases since they are both the same device type
+    def test_infer_device_state_recursive_multi_gpu(self):
+        # Check that no warning is issued for either gpu:0, gpu:1 or
+        # gpu:0, gpu:0 cases since they are both the same device type
+        global g_device_type
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{g_device_type}:0"),
+            "bar": [torch.rand(10, device=f"{g_device_type}:1")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(g_device_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:0")],
+            "foo": torch.rand(10, device=f"{g_device_type}:0"),
+            "bar": [torch.rand(10, device=f"{g_device_type}:0")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
-        # Check that a warning is issued for cuda:0, meta and that it includes
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(g_device_type, _device_type)
+        # Check that a warning is issued for gpu:0, meta and that it includes
         # device type information
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
+            "foo": torch.rand(10, device=f"{g_device_type}:0"),
             "bar": [torch.rand(10, device="meta")],
         }
         with warnings.catch_warnings(record=True) as w:
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(g_device_type, _device_type)
         self.assertEqual(len(w), 1)
         warning_msg = str(w[-1].message)
         self.assertTrue(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices"
             in warning_msg
         )
-        self.assertTrue("Device types: ['cuda', 'meta']" in warning_msg)
-        self.assertTrue("first device type: cuda" in warning_msg)
+        self.assertTrue(f"Device types: ['{device_type}', 'meta']" in warning_msg)
+        self.assertTrue(f"first device type: {device_type}" in warning_msg)
 
 
 class TestDataLoaderUtils(TestCase):
@@ -604,7 +609,7 @@ class TestDataLoaderUtils(TestCase):
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip(
-        "FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN"
+        "FIXME: Intermittent GPU out-of-memory error on Windows and time-out under ASAN"
     )
     def test_multi_keep(self):
         dataloader: DataLoader = DataLoader(
@@ -677,6 +682,7 @@ class TestHipifyTrie(TestCase):
         for i in range(len(orig_chars)):
             self.assertEqual(self.trie.quote(orig_chars[i]), quoted_strs[i])
 
+    @unittest.skipIf(HAS_XPU, "XPU not supported hipify")
     def test_export_trie_to_regex(self):
         words_to_add = [
             "__CUDACC__",
@@ -700,6 +706,7 @@ class TestHipifyTrie(TestCase):
         expected_regex = r"(?:app(?:le)?|ban(?:ana)?)"
         self.assertEqual(regex, expected_regex)
 
+    @unittest.skipIf(HAS_XPU, "XPU not supported hipify")
     def test_single_export_trie_to_regex(self):
         words_to_add = ["cudaErrorInvalidMemcpyDirection"]
         for word in words_to_add:
@@ -861,27 +868,27 @@ class TestDeviceUtils(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_default_device_more(self):
         try:
-            torch.set_default_device("cuda")
+            torch.set_default_device(device_type)
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device("cuda")
-            torch.cuda.set_device("cuda:1")
+            torch.set_default_device(device_type)
+            torch.get_device_module(device_type).set_device(f"{device_type}:1")
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device("cuda:1")
+            torch.set_default_device(f"{device_type}:1")
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device("cuda:1")
-            with torch.device("cuda:0"):
-                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+            torch.set_default_device(f"{device_type}:1")
+            with torch.device(f"{device_type}:0"):
+                self.assertEqual(torch.get_default_device(), torch.device(f"{device_type}", 0))
 
             torch.set_default_device("cpu")
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
-            with torch.device("cuda:0"):
-                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+            with torch.device(f"{device_type}:0"):
+                self.assertEqual(torch.get_default_device(), torch.device(f"{device_type}", 0))
 
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
         finally:

@@ -106,7 +106,7 @@ class DefaultDeviceType:
     to save and restore for recomputation.
     """
 
-    _default_device_type = "cuda"
+    _default_device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 
     @staticmethod
     def set_device_type(device: str = "cuda") -> None:
