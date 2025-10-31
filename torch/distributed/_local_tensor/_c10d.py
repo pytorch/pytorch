@@ -6,7 +6,7 @@ from typing import Callable
 
 import torch
 from torch._C import ScriptObject
-from torch._C._distributed_c10d import FakeWork
+from torch._C._distributed_c10d import FakeWork, CallbackWork
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -781,23 +781,24 @@ def _local_send(
     return work_so
 
 
-class RecvWork(Work):
-    def __init__(self, recv: Callable[[], None]):
-        super().__init__()
-        self._done = False
-        self._recv = recv
+# class RecvWork(FakeWork):
+#     def __init__(self, recv: Callable[[], None]):
+#         super().__init__()
+#         self._done = False
+#         self._recv = recv
 
-    def is_completed(self) -> bool:
-        return self._done
+#     def is_completed(self) -> bool:
+#         return self._done
 
-    def is_success(self):
-        return True
+#     def is_success(self):
+#         return True
 
-    def wait(self, timeout=None):
-        if not self._done:
-            self._recv()
-            self._done = True
-        return self
+#     def wait(self, timeout=None):
+#         if not self._done:
+#             breakpoint()
+#             self._recv()
+#             self._done = True
+#         return self
 
 
 def _local_recv_(
@@ -824,7 +825,7 @@ def _local_recv_(
 
         LocalRunnerMode.current().wait_recv(src, dst, _wait_and_store)
 
-    work = RecvWork(_recv_and_store)
+    work = CallbackWork(_recv_and_store)
     work_so = Work.boxed(work)
     return work_so
 
