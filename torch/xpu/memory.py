@@ -194,6 +194,26 @@ def mem_get_info(device: _device_t = None) -> tuple[int, int]:
     return torch._C._xpu_getMemoryInfo(device)
 
 
+def get_per_process_memory_fraction(device: _device_t = None) -> float:
+    r"""
+    Retrieve the memory fraction currently set for a process on a given XPU device.
+    This fraction represents the portion of the total device memory that
+    the caching allocator is allowed to use. The allowed memory is calculated as:
+
+    .. math:: \text{allowed\_memory} = \text{total\_memory} \times \text{fraction}
+
+    Args:
+        device (torch.device or int or str, optional): selected device. It uses the current device,
+            given by :func:`~torch.xpu.current_device`, if :attr:`device` is ``None`` (default).
+
+    Returns:
+        float: The memory fraction in the range 0.0 to 1.0.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    return torch._C._xpu_getMemoryFraction(device)
+
+
 def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -> None:
     r"""
     Set the memory fraction for a single process on XPU device.
@@ -222,6 +242,7 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
 
 __all__ = [
     "empty_cache",
+    "get_per_process_memory_fraction",
     "max_memory_allocated",
     "max_memory_reserved",
     "mem_get_info",

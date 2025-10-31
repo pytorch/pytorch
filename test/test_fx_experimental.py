@@ -262,7 +262,7 @@ class TestFXExperimental(JitTestCase):
                 self.embedding_layers = torch.nn.ModuleList()
                 el = torch.nn.EmbeddingBag(500000, 4, mode="sum", sparse=True)
                 self.embedding_layers.append(el)
-                for i in range(3):
+                for _ in range(3):
                     el = torch.nn.EmbeddingBag(1000000, 4, mode="sum", sparse=True)
                     self.embedding_layers.append(el)
                 el = torch.nn.EmbeddingBag(500000, 4, mode="sum", sparse=True)
