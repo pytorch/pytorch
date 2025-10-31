@@ -95,7 +95,7 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
-from .dicts import DefaultDictVariable
+from .dicts import ConstDictVariable, DefaultDictVariable
 from .lists import SizeVariable
 
 
@@ -811,13 +811,26 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args = [stacked]
 
             if issubclass(self.value, torch.Stream):
+                from .constant import ConstantVariable
+                from .lists import TupleVariable
+
                 # Register newly created stream for reconstruction
-                stream = self.value()
+                var_kwargs = ConstDictVariable(
+                    {ConstantVariable(k): v for k, v in kwargs.items()}
+                )
+                var_args = TupleVariable(list(args))
+                stream = self.value(
+                    *(var_args.as_python_constant()),
+                    **(var_kwargs.as_python_constant()),
+                )
                 from ..graph_bytecode_inputs import register_graph_created_object
                 from .streams import StreamVariable
 
                 ind = register_graph_created_object(
-                    stream, StreamVariable.construct_in_graph_stream
+                    stream,
+                    StreamVariable.make_construct_in_graph_stream_fn(
+                        var_args, var_kwargs
+                    ),
                 )
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
