@@ -82,13 +82,14 @@ class BaseTestCase(TestCase):
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
-    def assertProto(self, str_to_compare):
+    def assertProto(self, actual_proto):
         if expecttest.ACCEPT:
-            write_proto(str_to_compare, self)
+            write_proto(actual_proto, self)
             return True
-        expected = read_expected_content(self)
-        str_to_compare = str(str_to_compare)
-        self.assertEqual(remove_whitespace(str_to_compare), remove_whitespace(expected))
+        expected_str = read_expected_content(self)
+        expected_proto = Summary()
+        text_format.Parse(expected_str, expected_proto)
+        self.assertEqual(actual_proto, expected_proto)
 
     def assertImageProto(self, actual_proto):
         if expecttest.ACCEPT:
@@ -199,7 +200,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
                 bucket_counts=counts.tolist(),
             )
 
-            ints = torch.tensor(range(0, 100)).float()
+            ints = torch.tensor(range(100)).float()
             nbins = 100
             counts = torch.histc(ints, bins=nbins, min=0, max=99)
             limits = torch.tensor(range(nbins))

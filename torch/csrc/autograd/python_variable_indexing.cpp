@@ -109,7 +109,9 @@ static int64_t count_specified_dimensions(PyObject* index) {
       }
     } else {
       // Check sequences for __torch_function__ (top-level only)
-      if (PySequence_Check(obj)) {
+      // NB: do NOT use PySequence_Check, that will grab things like Numpy
+      // arrays
+      if (PyTuple_Check(obj) || PyList_Check(obj)) {
         if (sequence_has_torch_function(obj)) {
           return -1; // Signal torch function handling needed
         }

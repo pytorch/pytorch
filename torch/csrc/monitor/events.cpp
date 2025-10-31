@@ -37,8 +37,8 @@ class EventHandlers {
   }
 
  private:
-  std::mutex mu_{};
-  std::vector<std::shared_ptr<EventHandler>> handlers_{};
+  std::mutex mu_;
+  std::vector<std::shared_ptr<EventHandler>> handlers_;
 };
 } // namespace
 

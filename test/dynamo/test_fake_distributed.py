@@ -127,6 +127,8 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             local_rank = device_mesh.get_local_rank()
             global_rank = device_mesh.get_rank()
+            if "dp" not in device_mesh.mesh_dim_names:
+                x = x * 2
             return x + local_rank + global_rank
 
         x = torch.ones(10)

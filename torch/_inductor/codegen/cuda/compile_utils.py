@@ -179,7 +179,7 @@ def cuda_compile_command(
     src_files: list[str],
     dst_file: str,
     dst_file_ext: str,
-    extra_args: Optional[list[str]] = None,
+    extra_args: list[str] | None = None,
 ) -> str:
     if extra_args is None:
         extra_args = []
@@ -220,19 +220,6 @@ def cuda_compile_command(
         autotuning_log.debug("CUDA command: %s", res)
     return res
 
-
-def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
-    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
-    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
-    from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
-
-    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
-    compile_command = cuda_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
-    )
-    return compile_command
-
-
 class CUDACompileSourceCapturingContext:
     # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
     # Can be used to capture the sourcecode passed to CUDACodeCache.compile
@@ -254,6 +241,7 @@ class CUDACompileSourceCapturingContext:
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
+        # pyrefly: ignore [bad-assignment]
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
@@ -262,3 +250,15 @@ class CUDACompileSourceCapturingContext:
 
     def __exit__(self, *args, **kwargs):
         self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+
+
+def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
+    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
+    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
+    from torch._inductor.codecache import cuda_compile_command
+
+    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
+    compile_command = cuda_compile_command(
+        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
+    )
+    return compile_command
