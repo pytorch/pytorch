@@ -222,6 +222,7 @@ def check_tensor_meta(
     return None
 
 
+# TODO: autoparallel depends on this function, we will keep it until we update autoparallel redistribute_cost
 def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
@@ -349,15 +350,9 @@ def redistribute_cost(
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    from torch.distributed.tensor._redistribute import (
-        _gen_transform_infos,
-    )
-    from torch.utils._debug_mode import DebugMode
+    from torch.distributed.tensor._redistribute import _gen_transform_infos
 
-    with DebugMode(record_torchfunction=False) as debug_mode:
-        transform_infos = _gen_transform_infos(current_spec, target_spec)
-        print(debug_mode.debug_string())
-
+    transform_infos = _gen_transform_infos(current_spec, target_spec)
     for transform_info in transform_infos:
         assert current_spec.tensor_meta is not None, (
             "spec should have tensor meta defined!"
@@ -365,7 +360,6 @@ def redistribute_cost(
         comm_bytes_gb = (
             current_spec.tensor_meta.dtype.itemsize
             * math.prod(transform_info.logical_shape)
-            / current_spec.num_shards
             / 1024
             / 1024
             / 1024
@@ -377,8 +371,6 @@ def redistribute_cost(
         mesh_dim = transform_info.mesh_dim
         num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
         if current.is_shard() and target.is_replicate():
-            # allgather gives larger comm bytes
-            comm_bytes_gb *= num_devices_on_mesh_dim
             # add up allgather comm cost
             cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_shard() and target.is_shard():

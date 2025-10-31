@@ -206,39 +206,6 @@ class TestCostModel(DTensorOpTestBase):
         cost = redistribute_cost(shard_spec, partial_spec)
         self.assertEqual(cost, float("inf"))
 
-    def test_redistribute_cost_mesh_nd(self):
-        mesh_3d = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 2)
-        )
-        shard_placement = (
-            Shard(0),
-            Shard(0),
-        )
-        replica_placement = (
-            Shard(0),
-            Replicate(),
-        )
-
-        global_tensor = torch.randn(
-            4,
-            4,
-        )
-        global_tensor_meta = extract_tensor_meta(global_tensor)
-
-        # shard spec
-        source_spec = DTensorSpec(mesh_3d, shard_placement, global_tensor_meta)
-        # replica spec
-        target_spec = DTensorSpec(mesh_3d, replica_placement, global_tensor_meta)
-
-        # make sure reshard cost is 0 for the same spec redistribute
-        cost = redistribute_cost(source_spec, target_spec)
-        print("cost: ", cost)
-        # before:
-        # cost = 7.2006796424717825
-        # after change
-        # S(0)S(0) -> S(0)R, cost = 7.201359284943566
-        # S(0)S(0) -> RS(0), cost = 14.404077854830698
-
     def test_redistribute_cost_latency(self):
         # test cost model on addmm op
         from torch.distributed.tensor._ops._matrix_ops import addmm_strategy
@@ -409,6 +376,37 @@ class TestCostModel(DTensorOpTestBase):
                 op_schema
             )
             self.assertFalse(output_sharding.needs_redistribute)
+
+    def test_redistribute_cost_with_order(self):
+        mesh_2d = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
+
+        # Source: Shard on dim 0 across all three mesh dimensions
+        source_placement = (Shard(0), Shard(0))
+
+        # Target: Replicate on first mesh dimension, shard on others
+        # This requires 2 allgathers, one on dim=0 and one on dim=1
+        replicate_mesh_dim0 = (Replicate(), Shard(0))
+
+        # Target: Replicate on second mesh dimension, shard on others
+        # This requires 1 allgather on dim=1
+        replicate_mesh_dim1 = (Shard(0), Replicate())
+
+        global_tensor = torch.randn(4, 4)
+        global_tensor_meta = extract_tensor_meta(global_tensor)
+
+        source_spec = DTensorSpec(mesh_2d, source_placement, global_tensor_meta)
+        target_spec_dim0 = DTensorSpec(mesh_2d, replicate_mesh_dim0, global_tensor_meta)
+        target_spec_dim1 = DTensorSpec(mesh_2d, replicate_mesh_dim1, global_tensor_meta)
+
+        # Calculate costs for allgather on each mesh dimension
+        cost_mesh_dim0 = redistribute_cost(source_spec, target_spec_dim0)
+        cost_mesh_dim1 = redistribute_cost(source_spec, target_spec_dim1)
+
+        # Cost increases with earlier mesh dimensions due to the way
+        # mesh dimensions are ordered (outer to inner in device hierarchy)
+        self.assertGreater(cost_mesh_dim0, cost_mesh_dim1)
 
 
 # -------------Test op strategy registration-------------
