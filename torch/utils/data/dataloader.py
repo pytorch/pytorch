@@ -814,6 +814,18 @@ class _BaseDataLoaderIter:
     def __iter__(self) -> Self:
         return self
 
+    def _apply_dataset_sharding(self):
+        """Apply sharding to DataPipes for distributed data loading.
+
+        Adds forward compatibilities so classic DataLoader can work with DataPipes:
+        Taking care of distributed sharding.
+        """
+        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
+            # For BC, use default SHARDING_PRIORITIES
+            torch.utils.data.graph_settings.apply_sharding(
+                self._dataset, self._world_size, self._rank
+            )
+
     def _reset(self, loader, first_iter=False):
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
@@ -875,13 +887,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         assert self._timeout == 0
         assert self._num_workers == 0
 
-        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
-        #   Taking care of distributed sharding
-        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            # For BC, use default SHARDING_PRIORITIES
-            torch.utils.data.graph_settings.apply_sharding(
-                self._dataset, self._world_size, self._rank
-            )
+        self._apply_dataset_sharding()
 
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind,
@@ -947,13 +953,7 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
         assert self._timeout == 0
         assert self._num_workers == 0
 
-        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
-        #   Taking care of distributed sharding
-        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            # For BC, use default SHARDING_PRIORITIES
-            torch.utils.data.graph_settings.apply_sharding(
-                self._dataset, self._world_size, self._rank
-            )
+        self._apply_dataset_sharding()
 
         if next_iter_state is not None:
             self.load_state_dict(next_iter_state)
