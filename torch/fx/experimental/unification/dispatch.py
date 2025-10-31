@@ -1,8 +1,8 @@
 from functools import partial
 
-from .multipledispatch import dispatch  # type: ignore[import]
+from .multipledispatch import dispatch as _dispatch  # type: ignore[import]
 
 
 namespace = {}  # type: ignore[var-annotated]
 
-dispatch = partial(dispatch, namespace=namespace)
+dispatch = partial(_dispatch, namespace=namespace)

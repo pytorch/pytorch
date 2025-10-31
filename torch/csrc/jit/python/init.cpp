@@ -15,6 +15,7 @@
 #endif
 #include <c10/core/SymNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -78,6 +79,7 @@
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/python/init.h>
+#include <torch/csrc/jit/python/opaque_obj.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
@@ -1254,11 +1256,6 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
-          "expect_size",
-          [](const c10::SymNode& a, const char* file, int64_t line) {
-            return a->expect_size(file, line);
-          })
-      .def(
           "guard_size_oblivious",
           [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_size_oblivious(file, line);
@@ -1696,7 +1693,7 @@ void initJITBindings(PyObject* module) {
       [](const std::string& op_name, const std::string& overload_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
+          const auto& operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               return op->schema();
@@ -1717,7 +1714,7 @@ void initJITBindings(PyObject* module) {
          const std::string& overload_name) -> std::optional<py::tuple> {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
+          const auto& operations = getAllOperatorsFor(symbol);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
@@ -1726,7 +1723,7 @@ void initJITBindings(PyObject* module) {
                       const py::args& args, const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true);
+                        op, symbol, args, kwargs, /*is_overload*/ true);
                   });
               auto func_dk =
                   py::cpp_function([op, symbol, allow_numbers_as_tensors](
@@ -1735,10 +1732,12 @@ void initJITBindings(PyObject* module) {
                                        const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
+                        op, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
               return py::make_tuple(
-                  func, func_dk, py::cast(op->getTags().vec()));
+                  std::move(func),
+                  std::move(func_dk),
+                  py::cast(op->getTags().vec()));
             }
           }
           return std::nullopt;
@@ -1863,6 +1862,47 @@ void initJITBindings(PyObject* module) {
       &parseSchema,
       py::arg("schema"),
       py::arg("allow_typevars") = true);
+  m.def(
+      "_make_opaque_object",
+      [](py::object payload) {
+        auto obj = c10::make_intrusive<OpaqueObject>(payload);
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
+        return torch::jit::toPyObject(c10::IValue(std::move(obj)));
+      },
+      R"doc(Creates an opaque object which stores the given Python object.)doc");
+  m.def(
+      "_get_opaque_object_payload",
+      [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        auto customObj = ivalue.toCustomClass<OpaqueObject>();
+        return customObj->getPayload();
+      },
+      R"doc(Returns the Python object stored on the given opaque object.)doc");
+  m.def(
+      "_set_opaque_object_payload",
+      [](py::object obj, py::object payload) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        auto customObj = ivalue.toCustomClass<OpaqueObject>();
+        customObj->setPayload(std::move(payload));
+      },
+      R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
+  m.def(
+      "_register_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::registerOpaqueType(type_name);
+      },
+      R"doc(Registers a type name to be treated as an opaque type (PyObject) in schema parsing.)doc");
+  m.def(
+      "_is_opaque_type_registered",
+      [](const std::string& type_name) -> bool {
+        return torch::jit::isRegisteredOpaqueType(type_name);
+      },
+      R"doc(Checks if a type name is registered as an opaque type.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
@@ -1962,6 +2002,16 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly("overload_name", &FunctionSchema::overload_name)
       .def_property_readonly("arguments", &FunctionSchema::arguments)
       .def_property_readonly("returns", &FunctionSchema::returns)
+      .def(
+          "_is_view_op",
+          [](const FunctionSchema& self) -> bool {
+            for (const auto& arg : self.arguments()) {
+              if (arg.alias_info() && !arg.alias_info()->isWrite()) {
+                return true;
+              }
+            }
+            return false;
+          })
       .def(
           "is_backward_compatible_with",
           // FunctionSchema::isBackwardCompatibleWith has an extra

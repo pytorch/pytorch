@@ -17,7 +17,7 @@ variable_list Error::apply(variable_list&& inputs) {
 }
 
 variable_list Error::apply(variable_list&& inputs) const {
-  throw std::runtime_error(msg);
+  TORCH_CHECK(false, msg);
 }
 
 void Error::compiled_args(CompiledNodeArgs& args) const {

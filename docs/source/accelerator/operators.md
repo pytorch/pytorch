@@ -169,7 +169,7 @@ Of course, global fallbacks can also be combined with a blacklist of fallbacks, 
 
 ### PyTorch STUB
 
-PyTorch also provides another approach for built-in operators: `STUB`. This method is essentially based on the `Step 1<step-one>` approach, but adds secondary scheduling capabilities (for example, scheduling based on CPU characteristics).
+PyTorch also provides another approach for built-in operators: `STUB`. This method is essentially based on the {ref}`Step 1<step-one>` approach, but adds secondary scheduling capabilities (for example, scheduling based on CPU characteristics).
 
 ```{note}
 The `STUB` method currently supports only a limited set of operators. For new accelerator devices, the advantage of the `STUB` method is that it significantly reduces the cost of development at the cost of a small performance overhead. PyTorch currently does not clearly list the set of operators that can be registered through `STUB`. Due to the large number of related operators, only the query method for the supported operator list is provided here.
@@ -272,7 +272,7 @@ Here, we'll briefly introduce the implementation process of custom operators, fo
         * Name: `input`
     * Output Type: `Tensor`
 
-2. **Register Operator&Autograd Fallback:**
+2. **Register Operator**
 
     ::::{tab-set}
 
@@ -285,19 +285,11 @@ Here, we'll briefly introduce the implementation process of custom operators, fo
         :end-before: LITERALINCLUDE END: CUSTOM OPERATOR DEFAULT
         :linenos:
 
-    .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/aten/OpenRegExtra.cpp
-        :language: c++
-        :start-after: LITERALINCLUDE START: CUSTOM OPERATOR FALLBACK
-        :end-before: LITERALINCLUDE END: CUSTOM OPERATOR FALLBACK
-        :emphasize-lines: 2
-        :linenos:
-    ```
-
     :::
 
     ::::
 
-    Use `TORCH_LIBRARY_IMPL` to register the `wrapper_custom_abs` implementation for the `custom_abs` operator in `PrivateUse1`. However, because `Autograd` is always enabled in PyTorch, PyTorch defaults to finding and executing the corresponding backward implementation even if only forward computation is required(will fallthrough in backward implementation). Therefore, we also need to register the corresponding implementation for `AutogradPrivateUse1` of the `custom_abs` operator. Fortunately, PyTorch also provides a general `Autograd Fallback` mechanism named `torch::autograd::autogradNotImplementedFallback`, if only forward computation is involved, it is equivalent to a fallthrough operation, selecting the next DispatchKey for computation; if backward computation is involved, an error is thrown.
+    Use `TORCH_LIBRARY_IMPL` to register the `wrapper_custom_abs` implementation for the `custom_abs` operator in `PrivateUse1`. Because `Autograd` is always enabled in PyTorch, PyTorch defaults to finding and executing the corresponding backward implementation even if only forward computation is required(will fallthrough in backward implementation). Fortunately, PyTorch have implemented a general `Autograd Fallback` for PrivateUse1 as well, if only forward computation is involved, it is equivalent to a fallthrough operation, selecting the next DispatchKey for computation; if backward computation is involved, an error is thrown.
 
 3. **Register Metadata(optional, but required by the graph mode, etc.):**
 

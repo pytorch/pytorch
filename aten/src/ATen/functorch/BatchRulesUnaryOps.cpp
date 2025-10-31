@@ -171,6 +171,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   POINTWISE_BOXED(fill_.Scalar);
   POINTWISE_BOXED(zero_);
+  // This is special because this op doesn't return anything
+  m.impl("_assert_tensor_metadata", native::_assert_tensor_metadata);
 
 #undef UNARY_POINTWISE
 #undef UNARY_POINTWISE_ALL

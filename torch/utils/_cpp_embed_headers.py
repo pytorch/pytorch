@@ -53,6 +53,6 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage:\n {sys.argv[0]} filename")
+        print(f"Usage:\n {sys.argv[0]} filename")
         sys.exit(1)
     print(embed_headers(sys.argv[1]))
