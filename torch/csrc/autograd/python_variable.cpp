@@ -992,7 +992,7 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("tensor")
         .attr("DTensor")
         .attr("_op_dispatcher")
-        .attr("dispatch"))
+        .attr("_dispatch_fast_path_python_tail"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_output_sharding_class,
