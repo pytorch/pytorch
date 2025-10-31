@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/sparse/SparseStubs.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/Dispatch.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -8,8 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/equal.h>
-#include <ATen/ops/zeros.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/tensor.h>
 #endif
 
@@ -18,8 +18,7 @@ namespace at::native {
 namespace {
 
 Tensor view_as_complex_sparse_cpu(const Tensor& self) {
-//    return self.clone();
-  auto new_sizes = self.sym_sizes().vec();
+  auto new_sizes = self.sizes().vec();
   TORCH_CHECK(!new_sizes.empty(), "Input tensor must have one or more dimensions");
   TORCH_CHECK(new_sizes[new_sizes.size() - 1] == 2, "Tensor must have a last dimension of size 2");
   new_sizes.pop_back();
@@ -30,31 +29,50 @@ Tensor view_as_complex_sparse_cpu(const Tensor& self) {
   auto nnz = indices.size(1);
 
   auto new_indices = indices.slice(/*dim=*/0, /*start=*/0, /*end=*/ndim-1);
+  auto last_dim_indices = indices.select(0, ndim-1);
   const auto complex_type = c10::toComplexType(self.scalar_type());
-  auto complex_values = at::zeros(nnz, values.options().dtype(complex_type));
-  auto last_dim = ndim - 1;
+  auto complex_values = at::empty(nnz, values.options().dtype(complex_type));
+
+  // Create a flattened hash for sorting
+  Tensor flatten_indices = at::sparse::flatten_indices(new_indices, new_sizes);
+
+  // Sort columns by new_indices and reorder indices/values
+  auto sort_result = flatten_indices.sort();
+  Tensor sorted_flatten_indices = std::get<0>(sort_result);
+  Tensor sort_perm = std::get<1>(sort_result);
+  new_indices = new_indices.index_select(1, sort_perm);
+  last_dim_indices = last_dim_indices.index_select(0, sort_perm);
+  values = values.index_select(0, sort_perm);
+
+  auto flatten_indices_accessor = sorted_flatten_indices.accessor<int64_t, 1>();
+  auto last_dim_indices_accessor = last_dim_indices.accessor<int64_t, 1>();
 
   AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "view_as_complex_sparse_cpu", [&] {
     using complex_t = c10::complex<scalar_t>;
-    const complex_t I(scalar_t(0), scalar_t(1));
     std::unordered_set<int64_t> skip_cols;
     std::vector<int64_t> keep_cols;
+
+    auto values_accessor = values.accessor<scalar_t, 1>();
+    auto complex_accessor = complex_values.accessor<complex_t, 1>();
 
     for (int64_t i=0; i<nnz; i++) {
       if (skip_cols.find(i) != skip_cols.end()) {
         continue;
       }
       keep_cols.push_back(i);
-      complex_values[i] = indices[last_dim][i].item<int64_t>() == 0 ? values[i] : values[i].mul(I);
-      auto coli = new_indices.select(/*dim=*/1, /*index=*/i);
+      scalar_t val = values_accessor[i];
+      complex_t result = last_dim_indices_accessor[i] == 0 ? complex_t(val, 0) : complex_t(0, val);
 
-      for (int64_t j=i+1; j<nnz; j++) {
-        auto colj = new_indices.select(/*dim=*/1, /*index=*/j);
-        if (at::equal(coli, colj)) {
-          complex_values[i] += indices[last_dim][j].item<int64_t>() == 0 ? values[j] : values[j].mul(I);
-          skip_cols.insert(j);
-        }
+      // check if any indices are the same and sum them together.
+      int64_t j = i+1;
+      while (j < nnz && flatten_indices_accessor[i] == flatten_indices_accessor[j]) {
+        val = values_accessor[j];
+        result += last_dim_indices_accessor[j] == 0 ? complex_t(val, 0) : complex_t(0, val);
+        skip_cols.insert(j);
+        j++;
       }
+
+      complex_accessor[i] = result;
     }
 
     if (keep_cols.size() != static_cast<size_t>(nnz)) {
@@ -64,14 +82,14 @@ Tensor view_as_complex_sparse_cpu(const Tensor& self) {
     }
   });
 
-  return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
       self.sparse_dim() - 1,
       self.dense_dim(),
       new_sizes,
       new_indices,
       complex_values,
       self.options().dtype(complex_type),
-      self.is_coalesced()
+      true
   );
 }
 
