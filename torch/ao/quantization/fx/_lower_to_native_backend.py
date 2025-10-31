@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -227,7 +228,7 @@ def is_getattr_tensor_metadata_node(node):
     return (
         node.op == "call_function"
         and node.target == getattr
-        and node.args[1] in ["shape"]
+        and node.args[1] == "shape"
     )
 
 
@@ -522,7 +523,7 @@ def fold_weight(
                 del original_weights_lookup[str(lookup_counter)]
                 lookup_counter += 1
         elif prepack_node is not None:
-            # remove the foled node
+            # remove the fold node
             continue
         else:
             # copy other nodes
@@ -584,15 +585,19 @@ def _match_static_pattern(
         return SKIP_LOWERING_VALUE
     q_node = node
     ref_node = q_node.args[0]
-    assert isinstance(ref_node, Node)
+    if not isinstance(ref_node, Node):
+        raise AssertionError("Expected the reference node to be a torch.fx Node")
 
     # Handle cases where the node is wrapped in a ReLU
     if (ref_node.op == "call_function" and ref_node.target in (F.relu, torch.relu)) or (
-        ref_node.op == "call_module" and type(_get_module(ref_node, modules)) == nn.ReLU
+        ref_node.op == "call_module" and type(_get_module(ref_node, modules)) is nn.ReLU
     ):
         relu_node = ref_node
         ref_node = relu_node.args[0]
-        assert isinstance(ref_node, Node)
+        if not isinstance(ref_node, Node):
+            raise AssertionError(
+                "Expected the reference node after ReLU to be a torch.fx Node"
+            )
     else:
         relu_node = None
     if should_skip_lowering(ref_node, qconfig_map):
@@ -615,9 +620,10 @@ def _match_static_pattern(
     # (2) There must be at least one dequantize node
     matched_dequantize = False
     for i in dequantize_node_arg_indices:
-        assert i < len(ref_node.args), (
-            f"Dequantize index {i} exceeded reference node's arg length {len(ref_node.args)}"
-        )
+        if i >= len(ref_node.args):
+            raise AssertionError(
+                f"Dequantize index {i} exceeded reference node's arg length {len(ref_node.args)}"
+            )
         arg = ref_node.args[i]
         if is_dequantize_node(arg):
             matched_dequantize = True
@@ -659,7 +665,8 @@ def _match_static_pattern_with_two_inputs(
         return SKIP_LOWERING_VALUE
     q_node = node
     ref_node = q_node.args[0]
-    assert isinstance(ref_node, Node)
+    if not isinstance(ref_node, Node):
+        raise AssertionError("Expected the reference node to be a torch.fx Node")
 
     if should_skip_lowering(ref_node, qconfig_map):
         return SKIP_LOWERING_VALUE
@@ -710,20 +717,28 @@ def _lower_static_weighted_ref_module(
         )
         if q_node is None:
             continue
-        assert ref_node is not None
+        if ref_node is None:
+            raise AssertionError(
+                "Expected a reference node when matching static pattern"
+            )
         (_, scale_node, zero_point_node, _) = q_node.args
         ref_module = _get_module(ref_node, modules)
         ref_class = type(ref_module)
-        assert isinstance(scale_node, Node)
-        assert isinstance(zero_point_node, Node)
-        assert issubclass(ref_class, nn.Module)
+        if not isinstance(scale_node, Node):
+            raise AssertionError("Expected scale_node to be a Node")
+        if not isinstance(zero_point_node, Node):
+            raise AssertionError("Expected zero_point_node to be a Node")
+        if not issubclass(ref_class, nn.Module):
+            raise AssertionError(
+                "Expected reference module class to be a subclass of nn.Module"
+            )
 
         # Step 1: Change this pattern to use the corresponding quantized module
         # For fused modules, we also check whether the inner module is a reference module
         # If so, we replace the entire fused module with the corresponding quantized module
         if ref_class in STATIC_LOWER_FUSED_MODULE_MAP:
             inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_MAP[ref_class]
-            if type(ref_module[0]) != inner_ref_class:  # type: ignore[index]
+            if type(ref_module[0]) is not inner_ref_class:  # type: ignore[index]
                 continue
         else:
             q_class = STATIC_LOWER_MODULE_MAP[ref_class]
@@ -735,9 +750,11 @@ def _lower_static_weighted_ref_module(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
-        assert len(ref_node.args) == 1
+        if len(ref_node.args) != 1:
+            raise AssertionError("Expected reference node to have exactly 1 arg")
         dq_node = ref_node.args[0]
-        assert isinstance(dq_node, Node)
+        if not isinstance(dq_node, Node):
+            raise AssertionError("Expected dq_node to be a Node")
         ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
@@ -770,13 +787,21 @@ def _lower_static_weighted_ref_module_with_two_inputs(
         )
         if q_node is None:
             continue
-        assert ref_node is not None
+        if ref_node is None:
+            raise AssertionError(
+                "Expected a reference node when matching static pattern with two inputs"
+            )
         (_, scale_node, zero_point_node, _) = q_node.args
         ref_module = _get_module(ref_node, modules)
         ref_class = type(ref_module)
-        assert isinstance(scale_node, Node)
-        assert isinstance(zero_point_node, Node)
-        assert issubclass(ref_class, nn.Module)
+        if not isinstance(scale_node, Node):
+            raise AssertionError("Expected scale_node to be a Node")
+        if not isinstance(zero_point_node, Node):
+            raise AssertionError("Expected zero_point_node to be a Node")
+        if not issubclass(ref_class, nn.Module):
+            raise AssertionError(
+                "Expected reference module class to be a subclass of nn.Module"
+            )
 
         # Step 1: Change this pattern to use the corresponding quantized module
         # For fused modules, we also check whether the inner module is a reference module
@@ -785,7 +810,7 @@ def _lower_static_weighted_ref_module_with_two_inputs(
             inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP[
                 ref_class
             ]
-            if type(ref_module[0]) != inner_ref_class:  # type: ignore[index]
+            if type(ref_module[0]) is not inner_ref_class:  # type: ignore[index]
                 continue
         else:
             continue
@@ -797,12 +822,14 @@ def _lower_static_weighted_ref_module_with_two_inputs(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
-        assert len(ref_node.args) == 2
+        if len(ref_node.args) != 2:
+            raise AssertionError("Expected reference node to have exactly 2 args")
         for arg in ref_node.args:
             if not is_dequantize_node(arg):
                 continue
             dq_node = arg
-            assert isinstance(dq_node, Node)
+            if not isinstance(dq_node, Node):
+                raise AssertionError("Expected dq_node to be a Node")
             ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
 
         q_node.replace_all_uses_with(ref_node)
@@ -845,7 +872,7 @@ def _lower_dynamic_weighted_ref_module(model: GraphModule):
         ref_class = type(ref_module)
         if ref_class in DYNAMIC_LOWER_FUSED_MODULE_MAP:
             inner_ref_class, q_class = DYNAMIC_LOWER_FUSED_MODULE_MAP[ref_class]
-            if type(ref_module[0]) != inner_ref_class:
+            if type(ref_module[0]) is not inner_ref_class:
                 continue
         else:
             q_class = DYNAMIC_LOWER_MODULE_MAP.get(ref_class)  # type: ignore[assignment]
@@ -899,14 +926,21 @@ def _lower_static_weighted_ref_functional(
         )
         if q_node is None:
             continue
-        assert func_node is not None
+        if func_node is None:
+            raise AssertionError(
+                "Expected a function node when matching static functional pattern"
+            )
         (_, output_scale_node, output_zp_node, _) = q_node.args
         (input_dq_node, weight_dq_node, *remaining_func_args) = func_node.args
-        assert isinstance(output_zp_node, Node)
-        assert isinstance(input_dq_node, Node)
-        assert isinstance(weight_dq_node, Node)
+        if not isinstance(output_zp_node, Node):
+            raise AssertionError("Expected output_zp_node to be a Node")
+        if not isinstance(input_dq_node, Node):
+            raise AssertionError("Expected input_dq_node to be a Node")
+        if not isinstance(weight_dq_node, Node):
+            raise AssertionError("Expected weight_dq_node to be a Node")
         quantized_weight = weight_dq_node.args[0]
-        assert isinstance(quantized_weight, Node)
+        if not isinstance(quantized_weight, Node):
+            raise AssertionError("Expected quantized_weight to be a Node")
         if quantized_weight.op != "call_function" or quantized_weight.target not in (
             torch.quantize_per_tensor,
             torch.quantize_per_channel,
@@ -1007,7 +1041,7 @@ def _lower_dynamic_weighted_ref_functional(
             func_node.op == "call_function"
             and func_node.target == F.relu
             or func_node.op == "call_module"
-            and type(modules[str(func_node.target)]) == torch.nn.ReLU
+            and type(modules[str(func_node.target)]) is torch.nn.ReLU
         ):
             relu_node = func_node
             func_node = relu_node.args[0]
@@ -1134,7 +1168,10 @@ def _lower_quantized_binary_op(model: GraphModule, qconfig_map: dict[str, QConfi
         )
         if q_node is None:
             continue
-        assert bop_node is not None
+        if bop_node is None:
+            raise AssertionError(
+                "Expected a binary op node when matching quantized binary op pattern"
+            )
         (_, scale_node, zero_point_node, _) = q_node.args
 
         # Step 1: Remove dequant nodes
@@ -1143,14 +1180,21 @@ def _lower_quantized_binary_op(model: GraphModule, qconfig_map: dict[str, QConfi
             if not is_dequantize_node(arg):
                 continue
             dq_node = arg
-            assert isinstance(dq_node, Node)
+            if not isinstance(dq_node, Node):
+                raise AssertionError("Expected dq_node to be a Node")
             dn_input = dq_node.args[0]
             bop_node.replace_input_with(dq_node, dn_input)  # type: ignore[arg-type]
             num_dq_nodes += 1
-        assert num_dq_nodes > 0
+        if num_dq_nodes <= 0:
+            raise AssertionError(
+                "Expected at least one dequantize node in binary op args"
+            )
 
         # Step 2: Swap binary op to quantized binary op
-        assert bop_node.target in QBIN_OP_MAPPING
+        if bop_node.target not in QBIN_OP_MAPPING:
+            raise AssertionError(
+                f"Unsupported binary op {bop_node.target} for lowering"
+            )
         binop_to_qbinop = QBIN_OP_MAPPING if relu_node is None else QBIN_RELU_OP_MAPPING
         qbin_op = binop_to_qbinop[bop_node.target]
         # prepare the args for quantized binary op
@@ -1180,14 +1224,15 @@ def special_pattern_replacement(model: GraphModule):
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
         q_node = n
-        is_quantize = q_node.target == torch.quantize_per_tensor
+        is_quantize = q_node.target is torch.quantize_per_tensor
         is_to_fp16 = (
             q_node.op == "call_method"
             and q_node.target == "to"
             and len(q_node.args) == 2
             and q_node.args[1] == torch.float16
         )
-        if not (is_quantize or is_to_fp16):
+        # Only continue when neither quantize nor to_fp16
+        if not is_quantize and not is_to_fp16:
             continue
         ref_node = q_node.args[0]
         # get output scale/zero_point/dtype from the quantize node
@@ -1216,13 +1261,17 @@ def special_pattern_replacement(model: GraphModule):
         )
         if not (is_call_module or is_call_function or is_call_method):
             continue
-        assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
+        if len(ref_node.args) <= 0 and len(ref_node.kwargs) <= 0:
+            raise AssertionError("Expected ref_node to have args or kwargs")
         dq_node_or_nodes = (
             ref_node.args[0]
             if len(ref_node.args) > 0
             else next(iter(ref_node.kwargs.values()))
         )
-        assert isinstance(dq_node_or_nodes, (Node, tuple, list))
+        if not isinstance(dq_node_or_nodes, (Node, tuple, list)):
+            raise AssertionError(
+                "Expected dq_node_or_nodes to be a Node, tuple, or list"
+            )
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):
             is_dequantize = (

@@ -22,9 +22,10 @@ import platform
 import sys
 import textwrap
 import threading
+import warnings
+from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
-    Callable as _Callable,
     get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
@@ -302,7 +303,7 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
     return nvidia_lib_paths + lib_paths
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
+def _preload_cuda_deps(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
@@ -313,9 +314,10 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
-    if not lib_path:
+    if not lib_path and required:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
-    ctypes.CDLL(lib_path)
+    if lib_path:
+        ctypes.CDLL(lib_path)
 
 
 # See Note [Global dependencies]
@@ -354,8 +356,6 @@ def _load_global_deps() -> None:
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        from torch.version import cuda as cuda_version
-
         cuda_libs: dict[str, str] = {
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
@@ -369,7 +369,6 @@ def _load_global_deps() -> None:
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
             "cufile": "libcufile.so.*[0-9]",
         }
@@ -381,6 +380,9 @@ def _load_global_deps() -> None:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
+
+        # libnvToolsExt is Optional Dependency
+        _preload_cuda_deps("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -988,7 +990,7 @@ def sym_ite(b, t, f):
     """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    assert isinstance(b, (SymBool, builtins.bool)) and type(t) is type(f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
@@ -1117,11 +1119,6 @@ def typename(obj: _Any, /) -> str:
 
 def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     r"""Returns True if `obj` is a PyTorch tensor.
-
-    Note that this function is simply doing ``isinstance(obj, Tensor)``.
-    Using that ``isinstance`` check is better for type checking with mypy,
-    and more explicit - so it's recommended to use that instead of
-    ``is_tensor``.
 
     Args:
         obj (object): Object to test
@@ -1415,7 +1412,6 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
@@ -1427,19 +1423,29 @@ def use_deterministic_algorithms(
     :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
     See the documentation for that attribute for more information.
 
-    A handful of CUDA operations are nondeterministic if the CUDA version is
-    10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
-    or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
-    details: `<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
-    If one of these environment variable configurations is not set, a :class:`RuntimeError`
-    will be raised from these operations when called with CUDA tensors:
-
-        * :func:`torch.mm`
-        * :func:`torch.mv`
-        * :func:`torch.bmm`
-
     Note that deterministic operations tend to have worse performance than
     nondeterministic operations.
+
+
+    When this setting is turned on, the Inductor deterministic mode is also tuned on
+    automatically. In deterministic mode, Inductor would avoid doing on device benchmarking
+    that affect numerics. This includes:
+
+      - don't pad matmul input shapes. Without enabling deterministic mode, Inductor would do
+        benchmarking to check if padding matmul shape is beneficial.
+      - don't autotune templates. Inductor has templates for kernels like matmul/conv/attention.
+        Without enabling deterministic mode, Inductor would do autotuning to
+        pick the best configs for those templates and adopt it if it's faster
+        than the kernel in eager mode. In deterministic mode, we pick the eager kernel.
+      - don't autotune triton configs for reduction. Reduction numerics are
+        very sensitive to triton configs. In deterministic mode, Inductor
+        will use some heuristics to pick the most promising configs rather
+        than do autotuning.
+      - Skip autotuning for reduction in coordinate descent tuning.
+      - Don't benchmarking for the computation/communication reordering pass
+      - Disable the feature that dynamically scale down RBLOCK triton config for higher
+        occupancy.
+
 
     .. note::
 
@@ -1464,16 +1470,14 @@ def use_deterministic_algorithms(
         >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
-        # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(1)
-        ...
-        RuntimeError: kthvalue CUDA does not have a deterministic implementation...
-
         # Backward mode nondeterministic error
         >>> torch.nn.AvgPool3d(1)(torch.randn(3, 4, 5, 6, requires_grad=True).cuda()).sum().backward()
         ...
         RuntimeError: avg_pool3d_backward_cuda does not have a deterministic implementation...
     """
+    import torch._inductor.config as inductor_config
+
+    inductor_config.deterministic = mode
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 
@@ -1699,9 +1703,10 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)
+    _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
+# TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -1748,7 +1753,7 @@ def _check_index(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(IndexError, cond, message)
+    _check_with(IndexError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_value(cond, message=None):  # noqa: F811
@@ -1766,7 +1771,7 @@ def _check_value(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(ValueError, cond, message)
+    _check_with(ValueError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_type(cond, message=None):  # noqa: F811
@@ -1784,7 +1789,7 @@ def _check_type(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(TypeError, cond, message)
+    _check_with(TypeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_not_implemented(cond, message=None):  # noqa: F811
@@ -1802,7 +1807,12 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(NotImplementedError, cond, message)
+    _check_with(
+        NotImplementedError,
+        cond,
+        # pyrefly: ignore [bad-argument-type]
+        message,
+    )
 
 
 def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
@@ -2506,7 +2516,7 @@ def compile(
     to compile it and cache the compiled result on the code object for future
     use.  A single frame may be compiled multiple times if previous compiled
     results are not applicable for subsequent calls (this is called a "guard
-    failure), you can use TORCH_LOGS=guards to debug these situations.
+    failure"), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
     ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
@@ -2612,7 +2622,7 @@ def compile(
         def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
-            return compile(
+            return compile(  # pyrefly: ignore  # no-matching-overload
                 model,
                 fullgraph=fullgraph,
                 dynamic=dynamic,
@@ -2639,6 +2649,30 @@ def compile(
     guard_filter_fn = None
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
+
+    if torch.compiler.is_exporting():
+        warnings.warn(
+            "You are calling torch.compile inside torch.export region. "
+            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)",
+            stacklevel=2,
+        )
+        from torch._higher_order_ops.utils import setup_compilation_env
+
+        # Create wrapper that always uses eager backend during export
+        def export_wrapped_fn(*args, **kwargs):
+            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+                # Force eager backend regardless of original backend
+                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
+                return torch._dynamo.optimize(
+                    backend=backend_wrapper,
+                    nopython=fullgraph,
+                    dynamic=dynamic,
+                    disable=disable,
+                    guard_filter_fn=guard_filter_fn,
+                    # pyrefly: ignore [bad-argument-type]
+                )(model)(*args, **kwargs)
+
+        return export_wrapped_fn
 
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)

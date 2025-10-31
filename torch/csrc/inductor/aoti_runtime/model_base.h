@@ -1,6 +1,6 @@
 #pragma once
 #ifdef _WIN32
-#include <Windows.h>
+#include <windows.h>
 #include <functional> // std::function
 #ifdef USE_MMAP_SELF
 #include <errno.h>
@@ -581,7 +581,14 @@ class AOTInductorModelBase {
     return folded_constants;
   }
 
-  void load_constants() {
+  void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
+#if defined(USE_MMAP_EXTERNAL)
+    user_managed_mmap = const_cast<uint8_t*>(weight_blob_ptr);
+    load_constants(true);
+#endif
+  }
+
+  void load_constants(bool force = false) {
     size_t num_constants = this->num_constants();
     size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
@@ -590,7 +597,7 @@ class AOTInductorModelBase {
         num_constants - num_folded_constants);
     size_t blob_size = 0;
     compute_constant_blob(blob_size, constants_internal_offset);
-    if (!include_weights) {
+    if (!force && !include_weights) {
       return;
     }
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
@@ -817,11 +824,21 @@ class AOTInductorModelBase {
     return out_spec_.c_str();
   }
 
+  uint64_t constant_blob_size() const {
+#if defined(USE_MMAP_SELF) || defined(USE_MMAP_EXTERNAL)
+    const uint64_t weights_size =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+    return weights_size;
+#else
+    throw std::runtime_error{
+        "constant blob size is only available for mmap'd weights"};
+#endif
+  }
+
   void update_constants_array_from_map() {
-    if (!constants_map_) {
-      throw std::runtime_error{
-          "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
-    }
+    STD_TORCH_CHECK(
+        constants_map_,
+        "constants_map_ was not ready when constants_ is trying to be constructed from it!");
     if (!constants_) {
       constants_ =
           std::make_shared<std::vector<ConstantHandle>>(constants_info_.size());
@@ -857,9 +874,7 @@ class AOTInductorModelBase {
   /// Returns true if the model is complete.
   bool is_finished() {
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model CUDA event was not initialized"};
-    }
+    STD_TORCH_CHECK(run_finished_, "Model CUDA event was not initialized");
 
     auto event_status = cudaEventQuery(*run_finished_);
     if (event_status == cudaSuccess) {
@@ -868,13 +883,13 @@ class AOTInductorModelBase {
       return false;
     }
 
-    throw std::runtime_error(
-        std::string("The model did not finish successfully. Error: ") +
+    STD_TORCH_CHECK(
+        false,
+        "The model did not finish successfully. Error: ",
         cudaGetErrorString(cudaGetLastError()));
 #elif defined(USE_XPU)
-    if (!run_finished_) {
-      throw std::runtime_error{"Model XPU event was not initialized"};
-    }
+    STD_TORCH_CHECK(run_finished_, "Model XPU event was not initialized");
+
     using namespace sycl::info;
     return (*run_finished_)->get_info<event::command_execution_status>() ==
         event_command_status::complete;
@@ -886,23 +901,27 @@ class AOTInductorModelBase {
 
   /// Synchronizes completion event.
   void wait_for_completion() {
+    STD_TORCH_CHECK(run_finished_, "Model event was not initialized");
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
-
     AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
 #endif // USE_CUDA
+
 #ifdef USE_XPU
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
     (*run_finished_)->wait_and_throw();
-#endif
+#endif // USE_XPU
   }
 
  protected:
   uint8_t* _get_constants_start() {
+#if defined(USE_MMAP_EXTERNAL)
+    if (!user_managed_mmap) {
+      throw std::runtime_error{
+          "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first."};
+    }
+    // Mapped memory for weights
+    return user_managed_mmap;
+#endif
+
 #ifndef USE_MMAP_SELF
     // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
@@ -942,6 +961,7 @@ class AOTInductorModelBase {
     return self_mmap;
 #endif
   }
+
   struct ParamInfo {
     const char* name = nullptr;
   };
@@ -973,8 +993,14 @@ class AOTInductorModelBase {
   // Holds the blob storage for constants' at::Tensor.
   RAIIDataPtr constant_blob_;
 
-#ifdef USE_MMAP_SELF
+#if defined(USE_MMAP_SELF)
+  // Mapped memory for weights
   uint8_t* self_mmap = NULL;
+#endif
+
+#if defined(USE_MMAP_EXTERNAL)
+  // Mapped memory for weights
+  uint8_t* user_managed_mmap = NULL;
 #endif
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.

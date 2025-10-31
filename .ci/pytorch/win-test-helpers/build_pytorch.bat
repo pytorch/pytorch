@@ -48,8 +48,6 @@ curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -
 7z x -aoa libuv-1.40.0-h8ffe710_0.tar.bz2
 tar -xvf libuv-1.40.0-h8ffe710_0.tar -C %PYTHON_PATH%
 set libuv_ROOT=%PYTHON_PATH%\Library
-if errorlevel 1 goto fail
-if not errorlevel 0 goto fail
 
 :: Override VS env here
 pushd .
@@ -135,7 +133,7 @@ if "%USE_CUDA%"=="1" (
 :: Print all existing environment variable for debugging
 set
 
-python setup.py bdist_wheel
+python -m build --wheel --no-isolation
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 sccache --show-stats

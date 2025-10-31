@@ -26,6 +26,7 @@ from .decorators import (
     allow_in_graph,
     assume_constant_result,
     disable,
+    disable_nested_graph_breaks,
     disallow_in_graph,
     dont_skip_tracing,
     error_on_graph_break,
@@ -40,6 +41,7 @@ from .decorators import (
     run,
     set_stance,
     skip_frame,
+    step_unsupported,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -53,6 +55,8 @@ from .eval_frame import (
     OptimizedModule,
     reset_code,
 )
+
+# pyrefly: ignore [deprecated]
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
@@ -75,6 +79,7 @@ __all__ = [
     "assume_constant_result",
     "config",
     "disable",
+    "disable_nested_graph_breaks",
     "disallow_in_graph",
     "dont_skip_tracing",
     "export",
@@ -100,6 +105,7 @@ __all__ = [
     "error_on_graph_break",
     "set_stance",
     "skip_frame",
+    "step_unsupported",
     "substitute_in_graph",
 ]
 

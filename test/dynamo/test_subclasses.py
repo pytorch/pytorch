@@ -286,7 +286,7 @@ class OptionalScaledTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         return OptionalScaledTensor(
             inner_tensors["_data"],
-            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
+            inner_tensors.get("_scale", None),
             constant=metadata["_constant"],
         )
 
@@ -662,7 +662,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         "comparison",
         [
             subtest(isinstance, "isinstance"),
-            subtest(lambda instance, type_: type(instance) == type_, "equality"),
+            subtest(lambda instance, type_: type(instance) is type_, "equality"),
             subtest(lambda instance, type_: type(instance) is type_, "identity"),
         ],
     )
@@ -3166,7 +3166,6 @@ class GraphModule(torch.nn.Module):
     ):
         slice_1: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_10)
         slice_2: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_10, add_2);  tangents_1 = add_2 = None
-
         add_4: "f64[s64, s55]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
         return (
             None,  # None
@@ -3403,10 +3402,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s71: "Sym(s71)", L_nt_: "f64[3, s71, 5]"):
+    def forward(self, s71: "Sym(s71)", L_nt_: "NestedTensor(f64[3, s71, 5])"):
         l_nt_ = L_nt_
 
-        add: "f64[3, s71, 5]" = l_nt_ + 2;  l_nt_ = None
+        add: "NestedTensor(f64[3, s71, 5])" = l_nt_ + 2;  l_nt_ = None
         return (add,)
 """,  # noqa: B950
         )

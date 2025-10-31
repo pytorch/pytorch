@@ -2067,7 +2067,7 @@ Tensor _reshape_copy_symint(
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
-  if (self.is_contiguous()) {
+  if (self.is_contiguous_or_false()) {
     return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
   } else {
     return at::_unsafe_view_symint(
@@ -3641,7 +3641,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 namespace {
 // Transpose implementation for sparse compressed layouts
 // NB: We assume that dim1,dim0 have already been wrapped
-static inline Tensor sparse_compressed_transpose(
+inline Tensor sparse_compressed_transpose(
     const Tensor& self,
     int64_t dim0,
     int64_t dim1) {

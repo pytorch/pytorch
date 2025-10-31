@@ -374,7 +374,7 @@ cmake_dependent_option(
   "Build the lazy Torchscript backend, not compatible with mobile builds" ON
   "NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
-cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
+cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
@@ -388,9 +388,9 @@ cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker 
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
-# on Windows.
+# on Windows and AArch64.
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
-if(WIN32)
+if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
@@ -888,23 +888,28 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
+
+IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Setting USE_FBGEMM_GENAI for gfx942 to ON by default, doing ROCM build")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
+  message(STATUS "Setting USE_FBGEMM_GENAI to ON by default , doing CUDA build for SM100a")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+else()
+  set(USE_FBGEMM_GENAI_DEFAULT OFF)
+endif()
+
 cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  ON
-  "USE_ROCM"
+  ${USE_FBGEMM_GENAI_DEFAULT}
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
-IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
-  set(USE_FBGEMM_GENAI off)
-endif()
 
 # Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
 if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
-  message(STATUS "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
-  set(USE_FBGEMM_GENAI ON)
 endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem

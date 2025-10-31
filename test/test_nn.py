@@ -32,7 +32,7 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, \
+    skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, \
     IS_PPC, \
@@ -66,7 +66,7 @@ if TEST_WITH_ROCM:
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if TEST_SCIPY:
     import scipy.signal
@@ -1238,7 +1238,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         def check():
             self.assertEqual(len(parameter_dict), len(parameters))
-            for i, (k1, (k2, m2)) in enumerate(zip(parameters, parameter_dict.named_parameters())):
+            for (k1, (k2, m2)) in zip(parameters, parameter_dict.named_parameters()):
                 self.assertEqual(k1, k2)
                 self.assertIs(parameters[k1], m2)
             for k1, k2 in zip(parameters, parameter_dict):
@@ -1809,17 +1809,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 num_params - 1,
             )
 
-            # Removing the weight norm reparametrization restores the Parameter
+            # Removing the weight norm reparameterization restores the Parameter
             l = torch.nn.utils.remove_weight_norm(l, name=name)
             self.assertEqual(
                 sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params,
             )
 
-            # Make sure that, upon removal of the reparametrization, the
+            # Make sure that, upon removal of the reparameterization, the
             # `._parameters` and `.named_parameters` contain the right params.
             # Specifically, the original weight ('weight_ih_l0') should be placed
-            # back in the parameters, while the reparametrization components
+            # back in the parameters, while the reparameterization components
             # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
             self.assertTrue(name in l._parameters)
             self.assertIsNotNone(l._parameters[name])
@@ -2958,7 +2958,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                batch_first=batch_first)
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -3108,7 +3108,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                activation, batch_first=batch_first)
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -3185,7 +3185,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             with torch.no_grad():
                 # set constant weights of the model
-                for idx, p in enumerate(layer.parameters()):
+                for p in layer.parameters():
                     x = p.data
                     sz = x.view(-1).size(0)
                     shape = x.shape
@@ -3522,7 +3522,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             nn.RNN(10, 20, batch_first=True)
         ]
         # ROCm RNN does not issue warning about single contig chunk of memory, so don't assert it
-        first_warn = False if torch.version.hip else True
+        first_warn = not torch.version.hip
         for rnn in rnns:
             rnn.cuda()
             input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
@@ -4565,6 +4565,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
+        def test_pixel_shuffle_large_upscale_factor():
+            with self.assertRaises(ValueError):
+                ps = nn.PixelShuffle(545460846592)
+                ps(torch.randn(2, 16, 9, 3))
+
         def test_pixel_shuffle_unshuffle_1D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
@@ -4580,6 +4585,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         def test_pixel_shuffle_unshuffle_5D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
 
+        test_pixel_shuffle_large_upscale_factor()
         test_pixel_shuffle_unshuffle_1D()
         test_pixel_shuffle_unshuffle_2D()
         test_pixel_shuffle_unshuffle_3D()
@@ -5244,7 +5250,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 return torch.contiguous_format
             if memory_format in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
                 return memory_format
-            raise ValueError("Unable to detect memory format for backend={backend} and memory_format={memory_format}")
+            raise ValueError(f"Unable to detect memory format for backend={backend} and memory_format={memory_format}")
 
         def _get_memory_format(t: torch.Tensor) -> torch.memory_format:
             if t.is_contiguous(memory_format=torch.contiguous_format):
@@ -7302,7 +7308,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             count_tensor
         )
 
-        # Test batch_norm_backward_elemt gives the same answer for all
+        # Test batch_norm_backward_element gives the same answer for all
         # combinations of contiguous as channels_last input
         for a, b in [
                 (torch.channels_last, torch.contiguous_format),
@@ -7495,6 +7501,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError,
                                     "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
             res = arg_class(*arg_3)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @largeTensorTest("20GB", device="cuda")
+    def test_large_max_pool2d_ch_last(self):
+        # https://github.com/pytorch/pytorch/issues/165297
+        N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
+        device = torch.device("cuda")
+        x_cuda = torch.randn(N, C, H, W, device=device, dtype=torch.float16)
+        x_cuda = x_cuda.to(memory_format=torch.channels_last)
+        pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        y_cuda_ch_last = pool(x_cuda)
+        y_cuda_contig = pool(x_cuda.contiguous())
+        self.assertEqual(y_cuda_ch_last, y_cuda_contig)
 
     def test_max_pool1d_invalid_output_size(self):
         arg_1 = 3
@@ -8359,8 +8378,9 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.001)
+    @tf32_on_and_off(0.001)
     @reduced_f32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8466,6 +8486,26 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
 
     @onlyCUDA
+    @largeTensorTest("20GB", device="cuda")
+    def test_large_max_pool2d_ch_last(self, device):
+        # https://github.com/pytorch/pytorch/issues/165297
+        N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
+        x_cuda = torch.randn(N, C, H, W, device=device, dtype=torch.float16)
+        x_cuda = x_cuda.to(memory_format=torch.channels_last)
+        pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        y_cuda_ch_last = pool(x_cuda)
+        y_cuda_contig = pool(x_cuda.contiguous())
+        self.assertEqual(y_cuda_ch_last, y_cuda_contig)
+
+    @onlyCUDA
+    def test_large_reflect_pad(self, device):
+        # https://github.com/pytorch/pytorch/issues/165861
+        x = torch.rand(2**16, 2, device="cuda")
+        c = F.pad(x, (1, 1), mode="reflect")
+        c_cpu = F.pad(x.cpu(), (1, 1), mode="reflect")
+        self.assertEqual(c, c_cpu)
+
+    @onlyCUDA
     @largeTensorTest("48GB", "cpu")
     @largeTensorTest("48GB", "cuda")
     def test_avg_pool_large_tensor2(self, device):
@@ -8487,8 +8527,9 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8540,7 +8581,8 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -9417,8 +9459,9 @@ class TestNNDeviceType(NNTestCase):
             unfold(inp)
 
     @onlyCUDA
+    @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
@@ -11225,6 +11268,16 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_cudnn_rnn(self, dtype):
+        rnn = nn.RNN(10, 20, num_layers=2, device='cuda', dtype=dtype)
+        input = torch.randn(5, 4, 10, device='cuda', dtype=dtype)
+        hx = torch.randn(2, 4, 20, device='cuda', dtype=dtype)
+        output = rnn(input, hx)
+        output_ref = rnn.cpu()(input.cpu(), hx.cpu())
+        self.assertEqual(tuple([i.cuda() for i in output_ref]), output, atol=5e-3, rtol=1e-3)
+
+    @onlyCUDA
     @gcIfJetson
     def test_upsamplingNearest3d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)
@@ -11887,10 +11940,11 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
             F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
 
+    @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
@@ -12804,6 +12858,43 @@ if __name__ == '__main__':
         self.assertEqual(a_bf16.grad, expected_bf16)
 
     @onlyCPU
+    def test_rrelu_bounds_validation(self, device):
+        """Test RReLU bounds validation for finite and infinite values."""
+        x = torch.randn(5, 5, device=device)
+
+        # Test with finite bounds
+        result = F.rrelu(x, lower=0.1, upper=0.3)
+        self.assertEqual(result.shape, x.shape)
+
+        # Test with infinite lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got inf"):
+            F.rrelu(x, lower=float('inf'), upper=0.3)
+
+        # Test with infinite upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got inf"):
+            F.rrelu(x, lower=0.1, upper=float('inf'))
+
+        # Test with NaN lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got nan"):
+            F.rrelu(x, lower=float('nan'), upper=0.3)
+
+        # Test with NaN upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got nan"):
+            F.rrelu(x, lower=0.1, upper=float('nan'))
+
+        # Test with negative infinity lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got -inf"):
+            F.rrelu(x, lower=float('-inf'), upper=0.3)
+
+        # Test with negative infinity upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got -inf"):
+            F.rrelu(x, lower=0.1, upper=float('-inf'))
+
+        # Test with lower bound greater than upper bound
+        with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than or equal to the upper bound"):
+            F.rrelu(x, lower=0.5, upper=0.3)
+
+    @onlyCPU
     def test_softshrink(self, device):
         x = torch.tensor([[1.21, 0.56, 0.5001, 0.4999, 1.2357, -0.4999, -0.5001, -1.154,
                            0.254, -0.24, -0.225, 0.104, 0.002, -0.001, 0.0574, 1.2344,
@@ -13014,7 +13105,6 @@ if __name__ == '__main__':
         self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
-    @skipIfRocm(msg='Not our bug: TransformerEncoderLayer._sa_block still uses FA/ME and effectively takes fastpath')
     @skipIfMPS  # TODO(hvaara): Investigate as possible bug. macOS 13 passes, while 14 and 15 fails.
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
@@ -13044,7 +13134,7 @@ if __name__ == '__main__':
                 model = model.eval()
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -13264,7 +13354,7 @@ if __name__ == '__main__':
                 model = model.eval()
 
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape

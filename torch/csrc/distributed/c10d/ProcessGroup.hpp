@@ -11,7 +11,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
 // versions 1.7 and 1.8.

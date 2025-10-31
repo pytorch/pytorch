@@ -41,10 +41,14 @@ from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
+)
 from torch.testing._internal.common_fsdp import FSDPTest, MLP, MLPStack
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI200_ARCH,
     parametrize,
     run_tests,
     TEST_XPU,
@@ -121,6 +125,7 @@ class TestFullyShard2DTraining(FSDPTest):
             mesh_dim_names=("dp", "tp"),
         )
 
+    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
@@ -213,7 +218,7 @@ class TestFullyShard2DTraining(FSDPTest):
 
         torch.manual_seed(42 + global_mesh.get_local_rank("dp"))
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
-        for iter_idx in range(5):
+        for _ in range(5):
             ref_loss = ref_model(inp).sum()
             loss = model(inp).sum()
             self.assertEqual(ref_loss, loss)
@@ -233,9 +238,7 @@ class TestFullyShard2DTraining(FSDPTest):
             # runs its reduce-scatter
             self.assertIsInstance(model.pos_embeddings.weight.placements[1], Shard)
             self.assertIsInstance(model.pos_embeddings.weight.grad.placements[1], Shard)
-            for ref_param, (param_name, param) in zip(
-                ref_model.parameters(), model.named_parameters()
-            ):
+            for ref_param, param in zip(ref_model.parameters(), model.parameters()):
                 full_grad = param.grad.full_tensor()
                 self.assertEqual(ref_param.grad, full_grad)
 

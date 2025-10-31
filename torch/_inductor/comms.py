@@ -424,10 +424,7 @@ def _reorder_communication_preserving_peak_memory_internal(
             return
 
         # Candidate becomes last use of some bufs
-        for (
-            gn,
-            bufs,
-        ) in group_n_to_bufs_after_swap_dealloc_by_candidate.items():
+        for bufs in group_n_to_bufs_after_swap_dealloc_by_candidate.values():
             for buf in bufs:
                 buf_to_snode_last_use[buf] = candidate
 
@@ -465,6 +462,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     while _next[curr] is not None:
         if iterative_recompute_error:
             break
+        # pyrefly: ignore [bad-argument-type]
         if contains_collective(curr):
             if debug_num_collectives_to_reorder is not None and (
                 num_processed_collectives >= debug_num_collectives_to_reorder
@@ -826,18 +824,20 @@ def _schedule_for_comm(
             and (candidate := get_overlapping_candidate()) is not None
         ):
             ready.remove(candidate)
+
             schedule(candidate.snode)
+
             collective_cost -= snode_to_cost[candidate.snode]
         heapq.heapify(ready)
 
-    while len(ready):
+    while ready:
         snode = heapq.heappop(ready).snode
         if reorder_for_overlap and contains_collective(snode):
             schedule_collective_for_overlap(snode)
         else:
             schedule(snode)
 
-    for snode, deps in unmet_deps.items():
+    for deps in unmet_deps.values():
         assert len(deps) == 0, (
             f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
         )
@@ -1028,6 +1028,7 @@ def _sink_waits_iterative_internal(
         ):
             break
 
+        # pyrefly: ignore [bad-argument-type]
         if contains_wait(curr) and curr not in processed_waits:
             processed_waits.add(curr)
             info = stats[curr] = SinkWaitInfo()
@@ -1093,6 +1094,7 @@ def _sink_waits_iterative_internal(
                         info.grouped_info = _group_names(gns)
                         candidate = _next[candidate]
                         continue
+
                     elif (data_dep is None) and both_contain_comms:
                         info.limiting_factor = (
                             f"collective ordering {_group_names(gns)}"
@@ -1365,6 +1367,7 @@ def reorder_compute_and_comm_for_overlap(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
         print(f"final {peak_memory=}")
+    # pyrefly: ignore [bad-return]
     return order
 
 
@@ -1390,7 +1393,7 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     for idx, node in enumerate(node_list):
         if (
             node.op == "call_function"
-            and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            and node.target is torch.ops.inductor.resize_storage_bytes_.default
         ):
             assert node.args[0].op == "placeholder", f"""\
 Resize can only operate on graph inputs, but got {node} which is resizing non-graph-input {node.args[0]}
@@ -1413,7 +1416,7 @@ Resize can only operate on graph inputs, but got {node} which is resizing non-gr
         )
         resized_to_0_idxes = graph_input_to_resized_to_0_node_idxes.get(graph_input, [])
 
-        if not len(resized_to_full_idxes) == len(resized_to_0_idxes):
+        if len(resized_to_full_idxes) != len(resized_to_0_idxes):
             log.warning(
                 f"""
 Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
@@ -1441,7 +1444,7 @@ Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that
     # Find all eligible unsharded params and their corresponding graph intermediates.
     unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
     for idx, node in enumerate(node_list):
-        if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
+        if node.op == "call_function" and node.target is torch.ops.fsdp.copy_.default:
             fsdp_copy_node = node
             unsharded_param = node.args[0]
             assert unsharded_param.op == "placeholder", f"""
@@ -1453,8 +1456,8 @@ Offending node: {unsharded_param}. Graph: {graph}
 
     def is_allowed_mutation(node):
         return (
-            node.target == torch.ops.fsdp.copy_.default
-            or node.target == torch.ops.inductor.resize_storage_bytes_.default
+            node.target is torch.ops.fsdp.copy_.default
+            or node.target is torch.ops.inductor.resize_storage_bytes_.default
         )
 
     def is_node_mutating_unsharded_param_or_its_alias(node, unsharded_params):
@@ -1546,11 +1549,8 @@ Graph: {graph}
                     node.args = new_args
 
     # Delete `fsdp.copy_(unsharded_param, Y)` nodes
-    for (
-        unsharded_param,
-        fsdp_copy_node_idxes,
-    ) in unsharded_param_to_fsdp_copy_node_idxes.items():
-        for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
+    for fsdp_copy_node_idxes in unsharded_param_to_fsdp_copy_node_idxes.values():
+        for fsdp_copy_node_idx in fsdp_copy_node_idxes:
             fsdp_copy_node = node_list[fsdp_copy_node_idx]
             graph.erase_node(fsdp_copy_node)
 
@@ -1558,7 +1558,7 @@ Graph: {graph}
     for node in node_list:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            and node.target is torch.ops.inductor.resize_storage_bytes_.default
             and node.args[0] in unsharded_param_to_fsdp_copy_node_idxes
         ):
             graph.erase_node(node)
@@ -1632,6 +1632,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             KeywordArg("group_size"),
             KeywordArg("group_name"),
         ),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
         extra_check=lambda match: match.kwargs["item_idx"] == 0,
     )
@@ -1655,6 +1656,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             return all_gather_into_tensor
 
         match.replace_by_example(
+            # pyrefly: ignore [bad-argument-type]
             repl,
             [
                 kwargs["all_gather_inputs"],

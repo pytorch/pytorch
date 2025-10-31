@@ -1175,12 +1175,10 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-#if !defined(USE_ROCM)
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
     case cuda::synchronize:
-#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1769,7 +1767,7 @@ Node* Graph::createTupleSlice(
 
   int64_t i = beg;
   for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
-    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto idx = insertConstant(IValue(i));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
     new_vals.push_back(tupleIndex->output());

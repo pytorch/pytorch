@@ -1,4 +1,5 @@
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 from torch.ao.quantization.quantizer.quantizer import (
