@@ -2,11 +2,10 @@ import functools
 import math
 import operator
 from collections.abc import Sequence
-from typing import Callable
 
 import torch
 from torch._C import ScriptObject
-from torch._C._distributed_c10d import FakeWork, CallbackWork
+from torch._C._distributed_c10d import CallbackWork, FakeWork
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
     _get_default_group,

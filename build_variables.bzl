@@ -518,6 +518,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Types.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
     "torch/csrc/distributed/c10d/Work.cpp",
+    "torch/csrc/distributed/c10d/CallbackWork.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
