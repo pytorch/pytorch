@@ -158,7 +158,7 @@ class PytreeThunk:
         assert spec is not None
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
-            child.is_leaf() for child in spec.children()
+            child.is_leaf() for child in spec.children_specs
         ):
             self.is_simple = True
         if self.spec.is_leaf():
@@ -249,7 +249,7 @@ def maybe_to_fresh_input(idx, t, meta):
 def is_with_effects(node):
     return (
         node.op == "call_function"
-        and node.target == torch.ops.higher_order.with_effects
+        and node.target is torch.ops.higher_order.with_effects
     )
 
 

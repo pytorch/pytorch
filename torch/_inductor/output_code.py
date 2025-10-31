@@ -677,7 +677,7 @@ class CompiledFxGraph(OutputCode):
                     ]
                 else:
                     # On the forward we don't know whether or not
-                    # boxed_foward_device_index is set yet
+                    # boxed_forward_device_index is set yet
                     boxed_forward_device_index = graph_kwargs.get(
                         "boxed_forward_device_index", None
                     )
