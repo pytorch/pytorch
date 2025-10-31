@@ -40,10 +40,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 T = TypeVar("T")
 
@@ -405,10 +410,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             combs.append(torch.ones(size))
         return combs
 
-    @unittest.skipIf(
-        sys.version_info < (3, 10),
-        "itertools.pairwise was added at Python 3.10",
-    )
     @make_test
     def test_itertools_pairwise(a):
         pairs = []
@@ -1150,10 +1151,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.to(torch.float16)
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_tensor_type2(a, b):
-        m = a.to("cuda")
+        m = a.to(device_type)
         return m + b.type(m.type())
 
     @make_test
@@ -2083,6 +2084,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
+    def test_namedtuple_replace(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+        replaced = mytuple._replace(first=b)
+        return mytuple.first + mytuple.second + replaced.first + replaced.second
+
+    @make_test
     def test_generic_namedtuple_user_methods(a, b):
         mytuple = FunctionTests.MyGenericNamedTuple(a, b)
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
@@ -2295,30 +2302,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         return augment(x)
 
-    # # This is to test the new syntax for pattern matching
-    # # ("match ... case ...") added on python 3.10.
-    # # Uncomment these test cases if you run on 3.10+
-    # @make_test
-    # def test_match_sequence(a):
-    #     point = (5, 8)
-    #     match point:
-    #         case (0, 0):
-    #             return a
-    #         case (0, y):
-    #             return a - y
-    #         case (x, 0):
-    #             return a + x
-    #         case (x, y):
-    #             return a + x - y
+    @make_test
+    def test_match_sequence(a):
+        point = (5, 8)
+        match point:
+            case (0, 0):
+                return a
+            case (0, y):
+                return a - y
+            case (x, 0):
+                return a + x
+            case (x, y):
+                return a + x - y
 
-    # @make_test
-    # def test_match_mapping_and_match_keys(x):
-    #     param = {"a": 0.5}
-    #     match param:
-    #         case {"a": param}:
-    #             return x * param
-    #         case {"b": param}:
-    #             return x / param
+    @make_test
+    def test_match_mapping_and_match_keys(x):
+        param = {"a": 0.5}
+        match param:
+            case {"a": param}:
+                return x * param
+            case {"b": param}:
+                return x / param
 
     def test_math_radians(self):
         def func(x, a):
@@ -3620,7 +3624,7 @@ class GraphModule(torch.nn.Module):
                 )
 
         test(range(10), slice(1, 10, 2), expected=range(1, 10, 2))
-        test(range(10), slice(None, 10, None), expected=range(0, 10))
+        test(range(10), slice(None, 10, None), expected=range(10))
         test(range(10), slice(-1, 7, None), expected=range(9, 7))
         test(range(10), slice(-1, 7, 2), expected=range(9, 7, 2))
         test(range(1, 10, 2), slice(3, 7, 2), expected=range(7, 11, 4))
@@ -4040,7 +4044,7 @@ class GraphModule(torch.nn.Module):
         def f1():
             mod1 = torch.get_device_module()
             mod2 = torch.get_device_module("cpu")
-            mod3 = torch.get_device_module(torch.device("cuda"))
+            mod3 = torch.get_device_module(torch.device(device_type))
             return mod1, mod2, mod3
 
         self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
@@ -4075,6 +4079,7 @@ class GraphModule(torch.nn.Module):
         new_device = (
             "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
         )
+
         old_get_device_module = torch.get_device_module
 
         def new_get_device_module(device=None):
@@ -4686,10 +4691,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(lst), 2)
         self.assertEqual(lst[0], lst[1])
 
-    @unittest.skipIf(
-        sys.version_info < (3, 10),
-        "zip strict kwargs not implemented for Python < 3.10",
-    )
     def test_zip_strict(self):
         def fn(x, ys, zs):
             x = x.clone()
@@ -4721,10 +4722,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             opt_fn(x, ys, zs[:1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_cuda_current_device(self):
+    def test_gpu_current_device(self):
         def fn(x):
             y = torch.empty(
-                (2, 3), dtype=torch.float32, device=torch.cuda.current_device()
+                (2, 3),
+                dtype=torch.float32,
+                device=torch.accelerator.current_device_index(),
             )
             y.copy_(x)
             return torch.sin(y + y.device.index)
@@ -4732,11 +4735,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
 
-        with torch.cuda.device(0):
+        with torch.accelerator.device_index(0):
             x = torch.randn(2, 3)
             self.assertEqual(opt_fn(x), fn(x))
             self.assertEqual(counter.frame_count, 1)
-            with torch.cuda.device(1):
+            with torch.accelerator.device_index(1):
                 self.assertEqual(opt_fn(x), fn(x))
                 self.assertEqual(counter.frame_count, 2)
 
@@ -5166,6 +5169,52 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_property_class_transmute(self):
+        class PropertyGetter:
+            def __call__(self, obj):
+                return True
+
+        p = property(PropertyGetter())
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if self.p:
+                    return x + 1
+                else:
+                    raise RuntimeError("whoops")
+
+        mod = Mod()
+        mod.__class__ = type(mod.__class__.__name__, (mod.__class__,), {"p": p})
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+        self.assertEqual(opt_mod(x), x + 1)
+
+    def test_property_functools_partial(self):
+        def p_getter(obj, *, delta: int):
+            # Use instance state + a bound constant
+            return (getattr(obj, "flag", 0) + delta) > 0
+
+        class Mod(torch.nn.Module):
+            def __init__(self, flag: int):
+                super().__init__()
+                self.flag = flag
+
+            # fget is a functools.partial object
+            p = property(functools.partial(p_getter, delta=1))
+
+            def forward(self, x):
+                if self.p:  # calls p_getter(self, delta=1)
+                    return x + 1
+                else:
+                    raise RuntimeError("whoops")
+
+        mod = Mod(flag=1)
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+        self.assertEqual(opt_mod(x), x + 1)
 
 
 instantiate_parametrized_tests(FunctionTests)

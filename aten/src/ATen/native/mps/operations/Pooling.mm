@@ -519,6 +519,13 @@ static void max_unpool_out_mps_template(const Tensor& input,
                                         Tensor& output,
                                         const int32_t pooling_dims,
                                         const std::string& op_name) {
+  TORCH_CHECK(output_size_.size() == static_cast<size_t>(pooling_dims),
+              op_name,
+              "There should be exactly ",
+              pooling_dims,
+              " elements but got ",
+              output_size_.size());
+
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
 
@@ -533,6 +540,18 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
   output.resize_(output_size, memory_format);
   output.fill_(0);
+
+  if (indices.defined() && indices.numel() > 0) {
+    auto output_image_size = c10::multiply_integers(output_size_);
+
+    int64_t min_idx = indices.min().item<int64_t>();
+    int64_t max_idx = indices.max().item<int64_t>();
+
+    if (min_idx < 0 || max_idx >= output_image_size) {
+      int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
+      TORCH_CHECK(false, "Found an invalid max index: ", error_idx, " for output tensor of shape ", output_size_);
+    }
+  }
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();

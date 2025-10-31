@@ -89,7 +89,7 @@ def main() -> None:
         package_name, _, version = package.partition("=")
         if version == "":
             raise RuntimeError(
-                "Package {package_name} did not have a version specified. "
+                f"Package {package_name} did not have a version specified. "
                 "Please specify a version to produce a consistent linting experience."
             )
 

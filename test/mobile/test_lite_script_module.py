@@ -437,7 +437,7 @@ class TestLiteScriptModule(TestCase):
         # additional context to the exception message and preserve the correct
         #  C++ stack trace for symbolication. i.e. it isn't possible to add
         # the debug handle string to show where in the Python code the exception
-        # occured w/o first changing
+        # occurred w/o first changing
         # torch::jit::JITException to extend c10::Error.
         self.assertTrue("self.val and val are same" in error_message)
 

@@ -124,7 +124,8 @@ class RNNBase(Module):
                 "dropout option adds dropout after all but last "
                 "recurrent layer, so non-zero dropout expects "
                 f"num_layers greater than 1, but got dropout={dropout} and "
-                f"num_layers={num_layers}"
+                f"num_layers={num_layers}",
+                stacklevel=2,
             )
 
         if not isinstance(hidden_size, int):
@@ -242,7 +243,7 @@ class RNNBase(Module):
         for fw in self._flat_weights:
             if (
                 not isinstance(fw, Tensor)
-                or not (fw.dtype == dtype)
+                or fw.dtype != dtype
                 or not fw.is_cuda
                 or not torch.backends.cudnn.is_acceptable(fw)
             ):
@@ -640,14 +641,18 @@ class RNN(RNNBase):
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: Tensor, hx: Optional[Tensor] = None
+        self,
+        input: Tensor,
+        hx: Optional[Tensor] = None,
     ) -> tuple[Tensor, Tensor]:
         pass
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: PackedSequence, hx: Optional[Tensor] = None
+        self,
+        input: PackedSequence,
+        hx: Optional[Tensor] = None,
     ) -> tuple[PackedSequence, Tensor]:
         pass
 
@@ -772,7 +777,10 @@ class RNN(RNNBase):
 
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
-                output, batch_sizes, sorted_indices, unsorted_indices
+                output,
+                batch_sizes,
+                sorted_indices,
+                unsorted_indices,
             )
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
 
@@ -1030,7 +1038,9 @@ class LSTM(RNNBase):
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+        self,
+        input: Tensor,
+        hx: Optional[tuple[Tensor, Tensor]] = None,
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1038,7 +1048,9 @@ class LSTM(RNNBase):
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: PackedSequence, hx: Optional[tuple[Tensor, Tensor]] = None
+        self,
+        input: PackedSequence,
+        hx: Optional[tuple[Tensor, Tensor]] = None,
     ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1152,7 +1164,10 @@ class LSTM(RNNBase):
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
-                output, batch_sizes, sorted_indices, unsorted_indices
+                output,
+                batch_sizes,
+                sorted_indices,
+                unsorted_indices,
             )
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
@@ -1319,14 +1334,18 @@ class GRU(RNNBase):
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: Tensor, hx: Optional[Tensor] = None
+        self,
+        input: Tensor,
+        hx: Optional[Tensor] = None,
     ) -> tuple[Tensor, Tensor]:  # noqa: F811
         pass
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: PackedSequence, hx: Optional[Tensor] = None
+        self,
+        input: PackedSequence,
+        hx: Optional[Tensor] = None,
     ) -> tuple[PackedSequence, Tensor]:  # noqa: F811
         pass
 
@@ -1420,7 +1439,10 @@ class GRU(RNNBase):
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
-                output, batch_sizes, sorted_indices, unsorted_indices
+                output,
+                batch_sizes,
+                sorted_indices,
+                unsorted_indices,
             )
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:

@@ -12,7 +12,7 @@ name = "torch_openreg"
 version = "0.0.1"
 description = "A minimal reference implementation of an out-of-tree backend"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 dependencies = [
