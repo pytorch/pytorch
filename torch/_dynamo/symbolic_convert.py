@@ -3176,7 +3176,7 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # TOS: resumes, frames (popped), frame 1 stack + locals
+        # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
         cg.extend_output(
             [
                 *create_rot_n(3),
@@ -3187,12 +3187,8 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # TOS: [resumes, frames, *(frame 1 stack + locals)]
-        cg.extend_output(
-            [
-                *create_call_function_ex(False, True),
-            ]
-        )
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
+        cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
         if sys.version_info >= (3, 11):
