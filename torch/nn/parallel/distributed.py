@@ -173,6 +173,7 @@ def _dump_DDP_relevant_env_vars():
         "MASTER_PORT",
         "MASTER_ADDR",
         "CUDA_VISIBLE_DEVICES",
+        "ROCR_VISIBLE_DEVICES",
         "GLOO_SOCKET_IFNAME",
         "GLOO_DEVICE_TRANSPORT",
         "NCCL_SOCKET_IFNAME",

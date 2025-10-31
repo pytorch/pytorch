@@ -1663,7 +1663,7 @@ class MultiProcContinuousTest(TestCase):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         assert rdvz_file is not None
-        # rank should be local_rank for tests running on <= 8gpus which is how all these tests are designed
+        # rank should be local_rank for tests running on <= 8 gpus which is how all these tests are designed
         # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
         # issuing a warning
         os.environ["LOCAL_RANK"] = str(rank)

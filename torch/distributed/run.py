@@ -688,6 +688,15 @@ def get_args_parser() -> ArgumentParser:
         "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
     )
 
+    parser.add_argument(
+        "--virtual-local-rank",
+        "--virtual_local_rank",
+        action=check_env,
+        help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
+        "for all workers and ROCR/CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
+        "assigned GPU at device index 0.",
+    )
+
     #
     # Positional arguments.
     #
@@ -902,6 +911,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         signals_to_handle=args.signals_to_handle,
         duplicate_stdout_filters=args.duplicate_stdout_filters,
         duplicate_stderr_filters=args.duplicate_stderr_filters,
+        virtual_local_rank=args.virtual_local_rank,
     )
 
     with_python = not args.no_python
