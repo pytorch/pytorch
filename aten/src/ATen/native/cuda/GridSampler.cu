@@ -680,7 +680,7 @@ namespace {
               } else {
                 static_assert(!std::is_same<opmath_t, opmath_t>::value, "Unsupported opmath_t for LDS atomicAdd");
               }
-            }
+            };
             auto accumulate = [&](index_t iy_g, index_t ix_g, opmath_t weight) {
               // Global bounds check, same as the original impelmentation,
               // to check if the target input coord is valid.
@@ -708,10 +708,23 @@ namespace {
           }
 
           // Accumulate grad_grid contributions in registers.
-          scalar_t v_nw = get_value_bounded(inp_ptr_NC, static_cast<opmath_t>(ix_nw), static_cast<opmath_t>(iy_nw), inp_W, inp_H, input.strides[3], input.strides[2], PADDING_MODE, ALIGN_CORNERS);
-          scalar_t v_ne = get_value_bounded(inp_ptr_NC, static_cast<opmath_t>(ix_nw + 1), static_cast<opmath_t>(iy_nw), inp_W, inp_H, input.strides[3], input.strides[2], PADDING_MODE, ALIGN_CORNERS);
-          scalar_t v_sw = get_value_bounded(inp_ptr_NC, static_cast<opmath_t>(ix_nw), static_cast<opmath_t>(iy_nw + 1), inp_W, inp_H, input.strides[3], input.strides[2], PADDING_MODE, ALIGN_CORNERS);
-          scalar_t v_se = get_value_bounded(inp_ptr_NC, static_cast<opmath_t>(ix_nw + 1), static_cast<opmath_t>(iy_nw + 1), inp_W, inp_H, input.strides[3], input.strides[2], PADDING_MODE, ALIGN_CORNERS);
+          opmath_t v_nw = 0, v_ne = 0, v_sw = 0, v_se = 0;
+
+          // Perform manual bounds checking, just like the original kernel.
+          // Pre-condition: only for `GridSamplerInterpolation::Bilinear` and `GridSamplerPadding::Zeros`.
+          if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+              v_nw = static_cast<opmath_t>(inp_ptr_NC[iy_nw * input.strides[2] + ix_nw * input.strides[3]]);
+          }
+          if (within_bounds_2d(iy_nw, ix_nw + 1, inp_H, inp_W)) {
+              v_ne = static_cast<opmath_t>(inp_ptr_NC[iy_nw * input.strides[2] + (ix_nw + 1) * input.strides[3]]);
+          }
+          if (within_bounds_2d(iy_nw + 1, ix_nw, inp_H, inp_W)) {
+              v_sw = static_cast<opmath_t>(inp_ptr_NC[(iy_nw + 1) * input.strides[2] + ix_nw * input.strides[3]]);
+          }
+          if (within_bounds_2d(iy_nw + 1, ix_nw + 1, inp_H, inp_W)) {
+              v_se = static_cast<opmath_t>(inp_ptr_NC[(iy_nw + 1) * input.strides[2] + (ix_nw + 1) * input.strides[3]]);
+          }
+
           gix_agg += (v_ne - v_nw) * (1 - ty) * gOut + (v_se - v_sw) * ty * gOut;
           giy_agg += (v_sw - v_nw) * (1 - tx) * gOut + (v_se - v_ne) * tx * gOut;
         }
