@@ -26,6 +26,7 @@ ciflow_push_tags:
 - ciflow/nightly
 - ciflow/op-benchmark
 - ciflow/periodic
+- ciflow/periodic-rocm-mi200
 - ciflow/periodic-rocm-mi300
 - ciflow/pull
 - ciflow/quantization-periodic
@@ -33,6 +34,7 @@ ciflow_push_tags:
 - ciflow/rocm
 - ciflow/rocm-mi300
 - ciflow/rocm-mi355
+- ciflow/rocm-navi31
 - ciflow/s390
 - ciflow/slow
 - ciflow/torchbench

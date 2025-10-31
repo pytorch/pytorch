@@ -30,7 +30,7 @@ def split_result_tensors(
     else:
         splits = [x.shape[0] for x in inputs]
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return torch.split(result, splits)
 
 
