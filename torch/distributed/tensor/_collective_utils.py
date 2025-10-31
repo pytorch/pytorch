@@ -8,10 +8,12 @@ from typing import Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
+from torch._C._distributed_c10d import _resolve_process_group
 from torch._logging import warning_once
-
-# Import from centralized fallback module - no conditional imports needed
-from torch.distributed._distributed_c10d import _resolve_process_group
+from torch.distributed._local_tensor import (
+    local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
@@ -42,7 +44,7 @@ def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
-    if mesh.device_type == "cpu":
+    if mesh.device_type == "cpu" and local_tensor_mode() is None:
         # Gloo does not support alltoall, so falling back to allgather + chunk
         warning_once(
             logger,
@@ -169,6 +171,7 @@ def mesh_broadcast(
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
+@maybe_run_for_local_tensor
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
     if pad_size == 0:
         return tensor
@@ -177,6 +180,7 @@ def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tenso
     return torch.nn.functional.pad(tensor, pad)
 
 
+@maybe_run_for_local_tensor
 def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
     if pad_size == 0:
         return tensor

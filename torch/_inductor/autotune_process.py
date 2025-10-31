@@ -232,6 +232,13 @@ class TuningProcess:
             self.process.kill()
         self.close()
 
+    def restart(self) -> None:
+        """
+        Gracefully restarts the child process.
+        """
+        self.shutdown(wait=True)
+        self.start()
+
 
 class TuningProcessPool:
     """
@@ -312,11 +319,16 @@ class TuningProcessPool:
             )
             # Set to INF so this choice will be ignored
             return float("inf")
-        except Exception:
+        except Exception as process_exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
+            # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
+            # CUDA context, making it unrecoverable. All subsequent CUDA calls will
+            # fail as well. The process must be restarted to restore CUDA functionality.
+            if "cudaErrorLaunchFailure" in str(process_exception):
+                process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
         finally:
@@ -722,7 +734,9 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         """
 
         self.ensure_dll_loaded()
-        self.update_workspace_size()
+        if not out.is_xpu:
+            self.update_workspace_size()
+
         args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]
         autotuning_log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",

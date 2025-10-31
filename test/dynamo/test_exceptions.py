@@ -10,6 +10,7 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -126,7 +127,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
-                    raise AssertionError
+                    raise AssertionError  # noqa: B904
                 except AssertionError:
                     x = torch.cos(x)
 
@@ -630,7 +631,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ZeroDivisionError
             except ZeroDivisionError:
                 try:
-                    raise ValueError
+                    raise ValueError  # noqa: B904
                 except ValueError:
                     pass
                 raise
@@ -680,7 +681,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 yield 1
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -710,7 +711,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -888,20 +889,26 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         assert z == 1
 
     def test_user_defined_exception_variable(self):
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             z = 0
             try:
                 raise CustomException
             except ValueError:
                 z = 1
-            except CustomException:
+            except CustomException as e:
+                # trying to call python_type on the
+                # UserDefinedExceptionClassVariable
+                cls = type(e)
+                if type(cls) is type:
+                    t = t + 1
                 z = 2
             assert z == 2
             return t.sin()
 
         t = torch.randn(2)
         fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(t), opt_fn(t))
 
     def test_user_defined_exception_with_args(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -933,6 +940,29 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             exc2 = e
 
         assert exc2.__context__ is None
+
+    def test_exception_kwargs(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            raise AttributeError(name="a")
+
+        self.assertRaises(Unsupported, fn)
+
+    def test_stack_trace_from_observed_exception(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                # no attribute w on self.linear
+                weight = self.linear.w
+                return torch.nn.functional.linear(x, weight)
+
+        x = (torch.randn(4, 16, requires_grad=True),)
+
+        with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
+            torch._dynamo.functional_export._dynamo_graph_capture_for_export(Model())(x)
 
 
 instantiate_parametrized_tests(ExceptionTests)

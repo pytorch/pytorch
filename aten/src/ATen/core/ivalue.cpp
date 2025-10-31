@@ -7,6 +7,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/type_factory.h>
+#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -357,7 +358,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
-      // Unitialized ivalues show up in no-ops when the compiler can prove a
+      // Uninitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
   }
@@ -412,7 +413,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive

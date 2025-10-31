@@ -23,6 +23,7 @@ restoring state changes.
 import inspect
 import sys
 import warnings
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Union
 
 import torch._C
@@ -50,6 +51,7 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from .streams import StreamVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -512,19 +514,17 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         batch_size, randomness = self.target_values
         if isinstance(batch_size, variables.SymNodeVariable):
             batch_size_value = batch_size.sym_num
-            batch_size_node = batch_size.as_proxy().node
         else:
             batch_size_value = batch_size.as_python_constant()
-            batch_size_node = batch_size.as_python_constant()
         randomness = randomness.as_python_constant()
         vmap_level = torch._C._functorch._vmap_increment_nesting(
             batch_size_value, randomness
         )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
-        self.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_proxy(
             "call_function",
             torch._functorch.predispatch._vmap_increment_nesting,
-            (batch_size_node, randomness),
+            (batch_size.as_proxy(), randomness),
             {},
         )
         return variables.ConstantVariable.create(vmap_level)
@@ -1262,140 +1262,46 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return "_sdpa_kernel_variadic"
 
 
-class StreamVariable(VariableTracker):
-    def __init__(self, proxy, value, device, **kwargs) -> None:
-        if proxy is not None and "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == value
-        assert value.device.type == device.type, (
-            "stream value is not equal to the passed device"
+class FxTracebackAnnotateVariable(ContextWrappingVariable):
+    """
+    fx.traceback.annotate is a context manager that allows users to annotate the
+    fx graph nodes with custom metadata. In the context of Dynamo, we don't have
+    to trace the body of the context manager. Instead we want to directly run
+    the body of the context manager, so the Dynamo created Fx graphs have the
+    right custom metadata. This variable tracker just runs __enter__ and
+    __exit__ method (instead of tracing).
+    """
+
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
         )
-        super().__init__(**kwargs)
-        self.proxy = proxy
-        self.value = value
-        self.device = device
 
-    def python_type(self):
-        return torch.Stream
+    def enter(self, tx, *args):
+        # Run the annotation ctx manager in eager. Also ensure that
+        # preserve_node_meta context manager is setup. This is important to pass
+        # on the metadata to the create_proxy nodes.
+        stack = ExitStack()
+        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        stack.enter_context(torch.fx.traceback.preserve_node_meta())
+        self.set_cleanup_hook(tx, lambda: stack.close())
+        return variables.ConstantVariable.create(None)
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        assert hasattr(self.value, name), f"no stream method found named {name}"
+    def module_name(self):
+        return "torch.fx.traceback"
 
-        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
-        from .builder import wrap_fx_proxy_cls
+    def fn_name(self):
+        return "annotate"
 
-        if name in ("wait_stream", "synchronize", "wait_event"):
-            tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-            )
-            return variables.ConstantVariable(None)
-        elif name == "query":
-            return wrap_fx_proxy_cls(
-                target_cls=variables.ConstantVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-                ),
-            )
-        elif name == "record_event":
-            return wrap_fx_proxy_cls(
-                target_cls=EventVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-                ),
-            )
-        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            # NB : Checking for mutation is necessary because we compare
-            # constant values
-            other = args[0]
-            if not isinstance(other, StreamVariable):
-                return variables.ConstantVariable.create(NotImplemented)
-            return variables.ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.value, other.value)
-            )
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def as_proxy(self):
-        return self.proxy
-
-    def reconstruct(self, codegen: "PyCodegen"):
-        # If we got here, this stream is fully subsumed by the graph - this means it is
-        # not an input or global
-        assert not self.source
-        # Since we just proved that - for other such structures, like lists and dicts, reconstruction
-        # is fine and sound according to dynamo principles of treating collectives. However,
-        # streams are special in that we want to preserve the identity of the stream as the same as in the graph
-        # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
-        # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
-        # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
-        prefix = f"_stream_{self.device}"
-        name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(codegen.create_load_global(name, add=True))
-
-
-class EventVariable(VariableTracker):
-    def __init__(self, proxy, value, **kwargs) -> None:
-        if proxy is not None and "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == value
-        super().__init__(**kwargs)
-        self.proxy = proxy
-        self.value = value
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        from ..utils import proxy_args_kwargs
-        from .builder import wrap_fx_proxy_cls
-
-        if name in ("wait", "record", "synchronize"):
-            tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-            )
-            return variables.ConstantVariable(None)
-        elif name == "query":
-            return wrap_fx_proxy_cls(
-                target_cls=variables.ConstantVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-                ),
-            )
-        else:
-            method_name = (
-                f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
-            )
-            unimplemented_v2(
-                gb_type="Unsupported event method",
-                context=str(name),
-                explanation=f"Dynamo doesn't support tracing the {method_name} method. "
-                f"We currently support wait, record, synchronize, and query.",
-                hints=[
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
-    def as_proxy(self):
-        return self.proxy
-
-    def reconstruct(self, codegen: "PyCodegen"):
-        # If we got here, this event is fully subsumed by the graph - this means it is
-        # not an input or global
-        assert not self.source
-        # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
-        prefix = "_event"
-        name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(codegen.create_load_global(name, add=True))
+    def reconstruct_type(self, codegen: "PyCodegen"):
+        unimplemented_v2(
+            gb_type="torch.fx.traceback.annotate escaped from compiled region",
+            context=str(self),
+            explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 class DynamoConfigPatchVariable(ContextWrappingVariable):
@@ -1448,6 +1354,46 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "error_on_graph_break"
+
+
+class WithEnterFunctionVariable(VariableTracker):
+    def __init__(
+        self,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.ctx = ctx
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert not args
+        assert not kwargs
+        # NOTE: we assume that the instruction immediately after the current CALL instruction
+        # is the first instruction of the block.
+        return tx.enter_ctx(self.ctx, tx.current_instruction)
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        try:
+            type_str = f"{self.ctx.module_name()}.{self.ctx.fn_name()}"
+        except NotImplementedError:
+            type_str = str(type(self.ctx))
+        unimplemented_v2(
+            gb_type="Attempted to reconstruct context manager's __enter__ method",
+            context=str(self.ctx),
+            explanation=f"Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
+            hints=[
+                "It is likely there is a graph break while tracing `with ctx:` "
+                "but outside the actual `ctx.__enter__()` method. "
+                "`torch.compile` does not expect this to happen.",
+                *graph_break_hints.DIFFICULT,
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
 
 
 class WithExitFunctionVariable(VariableTracker):

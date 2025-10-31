@@ -49,8 +49,8 @@ class HandlerRegistry {
   }
 
  private:
-  std::shared_mutex handlersMutex_{};
-  std::unordered_map<std::string, HandlerFunc> handlers_{};
+  std::shared_mutex handlersMutex_;
+  std::unordered_map<std::string, HandlerFunc> handlers_;
 };
 
 HandlerRegistry& getHandlerRegistry() {
