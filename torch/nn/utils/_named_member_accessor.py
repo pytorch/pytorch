@@ -77,7 +77,7 @@ def swap_tensor(
             setattr(module, name, tensor)
         elif hasattr(module, name):
             delattr(module, name)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return orig_tensor
 
 

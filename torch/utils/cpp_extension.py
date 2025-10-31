@@ -794,7 +794,7 @@ class BuildExtension(build_ext):
 
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             output_dir = os.path.abspath(output_dir)
 
             # See Note [Absolute include_dirs]
@@ -985,7 +985,7 @@ class BuildExtension(build_ext):
                                    is_standalone=False):
             if not self.compiler.initialized:
                 self.compiler.initialize()
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             output_dir = os.path.abspath(output_dir)
 
             # Note [Absolute include_dirs]
@@ -1537,7 +1537,7 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         # Support CUDA_INC_PATH env variable supported by CMake files
         if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
                 cuda_inc_path != '/usr/include':
-            # pyrefly: ignore  # unbound-name
+
             paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
@@ -2579,7 +2579,7 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
         from setuptools import distutils  # type: ignore[attr-defined]
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         try:

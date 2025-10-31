@@ -1066,6 +1066,8 @@ coverage_ignore_functions = [
     "set_current_meta",
     "set_grad_fn_seq_nr",
     "set_stack_trace",
+    "set_current_replay_node",
+    "get_current_replay_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
