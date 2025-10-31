@@ -269,17 +269,22 @@ static void reduction_out_mps(const Tensor& input_t,
                                                                      name:nil];
         castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor axes:@[ @0, @1 ] name:nil];
       } else if (reduction_type == MPSReductionType::NANSUM) {
-        // Create a 0 tensor of the same shape as inputTensor
-        MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:castInputTensor.dataType];
-        // Find NaNs
-        MPSGraphTensor* nanMask = [mpsGraph isNaNWithTensor:castInputTensor name:nil];
-        // Replace NaNs with 0
-        MPSGraphTensor* nanReplaced = [mpsGraph selectWithPredicateTensor:nanMask
-                                                      truePredicateTensor:zeros
-                                                     falsePredicateTensor:castInputTensor
-                                                                     name:nil];
-        // Sum
-        castOutputTensor = [mpsGraph reductionSumWithTensor:nanReplaced axes:wrappedAxes name:nil];
+        // Integral types cannot contain NaN, so just do regular sum
+        if (([castInputTensor dataType] & MPSDataTypeFloatBit) == 0) {
+          castOutputTensor = [mpsGraph reductionSumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+        } else {
+          // Create a 0 tensor of the same shape as inputTensor
+          auto zeros = [mpsGraph constantWithScalar:0.0 dataType:castInputTensor.dataType];
+          // Find NaNs
+          auto nanMask = [mpsGraph isNaNWithTensor:castInputTensor name:nil];
+          // Replace NaNs with 0
+          auto nanReplaced = [mpsGraph selectWithPredicateTensor:nanMask
+                                             truePredicateTensor:zeros
+                                            falsePredicateTensor:castInputTensor
+                                                            name:nil];
+          // Sum
+          castOutputTensor = [mpsGraph reductionSumWithTensor:nanReplaced axes:wrappedAxes name:nil];
+        }
       }
 
       MPSGraphTensor* outputTensor = castOutputTensor;
@@ -442,6 +447,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       const std::optional<Scalar>& correction,
                                       bool keepdim,
                                       StdVarType stdVarType) {
+  TORCH_CHECK_NOT_IMPLEMENTED(input_t.scalar_type() != kLong, "Not implemented for MPS");
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
@@ -1028,15 +1034,18 @@ TORCH_IMPL_FUNC(prod_out_mps)
 }
 
 TORCH_IMPL_FUNC(amax_out_mps)(const Tensor& input_t, IntArrayRef dim, bool keepdim, const Tensor& output_t) {
+  TORCH_CHECK(!c10::isComplexType(input_t.scalar_type()), "amax is not defined for complex types");
   reduction_out_mps(input_t, dim, keepdim, std::nullopt, output_t, MPSReductionType::AMAX, "amax_out_mps");
 }
 
 TORCH_IMPL_FUNC(amin_out_mps)(const Tensor& input_t, IntArrayRef dim, bool keepdim, const Tensor& output_t) {
+  TORCH_CHECK(!c10::isComplexType(input_t.scalar_type()), "amin is not defined for complex types");
   reduction_out_mps(input_t, dim, keepdim, std::nullopt, output_t, MPSReductionType::AMIN, "amin_out_mps");
 }
 
 TORCH_IMPL_FUNC(aminmax_out_mps)
 (const Tensor& input_t, std::optional<int64_t> dim_opt, bool keepdim, const Tensor& min_t, const Tensor& max_t) {
+  TORCH_CHECK(!c10::isComplexType(input_t.scalar_type()), "aminmax is not defined for complex types");
   reduction_out_mps(input_t,
                     dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : std::nullopt,
                     keepdim,
