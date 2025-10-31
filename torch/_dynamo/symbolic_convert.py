@@ -2640,7 +2640,7 @@ class InstructionTranslatorBase(
         except Unsupported as e:
             if not self.should_compile_partial_graph():
                 raise
-            reason = f"Encountered graph break when attempting to store an object's attribute:\n\n{str(e)}"
+            reason = f"Encountered graph break when attempting to store an object's attribute (STORE_ATTR):\n\n{str(e)}"
             self.log_graph_break(
                 self.code_options,
                 reason=reason,
