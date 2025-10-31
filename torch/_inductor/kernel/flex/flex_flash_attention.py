@@ -97,15 +97,6 @@ def patch_fixed_layout_indexer_for_cutedsl():
         FixedLayout.make_indexer = original_make_indexer  # type: ignore[assignment]
 
 
-def with_cutedsl_indexer(fn: Callable[..., Any]) -> Callable[..., Any]:
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        with patch_fixed_layout_indexer_for_cutedsl():
-            return fn(*args, **kwargs)
-
-    return wrapper
-
-
 def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
     """Check if any of the input buffers (beyond the score mod placeholders) require gradients."""
     inputs = []
@@ -284,9 +275,11 @@ def create_flex_flash_attention_kernel(
         def make_kernel_render_with_patch(*args, **kwargs):
             render_kernel, render = original_make_kernel_render(*args, **kwargs)
 
-            @with_cutedsl_indexer
+            # Let the template construct its closures, then scope the indexer patch
+            # to the actual render call that emits the kernel
             def render_with_patch():
-                return render()
+                with patch_fixed_layout_indexer_for_cutedsl():
+                    return render()
 
             return render_kernel, render_with_patch
 
