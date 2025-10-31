@@ -1,4 +1,5 @@
 import itertools
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, NamedTuple, Optional
@@ -126,6 +127,64 @@ class DTensorSpec:
             if value
         )
         return default_shard_order
+
+    @staticmethod
+    def _maybe_convert_StridedShard_to_shard_order(
+        placements: tuple[Placement, ...], mesh: DeviceMesh
+    ) -> Optional[ShardOrder]:
+        """
+        Try convert _StridedShard to ShardOrder.
+        """
+        if not any(isinstance(p, _StridedShard) for p in placements):
+            return DTensorSpec.compute_default_shard_order(placements)
+        max_tensor_dim = max([i.dim for i in placements if isinstance(i, Shard)])
+        shard_order = []
+        for tensor_dim in range(max_tensor_dim + 1):
+            tensor_dim_order: list[int] = []
+            for mesh_dim in reversed(range(len(placements))):
+                cur_placement = placements[mesh_dim]
+                if isinstance(cur_placement, Shard) and cur_placement.dim == tensor_dim:
+                    cur_sf = 1
+                    if isinstance(cur_placement, _StridedShard):
+                        cur_sf = cur_placement.split_factor
+                    accumulated_sf = 1
+                    find_order = False
+                    for i in range(len(tensor_dim_order) + 1):
+                        if accumulated_sf == cur_sf:
+                            tensor_dim_order.insert(i, mesh_dim)
+                            find_order = True
+                            break
+                        if i < len(tensor_dim_order):
+                            accumulated_sf *= mesh.size(tensor_dim_order[i])
+                    if not find_order:
+                        # _StridedShard is not convertible to ShardOrder
+                        return None
+            if len(tensor_dim_order) > 0:
+                shard_order.append(
+                    ShardOrderEntry(
+                        tensor_dim=tensor_dim, mesh_dims=tuple(tensor_dim_order)
+                    )
+                )
+        return tuple(shard_order)
+
+    @staticmethod
+    def _convert_shard_order_to_StridedShard(
+        shard_order: ShardOrder, placements: tuple[Placement, ...], mesh: DeviceMesh
+    ) -> tuple[Placement, ...]:
+        """
+        Convert ShardOrder to _StridedShard.
+        """
+        placements_list = list(placements)
+        for entry in shard_order:
+            tensor_dim = entry.tensor_dim
+            mesh_dims = entry.mesh_dims
+            for idx in range(len(mesh_dims)):
+                mesh_dim = mesh_dims[idx]
+                count = math.prod(mesh.size(i) for i in mesh_dims[:idx] if i > mesh_dim)
+                placements_list[mesh_dim] = _StridedShard(
+                    tensor_dim, split_factor=count
+                )
+        return tuple(placements_list)
 
     def _verify_shard_order(self, shard_order: ShardOrder) -> None:
         """Verify that the shard_order is valid and matches the placements."""
