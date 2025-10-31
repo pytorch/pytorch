@@ -2928,16 +2928,13 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
 
   // for real-valued 'input', eigenvalues can be real-valued or complex-valued
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY((toComplexType(input.scalar_type()) == values.scalar_type()) || (input.scalar_type() == values.scalar_type()));
-  //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
 
   // for real-valued 'input', eigenvectors can be real-valued or complex-valued
   if (compute_eigenvectors) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY((toComplexType(input.scalar_type()) == vectors.scalar_type()) || (input.scalar_type() == vectors.scalar_type()));
-    //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.device() == at::kCPU);
   }
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.scalar_type() == at::kInt);
-  //TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.numel() == std::max<int64_t>(1, batchCount(input)));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_contiguous());
 
