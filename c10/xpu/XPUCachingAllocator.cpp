@@ -1049,21 +1049,6 @@ class DeviceCachingAllocator {
     }
   }
 
-  void addPeerAccess(c10::DeviceIndex dev_to_access) {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-
-    if (std::find(
-            devices_with_peer_access.begin(),
-            devices_with_peer_access.end(),
-            dev_to_access) != devices_with_peer_access.end()) {
-      return;
-    }
-    devices_with_peer_access.push_back(dev_to_access);
-    for (const auto& es : expandable_segments) {
-      es->addPeer(dev_to_access);
-    }
-  }
-
   double getMemoryFraction() {
     if (!set_fraction) {
       return 1.0;
