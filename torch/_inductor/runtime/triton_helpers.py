@@ -249,13 +249,8 @@ def device_assert_then(cond, msg, r):
 
 
 @triton.jit
-def rand_eager_kernel(
-    seed,
-    offset_blocks,
-    tid: tl.tensor,
-    VEC: tl.constexpr
-):
-    inv  = 1.0 / 4294967296.0
+def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
+    inv = 1.0 / 4294967296.0
     half = inv * 0.5
 
     tid_u64 = tid.to(tl.uint64)
@@ -279,6 +274,7 @@ def rand_eager_kernel(
     rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
 
     return 1.0 - (rand_int.to(tl.float32) * inv + half)
+
 
 @triton.jit
 def randint64(seed, offset, low, high):

@@ -84,7 +84,9 @@ class OpsHandler(Generic[T]):
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
         raise NotImplementedError
 
-    def rand_eager(self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T) -> T:
+    def rand_eager(
+        self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T
+    ) -> T:
         """Computes inductor_prims.random with mode="rand_eager". Only when torch._inductor.config.align_random_eager=True  offset has dtype int32."""
         raise NotImplementedError
 

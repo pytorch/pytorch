@@ -2431,16 +2431,27 @@ def inductor_lookup_seed(seeds, index):
         ranges=[],
     )
 
+
 def get_seed_and_threads_per_round(x_device_index: int, nelem: int):
     UNROLL = 4
     prop = torch.cuda.get_device_properties(x_device_index)
-    threads_per_round = prop.multi_processor_count * prop.max_threads_per_multi_processor
+    threads_per_round = (
+        prop.multi_processor_count * prop.max_threads_per_multi_processor
+    )
     gen = torch.cuda.default_generators[x_device_index]
     seed = int(gen.initial_seed())
     return seed, threads_per_round
 
+
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0, align_dtype: torch.dtype = torch.float32):
+def inductor_random(
+    size: list[int],
+    seed: TensorBox,
+    mode: str,
+    *,
+    offset: int = 0,
+    align_dtype: torch.dtype = torch.float32,
+):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2453,15 +2464,21 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
 
     if config.align_random_eager:
         nelem = math.prod(size)
-        seed_val, threads_per_round = get_seed_and_threads_per_round(device.index, nelem)
+        seed_val, threads_per_round = get_seed_and_threads_per_round(
+            device.index, nelem
+        )
+
         def _vec_from_dtype(dt: torch.dtype) -> int:
-            if dt in (torch.float16, torch.bfloat16): return 8
-            if dt is torch.float64: return 2
+            if dt in (torch.float16, torch.bfloat16):
+                return 8
+            if dt is torch.float64:
+                return 2
             return 4
+
         vec = _vec_from_dtype(align_dtype)
 
         def inner_fn(index):
-            return getattr(ops, "rand_eager")(
+            return ops.rand_eager(
                 seed_val,
                 seed_loader([]),
                 threads_per_round,
@@ -2469,6 +2486,7 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
                 vec=int(vec),
             )
     else:
+
         def inner_fn(index):
             return getattr(ops, mode)(
                 seed_loader([]),

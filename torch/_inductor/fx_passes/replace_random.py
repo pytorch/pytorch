@@ -22,6 +22,7 @@ aten = torch.ops.aten
 
 from torch.library import custom_op
 
+
 # ---- host helpers ----
 def _compute_grid_x(nelem: int, block: int, device_index: int) -> int:
     prop = torch.cuda.get_device_properties(device_index)
@@ -29,6 +30,7 @@ def _compute_grid_x(nelem: int, block: int, device_index: int) -> int:
     max_blocks = prop.multi_processor_count * blocks_per_sm
     need_blocks = (nelem + block - 1) // block
     return min(max_blocks, need_blocks)
+
 
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
@@ -38,10 +40,15 @@ def _shape_to_offset(size, device: torch.device) -> int:
     UNROLL = 4
     prop = torch.cuda.get_device_properties(device)
 
-    threads_per_round = prop.multi_processor_count * prop.max_threads_per_multi_processor
-    rounds_per_thread = (nelem + threads_per_round * UNROLL - 1) // (threads_per_round * UNROLL)
+    threads_per_round = (
+        prop.multi_processor_count * prop.max_threads_per_multi_processor
+    )
+    rounds_per_thread = (nelem + threads_per_round * UNROLL - 1) // (
+        threads_per_round * UNROLL
+    )
     used_offset = rounds_per_thread * UNROLL
     return used_offset
+
 
 def _reserve_offset(device: torch.device, used_offset: int) -> int:
     dev_index = device.index if isinstance(device, torch.device) else int(device)
@@ -50,12 +57,14 @@ def _reserve_offset(device: torch.device, used_offset: int) -> int:
     gen.set_offset(old_off + used_offset)
     return old_off // 4
 
+
 @custom_op("custom_op::rand_eager_offset", mutates_args={})
 def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
     base = _reserve_offset(device, int(offset))
     out = torch.empty(1, dtype=torch.int64, device=device)
     out.fill_(int(base))
     return out
+
 
 @custom_op("custom_op::rand_eager_offsets", mutates_args={})
 def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor:
@@ -65,13 +74,16 @@ def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor
     out.copy_(cpu, non_blocking=True)
     return out
 
+
 @rand_eager_offset.register_fake
 def _(offset: int, device: torch.device):
     return torch.empty((1,), dtype=torch.int64, device=device)
 
+
 @rand_eager_offsets.register_fake
 def _(offsets: list[int], device: torch.device):
     return torch.empty((len(offsets),), dtype=torch.int64, device=device)
+
 
 def replace_random_passes(gm: torch.fx.GraphModule):
     """Modify the given FX graph to use backend-native random ops"""
@@ -86,6 +98,7 @@ def replace_random_passes(gm: torch.fx.GraphModule):
             count += fuse_offset_creation_pass(gm.graph)
 
     return count
+
 
 def fuse_offset_creation_pass(graph: torch.fx.Graph):
     """
@@ -112,7 +125,9 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph):
     for device, offsets in device_offsets.items():
         with graph.inserting_before(offsets[0]):
             offs = [n.args[0] for n in offsets]
-            combined = graph.call_function(torch.ops.custom_op.rand_eager_offsets.default, (offs, device))
+            combined = graph.call_function(
+                torch.ops.custom_op.rand_eager_offsets.default, (offs, device)
+            )
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
                     [len(offsets)], device=device, dtype=torch.int64
@@ -131,6 +146,7 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph):
             graph.erase_node(offset)
 
     return len(device_offsets)
+
 
 def fuse_seed_creation_pass(graph: torch.fx.Graph):
     """
@@ -225,6 +241,7 @@ def replace_random(
     device = get_device(device)
 
     if mode == "rand" and config.align_random_eager:
+
         def replacement(size):
             offset = _shape_to_offset(size, device)
 
@@ -235,7 +252,11 @@ def replace_random(
                 align_dtype = torch.float32
 
             result = inductor_prims.random(
-                size, torch.ops.custom_op.rand_eager_offset(offset, device), mode, **default_kwargs(device), align_dtype=align_dtype,
+                size,
+                torch.ops.custom_op.rand_eager_offset(offset, device),
+                mode,
+                **default_kwargs(device),
+                align_dtype=align_dtype,
             )
             if dtype is not None:
                 result = result.to(dtype)
