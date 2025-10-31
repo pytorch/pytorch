@@ -57,7 +57,7 @@ struct ConcretePyInterpreterVTable final
   void reportErrorCallback(PyObject* callback, DispatchKey key) const override;
   void python_dispatcher(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet,
+      c10::DispatchKeySet /*ks*/,
       torch::jit::Stack* stack) const override;
   // NB: this is defined in python_dispatch.cpp
   void python_op_registration_trampoline(
@@ -80,10 +80,15 @@ struct ConcretePyInterpreterVTable final
             opname, pymodule, context);
   }
 
-  bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
-      const override;
-  bool is_strides_like(const c10::TensorImpl* self, at::MemoryFormat)
-      const override;
+  bool is_contiguous(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
+  c10::SymBool sym_is_contiguous(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
+  bool is_strides_like(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
   bool is_non_overlapping_and_dense(const c10::TensorImpl* self) const override;
   c10::Device device(const c10::TensorImpl* self) const override;
   int64_t dim(const c10::TensorImpl* self) const override;
@@ -265,7 +270,7 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
           "This probably happened because you took out a weak reference to "
           "Tensor and didn't call _fix_weakref() after dereferencing it.  "
           "Subsequent accesses to this tensor via the PyObject will now fail.");
-      ((THPVariable*)pyobj)->cdata =
+      (reinterpret_cast<THPVariable*>(pyobj))->cdata =
           c10::MaybeOwned<torch::autograd::Variable>();
     } else if (THPStorage_Check(pyobj)) {
       TORCH_WARN(
@@ -273,7 +278,8 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
           "This probably happened because you took out a weak reference to "
           "UntypedStorage and didn't call _fix_weakref() after dereferencing it.  "
           "Subsequent accesses to this storage via the PyObject will now fail.");
-      ((THPStorage*)pyobj)->cdata = c10::MaybeOwned<c10::Storage>();
+      (reinterpret_cast<THPStorage*>(pyobj))->cdata =
+          c10::MaybeOwned<c10::Storage>();
     }
   }
   Py_DECREF(pyobj);
@@ -474,6 +480,33 @@ bool ConcretePyInterpreterVTable::is_contiguous(
       ", expected bool");
 
   return PyObject_IsTrue(out.ptr());
+}
+
+c10::SymBool ConcretePyInterpreterVTable::sym_is_contiguous(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  py::object out;
+  out = torchDispatchFromTensorImpl(
+      self,
+      "sym_is_contiguous",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_is_contiguous")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten",
+      {py::cast(memory_format)});
+
+  if (out.is_none()) {
+    return self->sym_is_contiguous_default(memory_format);
+  }
+
+  return torch::is_symbool(out) ? out.cast<c10::SymBool>()
+                                : c10::SymBool{py::cast<bool>(out)};
 }
 
 bool ConcretePyInterpreterVTable::is_strides_like(

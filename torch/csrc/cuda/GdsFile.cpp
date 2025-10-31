@@ -47,7 +47,7 @@ void gds_load_storage(
   const size_t nbytes = storage.nbytes();
 
   // Read the binary file
-  ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, offset, 0);
+  ssize_t ret = cuFileRead(cf_handle, dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
 }
 

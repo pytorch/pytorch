@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, Optional, Union
+from typing import Any, get_args, Optional, Union
 
 import torch
 import torch._library.utils as library_utils
@@ -239,7 +239,7 @@ def write_view_information_to_args(
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
-                arg_to_base_index.get(arg_name, None),  # type: ignore[arg-type]
+                arg_to_base_index.get(arg_name),  # type: ignore[arg-type]
             )
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -390,7 +390,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         if isinstance(_mutable_op, HigherOrderOperator):
             _op_to_check = HopInstance(
                 _mutable_op,
-                SchemaHolder.from_tree_spec(kwargs.get("_op_schema", None)).schema,  # type: ignore[arg-type]
+                SchemaHolder.from_tree_spec(kwargs.get("_op_schema")).schema,  # type: ignore[arg-type]
             )
         else:
             _op_to_check = _mutable_op
@@ -508,7 +508,7 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:
@@ -518,7 +518,8 @@ def do_auto_functionalize(
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
-            "Please consider using a different name for this argument to avoid potential issues."
+            "Please consider using a different name for this argument to avoid potential issues.",
+            stacklevel=2,
         )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
@@ -609,6 +610,7 @@ def do_auto_functionalize_v2(
     normalized_kwargs = {}
 
     schema = op._schema
+    # pyrefly: ignore  # bad-assignment
     op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
 
@@ -625,7 +627,7 @@ def do_auto_functionalize_v2(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:
@@ -690,7 +692,8 @@ def do_auto_functionalize_v2(
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
-            "Please consider using a different name for this argument to avoid potential issues."
+            "Please consider using a different name for this argument to avoid potential issues.",
+            stacklevel=2,
         )
     all_basis_unwrapped = ctx.unwrap_tensors(all_bases)
 
@@ -957,11 +960,11 @@ def auto_functionalized_v2_proxy(
         # hop node in the traced graph and graph module inputs to the hop. Finally, we replace the
         # original kwarg's callable with the graph module.
         all_bases = kwargs.get("_all_bases", [])
-        _only_clone_these_bases = kwargs.get("_only_clone_these_bases", None)
+        _only_clone_these_bases = kwargs.get("_only_clone_these_bases")
         if _only_clone_these_bases is None:
             _only_clone_these_bases = tuple(range(len(all_bases)))
 
-        schema = pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema  # type: ignore[arg-type]
+        schema = pytree.tree_unflatten([], kwargs.get("_op_schema")).schema  # type: ignore[arg-type]
         new_kwargs, _ = _generate_new_op_kwargs_from_bases(
             schema,
             {k: v for k, v in kwargs.items() if k not in ("_all_bases", "_op_schema")},

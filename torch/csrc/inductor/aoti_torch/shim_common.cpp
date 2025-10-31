@@ -28,6 +28,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
+#include <c10/util/FileSystem.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -57,57 +58,7 @@
 #include <ATen/ops/scatter_reduce.h>
 #include <ATen/ops/view_as_real_ops.h>
 #include <ATen/ops/view_ops.h>
-
 #endif
-
-#ifndef _WIN32
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <climits>
-
-#else
-#include <filesystem>
-namespace fs = std::filesystem;
-#endif
-
-// HACK for failed builds in ARVR, where it cannot find these symbols within
-// std::experimental::filesystem
-namespace {
-std::string get_current_path() {
-#ifdef _WIN32
-  return fs::current_path().string();
-#else
-  // NOLINTNEXTLINE(*array*)
-  char currentPath[PATH_MAX]{};
-  if (getcwd(currentPath, sizeof(currentPath)) != nullptr) {
-    return std::string(currentPath);
-  } else {
-    throw std::runtime_error("Failed to get current path");
-  }
-#endif
-}
-
-bool file_exists(std::string& path) {
-#ifdef _WIN32
-  return fs::exists(path);
-#else
-  struct stat rc{};
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
-
-bool create_directories(const std::string& path) {
-#ifdef _WIN32
-  return fs::create_directories(path);
-#else
-  if (mkdir(path.c_str(), 0777) == -1) {
-    throw std::runtime_error("Failed to create directory");
-  }
-  return true;
-#endif
-}
-} // namespace
 
 using namespace torch::aot_inductor;
 
@@ -267,6 +218,55 @@ AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     delete t;
+  });
+}
+
+AOTITorchError aoti_torch_delete_c10_value_object(C10IValueHandle handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = reinterpret_cast<c10::IValue*>(handle);
+    delete t;
+  });
+}
+
+AOTITorchError aoti_torch_int64_to_ivalue(
+    int64_t val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_str_to_ivalue(
+    const char* val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::string> vec;
+    for (int64_t i = 0; i < len; i++) {
+      vec.push_back(std::string(val[i]));
+    }
+    c10::IValue* t = new c10::IValue(vec);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_tensor_to_ivalue(
+    AtenTensorHandle tensor,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* tmp_tensor = tensor_handle_to_tensor_pointer(tensor);
+    c10::IValue* tmp_ivalue = new c10::IValue(*tmp_tensor);
+    *ivalue = reinterpret_cast<C10IValueHandle>(tmp_ivalue);
   });
 }
 
@@ -1124,7 +1124,7 @@ AOTITorchError aoti_record_function_start(
 
     std::vector<c10::IValue> recordInputs(n_inputs);
     for (size_t i = 0; i < n_inputs; i++) {
-      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+      recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
     newGuard->before(name, &recordInputs, &recordKwargs);
@@ -1232,21 +1232,22 @@ void aoti_torch_save_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  std::string cwd = get_current_path();
-  std::string tmp_folder = cwd + "/tmp/aoti_torch/";
-  if (!file_exists(tmp_folder)) {
+  auto cwd = c10::filesystem::current_path();
+  auto tmp_folder = cwd / "tmp" / "aoti_torch";
+  if (!c10::filesystem::exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
         << tmp_folder << '\n';
 
-    if (!create_directories(tmp_folder)) {
+    std::error_code ec{};
+    if (!c10::filesystem::create_directories(tmp_folder, ec)) {
       std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
-                << tmp_folder << '\n';
+                << tmp_folder << " error:" << ec.message() << '\n';
       return;
     }
   }
-  std::string tensor_filepath_to_save = tmp_folder + launch_prefix + "_" +
-      kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
+  std::string tensor_filepath_to_save = tmp_folder.string() + launch_prefix +
+      "_" + kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
@@ -1373,11 +1374,8 @@ void aoti_torch_warn(
     const char* file,
     uint32_t line,
     const char* msg) {
-  ::c10::warn(::c10::Warning(
-      ::c10::UserWarning(),
-      {func, file, static_cast<uint32_t>(line)},
-      msg,
-      false));
+  ::c10::warn(
+      ::c10::Warning(::c10::UserWarning(), {func, file, line}, msg, false));
 }
 
 AOTITorchError aoti_torch__alloc_from_pool(
@@ -1415,28 +1413,28 @@ static StableIValue from_ivalue(
     case c10::TypeKind::TensorType: {
       AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
           std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
-      return from(ath);
+      return torch::stable::detail::from(ath);
     }
     case c10::TypeKind::IntType: {
-      return from(ivalue.toInt());
+      return torch::stable::detail::from(ivalue.toInt());
     }
     case c10::TypeKind::FloatType: {
-      return from(ivalue.toDouble());
+      return torch::stable::detail::from(ivalue.toDouble());
     }
     case c10::TypeKind::BoolType: {
-      return from(ivalue.toBool());
+      return torch::stable::detail::from(ivalue.toBool());
     }
     case c10::TypeKind::ScalarTypeType: {
-      return from(ivalue.toScalarType());
+      return torch::stable::detail::from(ivalue.toScalarType());
     }
     case c10::TypeKind::DeviceObjType: {
-      return from(ivalue.toDevice());
+      return torch::stable::detail::from(ivalue.toDevice());
     }
     case c10::TypeKind::LayoutType: {
-      return from(ivalue.toLayout());
+      return torch::stable::detail::from(ivalue.toLayout());
     }
     case c10::TypeKind::MemoryFormatType: {
-      return from(ivalue.toMemoryFormat());
+      return torch::stable::detail::from(ivalue.toMemoryFormat());
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1446,17 +1444,18 @@ static StableIValue from_ivalue(
       // able to follow the patterned semantic of every other case here in one
       // line:
       //
-      // return from<std::optional<inner_type::t>>(ivalue.toInnerTypeT()));
+      // return
+      // torch::stable::detail::from<std::optional<inner_type::t>>(ivalue.toInnerTypeT()));
       //
       // BUT we do NOT have that type inner_type::t readily available, so we
       // will manually unwrap and recursively call. This implementation MUST
-      // be kept in sync with from<std::optional<T>> function in
-      // torch/csrc/stable/library.h
+      // be kept in sync with torch::stable::detail::from<std::optional<T>>
+      // function in torch/csrc/stable/stableivalue_conversions.h
       if (ivalue.isNone()) {
-        return from(std::nullopt);
+        return torch::stable::detail::from(std::nullopt);
       }
       StableIValue* sivp = new StableIValue(from_ivalue(inner_type, ivalue));
-      return from(sivp);
+      return torch::stable::detail::from(sivp);
     }
     default: {
       TORCH_CHECK(
@@ -1473,30 +1472,32 @@ static c10::IValue to_ivalue(
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          to<AtenTensorHandle>(stable_ivalue));
+          torch::stable::detail::to<AtenTensorHandle>(stable_ivalue));
       return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
           ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
-      return c10::IValue(to<int64_t>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<int64_t>(stable_ivalue));
     }
     case c10::TypeKind::FloatType: {
-      return c10::IValue(to<double>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<double>(stable_ivalue));
     }
     case c10::TypeKind::BoolType: {
-      return c10::IValue(to<bool>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<bool>(stable_ivalue));
     }
     case c10::TypeKind::ScalarTypeType: {
-      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
+      return c10::IValue(
+          torch::stable::detail::to<c10::ScalarType>(stable_ivalue));
     }
     case c10::TypeKind::DeviceObjType: {
-      return c10::IValue(to<c10::Device>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<c10::Device>(stable_ivalue));
     }
     case c10::TypeKind::LayoutType: {
-      return c10::IValue(to<c10::Layout>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<c10::Layout>(stable_ivalue));
     }
     case c10::TypeKind::MemoryFormatType: {
-      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+      return c10::IValue(
+          torch::stable::detail::to<c10::MemoryFormat>(stable_ivalue));
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1506,16 +1507,17 @@ static c10::IValue to_ivalue(
       // able to follow the patterned semantic of every other case here in one
       // line:
       //
-      // return c10::IValue(to<std::optional<inner_type::t>>(stable_ivalue));
+      // return
+      // c10::IValue(torch::stable::detail::to<std::optional<inner_type::t>>(stable_ivalue));
       //
       // BUT we do NOT have that type inner_type::t readily available, so we
       // will manually unwrap and recursively call. This implementation MUST
-      // be kept in sync with the to<T> function in
-      // torch/csrc/stable/library.h
-      if (stable_ivalue == from(std::nullopt)) {
+      // be kept in sync with the torch::stable::detail::to<T> function in
+      // torch/csrc/stable/stableivalue_conversions.h
+      if (stable_ivalue == torch::stable::detail::from(std::nullopt)) {
         return c10::IValue();
       }
-      auto sivp = to<StableIValue*>(stable_ivalue);
+      auto sivp = torch::stable::detail::to<StableIValue*>(stable_ivalue);
       auto ival = to_ivalue(inner_type, *sivp);
       delete sivp;
       return ival;

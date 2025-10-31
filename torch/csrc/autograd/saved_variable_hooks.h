@@ -11,8 +11,8 @@ struct TORCH_API SavedVariableHooks {
   virtual ~SavedVariableHooks() = default;
   virtual std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
   retrieve_unpack_hook_data() const {
-    throw std::runtime_error(
-        "Compiled Autograd only supports python saved tensor hooks ");
+    TORCH_CHECK(
+        false, "Compiled Autograd only supports python saved tensor hooks ");
   }
 };
 

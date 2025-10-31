@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import re
 from collections import defaultdict, OrderedDict
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule

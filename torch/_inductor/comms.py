@@ -52,6 +52,28 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import BaseSchedulerNode
 
 
+def align_runtime_estimations_across_all_distributed_ranks(
+    snodes: list[BaseSchedulerNode],
+):
+    runtime_estimations = {}
+    for snode in snodes:
+        runtime_estimations[snode] = snode.get_estimated_runtime()
+    import torch.distributed as dist
+    from torch.distributed.distributed_c10d import _get_default_group
+
+    world_size = dist.get_world_size()
+    pg = _get_default_group()
+    gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
+    dist.all_gather_object(
+        gathered_runtime_estimations, list(runtime_estimations.values()), pg
+    )
+    median_runtime_estimations = torch.median(
+        torch.tensor(gathered_runtime_estimations), dim=0
+    ).values.tolist()
+    for i in range(len(snodes)):
+        snodes[i].override_estimated_runtime = median_runtime_estimations[i]
+
+
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
@@ -443,6 +465,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     while _next[curr] is not None:
         if iterative_recompute_error:
             break
+        # pyrefly: ignore [bad-argument-type]
         if contains_collective(curr):
             if debug_num_collectives_to_reorder is not None and (
                 num_processed_collectives >= debug_num_collectives_to_reorder
@@ -804,11 +827,13 @@ def _schedule_for_comm(
             and (candidate := get_overlapping_candidate()) is not None
         ):
             ready.remove(candidate)
+
             schedule(candidate.snode)
+
             collective_cost -= snode_to_cost[candidate.snode]
         heapq.heapify(ready)
 
-    while len(ready):
+    while ready:
         snode = heapq.heappop(ready).snode
         if reorder_for_overlap and contains_collective(snode):
             schedule_collective_for_overlap(snode)
@@ -1006,6 +1031,7 @@ def _sink_waits_iterative_internal(
         ):
             break
 
+        # pyrefly: ignore [bad-argument-type]
         if contains_wait(curr) and curr not in processed_waits:
             processed_waits.add(curr)
             info = stats[curr] = SinkWaitInfo()
@@ -1071,6 +1097,7 @@ def _sink_waits_iterative_internal(
                         info.grouped_info = _group_names(gns)
                         candidate = _next[candidate]
                         continue
+
                     elif (data_dep is None) and both_contain_comms:
                         info.limiting_factor = (
                             f"collective ordering {_group_names(gns)}"
@@ -1343,6 +1370,7 @@ def reorder_compute_and_comm_for_overlap(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
         print(f"final {peak_memory=}")
+    # pyrefly: ignore [bad-return]
     return order
 
 
@@ -1391,7 +1419,7 @@ Resize can only operate on graph inputs, but got {node} which is resizing non-gr
         )
         resized_to_0_idxes = graph_input_to_resized_to_0_node_idxes.get(graph_input, [])
 
-        if not len(resized_to_full_idxes) == len(resized_to_0_idxes):
+        if len(resized_to_full_idxes) != len(resized_to_0_idxes):
             log.warning(
                 f"""
 Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
@@ -1610,6 +1638,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             KeywordArg("group_size"),
             KeywordArg("group_name"),
         ),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
         extra_check=lambda match: match.kwargs["item_idx"] == 0,
     )
@@ -1633,6 +1662,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             return all_gather_into_tensor
 
         match.replace_by_example(
+            # pyrefly: ignore [bad-argument-type]
             repl,
             [
                 kwargs["all_gather_inputs"],
