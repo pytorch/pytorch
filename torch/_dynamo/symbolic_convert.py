@@ -1376,6 +1376,19 @@ class InstructionTranslatorBase(
         except (ReturnValueOp, YieldValueOp):
             return False
         except (Unsupported, StepUnsupported) as e:
+            # More restrictive condition than should_compile_partial_graph:
+            # if this condition is true, then we SHOULD NOT attempt to find
+            # a previous checkpoint to resume from and try to resume - we should
+            # immediately error out.
+            # The condition is more restrictive because, it may be possible to resume significantly earlier
+            # in the code (the most recent speculation point). This happens, for example, in the case
+            # of a graph break in a try block.
+            if (
+                self.one_graph
+                or self.error_on_graph_break
+                or self.is_tracing_resume_prologue
+            ):
+                raise
             if self.current_speculation is None:
                 log.debug("empty checkpoint")
                 if isinstance(e, StepUnsupported):
@@ -2087,7 +2100,7 @@ class InstructionTranslatorBase(
     def _raise_exception_variable(self, val: VariableTracker) -> NoReturn:
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
-        #   2) raise exception instance - raise NotImplemetedError("foo")
+        #   2) raise exception instance - raise NotImplementedError("foo")
 
         # 1) when user raises exception type
         val = self._create_exception_type(val)
@@ -2138,7 +2151,7 @@ class InstructionTranslatorBase(
             try:
                 self._raise_exception_variable(val)
             finally:
-                # Update __cause__/__supppress_context__ in the raised exception
+                # Update __cause__/__suppress_context__ in the raised exception
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 cause = self._create_exception_type(from_vt)
                 curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
@@ -2415,8 +2428,8 @@ class InstructionTranslatorBase(
 
         # Users can check exception in 3 ways
         # 1) except NotImplementedError --> BuiltinVariable
-        # 2) except CustomException --> UserDefinedExceptionClasVariable
-        # 3) except (NotImplemetedError, AttributeError) -> TupleVariable
+        # 2) except CustomException --> UserDefinedExceptionClassVariable
+        # 3) except (NotImplementedError, AttributeError) -> TupleVariable
 
         if not isinstance(
             expected_exc_types,
@@ -3243,7 +3256,7 @@ class InstructionTranslatorBase(
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(SliceVariable(items))
+        self.push(SliceVariable(items, tx=self))
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)

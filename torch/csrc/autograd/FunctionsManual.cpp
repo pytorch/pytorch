@@ -4568,7 +4568,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
   if (!grad.defined() || (!A_requires_grad && !B_requires_grad)) {
     return std::make_tuple(Tensor{}, Tensor{});
   }
-  // We always need to comput G_B
+  // We always need to compute G_B
   const Tensor A_H = A.mH();
   const Tensor G_B =
       at::linalg_solve_triangular(A_H, grad, !upper, left, unitriangular);
