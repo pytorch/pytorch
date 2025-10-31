@@ -2457,7 +2457,11 @@ class BuiltinVariable(VariableTracker):
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
         ]
-        return variables.MapVariable(fn, seq_list, mutation_type=ValueMutationNew())
+        return variables.MapVariable(
+            fn,
+            seq_list,  # type: ignore[arg-type]
+            mutation_type=ValueMutationNew()
+        )
 
     def call_filter(
         self, tx: "InstructionTranslator", fn: VariableTracker, seq: VariableTracker
@@ -2466,7 +2470,9 @@ class BuiltinVariable(VariableTracker):
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
         )
         return variables.FilterVariable(
-            fn, seq_or_list, mutation_type=ValueMutationNew()
+            fn,
+            seq_or_list,  # type: ignore[arg-type]
+            mutation_type=ValueMutationNew()
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
