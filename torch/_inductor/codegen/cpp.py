@@ -159,11 +159,14 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
 ]
 
 MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
+    torch.float64,
     torch.float,
     torch.bfloat16,
     torch.float16,
     torch.uint8,
     torch.int8,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
 ]
 
 
@@ -1119,6 +1122,14 @@ class CppOverrides(OpOverrides):
             code.writeline("return left - right;")
         code.writeline("()")
         return code
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> None:
+        raise NotImplementedError
 
 
 CppOverrides._initialize_pointwise_overrides("cpp")
@@ -2532,7 +2543,7 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
-            return "AOTI_TORCH_CHECK"
+            return "STD_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
 
@@ -5460,7 +5471,16 @@ class CppScheduling(BaseScheduling):
                 src_code, self.kernel_group.scheduled_nodes
             )
             self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
+            if config.cpp.enable_kernel_profile:
+                V.graph.wrapper_code.write_kernel_context_guard_begin()
+                V.graph.wrapper_code.write_kernel_context_guard(
+                    kernel_name,
+                    self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
+                )
             self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
+            if config.cpp.enable_kernel_profile:
+                V.graph.wrapper_code.write_kernel_context_guard_end()
+
         self.reset_kernel_group()
         self._set_flush_status(False)
 
