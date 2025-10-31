@@ -1416,6 +1416,7 @@ TORCH_IMPL_FUNC(silu_out_mps)(const Tensor& self, const Tensor& result) {
   using CachedGraph = MPSUnaryCachedGraph;
 
   TORCH_CHECK(self.is_mps());
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
 
   // Empty output
   if (result.numel() == 0)
