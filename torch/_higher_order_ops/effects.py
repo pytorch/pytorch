@@ -26,7 +26,10 @@ OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
     [
+        (torch.ops.aten._print, _EffectType.ORDERED),
         (torch.ops.aten._print.default, _EffectType.ORDERED),
+        (torch.ops.aten._async_error, _EffectType.ORDERED),
+        (torch.ops.aten._async_error.default, _EffectType.ORDERED),
         (call_torchbind, _EffectType.ORDERED),
     ]
 )
@@ -298,5 +301,5 @@ def handle_effects(
     assert isinstance(wrapped_token, torch.Tensor)
     tokens[key] = wrapped_token
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return ctx.wrap_tensors(unwrapped_outs)

@@ -5,6 +5,7 @@
 #include <ATen/core/TorchDispatchUtils.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/ops/_async_error.h>
 
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -72,8 +73,7 @@ static void reportAutogradNotImplemented(
         "differentiable, or to squash this warning and use the previous behavior, "
         "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.");
   } else {
-    TORCH_CHECK(
-        0,
+    at::_async_error(c10::str(
         op_name,
         ": an autograd kernel was not registered to the Autograd key(s) ",
         "but we are trying to backprop through it. This can lead to silently incorrect behavior. ",
@@ -81,7 +81,7 @@ static void reportAutogradNotImplemented(
         "autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, "
         "). If your operator is not "
         "differentiable and ensure NO gradients flow through this operator, "
-        "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.")
+        "please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd."));
   }
 }
 
