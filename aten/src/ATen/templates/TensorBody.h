@@ -158,7 +158,7 @@ class TORCH_API Tensor: public TensorBase {
   // will only lead to trouble and dangling references.
   c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
 
-  // The following overloads are very intruiging.  Consider the following
+  // The following overloads are very intriguing.  Consider the following
   // program:
   //
   //    x[1] = 3;

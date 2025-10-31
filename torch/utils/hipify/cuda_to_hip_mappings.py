@@ -48,7 +48,7 @@ MATH_TRANSPILATIONS = collections.OrderedDict(
     ]
 )
 
-# pyrefly: ignore  # no-matching-overload
+# pyrefly: ignore [no-matching-overload]
 CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     [
         ("CUresult", ("hipError_t", CONV_TYPE, API_DRIVER)),
@@ -587,6 +587,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_INCLUDE_MAP = collections.OrderedDict(
     [
         # since pytorch uses "\b{pattern}\b" as the actual re pattern,
@@ -676,7 +677,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
     ]
 )
 
-# pyrefly: ignore  # no-matching-overload
+# pyrefly: ignore [no-matching-overload]
 CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     [
         ("__CUDACC__", ("__HIPCC__", CONV_DEF, API_RUNTIME)),
@@ -8370,6 +8371,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_SPECIAL_MAP = collections.OrderedDict(
     [
         # SPARSE
@@ -8852,6 +8854,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
@@ -9316,6 +9319,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
@@ -9401,6 +9405,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 #
 # NB: if you want a transformation to ONLY apply to the c10/ directory,
 # put it as API_CAFFE2
+# pyrefly: ignore [no-matching-overload]
 C10_MAPPINGS = collections.OrderedDict(
     [
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),

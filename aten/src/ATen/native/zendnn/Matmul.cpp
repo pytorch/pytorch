@@ -21,27 +21,50 @@ void zendnn_baddbmm(
       "zendnn::zendnn_baddbmm",
       std::vector<c10::IValue>({batch1, batch2, self}));
 
+  Tensor b1 = batch1;
+  Tensor b2 = batch2;
   // Infer matrix dimensions from 3D inputs:
   // [B, M, K] x [B, K, N] -> [B, M, N]
-  const int64_t M = batch1.size(1);
-  const int64_t N = batch2.size(2);
-  const int64_t K = batch1.size(2);
+  const int64_t M = b1.size(1);
+  const int64_t N = b2.size(2);
+  const int64_t K = b1.size(2);
 
-  // Leading dimensions depend on memory layout; swap if transposed.
-  const bool a_is_contig = batch1.is_contiguous();
-  const bool b_is_contig = batch2.is_contiguous();
-  const int64_t lda = a_is_contig ? K : M;
-  const int64_t ldb = b_is_contig ? N : K;
-  const int64_t ldc = N;
-  const bool transa = a_is_contig ? false : true;
-  const bool transb = b_is_contig ? false : true;
+  // Check if a 3D tensor is transposed (transposed version of a contiguous
+  // tensor) in the last two dimensions.
+  // For a transposed tensor
+  // [B, M, K] -> [B, K, M]:
+  // - stride[0] should be M*K (batch stride unchanged)
+  // - stride[1] should be 1 (innermost dimension after transpose)
+  // - stride[2] should be M (step size for original rows, now columns)
+  auto is_transposed = [](const Tensor& t) {
+    const auto sizes = t.sizes();
+    const auto strides = t.strides();
+    return strides[0] == sizes[1] * sizes[2] && strides[1] == 1 &&
+        strides[2] == sizes[1];
+  };
+
+  // check if tensor is transposed
+  bool transa = is_transposed(b1);
+  bool transb = is_transposed(b2);
+
+  // make a copy of tensor when tensor is neither contiguous nor transposed
+  b1 = (transa || b1.is_contiguous()) ? b1 : b1.contiguous();
+  b2 = (transb || b2.is_contiguous()) ? b2 : b2.contiguous();
+
+  auto strideA = b1.strides();
+  auto strideB = b2.strides();
+  auto strideC = self.strides();
+
+  const int64_t lda = transa ? strideA[2] : strideA[1];
+  const int64_t ldb = transb ? strideB[2] : strideB[1];
+  const int64_t ldc = strideC[1];
 
   data_type_t out_type = get_zendnn_dtype(self);
-  data_type_t inp_dtype = get_zendnn_dtype(batch1);
-  data_type_t wgt_dtype = get_zendnn_dtype(batch2);
+  data_type_t inp_dtype = get_zendnn_dtype(b1);
+  data_type_t wgt_dtype = get_zendnn_dtype(b2);
 
   TORCH_CHECK(
-      (batch1.scalar_type() == batch2.scalar_type()),
+      (b1.scalar_type() == b2.scalar_type()),
       "zendnn_baddbmm: batch1 and batch2 data types should be same");
 
   data_types matmul_dtype;
@@ -63,17 +86,17 @@ void zendnn_baddbmm(
       N,
       K,
       alpha,
-      batch1.data_ptr(),
+      b1.data_ptr(),
       lda,
-      batch2.data_ptr(),
+      b2.data_ptr(),
       ldb,
       nullptr,
       beta,
       self.data_ptr(),
       ldc,
       params,
-      batch1.size(0),
-      batch2.size(0));
+      b1.size(0),
+      b2.size(0));
   return;
 }
 } // namespace at::native

@@ -515,8 +515,11 @@ def meta_copy_(self, src, non_blocking=False):
 def inferUnsqueezeGeometry(tensor, dim):
     result_sizes = list(tensor.size())
     result_strides = list(tensor.stride())
+    # pyrefly: ignore [unsupported-operation]
     new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
+    # pyrefly: ignore [bad-argument-type]
     result_sizes.insert(dim, 1)
+    # pyrefly: ignore [bad-argument-type]
     result_strides.insert(dim, new_stride)
     return result_sizes, result_strides
 
@@ -2341,19 +2344,19 @@ def calc_conv_nd_return_shape(
 
     ret_shape = [input_tensor.shape[0], out_channels]
     if isinstance(stride, IntLike):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         stride = [stride] * len(dims)
     elif len(stride) == 1:
         stride = [stride[0]] * len(dims)
 
     if isinstance(padding, IntLike):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         padding = [padding] * len(dims)
     elif len(padding) == 1:
         padding = [padding[0]] * len(dims)
 
     if isinstance(dilation, IntLike):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         dilation = [dilation] * len(dims)
     elif len(dilation) == 1:
         dilation = [dilation[0]] * len(dims)
@@ -2361,7 +2364,7 @@ def calc_conv_nd_return_shape(
     output_padding_list: Optional[list[int]] = None
     if output_padding:
         if isinstance(output_padding, IntLike):
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             output_padding_list = [output_padding] * len(dims)
         elif len(output_padding) == 1:
             output_padding_list = [output_padding[0]] * len(dims)
@@ -2374,19 +2377,19 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     padding[i],
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     from torch.fx.experimental.symbolic_shapes import sym_or
@@ -3483,7 +3486,7 @@ def meta_index_Tensor(self, indices):
         """
         shape = before_shape + replacement_shape + after_shape
         strides = list(self.stride())
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         strides[len(before_shape) : len(self.shape) - len(after_shape)] = [0] * len(
             replacement_shape
         )
@@ -5340,6 +5343,7 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
+    # pyrefly: ignore [not-iterable]
     return torch.empty(size, *args, **kwargs)
 
 
@@ -6473,6 +6477,13 @@ def meta_scaled_mm(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
                 )
+            elif (
+                scale_a.size(0) == m
+                and scale_a.size(1) == scale_b.size(0) == (_k + 128 - 1) // 128
+                and scale_b.size(1) == (n + 128 - 1) // 128
+            ):
+                # (BlockWise1x128, BlockWise128x128)
+                pass  # do nothing, but do not error
             else:
                 # does not match any valid scaling type
                 torch._check(
@@ -6481,6 +6492,8 @@ def meta_scaled_mm(
                         "Invalid scaling configuration. "
                         "For tensorwise scaling, both scales should be scalar. "
                         f"For rowwise scaling, scale_a should be ({m}, 1), scale_b should be (1, {n}). "
+                        f"For (BlockWise1x128, BlockWise128x128), scale_a should be ({m}, {(_k + 128 - 1) // 128}), "
+                        + f"scale_b should be ({(_k + 128 - 1) // 128}, {(n + 128 - 1) // 128}). "
                         f"Got scale_a.size()=({scale_a.size(0)}, {scale_a.size(1)}) "
                         f"and scale_b.size()=({scale_b.size(0)}, {scale_b.size(1)})"
                     ),
@@ -6697,7 +6710,7 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),
