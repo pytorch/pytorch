@@ -1370,11 +1370,11 @@ clear_inductor_caches = clear_caches
 fresh_inductor_cache = fresh_cache
 
 
-def argsort(seq: Sequence[Any]) -> list[int]:
-    # preserve original order for equal strides
+def argsort(seq: Sequence[Any], *, reverse: bool = False) -> list[int]:
     getter = seq.__getitem__
     a_r = range(len(seq))
-    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+    # sorted preserves order when elements compare equal
+    return list(sorted(a_r, key=getter, reverse=reverse))  # noqa: C413
 
 
 def argsort_sym(
