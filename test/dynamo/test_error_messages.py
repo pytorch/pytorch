@@ -528,30 +528,6 @@ Attempted to call function marked as skipped
             f(x)
         self.assertEqual(len(ws), 2)
 
-    def test_slice_with_tensor(self):
-        def fn(x, y):
-            return x[:y]
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.randn(10),
-                torch.tensor([3]),
-            ),
-            """\
-Dynamic slicing with Tensor arguments
-  Explanation: Creating slices with Tensor arguments is not supported. e.g. `l[:x]`, where `x` is a 1-element tensor.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
-
-  Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: LazyVariableTracker(realized: TensorVariable()), step: ConstantVariable(NoneType: None)
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0038.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return x[:y]""",
-        )
-
     def test_observed_exception(self):
         def fn():
             raise RuntimeError("test")

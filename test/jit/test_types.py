@@ -341,7 +341,7 @@ class TestTypesAndAnnotation(JitTestCase):
                     self.x = x
 
                 def set(self, val: int):
-                    for i in range(3):
+                    for _ in range(3):
                         self.x: int = val
 
         # Type annotation in __init__, should not fail
