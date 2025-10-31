@@ -252,7 +252,15 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        log.debug("run_node %s", LazyString(lambda: n.format_node()))
+        log.debug(
+            "run_node %s",
+            LazyString(lambda:
+                f"{n.name} = "
+                f"{getattr(n.target, '__module__', '') + '.' if hasattr(n.target, '__module__') else ''}"
+                f"{getattr(n.target, '__name__', n.target)}"
+                f"({', '.join(map(str, n.args))})"
+            ),
+        )
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
