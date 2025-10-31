@@ -165,7 +165,8 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
     prepack_op = prepack_ops.get(conv_op)
-    assert prepack_op, f"Didn't find prepack op for {conv_op}"
+    if prepack_op is None:
+        raise AssertionError(f"Didn't find prepack op for {conv_op}")
     return prepack_op
 
 
@@ -230,7 +231,8 @@ def graph_module_from_producer_nodes(
     Return:
       A graph module constructed from the producer nodes
     """
-    assert len(producer_nodes) > 0, "list of producer nodes can not be empty"
+    if len(producer_nodes) == 0:
+        raise AssertionError("list of producer nodes can not be empty")
     # since we traced back from node to getattr
     producer_nodes.reverse()
     graph = Graph()
@@ -300,7 +302,8 @@ def all_node_args_have_no_tensors(
     elif node.op == "placeholder":
         result = False
     elif node.op == "call_module":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError("node.target must be a string for call_module nodes")
         if _is_activation_post_process(modules[node.target]):
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == "call_module":
@@ -503,9 +506,10 @@ def _is_custom_module_lstm(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(
+        if not isinstance(
             qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        )  # type: ignore[attr-defined]
+        ):  # type: ignore[attr-defined]
+            raise AssertionError("qhandler must be a QuantizeHandler when provided")
         return (
             isinstance(mod, torch.nn.LSTM)
             and activation_is_statically_quantized(qconfig)
@@ -527,9 +531,10 @@ def _is_custom_module_mha(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(
+        if not isinstance(
             qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        )  # type: ignore[attr-defined]
+        ):  # type: ignore[attr-defined]
+            raise AssertionError("qhandler must be a QuantizeHandler when provided")
         return (
             isinstance(mod, torch.nn.MultiheadAttention)
             and activation_is_statically_quantized(qconfig)
@@ -826,11 +831,17 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
     for pattern in matched_patterns:
         first_tuple = pattern[0]
         last_getitem = pattern[-1]
-        assert first_tuple.op == "call_function" and first_tuple.target is tuple
-        assert (
+        if not (first_tuple.op == "call_function" and first_tuple.target is tuple):
+            raise AssertionError(
+                "first tuple node must be a call_function with target tuple"
+            )
+        if not (
             last_getitem.op == "call_function"
             and last_getitem.target == operator.getitem
-        )
+        ):
+            raise AssertionError(
+                "last getitem node must be a call_function with target operator.getitem"
+            )
         last_getitem_index = last_getitem.args[1]
         new_input = first_tuple.args[0][last_getitem_index]  # type: ignore[index]
         for user in list(last_getitem.users.keys()):
@@ -847,7 +858,10 @@ def _get_observer_from_activation_post_process(
     if isinstance(activation_post_process, ObserverBase):
         return activation_post_process
     else:
-        assert isinstance(activation_post_process, FakeQuantizeBase)
+        if not isinstance(activation_post_process, FakeQuantizeBase):
+            raise AssertionError(
+                "activation_post_process must be an ObserverBase or FakeQuantizeBase"
+            )
         return activation_post_process.activation_post_process  # type: ignore[return-value]
 
 
@@ -966,7 +980,10 @@ def _qconfig_satisfies_dtype_config_constraints(
     satisfies_constraints = True
     if activation_post_process_ctr is not None:
         activation_post_process = activation_post_process_ctr()
-        assert _is_activation_post_process(activation_post_process)
+        if not _is_activation_post_process(activation_post_process):
+            raise AssertionError(
+                "activation_post_process must be an activation post process"
+            )
         # If dtypes don't match, don't check the activation_post_process and return True early
         if activation_post_process.dtype != dtype_with_constraints.dtype:
             return True
