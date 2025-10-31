@@ -1338,6 +1338,14 @@ def _compile(
             code,
         )
 
+        # Dump the original bytecode of both normal and resumption function
+        # into TORCH_DIR log file, so that it is parsed by tlparse tool.
+        torch._logging.trace_structured(
+            "bytecode_dump",
+            lambda: {"co_name": code.co_name, "bytecode_type": "ORIGINAL BYTECODE"},
+            payload_fn=lambda: dis.Bytecode(code).dis(),
+        )
+
         out_code = None
         try:
             dynamo_output = compile_frame(
@@ -1368,6 +1376,14 @@ def _compile(
         tracer_output = dynamo_output.tracer_output
         if dynamo_output.last_attempt_start_time is not None:
             last_attempt_start_time = dynamo_output.last_attempt_start_time
+
+        # Dump the modified bytecode of both normal and resumption function
+        # into TORCH_DIR log file, so that it is parsed by tlparse tool.
+        torch._logging.trace_structured(
+            "bytecode_dump",
+            lambda: {"co_name": code.co_name, "bytecode_type": "MODIFIED BYTECODE"},
+            payload_fn=lambda: dis.Bytecode(out_code).dis(),
+        )
 
         assert out_code is not None
         log_bytecode(
