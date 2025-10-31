@@ -6094,7 +6094,7 @@ class DistributedTest:
                 dim=1,
             ).cuda(rank)
 
-            for i in range(100):
+            for _ in range(100):
                 y = model(input_var[rank].cuda(rank))
                 y.mean().backward()
 

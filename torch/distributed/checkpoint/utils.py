@@ -257,7 +257,7 @@ class _DistWrapper:
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
 
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
@@ -306,7 +306,7 @@ class _DistWrapper:
                 result = map_fun()
             except BaseException as e:  # noqa: B036
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
@@ -461,7 +461,8 @@ def _api_bc_check(func):
         if len(args) == 2:
             warnings.warn(
                 f"The argument order of {func.__name__} has been changed. "
-                "Please check the document to avoid future breakages."
+                "Please check the document to avoid future breakages.",
+                stacklevel=2,
             )
             sig = inspect.signature(func)
             kwonlyargs = [
