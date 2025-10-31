@@ -1085,6 +1085,13 @@ static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
   return res;
 }
 
+static constexpr c10::DispatchKeySet after_Python_keyset =
+    c10::DispatchKeySet(c10::DispatchKeySet::FULL) ^
+    (c10::DispatchKeySet(
+         c10::DispatchKeySet::FULL_AFTER,
+         c10::DispatchKey::Python) |
+     c10::DispatchKeySet(c10::DispatchKey::Python));
+
 // This is much simpler than the __torch_function__ paths precisely
 // because it doesn't have to worry about anything to do with dispatch
 // or __torch_function__.
@@ -1093,6 +1100,8 @@ void callDTensorCustomOpHandler(
     torch::jit::Stack* stack) {
   // We're called from dispatch and the dispatcher drops the GIL.
   py::gil_scoped_acquire guard;
+  // Match pythonFallback's dispatch key behavior.
+  c10::impl::ExcludeDispatchKeyGuard exclude_guard(after_Python_keyset);
   const auto op_handler = get_dtensor_custom_op_handler();
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       op.schema().arguments().size() == stack->size());
@@ -1111,6 +1120,8 @@ void callDTensorOpDispatch(
     torch::jit::Stack* stack) {
   // We're called from dispatch and the dispatcher drops the GIL.
   py::gil_scoped_acquire guard;
+  // Match pythonFallback's dispatch key behavior.
+  c10::impl::ExcludeDispatchKeyGuard exclude_guard(after_Python_keyset);
   const auto dispatch = get_dtensor_dispatch();
   auto [args, kwargs] = parseIValuesToPyArgsKwargs(op, *stack);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
