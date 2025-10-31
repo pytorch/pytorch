@@ -346,10 +346,9 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    stubs_exist = check_stubs_exist(args.code)
-    stubs_exist = [LintMessage()]
-    if len(stubs_exist) > 0:
-        for lint_message in stubs_exist:
+    stubs_exist_lints = check_stubs_exist(args.code)
+    if len(stubs_exist_lints) > 0:
+        for lint_message in stubs_exist_lints:
             print(json.dumps(lint_message._asdict()), flush=True)
         return
 
