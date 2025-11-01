@@ -2495,7 +2495,12 @@ class TestFrozenOptimizations(JitTestCase):
                     self.linear = modules[0](
                         in_features, out_features, bias=False, dtype=torch.half
                     )
-                    self.bn = modules[1](out_features, eps=0.001, dtype=torch.float)
+                    self.bn = modules[1](
+                        out_features,
+                        eps=0.001,
+                        dtype=torch.float,
+                        track_running_stats=track_stats,
+                    )
 
                 def forward(self, x):
                     x = self.linear(x)
