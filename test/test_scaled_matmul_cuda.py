@@ -1295,16 +1295,16 @@ class TestFP8Matmul(TestCase):
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [
-            # Nice size
-            (256, 768, 512),
-            # Requires padding for 128x128 scale
-            (384, 128, 1280),
+        # Nice size
+        (256, 768, 512),
+        # Requires padding for 128x128 scale
+        (384, 128, 1280),
     ])
     @parametrize("test_case", [
-            "x_eye_b_eye",
-            "x_ones_y_ones_calc_scales",
-            "x_ones_y_ones_set_scales",
-            "data_random_scales_one",
+        "x_eye_b_eye",
+        "x_ones_y_ones_calc_scales",
+        "x_ones_y_ones_set_scales",
+        "data_random_scales_one",
     ])
     def test_scaled_mm_block_wise_numerics(self, output_dtype, lhs_block, rhs_block, M, N, K, test_case):
         """
@@ -1312,6 +1312,7 @@ class TestFP8Matmul(TestCase):
         do some other functional tests.
         """
         torch.manual_seed(42)
+
         def _adjust_lhs_scale(x_fp8, x_scales, lhs_block):
             M, K = x_fp8.shape
             x_scales_original = x_scales.clone()
@@ -1366,7 +1367,7 @@ class TestFP8Matmul(TestCase):
             y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
             y_hp, y_recipe, y_scales, y_scales_original = _adjust_rhs_scale(y_fp8, y_scales, rhs_block)
 
-            return y_hp, rhs_recipe, y_fp8, y_scales, y_scales_original
+            return y_hp, y_recipe, y_fp8, y_scales, y_scales_original
 
         def _run_test(x_hp, x_recipe, x_fp8, x_scales, x_scales_original,
                       y_hp, y_recipe, y_fp8, y_scales, y_scales_original):
@@ -1475,9 +1476,6 @@ class TestFP8Matmul(TestCase):
             x_hp, x_recipe, x_scales, x_scales_original = _adjust_lhs_scale(x_fp8, x_scales, lhs_block)
             y_hp, y_recipe, y_scales, y_scales_original = _adjust_rhs_scale(y_fp8, y_scales, rhs_block)
 
-        else:
-            assert False, "boo"
-
         _run_test(x_hp, x_recipe, x_fp8, x_scales, x_scales_original,
                   y_hp, y_recipe, y_fp8, y_scales, y_scales_original)
 
@@ -1491,15 +1489,15 @@ class TestFP8Matmul(TestCase):
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [
-            # Minimum size
-            (128, 128, 128),
-            (256, 128, 128),
-            (384, 128, 1280),
-            (256, 768, 256),
-            # Nice size
-            (256, 768, 512),
-            # Requires padding for 128x128 scale
-            (256, 768, 1024)
+        # Minimum size
+        (128, 128, 128),
+        (256, 128, 128),
+        (384, 128, 1280),
+        (256, 768, 256),
+        # Nice size
+        (256, 768, 512),
+        # Requires padding for 128x128 scale
+        (256, 768, 1024)
     ])
     def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block, M, N, K):
         torch.manual_seed(42)
@@ -1534,26 +1532,22 @@ class TestFP8Matmul(TestCase):
             lhs_recipe = ScalingType.BlockWise1x128
             assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
             assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
-            x_hp = hp_from_1x128(x_fp8, x_scales_original)
         else:
             lhs_recipe = ScalingType.BlockWise128x128
             x_scales, pad_amount = _pad_128x128_scales(x_scales)
             # scales in [M // 128, L4] -> [L4, M // 128]
             x_scales = x_scales.t()
-            x_hp = hp_from_128x128(x_fp8, x_scales_original)
 
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
             rhs_recipe = ScalingType.BlockWise1x128
             assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
             assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
-            y_hp = hp_from_1x128(y_fp8, y_scales_original)
         else:
             rhs_recipe = ScalingType.BlockWise128x128
             y_scales, pad_amount = _pad_128x128_scales(y_scales)
             # Scale in [N // 128, L4] -> [L4, N // 128]
             y_scales = y_scales.t()
-            y_hp = hp_from_128x128(y_fp8, y_scales_original)
 
 
         # Calculate actual F8 mm
@@ -1629,26 +1623,22 @@ class TestFP8Matmul(TestCase):
             lhs_recipe = ScalingType.BlockWise1x128
             assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
             assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
-            x_hp = hp_from_1x128(x_fp8, x_scales_original)
         else:
             lhs_recipe = ScalingType.BlockWise128x128
             x_scales, pad_amount = _pad_128x128_scales(x_scales)
             # scales in [M // 128, L4] -> [L4, M // 128]
             x_scales = x_scales.t()
-            x_hp = hp_from_128x128(x_fp8, x_scales_original)
 
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
             rhs_recipe = ScalingType.BlockWise1x128
             assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
             assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
-            y_hp = hp_from_1x128(y_fp8, y_scales_original)
         else:
             rhs_recipe = ScalingType.BlockWise128x128
             y_scales, pad_amount = _pad_128x128_scales(y_scales)
             # Scale in [N // 128, L4] -> [L4, N // 128]
             y_scales = y_scales.t()
-            y_hp = hp_from_128x128(y_fp8, y_scales_original)
 
         # Verify that actual F8 mm doesn't error
         scaled_mm_wrap(
