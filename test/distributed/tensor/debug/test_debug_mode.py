@@ -118,10 +118,11 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_stack_trace="stack"
+        ) as debug_mode:
             z = x_dtensor + y_dtensor
-            with DebugMode.stack_traces():
-                z.sum().backward()
+            z.sum().backward()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
@@ -153,9 +154,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
         # check stack trace
-        self.assertTrue(
-            "z.sum().backward()" in debug_mode.operators[-1].record["stack_trace"]
-        )
+        self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
