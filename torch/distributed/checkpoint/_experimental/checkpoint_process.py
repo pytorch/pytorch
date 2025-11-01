@@ -1,11 +1,12 @@
 import logging
 import os
 import traceback
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from multiprocessing.connection import Connection
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch.multiprocessing as mp
 from torch.multiprocessing.spawn import ProcessExitedException

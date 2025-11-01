@@ -1,7 +1,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/GPUTrace.h>
-#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
@@ -260,13 +259,8 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
     Py_RETURN_NONE;
   }
 
-  if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var);
-  }
-
   std::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
+      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -329,8 +323,8 @@ static bool isResurrectable(THPVariable* self) {
     return false;
   }
   // Check if this is hermetic. If it is, no resurrection.
-  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false) != (PyObject*)self) {
+  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() !=
+      (PyObject*)self) {
     return false;
   }
   return true;
@@ -355,8 +349,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
       !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
   c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj();
 
   TORCH_INTERNAL_ASSERT(
       maybe_pyobj.has_value(),
@@ -381,7 +374,6 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
   // reference on Tensor in struct BEFORE we overwrite the old one)
-  TORCH_INTERNAL_ASSERT(!c10::impl::HermeticPyObjectTLS::get_state());
   self->cdata = MaybeOwned<Variable>::borrowed(tensor);
 
   // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
@@ -1236,7 +1228,7 @@ static PyObject* THPVariable_get_version(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "_version");
   }
   const auto& var = THPVariable_Unpack(self);
-  return PyInt_FromLong(var._version());
+  return THPUtils_packInt64(var._version());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1391,9 +1383,8 @@ static PyObject* THPVariable_get_output_nr(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "output_nr");
   }
-  const auto output_nr =
-      static_cast<long>(THPVariable_Unpack(self).output_nr());
-  return PyInt_FromLong(output_nr);
+  const auto output_nr = THPVariable_Unpack(self).output_nr();
+  return THPUtils_packInt64(output_nr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1430,7 +1421,7 @@ static PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "ndim");
   }
-  return PyInt_FromLong(THPVariable_Unpack(self).dim());
+  return THPUtils_packInt64(THPVariable_Unpack(self).dim());
   END_HANDLE_TH_ERRORS
 }
 
@@ -2223,8 +2214,8 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed() &&
-        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-            /*ignore_hermetic_tls=*/false) == (PyObject*)self) {
+        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() ==
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -2410,8 +2401,7 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common
@@ -2477,28 +2467,13 @@ static PyObject* THPVariable_NewWithVar(
     auto v = (THPVariable*)obj;
     // TODO: named constructor to avoid default initialization
     new (&v->cdata) MaybeOwned<Variable>();
-    if (c10::impl::HermeticPyObjectTLS::get_state()) {
-      // Do NOT initialize pyobj field on the tensor, you own the C++
-      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
-      TORCH_INTERNAL_ASSERT(
-          !check_has_torch_dispatch(obj),
-          "While HermeticPyObject was enabled, we attempted to create a tensor "
-          "subclass with __torch_dispatch__.  This violates the invariant that "
-          "operations in HermeticPyObject have equivalent C++ implementations. "
-          "If your operator registered from Python operator registration isn't "
-          "doing anything strange, there may be an internal PyTorch bug involving "
-          "not appropriately disabling TorchDispatchMode before executing "
-          "Python op registration.");
-    } else {
-      // Normal codepath
-      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
-      const auto& var = THPVariable_Unpack(v);
-      var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(obj);
-      if (has_torch_dispatch_if_known.has_value()
-              ? *has_torch_dispatch_if_known
-              : check_has_torch_dispatch(obj)) {
-        var.unsafeGetTensorImpl()->set_python_dispatch(true);
-      }
+    v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
+    const auto& var = THPVariable_Unpack(v);
+    var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(obj);
+    if (has_torch_dispatch_if_known.has_value()
+            ? *has_torch_dispatch_if_known
+            : check_has_torch_dispatch(obj)) {
+      var.unsafeGetTensorImpl()->set_python_dispatch(true);
     }
   }
   return obj;

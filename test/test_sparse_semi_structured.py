@@ -1240,11 +1240,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         version = _get_torch_cuda_version()
         assert torch.backends.cusparselt.is_available()
 
-        # CUDA 11.8 has cuSPARSELt v0.4.0 support
-        if version == (11, 8):
-            assert torch.backends.cusparselt.version() == 400
         # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
-        elif version >= (12, 4):
+        if version >= (12, 4):
             assert torch.backends.cusparselt.version() >= 602
         else:
             assert torch.backends.cusparselt.version() is None

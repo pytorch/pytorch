@@ -341,7 +341,7 @@ def helper_for_dump_minify(contents: str) -> None:
 
     except OSError as e:
         log.exception("")
-        raise NotImplementedError("Could not write to {minified_repro_path}") from e
+        raise NotImplementedError(f"Could not write to {minified_repro_path}") from e
 
 
 class AccuracyError(Exception):

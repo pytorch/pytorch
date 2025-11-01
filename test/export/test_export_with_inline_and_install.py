@@ -73,26 +73,6 @@ del test
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_buffer_util_inline_and_install_strict  # noqa: F821
 )
-# this is because we marked unlift hooks to be dynamo skip traced
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_custom_tag_metadata_re_export_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_from_node_metadata_export_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_module_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_module_with_dict_container_inp_out_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_retrace_pre_autograd_inline_and_install_strict  # noqa: F821
-)
-# this is because detect leak test has export root
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_detect_leak_strict_inline_and_install_strict  # noqa: F821
-)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

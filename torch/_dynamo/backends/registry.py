@@ -60,7 +60,6 @@ optimized_model = torch.compile(model, backend="my_compiler")
 
 import functools
 import logging
-import sys
 from collections.abc import Sequence
 from importlib.metadata import EntryPoint
 from typing import Any, Callable, Optional, Protocol, Union
@@ -174,12 +173,7 @@ def _discover_entrypoint_backends() -> None:
     from importlib.metadata import entry_points
 
     group_name = "torch_dynamo_backends"
-    if sys.version_info < (3, 10):
-        eps = entry_points()
-        eps = eps[group_name] if group_name in eps else []
-        eps_dict = {ep.name: ep for ep in eps}
-    else:
-        eps = entry_points(group=group_name)
-        eps_dict = {name: eps[name] for name in eps.names}
+    eps = entry_points(group=group_name)
+    eps_dict = {name: eps[name] for name in eps.names}
     for backend_name in eps_dict:
         _BACKENDS[backend_name] = eps_dict[backend_name]

@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
+    xfailIf,
 )
 
 
@@ -228,6 +229,52 @@ class TestConvolutionNN(NNTestCase):
             torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-1)
         with self.assertRaisesRegex(ValueError, "groups must be a positive integer"):
             torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-2)
+
+    def test_conv3d_overflow_values(self):
+        input = torch.full(
+            (
+                0,
+                7,
+                9,
+                1,
+                5,
+            ),
+            0,
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        weight = torch.full(
+            (
+                9,
+                1,
+            ),
+            4.14214e16,
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        stride = [5, 5, 5]
+
+        with self.assertRaisesRegex(ValueError, "Padding height too large"):
+            torch.ops.aten.slow_conv3d(
+                input,
+                weight,
+                kernel_size=[5, 5, 5],
+                bias=None,
+                stride=stride,
+                padding=[2**62, 2**62, 2**62],
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Kernel height x width product is too large:"
+        ):
+            torch.ops.aten.slow_conv3d(
+                input,
+                weight,
+                kernel_size=[2**32, 2**32, 2**32],
+                bias=None,
+                stride=stride,
+                padding=[2**31, 2**31, 2**31],
+            )
 
     def test_Conv1d_module_same_padding(self):
         # Compare module against functional: without strides/dilation, asymmetric padding
@@ -4039,8 +4086,34 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
+    @largeTensorTest("40GB", "cuda")
+    def test_conv3d_cudnn_broken(self, device):
+        for dtype in (torch.half, torch.bfloat16):
+            x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
+            m = torch.nn.Conv3d(
+                16,
+                16,
+                kernel_size=(1, 3, 3),
+                padding=0,
+                stride=1,
+                bias=False,
+                dtype=dtype,
+                device=device,
+            )
+            with torch.backends.cudnn.flags(enabled=False):
+                yref = m(x)
+            y = m(x)
+            self.assertEqual(yref, y)
+
+    @skipCUDAIfRocm
+    @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
+    @xfailIf(
+        torch.backends.cudnn.version() is not None
+        and torch.backends.cudnn.version() > 91000
+    )
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
@@ -4054,7 +4127,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         del y, yref
 
         # try a batch-splittable case
-        x = x.reshape(100, 2, 3280, 3280).contiguous(memory_format=torch.channels_last)
+        x = x.reshape(100, 2, 3280, 3280)
+        x = x.contiguous(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)

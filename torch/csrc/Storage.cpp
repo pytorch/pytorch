@@ -41,8 +41,8 @@ PyObject* THPStorage_NewWithStorage(
       "Creating a Storage subclass from a class that does not inherit from ",
       "Storage is not possible. Make sure your class inherits from Storage.");
 
-  auto maybe_pyobj = _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+  auto maybe_pyobj =
+      _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj();
   if (maybe_pyobj.has_value() && maybe_pyobj.value()) {
     TORCH_CHECK(
         allow_preexisting_pyobj,
@@ -74,13 +74,9 @@ PyObject* THPStorage_NewWithStorage(
 
   s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));
 
-  if (!c10::impl::HermeticPyObjectTLS::get_state()) {
-    s->is_hermetic = false;
-    const auto& storage = THPStorage_Unpack(s);
-    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj);
-  } else {
-    s->is_hermetic = true;
-  }
+  s->is_hermetic = false;
+  const auto& storage = THPStorage_Unpack(s);
+  storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj);
 
   return obj;
 }
@@ -88,13 +84,9 @@ PyObject* THPStorage_NewWithStorage(
 // Wraps the c10::Storage with a storage PyObject
 PyObject* THPStorage_Wrap(c10::Storage storage) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
-  if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
-  }
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 
-  std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+  std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj();
   if (maybe_pyobj.has_value()) {
     auto obj = *maybe_pyobj;
     if (obj) {
@@ -127,8 +119,8 @@ static bool THPStorage_isPreservable(THPStorage* self) {
     return false;
   }
 
-  if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/true) != (PyObject*)self) {
+  if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj() !=
+      (PyObject*)self) {
     return false;
   }
   if (storage.use_count() <= 1) {
@@ -145,8 +137,7 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   const auto& storage = THPStorage_Unpack(self);
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
-  auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/true);
+  auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj();
   // NOTE: It is possible to just set the PyObjectSlot here, but the point is
   // that we should have already set PyObjectSlot when the storage PyObject
   // was created.
@@ -449,7 +440,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
       return nullptr;
     }
     uint8_t value = storage_get(storage, nindex);
-    return THPByteUtils_newReal(value);
+    return THPUtils_packUInt32(value);
     /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start = 0, stop = 0, slicelength = 0, step = 0;

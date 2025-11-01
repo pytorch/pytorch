@@ -500,19 +500,10 @@ class CodeGen:
 
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
-                if hasattr(o, "__args__"):
-                    # Assign global names for each of the inner type variables.
+                if hasattr(o, "__args__") and o.__args__:
                     args = [type_repr(arg) for arg in o.__args__]
-
-                    if len(args) == 0:
-                        # Bare type, such as `typing.Tuple` with no subscript
-                        # This code-path used in Python < 3.9
-                        return origin_typename
-
                     return f"{origin_typename}[{','.join(args)}]"
                 else:
-                    # Bare type, such as `typing.Tuple` with no subscript
-                    # This code-path used in Python 3.9+
                     return origin_typename
 
             # Common case: this is a regular module name like 'foo.bar.baz'

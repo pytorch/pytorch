@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Collection, Mapping, MutableMapping
-from typing import Callable, cast, Optional, TypeVar, Union
+from collections.abc import Callable, Collection, Mapping, MutableMapping
+from typing import cast, Optional, TypeVar, Union
 
 import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
