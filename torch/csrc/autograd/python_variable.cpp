@@ -1001,6 +1001,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
 #define FOR_EACH_DTENSOR_INTERNED_STRING(_)                   \
   MAYBE_FOR_EACH_PYTHON_3_10_MINUS_DTENSOR_INTERNED_STRING(_) \
   _(_comparison_key)                                          \
+  _(_custom_op_handlers)                                      \
   _(_local_tensor)                                            \
   _(_spec)                                                    \
   _(args_schema)                                              \
@@ -1137,7 +1138,7 @@ void callDTensorOpDispatch(
       "Python op_dispatch implementation expects non-None kwargs");
   const auto py_op = torch::detail::getTorchApiFunction(op);
   const auto custom_op_handlers =
-      get_dtensor_op_dispatcher().attr("_custom_op_handlers");
+      get_dtensor_op_dispatcher().attr(dtensor_interned_strings._custom_op_handlers);
   TORCH_CHECK(
       PyDict_Check(custom_op_handlers.ptr()),
       "_custom_op_handlers must be a dict!");
