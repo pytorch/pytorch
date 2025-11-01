@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
+from collections.abc import Callable
 
 import torch
 import torch._dynamo

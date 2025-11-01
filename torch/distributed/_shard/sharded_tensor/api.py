@@ -8,7 +8,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable, cast, Optional, TYPE_CHECKING
+from typing import cast, Optional, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -41,7 +41,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.distributed._shard.metadata import ShardMetadata
 

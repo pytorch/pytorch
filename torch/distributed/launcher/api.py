@@ -9,8 +9,9 @@
 import os
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry

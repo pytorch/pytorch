@@ -105,24 +105,14 @@ class AssociativeScanOp(HigherOrderOperator):
         xs_slice2 = [first_slice_copy(x) for x in xs]
         all_inputs = tuple(xs_slice1 + xs_slice2 + list(additional_inputs))
 
-        combine_gm: torch.fx.GraphModule = (
-            combine_fn
-            if isinstance(combine_fn, torch.fx.GraphModule)
-            else materialize_as_graph(combine_fn, all_inputs)
-        )
-
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in combine_gm.graph.find_nodes(op="placeholder")
-        ]
-
+        combine_gm: torch.fx.GraphModule = materialize_as_graph(combine_fn, all_inputs)
         (
             _,
             _,
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm)
         if len(mutated_inputs) > 0:
             raise RuntimeError(
                 "For associative_scan, combine_fn cannot have in-place mutations but found "
@@ -206,14 +196,14 @@ def associative_scan(
     def _validate_input(cfn, lxs, d, r, cm):
         # Basic arguments check
         if not callable(cfn):
-            raise ValueError("Combine_fn must be a callable, but got {cfn}")
+            raise ValueError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
             raise ValueError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
-                "Combine_mode must either 'pointwise' or 'generic', but got {cm}"
+                f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
         if cm == "pointwise" and not all(l.device.type == "cuda" for l in lxs):
             raise ValueError(

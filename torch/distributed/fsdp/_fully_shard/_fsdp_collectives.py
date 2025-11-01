@@ -1,7 +1,7 @@
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, Callable, cast, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist

@@ -3,8 +3,8 @@ import contextlib
 import logging
 import math
 import warnings
-from collections.abc import Generator, Iterator
-from typing import Any, Callable, cast, no_type_check
+from collections.abc import Callable, Generator, Iterator
+from typing import Any, cast, no_type_check
 
 import torch
 import torch.distributed as dist

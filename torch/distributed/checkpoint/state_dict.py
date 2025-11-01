@@ -3,10 +3,10 @@ import contextlib
 import functools
 import gc
 import warnings
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, Callable, cast, no_type_check, Optional, Union
+from typing import Any, cast, no_type_check, Optional, Union
 
 import torch
 import torch.distributed as dist

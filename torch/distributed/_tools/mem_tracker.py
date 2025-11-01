@@ -2,11 +2,12 @@ import math
 import os
 import re
 import warnings
+from collections.abc import Callable
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 
 import torch

@@ -1,5 +1,7 @@
 """Constant operator implementation."""
 
+from typing import Optional
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import (
     fuzz_scalar,
@@ -15,6 +17,16 @@ class ConstantOperator(Operator):
 
     def __init__(self):
         super().__init__("constant")
+        self.template = "default"  # Track template for DTensor compatibility
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Constant is not a torch operation, it generates constant values."""
+        return None
+
+    def set_template(self, template: str):
+        """Set the template for context-aware code generation."""
+        self.template = template
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Constant can produce any type of output."""
@@ -64,24 +76,38 @@ class ConstantOperator(Operator):
                 import torch
 
                 default_values = {
-                    torch.float16: 0.0,
-                    torch.float32: 0.0,
-                    torch.float64: 0.0,
-                    torch.bfloat16: 0.0,
-                    torch.int8: 0,
-                    torch.int16: 0,
-                    torch.int32: 0,
-                    torch.int64: 0,
-                    torch.bool: False,
-                    torch.complex64: 0.0,
-                    torch.complex128: 0.0,
+                    torch.float16: 1.0,
+                    torch.float32: 1.0,
+                    torch.float64: 1.0,
+                    torch.bfloat16: 1.0,
+                    torch.int8: 1,
+                    torch.int16: 1,
+                    torch.int32: 1,
+                    torch.int64: 1,
+                    torch.bool: True,
+                    torch.complex64: 1.0,
+                    torch.complex128: 1.0,
                 }
-                fill_value = default_values.get(output_spec.dtype, 0)
-                return f"{output_name} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+
+                fill_value = default_values.get(output_spec.dtype, 1)
+                tensor_creation = (
+                    f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                )
             else:
                 # For non-empty tensors, use the first element as fill value
                 fill_value = actual_tensor.flatten()[0].item()
-                return f"{output_name} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                tensor_creation = (
+                    f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                )
+
+            # For DTensor template, convert to DTensor
+            if self.template == "dtensor":
+                return (
+                    f"{output_name}_local = {tensor_creation}.to('cuda')\n"
+                    f"    {output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
+                )
+            else:
+                return f"{output_name} = {tensor_creation}"
 
         else:
             return f"# Unknown output spec type for constant: {type(output_spec)}"

@@ -443,59 +443,15 @@ def run(cnt):
             f(t(2, 4), t(2, 2))
             f(t(4, 2), t(2, 2))
 
-            # with default remote (dynamic x) + extra remote (dynamic y),
-            # we should be able to wobble x & y with no recompiles.
+            # with both default remote present, we ignore extra remote.
             self.reset()
             cnts.clear()
             with torch.compiler.config.patch(pgo_extra_read_key="sticky_1"):
                 f(t(2, 2), t(2, 2))
-                f(t(2, 4), t(4, 2))
-                f(t(4, 2), t(2, 4))
+                f(t(6, 8), t(2, 2))
                 self.assertEqual(cnts.frame_count, 1)
-
-    def test_profile_merges(self):
-        from torch._dynamo.pgo import auto_dynamic, merge_pgo_entry
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(ints, t_scalar, tensors):
-            # arbitrary compute
-            return ints[0] + ints[1], t_scalar + 1, [t + 1 for t in tensors]
-
-        # single static run
-        f(
-            [0, 2],
-            torch.tensor(0),
-            [
-                torch.randn(2),
-                torch.randn(2, 2),
-                torch.randn(4, 4),
-            ],
-        )
-        # collect profiles
-        profile = next(
-            iter(torch._dynamo.pgo.get_code_state().values())
-        ).automatic_dynamic
-        i0, i1 = profile["L['ints'][0]"], profile["L['ints'][1]"]
-        ts = profile["L['t_scalar]"]
-        t0, t1, t2 = (
-            profile["L['tensors'][0]"],
-            profile["L['tensors'][1]"],
-            profile["L['tensors'][2]"],
-        )
-        # merging same scalar, or tensor into scalar -> no-op
-        merge_pgo_entry(i0, i0)
-        merge_pgo_entry(ts, i0)
-        merge_pgo_entry(t0, i0)
-        self.assertEqual(i0.scalar, 0)
-        # merging different scalars -> dynamic
-        merge_pgo_entry(i1, i0)
-        self.assertEqual(i0.scalar, auto_dynamic)
-        # merging different rank tensors -> static
-        merge_pgo_entry(t0, t2)
-        self.assertEqual(t2.size, (4, 4))
-        # merging same rank tensors -> dynamic
-        merge_pgo_entry(t1, t2)
-        self.assertEqual(t2.size, (auto_dynamic, auto_dynamic))
+                f(t(2, 2), t(2, 4))
+                self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":

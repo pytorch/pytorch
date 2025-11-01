@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import functools
 import itertools
 import logging
 import types
@@ -14,7 +15,9 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.passes.graph_transform_observer import (
+    GraphTransformObserver as GraphTransformObserverBase,
+)
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
@@ -23,7 +26,7 @@ from .. import config
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     stable_topological_sort,
 )
 from ..utils import is_cpu_device, pass_execution_and_save
@@ -31,6 +34,13 @@ from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
 
+
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="pre_grad_passes"
+)
+GraphTransformObserver = functools.partial(
+    GraphTransformObserverBase, subsystem="pre_grad_passes"
+)
 
 log = logging.getLogger(__name__)
 
@@ -165,7 +175,7 @@ def lazy_init():
 
 
 def _get_pass_name_func(p):
-    if isinstance(p, PatternMatcherPass):
+    if isinstance(p, PatternMatcherPassBase):
         pass_name = p.pass_name
         pass_func = p.apply
     elif isinstance(p, types.FunctionType):

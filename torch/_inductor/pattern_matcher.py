@@ -1905,12 +1905,14 @@ class PatternMatcherPass:
     def __init__(
         self,
         pass_name: Optional[str] = None,
+        subsystem: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.patterns: defaultdict[
             tuple[str, torch.fx.node.Target], list[PatternEntry]
         ] = defaultdict(list)
         self.pass_name = pass_name
+        self.subsystem = subsystem
 
         # For a particular generated pattern repr, store all of the str representations
         # of the graph used to generate them. Because we ignore certain patterns
@@ -1950,7 +1952,7 @@ class PatternMatcherPass:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
         assert isinstance(gm, torch.fx.GraphModule)
-        with GraphTransformObserver(gm, pass_name):
+        with GraphTransformObserver(gm, pass_name, self.subsystem):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":

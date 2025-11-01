@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 import itertools
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, Callable, cast, Optional
+from typing import Any, cast, Optional
 
 import torch
 import torch.nn as nn
