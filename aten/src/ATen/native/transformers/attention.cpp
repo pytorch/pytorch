@@ -768,11 +768,8 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_and_lse);
     }
     case SDPBackend::overrideable: {
-      bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
-      compute_logsumexp = compute_logsumexp ||
-          (at::GradMode::is_enabled() && attn_mask.has_value() && attn_mask.value().requires_grad());
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
-          query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale, compute_logsumexp);
+          query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::math: {
@@ -1018,8 +1015,7 @@ _scaled_dot_product_fused_attention_overrideable(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale,
-    bool compute_logsumexp) {
+    std::optional<double> scale) {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_fused_attention_overrideable not implemented. This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
