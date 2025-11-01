@@ -2058,7 +2058,8 @@ class PythonWrapperCodegen(CodeGen):
             neg = self.codegen_sizevar(
                 sympy.Max(0, sympy.Min(x + node.size, node.size))
             )
-            return f"{pos} if {x} >= 0 else {neg}"
+            x_cond = self.codegen_sizevar(x)
+            return f"{pos} if {x_cond} >= 0 else {neg}"
 
         def codegen_with_step(start_var, end_var, step):
             if step == 1:
@@ -3604,16 +3605,12 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline("if not should_loop:")
         if stack_output:
             # Handle the case when loop never executes
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
                 self.writeline(ExitSubgraphLine(self))
         else:
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.clone()")
                 self.writeline(ExitSubgraphLine(self))

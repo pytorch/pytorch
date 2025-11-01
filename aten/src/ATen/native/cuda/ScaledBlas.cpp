@@ -794,6 +794,24 @@ void _check_deepseek_scale_stride(const Tensor& scale, const Tensor& t, const Sc
   }
 }
 
+void
+_check_deepseek_support() {
+#ifndef USE_ROCM
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (dprops->major != 9) {
+    // Only on Hopper GPUs
+    TORCH_CHECK_NOT_IMPLEMENTED(
+      dprops->major == 9,
+      "DeepSeek style (1x128, 128x128) scaling only supported in CUDA for SM90")
+  }
+  // Only in cublasLt >= 12.9
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900,
+    "DeepSeek style (1x128, 128x128) scaling requires cublasLt >= 12.9"
+  );
+#endif
+}
+
 Tensor&
 _scaled_block1x128_block1x128(
           const Tensor& mat_a, const Tensor& mat_b,
@@ -802,8 +820,12 @@ _scaled_block1x128_block1x128(
           const c10::ScalarType out_dtype,
           const bool use_fast_accum,
           Tensor& out) {
+#ifndef USE_ROCM
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
+  // CUDA: Only Hopper GPUs
+  _check_deepseek_support();
+
   TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
   TORCH_CHECK_VALUE(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
@@ -821,6 +843,12 @@ _scaled_block1x128_block1x128(
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
   return out;
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    false,
+    "1x128 and 128x128 scaling not available with ROCm"
+  );
+#endif
 }
 
 Tensor&
@@ -831,10 +859,12 @@ _scaled_block128x128_block1x128(
           const c10::ScalarType out_dtype,
           const bool use_fast_accum,
           Tensor& out) {
+#ifndef USE_ROCM
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
-  std::cout << "mat_b: " << mat_b.dim() << ", " << mat_b.sizes() << ", " << mat_b.strides() << std::endl;
-  std::cout << "scale_b: " << scale_b.dim() << ", " << scale_b.sizes() << ", " << scale_b.strides() << std::endl;
+  // CUDA: Only Hopper GPUs
+  _check_deepseek_support();
+
   TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
   TORCH_CHECK_VALUE(scale_a.sizes()[0] == ceil_div<int64_t>(mat_a.sizes()[0], 128) && scale_a.sizes()[1] == ceil_div<int64_t>(mat_a.sizes()[1], 128) && scale_a.scalar_type() == kFloat,
@@ -852,6 +882,12 @@ _scaled_block128x128_block1x128(
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
   return out;
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    false,
+    "1x128 and 128x128 scaling not available with ROCm"
+  );
+#endif
 }
 
 Tensor&
@@ -862,8 +898,12 @@ _scaled_block1x128_block128x128(
           const c10::ScalarType out_dtype,
           const bool use_fast_accum,
           Tensor& out) {
+#ifndef USE_ROCM
   // Restrictions:
   // A, B are FP8, scales are fp32, A: shape K//128, B: K//128, N//128
+  // CUDA: Only Hopper GPUs
+  _check_deepseek_support();
+
   TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
   TORCH_CHECK_VALUE(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
@@ -881,6 +921,12 @@ _scaled_block1x128_block128x128(
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
   return out;
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    false,
+    "1x128 and 128x128 scaling not available with ROCm"
+  );
+#endif
 }
 
 Tensor&

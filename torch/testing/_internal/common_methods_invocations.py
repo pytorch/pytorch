@@ -445,11 +445,9 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     # Checking for permutations of weights and biases as `None`
-    weights = [channels, None, None]
-    biases = [None, channels, None]
     is_training = [True, False, False]
 
-    for weight, bias, training in zip(weights, biases, is_training, strict=True):
+    for training in is_training:
         yield SampleInput(
             make_arg(input_shape),
             args=(
@@ -20342,9 +20340,7 @@ op_db: list[OpInfo] = [
            ref=reference_smooth_l1_loss,
            sample_inputs_func=sample_inputs_smooth_l1_loss,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           backward_dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
