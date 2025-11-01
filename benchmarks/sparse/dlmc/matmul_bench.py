@@ -169,4 +169,3 @@ if __name__ == "__main__":
 
     print(f"== Results {'=' * 80}\n{'/' * 95}\n")
     comparison.print()
-    
