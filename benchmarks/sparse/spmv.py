@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import sys
 
 import torch
@@ -81,54 +82,55 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.outfile == "stdout":
-        outfile = sys.stdout
+        outfile_ctx = contextlib.nullcontext(sys.stdout)
     elif args.outfile == "stderr":
-        outfile = sys.stderr
+        outfile_ctx = contextlib.nullcontext(sys.stderr)
     else:
-        outfile = open(args.outfile, "a")
+        outfile_ctx = open(args.outfile, "a")
 
-    test_count = args.test_count
-    m = args.m
-    nnz_ratio = args.nnz_ratio
+    with outfile_ctx as outfile:
+        test_count = args.test_count
+        m = args.m
+        nnz_ratio = args.nnz_ratio
 
-    nnz = int(nnz_ratio * m * m)
-    if args.format == "csr":
-        time = test_sparse_csr(m, nnz, test_count)
-    elif args.format == "coo":
-        time = test_sparse_coo(m, nnz, test_count)
-    elif args.format == "both":
-        time_coo, time_csr = test_sparse_coo_and_csr(m, nnz, test_count)
+        nnz = int(nnz_ratio * m * m)
+        if args.format == "csr":
+            time = test_sparse_csr(m, nnz, test_count)
+        elif args.format == "coo":
+            time = test_sparse_coo(m, nnz, test_count)
+        elif args.format == "both":
+            time_coo, time_csr = test_sparse_coo_and_csr(m, nnz, test_count)
 
-    if args.format != "both":
-        print(
-            "format=",
-            args.format,
-            " nnz_ratio=",
-            nnz_ratio,
-            " m=",
-            m,
-            " time=",
-            time,
-            file=outfile,
-        )
-    else:
-        print(
-            "format=coo",
-            " nnz_ratio=",
-            nnz_ratio,
-            " m=",
-            m,
-            " time=",
-            time_coo,
-            file=outfile,
-        )
-        print(
-            "format=csr",
-            " nnz_ratio=",
-            nnz_ratio,
-            " m=",
-            m,
-            " time=",
-            time_csr,
-            file=outfile,
-        )
+        if args.format != "both":
+            print(
+                "format=",
+                args.format,
+                " nnz_ratio=",
+                nnz_ratio,
+                " m=",
+                m,
+                " time=",
+                time,
+                file=outfile,
+            )
+        else:
+            print(
+                "format=coo",
+                " nnz_ratio=",
+                nnz_ratio,
+                " m=",
+                m,
+                " time=",
+                time_coo,
+                file=outfile,
+            )
+            print(
+                "format=csr",
+                " nnz_ratio=",
+                nnz_ratio,
+                " m=",
+                m,
+                " time=",
+                time_csr,
+                file=outfile,
+            )

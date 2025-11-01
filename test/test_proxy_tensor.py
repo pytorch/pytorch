@@ -60,8 +60,8 @@ def process_failures():
 
     and processes them into a list of opinfo xfails
     """
-    f = open('pytest_failures')
-    failures = f.readlines()
+    with open('pytest_failures') as f:
+        failures = f.readlines()
     failures = [i.strip() for i in failures]
 
     def process_failure_string(s, matcher):

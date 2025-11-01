@@ -1939,7 +1939,8 @@ class DistributedDataParallelTest(
 
         if self.rank == 0:
             # the file will be deleted by the recovered FileStore
-            open(recovery_filename, "w").close()
+            with open(recovery_filename, "w"):
+                pass
 
         # not necessary to run barrier here, as DDP will synchronize
 

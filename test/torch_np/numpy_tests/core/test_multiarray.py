@@ -3937,7 +3937,8 @@ class TestIO(TestCase):
             d.tofile(f)
             assert_equal(os.path.getsize(tmp_filename), d.nbytes * 2)
         # check append mode (gh-8329)
-        open(tmp_filename, "w").close()  # delete file contents
+        with open(tmp_filename, "w"):  # delete file contents
+            pass
         with open(tmp_filename, "ab") as f:
             d.tofile(f)
         assert_array_equal(d, np.fromfile(tmp_filename))

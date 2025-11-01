@@ -123,7 +123,8 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
             # Check that the downloaded file has default file permissions
             f_ref = os.path.join(tmpdir, "reference")
-            open(f_ref, "w").close()
+            with open(f_ref, "w"):
+                pass
             expected_permissions = oct(os.stat(f_ref).st_mode & 0o777)
             actual_permissions = oct(os.stat(f).st_mode & 0o777)
             assert actual_permissions == expected_permissions
