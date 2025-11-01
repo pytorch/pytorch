@@ -13,7 +13,7 @@
 #define Py_BUILD_CORE
 #include <Python.h>
 #include <internal/pycore_stackref.h>
-#include "stackref_bridge.h"
+#include <torch/csrc/dynamo/stackref_bridge.h>
 #undef Py_BUILD_CORE
 
 PyObject* THP_PyStackRef_AsPyObjectBorrow(void* stackref) {
