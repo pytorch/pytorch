@@ -2169,18 +2169,18 @@ void xgeev<double>(
       jobvl,
       jobvr,
       n,
-      CUDA_R_64F,  // Datentyp der Matrix
+      CUDA_R_64F,
       reinterpret_cast<void*>(A),
       lda,
-      CUDA_R_64F,  // Datentyp der Eigenwerte (reell)
+      CUDA_R_64F,
       reinterpret_cast<void*>(W),
-      CUDA_R_64F,  // Datentyp der linken EV
+      CUDA_R_64F,
       reinterpret_cast<void*>(VL),
       ldvl,
-      CUDA_R_64F,  // Datentyp der rechten EV
+      CUDA_R_64F,
       reinterpret_cast<void*>(VR),
       ldvr,
-      CUDA_R_64F,  // Arbeitsbereich-Typ
+      CUDA_R_64F,
       reinterpret_cast<void*>(bufferOnDevice),
       workspaceInBytesOnDevice,
       reinterpret_cast<void*>(bufferOnHost),
