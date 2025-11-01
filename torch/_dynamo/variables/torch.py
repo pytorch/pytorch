@@ -1289,6 +1289,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._check)
         def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
+            if not args or len(args) == 0:
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        {},
+                        {},
+                    ),
+                )
+
             message_eager = None
             message_graph_proxy = None
             if len(args) >= 2:
