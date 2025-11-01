@@ -930,7 +930,13 @@ class DefaultDictVariable(ConstDictVariable):
         if isinstance(arg, variables.BuiltinVariable):
             return arg.fn in (list, tuple, dict, set)
         else:
-            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
+            return isinstance(
+                arg,
+                (
+                    variables.functions.BaseUserFunctionVariable,
+                    variables.functions.PolyfilledFunctionVariable,
+                ),
+            )
 
     def call_method(
         self,

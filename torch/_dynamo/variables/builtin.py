@@ -1908,11 +1908,11 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
 
-    def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
+    def call_dict(self, tx: "InstructionTranslator", /, *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     @staticmethod
-    def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+    def call_custom_dict(tx: "InstructionTranslator", user_cls, /, *args, **kwargs):
         args = list(args)
         if (
             len(args) == 1
@@ -1932,7 +1932,7 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict_fromkeys(
-        tx: "InstructionTranslator", user_cls, *args, **kwargs
+        tx: "InstructionTranslator", user_cls, /, *args, **kwargs
     ):
         if user_cls not in {dict, OrderedDict, defaultdict}:
             unimplemented_v2(
