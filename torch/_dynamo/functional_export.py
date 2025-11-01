@@ -526,6 +526,8 @@ def pytreeify(
     in_shuffle_graph = make_fx(
         InShuffle(), tracing_mode="symbolic", proxy_module_inputs=True
     )(*flat_real_args)
+    in_shuffle_graph.graph.eliminate_dead_code()
+    in_shuffle_graph.recompile()
 
     output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
 
@@ -573,6 +575,8 @@ def pytreeify(
     out_shuffle_graph = make_fx(
         out_shuffle, tracing_mode="symbolic", proxy_module_inputs=True
     )(*flat_out_shuffle_args)
+    out_shuffle_graph.graph.eliminate_dead_code()
+    out_shuffle_graph.recompile()
 
     assert out_shuffle.out_spec is not None
     return PyTreeifyOutput(
