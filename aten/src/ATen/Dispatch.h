@@ -6,7 +6,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/complex.h>
-#include <torch/headeronly/core/Dispatch_v2.h>
+#include <torch/headeronly/core/Dispatch.h>
 
 #ifdef __CUDACC__
 #include <cuda.h> // For CUDA_VERSION
@@ -62,12 +62,9 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     }                                                 \
   } while (0)
 
-#define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...)                 \
-  case enum_type: {                                                           \
-    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                              \
-    using HINT [[maybe_unused]] = c10::impl::ScalarTypeToCPPTypeT<enum_type>; \
-    return __VA_ARGS__();                                                     \
-  }
+#define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
+  AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(                       \
+      AT_PRIVATE_CHECK_SELECTIVE_BUILD, enum_type, HINT, __VA_ARGS__)
 
 #define AT_DISPATCH_CASE(enum_type, ...) \
   AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, scalar_t, __VA_ARGS__)
@@ -183,25 +180,13 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 // but we're just being safe (and it doesn't hurt.)  Note we must
 // use it to shut up warnings about unused store.
 
-#define AT_DISPATCH_SWITCH(TYPE, NAME, ...)                                 \
-  [&] {                                                                     \
-    const auto& the_type = TYPE;                                            \
-    constexpr const char* at_dispatch_name = NAME;                          \
-    /* don't use TYPE again in case it is an expensive or side-effect op */ \
-    at::ScalarType _st = ::detail::scalar_type(the_type);                   \
-    RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                    \
-    switch (_st) {                                                          \
-      __VA_ARGS__                                                           \
-      default:                                                              \
-        TORCH_CHECK_NOT_IMPLEMENTED(                                        \
-            false,                                                          \
-            '"',                                                            \
-            at_dispatch_name,                                               \
-            "\" not implemented for '",                                     \
-            toString(_st),                                                  \
-            "'");                                                           \
-    }                                                                       \
-  }()
+#define AT_DISPATCH_SWITCH(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH_TMPL(                  \
+      RECORD_KERNEL_FUNCTION_DTYPE,         \
+      TORCH_CHECK_NOT_IMPLEMENTED,          \
+      TYPE,                                 \
+      NAME,                                 \
+      __VA_ARGS__)
 
 #define AT_DISPATCH_CASE_FLOATING_TYPES(...)            \
   AT_DISPATCH_CASE(at::ScalarType::Double, __VA_ARGS__) \

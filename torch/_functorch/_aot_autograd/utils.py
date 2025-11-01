@@ -295,7 +295,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         for output_token_node in output_token_nodes:
             assert (
                 output_token_node.op == "call_function"
-                and output_token_node.target == operator.getitem
+                and output_token_node.target is operator.getitem
                 and output_token_node.args[1] == 0
             )
         with module.graph.inserting_before(node):
@@ -327,7 +327,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     if (
                         isinstance(out, torch.fx.node.Node)
                         and out.op == "call_function"
-                        and out.target == operator.getitem
+                        and out.target is operator.getitem
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
