@@ -3861,6 +3861,14 @@ class CUDAGraphWrapperMetadata:
     # Index of the current partition.
     partition_index: int
 
+    # index of static inputs that do not need to be copied
+    static_input_idxs: list[int]
+
+    # index of mutated inputs. If a mutated input is NOT a static
+    # input, it needs to be copied after graph.replay().
+    # TODO: more doc
+    mutated_input_idxs: list[int]
+
 
 PartitionFnType = Callable[..., Any]
 CUDAGraphWrapperType = Callable[

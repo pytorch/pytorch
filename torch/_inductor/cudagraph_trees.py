@@ -2305,6 +2305,7 @@ class CUDAGraphTreeManager:
         ModelType,
         OutputType,
     ]:
+        print(f"mode:{mode}, num inputs:{len(inputs)}, num static inputs:{len(static_input_idxs)}, num constants:{len(constants)}, static_input_idxs:{static_input_idxs}")
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(

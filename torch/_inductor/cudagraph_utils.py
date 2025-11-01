@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
-from torch._inductor.utils import GraphPartitionMap, InputType
+from torch._inductor.utils import GraphPartitionMap, InputType, CUDAGraphWrapperMetadata
 from torch.utils._ordered_set import OrderedSet
 
 from .utils import is_using_cudagraph_partition
@@ -420,3 +420,52 @@ def get_partition_cudagraph_metadata(
         partition_stack_traces,
         partition_constants,
     )
+
+
+class CUDAGraphWrapper:
+    def __init__(
+        self,
+        runnable: Callable,
+        graph_pool: Optional[torch.cuda.graph_pool_handle] = None,
+        input_clone_indices: Optional[list[str]] = None,
+    ):
+        self.runnable = runnable
+        self.graph_pool = graph_pool if graph_pool is not None else torch.cuda.graph_pool_handle()
+        self.cudagraph: Optional[torch.cuda.CUDAGraph] = None
+
+        self.input_clone_indices = input_clone_indices
+        self.input_buffers: Optional[list[torch.Tensor]] = None
+        self.output = None
+        self.has_warmup = False
+
+    def __call__(self, *args: tuple[torch.Tensor]):
+        if not self.has_warmup:
+            self.has_warmup = True
+            return self.runnable(*args)
+
+        if self.cudagraph is None:
+            self.cudagraph = torch.cuda.CUDAGraph()
+
+            if self.input_clone_indices:
+                self.input_buffers = [
+                    arg.clone() if idx in self.input_clone_indices else arg for idx, arg in enumerate(args)
+                ]
+
+            with torch.cuda.graph(self.cudagraph, pool=self.graph_pool):
+                # `output` is managed by pytorch's cudagraph pool
+                # TODO: use weak ref for output to reuse memory
+                self.output = self.runnable(*self.input_buffers)
+
+        if self.input_clone_indices:
+            for i in self.input_clone_indices:
+                self.input_buffers[i].copy_(args[i])
+
+        self.cudagraph.replay()
+        return self.output
+
+
+def cudagraph_wrapper(fn: Callable, metadata: CUDAGraphWrapperMetadata) -> Callable:
+    # there should be static input idxs in the metadata
+    
+
+    return CUDAGraphWrapper(fn)

@@ -332,6 +332,21 @@ def list_mode_options(
 
     mode_options: dict[str, dict[str, bool]] = {
         "default": {},
+        # lightweight backend
+        "light": {
+            "fallback_by_default": True,
+            "use_dce": False,
+            "allow_buffer_reuse": False,
+            "reorder_for_peak_memory": False,
+            "reorder_for_compute_comm_overlap": False,
+            "triton.reorder_for_reducing_graph_partitions": False,
+            "use_pre_grad_passes": False,
+            "use_joint_graph_passes": False,
+            "use_post_grad_passes": False,
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "use_decomposition": False,
+            # "triton.cudagraphs": True,
+        },
         # enable cudagraphs
         "reduce-overhead": {
             "triton.cudagraphs": True,

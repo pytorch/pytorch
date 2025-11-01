@@ -254,6 +254,35 @@ def cudagraph_post_compile(
                 )
 
 
+def get_cudagraph_metadata_for_all_partitions(
+    compiled_graph: CompiledFxGraph,
+    constants: dict[str, torch.Tensor],
+) -> list[CudagraphMetadata]:
+    assert compiled_graph.current_callable is not None
+    assert compiled_graph.recursively_apply_fns is not None
+    static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"] or ())
+    mutated_input_idxs = compiled_graph.mutated_input_idxs
+
+    graph_metadata = CudagraphMetadata(
+        compiled_graph.cudagraph_info.placeholders,
+        static_input_idxs,
+        mutated_input_idxs,
+        compiled_graph.cudagraph_info.stack_traces,
+        constants,
+    )
+
+    res = []
+
+    for partition_map in compiled_graph.partition_maps:
+        partition_metadata = get_partition_cudagraph_metadata(
+            partition_map,
+            graph_metadata,
+        )
+        res.append(partition_metadata)
+
+    return res
+
+
 def cudagraph_partition_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
@@ -283,35 +312,26 @@ def cudagraph_partition_post_compile(
 
     from .compile_fx import cudagraphify
 
-    assert compiled_graph.current_callable is not None
-    assert compiled_graph.recursively_apply_fns is not None
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
-    static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"] or ())
-    mutated_input_idxs = compiled_graph.mutated_input_idxs
     device_index = next(iter(compiled_graph.device_idxs))
-
-    graph_metadata = CudagraphMetadata(
-        compiled_graph.cudagraph_info.placeholders,
-        static_input_idxs,
-        mutated_input_idxs,
-        compiled_graph.cudagraph_info.stack_traces,
-        constants,
-    )
 
     prepare_cudagraph_post_compile(
         compiled_graph, example_inputs, boxed_forward_device_index
+    )
+
+    partition_metadatas = get_cudagraph_metadata_for_all_partitions(
+        compiled_graph, constants
     )
 
     # cudagraphify each partition function, assuming every graph partition function
     # is cudagraphable. Non-cudagraphable ops (e.g., cpu ops) are inlined into
     # `call` function and not included in partition functions.
     cudagraphify_fns = []
-    for partition_map in compiled_graph.partition_maps:
-        partition_metadata = get_partition_cudagraph_metadata(
-            partition_map,
-            graph_metadata,
-        )
+    for partition_metadata in partition_metadatas:
+        print("mutated_input_idxs: ", partition_metadata.mutated_input_idxs)
+
+        print("static_input_idxs: ", partition_metadata.static_input_idxs)
 
         cudagraphify_fn = partial(
             cudagraphify,
@@ -643,8 +663,12 @@ class CompiledFxGraph(OutputCode):
             assert self.recursively_apply_fns is not None
             assert self.compiled_fn_runner is not None
             num_partitions = len(self.compiled_fn_runner.partitions)
+
+            # 1: add static tensor indices to metadata
+            partition_metadatas = get_cudagraph_metadata_for_all_partitions(self, constants.unwrap(self))
+
             wrapper_metadatas = [
-                CUDAGraphWrapperMetadata(num_partitions, i)
+                CUDAGraphWrapperMetadata(num_partitions, i, partition_metadatas[i].static_tensor_indices, partition_metadatas[i].mutated_input_idxs)
                 for i in range(num_partitions)
             ]
             customized_wrapper = _unstable_customized_partition_wrapper.wrapper

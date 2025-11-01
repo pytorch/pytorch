@@ -114,6 +114,7 @@ from .utils import (
     ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
+from torch.fx.passes.regional_inductor import _needs_inductor_compile
 
 
 if TYPE_CHECKING:
@@ -316,6 +317,13 @@ def mark_nodes_dislike_padding(
         # We only want to mark output nodes. So, move it after the above prior nodes process.
         if not config.pad_outputs and cur in extended_user_visible_nodes:
             cur.meta["dislike_padding"] = True
+
+
+def should_fallback_by_default(node: torch.fx.Node) -> bool:
+    if not config.fallback_by_default:
+        return False
+    
+    return not _needs_inductor_compile(node)
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -1626,7 +1634,7 @@ class GraphLowering(torch.fx.Interpreter):
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
                         "inductor", "lowerings", lambda: repr(n)
-                    )
+                    ) or should_fallback_by_default(n)
                 )
             ):
                 debug("fallback_handler")
