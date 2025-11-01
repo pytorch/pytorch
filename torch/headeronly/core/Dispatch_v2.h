@@ -9,7 +9,7 @@
 // custom implementations of the original AT_DISPATCH_SWITCH and
 // AT_DISPATCH_CASE macros. Use the provided macros
 // AT_DISPATCH_SWITCH_TMPL and AT_DISPATCH_CASE_TMPL to define the
-// custom implementations of the switch and case macros.
+// custom implementations of the switch and case macros, respectively.
 
 // Public API macros
 
@@ -59,18 +59,31 @@ inline c10::ScalarType scalar_type(c10::ScalarType s) {
 
 // Headeronly API to DISPATCH V2 macros:
 
+// THO_EMPTY is a helper macro that discards its arguments.
 #define THO_EMPTY(...)
 
+// THO_PRIVATE_CASE_TYPE_USING_HINT is same as
+// AT_PRIVATE_CASE_TYPE_USING_HINT with call to macro
+// AT_PRIVATE_CHECK_SELECTIVE_BUILD removed.
 #define THO_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
   AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(THO_EMPTY, enum_type, HINT, __VA_ARGS__)
 
+// THO_DISPATCH_SWITCH is same as AT_DISPATCH_SWITCH with call to
+// macro RECORD_KERNEL_FUNCTION_DTYPE removed and using
+// STD_TORCH_CHECK instead of TORCH_CHECK_NOT_IMPLEMENTED.
 #define THO_DISPATCH_SWITCH(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH_TMPL(THO_EMPTY, STD_TORCH_CHECK, TYPE, NAME, __VA_ARGS__)
 
+// THO_DISPATCH_CASE is same as AT_DISPATCH_CASE but using
+// THO_PRIVATE_CASE_TYPE_USING_HINT instead of
+// AT_PRIVATE_CASE_TYPE_USING_HINT.
 #define THO_DISPATCH_CASE(enum_type, ...) \
   AT_DISPATCH_CASE_TMPL(                  \
       THO_PRIVATE_CASE_TYPE_USING_HINT, enum_type, __VA_ARGS__)
 
+// THO_DISPATCH_V2 is same as AT_DISPATCH_V2 but using
+// THO_DISPATCH_SWITCH and THO_DISPATCH_CASE instead of
+// AT_DISPATCH_SWITCH and AT_DISPATCH_CASE, respectively.
 #define THO_DISPATCH_V2(TYPE, NAME, BODY, ...) \
   AT_DISPATCH_V2_TMPL(                         \
       THO_DISPATCH_SWITCH, THO_DISPATCH_CASE, TYPE, NAME, BODY, __VA_ARGS__)
