@@ -3560,7 +3560,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         if type(value) is not type(_local_map_wrapped):
             return False
 
-        return value == _local_map_wrapped and cls._enabled
+        return value is _local_map_wrapped and cls._enabled
 
     @staticmethod
     def build(**options):
