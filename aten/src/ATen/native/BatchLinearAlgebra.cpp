@@ -17,8 +17,6 @@
 #include <utility>
 #include <vector>
 
-#include "jit/tensorexpr/bounds_overlap.h"
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
