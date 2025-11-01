@@ -1089,7 +1089,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_newly_constructed_default_dict_with_dict(self):
         def f(x):
-            d = dict([("a", 1), ("b", 2)], c=3)
+            d = dict([("a", 1), ("b", 2)], c=3)  # noqa: C406
             dd = defaultdict(list, d, d=4, e=5)
             dd["x"].append(42)
             return x + 1, d, dd
