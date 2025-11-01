@@ -68,7 +68,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #elif IS_PYTHON_3_14_PLUS
   for (int i = 0; i < offset; i++) {
     update_framelocals(
-      i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
+        i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
   }
 #else
   for (int i = 0; i < offset; i++) {
