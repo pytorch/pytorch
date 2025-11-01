@@ -525,7 +525,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
     def run_model_and_common_checks(self, model, ex_input, num_epochs, batch_size):
         # split up data into batches
         split_up_data = torch.split(ex_input, batch_size)
-        for epoch in range(num_epochs):
+        for _epoch in range(num_epochs):
             # reset all model report obs
             model.apply(
                 lambda module: module.reset_batch_and_epoch_values()
@@ -952,7 +952,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             # see whether observers properly in regular nn.Module
             # there should be 4 observers present in this case
             modules_observer_cnt = 0
-            for fqn, module in prepared_for_callibrate_model.named_modules():
+            for module in prepared_for_callibrate_model.modules():
                 if isinstance(module, ModelReportObserver):
                     modules_observer_cnt += 1
 
@@ -999,7 +999,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         # get the number of observers stored as modules
         modules_observer_cnt = 0
-        for fqn, module in callibrated_fx_module.named_modules():
+        for module in callibrated_fx_module.modules():
             if isinstance(module, ModelReportObserver):
                 modules_observer_cnt += 1
 
@@ -1058,7 +1058,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # now calibrate the two models
             num_iterations = 10
-            for i in range(num_iterations):
+            for _ in range(num_iterations):
                 example_input = torch.tensor(torch.randint(100, (1, 3, 3, 3)), dtype=torch.float)
                 prepared_for_callibrate_model_full(example_input)
                 prepared_for_callibrate_model_single(example_input)
@@ -1324,7 +1324,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             fused = self._get_prepped_for_calibration_model(self.TwoBlockComplexNet(), detector_set, fused=True)
 
             # reporter should still give same counts even for fused model
-            for prepared_for_callibrate_model, mod_report in [non_fused, fused]:
+            for prepared_for_callibrate_model, _mod_report in [non_fused, fused]:
 
                 # supported modules to check
                 mods_to_check = {nn.Linear, nn.Conv2d}
@@ -1345,7 +1345,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
 
                 # assert that each of the desired modules have the observers inserted
-                for fqn, module in prepared_for_callibrate_model.named_modules():
+                for module in prepared_for_callibrate_model.modules():
                     # check if module is a supported module
                     is_in_include_list = sum(isinstance(module, x) for x in mods_to_check) > 0
 
@@ -1569,7 +1569,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
             self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
 
             # assert that each of the desired modules have the observers inserted
-            for fqn, module in prepared_for_callibrate_model.named_modules():
+            for module in prepared_for_callibrate_model.modules():
                 # check if module is a supported module
                 is_in_include_list = isinstance(module, tuple(mods_to_check))
 

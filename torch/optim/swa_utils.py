@@ -264,7 +264,7 @@ class AveragedModel(Module):
         self_param_detached: list[Optional[Tensor]] = []
         model_param_detached: list[Optional[Tensor]] = []
         copy_param = bool(self.n_averaged == 0)
-        for p_averaged, p_model in zip(self_param, model_param, strict=True):
+        for p_averaged, p_model in zip(self_param, model_param, strict=False):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
