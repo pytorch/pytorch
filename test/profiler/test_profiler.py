@@ -109,7 +109,7 @@ class TestProfilerCUDA(TestCase):
         t = torch.rand(1, 1).cuda()
         p = psutil.Process()
         last_rss = collections.deque(maxlen=5)
-        for outer_idx in range(10):
+        for _ in range(10):
             with _profile(use_cuda=True):
                 for _ in range(1024):
                     t = torch.mm(t, t)
@@ -1054,7 +1054,7 @@ class TestProfiler(TestCase):
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
             on_trace_ready=trace_handler,
         ) as p:
-            for idx in range(8):
+            for _ in range(8):
                 self.payload(use_cuda=use_cuda)
                 p.step()
 
@@ -1144,14 +1144,14 @@ class TestProfiler(TestCase):
             # See https://github.com/pytorch/pytorch/issues/88446
             optimizer_step()
 
-        for idx in range(niters):
+        for _ in range(niters):
             run_batch()
 
         with profile(
             activities=supported_activities(),
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
         ) as p:
-            for idx in range(niters):
+            for _ in range(niters):
                 run_batch()
                 p.step()
 
@@ -1508,7 +1508,7 @@ class TestProfiler(TestCase):
         )
         inputs = torch.randn(40, 16, 18, 260)
         uint32_max = 2**32 - 1
-        for i in range(5):
+        for _ in range(5):
             with profile() as prof:
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
@@ -2023,7 +2023,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         WAIT_TIME = 10
         with profile() as p:
             with torch.profiler.record_function("test_span"):
-                for i in range(WAIT_TIME):
+                for _ in range(WAIT_TIME):
                     torch.rand(4, 4)
                     time.sleep(1)
         events = p.events()
@@ -2072,7 +2072,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             ),
             acc_events=acc_events,
         ) as prof:
-            for i in range(100):
+            for _ in range(100):
                 torch.add(1, 2)
                 prof.step()
         # print(prof.key_averages())
@@ -3161,7 +3161,7 @@ aten::mm""",
         r.seed(1)
         text_sections = get_text_sections()
         addrs = []
-        for i in range(200):
+        for _ in range(200):
             s = r.randrange(0, len(text_sections))
             start, size = text_sections[s]
             addr = r.randrange(start, start + size)
