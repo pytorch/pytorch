@@ -1007,6 +1007,150 @@ void _all_to_all_get(
       input, out, src_offsets_ptr, out_splits_ptr, dst_offsets_ptr, group_name, /*team=*/ std::nullopt);
 }
 
+/* 2D all-to-all-v exchange plan */
+
+#define MAX_N_PEERS (THREADS_PER_BLOCK / WARP_SIZE)
+#define MAX_LOCAL_EXPERTS 8
+#define MAX_N_EXPERTS (MAX_N_PEERS * MAX_LOCAL_EXPERTS)
+
+
+// This kernel is used to exchange output splits and dest offsets between peers.
+__global__ void make2dExchangePlan(int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, int64_t* dst_offsets, nvshmem_team_t team, int ne) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  int peer = threadIdx.x / WARP_SIZE;
+  int my_pe = nvshmem_team_my_pe(team);
+  int npes = nvshmem_team_n_pes(team);
+  int nsplits = ne * npes;
+  CUDA_KERNEL_ASSERT(npes <= MAX_N_PEERS && " Number of peers must be smaller than MAX_N_PEERS\n");
+  CUDA_KERNEL_ASSERT(nsplits <= MAX_N_EXPERTS && " Number of splits must be smaller than MAX_N_EXPERTS\n");
+
+  // Gather input splits from peers
+  __shared__ int64_t in_splits_all[MAX_N_PEERS][MAX_N_EXPERTS];
+  // Use 1 warp per peer, to get into shared memory
+  if (peer < npes) {
+    auto global_peer_id = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
+    nvshmemx_int64_get_warp(in_splits_all[peer], in_splits, nsplits, global_peer_id);
+  }
+  __syncthreads();
+
+  // Write to output splits
+  int local_expert = threadIdx.x % WARP_SIZE;
+  if (local_expert < ne) {
+    // experts I own
+    int expert_id = ne * my_pe + local_expert;
+    // out_splits is (ne, npes) flattened
+    out_splits[local_expert * npes + peer] = in_splits_all[peer][expert_id];
+  }
+  __syncthreads();
+
+  // This is the aggregate per expert. There are a total of npes * ne experts,
+  // and we arrange it as a 2D matrix
+  __shared__ int64_t aggregate_per_expert[MAX_N_PEERS][MAX_LOCAL_EXPERTS];
+  // Calculate the cusum of splits for an expert
+  // One thread per expert, for all experts
+  auto& cusum_per_expert = in_splits_all;  // in-place prefix sum
+  if (peer < npes && local_expert < ne) {
+    int expert = peer * ne + local_expert;
+    int64_t tmp = 0, cusum = 0;
+    // This prefix sum is in the row direction, thus we cannot use cub helper
+    for (int rank = 0; rank < npes; rank++) {
+      tmp = in_splits_all[rank][expert];
+      cusum_per_expert[rank][expert] = cusum;
+      cusum += tmp;
+    }
+    aggregate_per_expert[peer][local_expert] = cusum;
+  }
+  __syncthreads();
+
+  // Calculate each expert's offset within their ranks
+  // There are two solutions below. The first one uses warpScan, and the second
+  // one uses manual prefix sum. warpScan's result is not stable, so we use the
+  // second one for now. (Since ne is usually small, the performance difference
+  // is negligible)
+#if 0
+  // Solution 1: use warpScan
+  __shared__ int64_t cusum_per_rank[MAX_N_PEERS][MAX_LOCAL_EXPERTS];
+  // One warp per target rank
+  prefixSum_warp<MAX_N_PEERS>(cusum_per_rank[peer], aggregate_per_expert[peer], ne);
+#else
+  // Solution 2: manual sum
+  auto& cusum_per_rank = aggregate_per_expert;  // in-place prefix sum
+  if (peer < npes && local_expert == 0) {
+    int64_t tmp = 0, cusum = 0;
+    // Summing the experts of a rank
+    for (int e = 0; e < ne; e++) {
+      tmp = aggregate_per_expert[peer][e];
+      cusum_per_rank[peer][e] = cusum;
+      cusum += tmp;
+    }
+  }
+#endif
+  __syncthreads();
+
+  // Now add the in-rank offsets to the in-expert offsets, then "I" will know
+  // where to write my data in the dest rank
+  if (peer < npes && local_expert < ne) {
+    int expert = peer * ne + local_expert;
+    dst_offsets[expert] = cusum_per_expert[my_pe][expert] + cusum_per_rank[peer][local_expert];
+  }
+#endif
+}
+
+void _make_a2a_2d_exchange_plan(
+    at::Tensor& in_splits,
+    at::Tensor& src_offsets,
+    at::Tensor& out_splits,
+    at::Tensor& dst_offsets,
+    std::string group_name) {
+  // Make an exchange plan for a AllToAllv_2D shuffle operation.
+  auto in_splits_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
+  auto src_offsets_hdl = c10d::symmetric_memory::rendezvous(src_offsets, group_name);
+  auto out_splits_hdl = c10d::symmetric_memory::rendezvous(out_splits, group_name);
+  auto dst_offsets_hdl = c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
+
+  // Verify inputs
+  auto npes = in_splits_hdl->get_world_size();
+  int nsplits = in_splits.size(0);
+  TORCH_CHECK(nsplits % npes == 0, "Number of splits must be a multiple of number of peers");
+  TORCH_CHECK(src_offsets.size(0) == nsplits && out_splits.size(0) == nsplits && dst_offsets.size(0) == nsplits,
+      "in_splits, src_offsets, out_splits and dst_offsets must have the same size");
+  TORCH_CHECK(in_splits.scalar_type() == at::kLong && src_offsets.scalar_type() == at::kLong
+      && out_splits.scalar_type() == at::kLong && dst_offsets.scalar_type() == at::kLong,
+      "splits and offsets must be int64");
+  // Number of experts per rank
+  int ne = nsplits / npes;
+
+  auto in_splits_ptr = in_splits.const_data_ptr<int64_t>();
+  auto src_offsets_ptr = src_offsets.mutable_data_ptr<int64_t>();
+  auto out_splits_ptr = out_splits.mutable_data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.mutable_data_ptr<int64_t>();
+
+  auto device = in_splits.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, in_splits_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  // Exchange output splits and source offsets
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &in_splits_ptr,
+      &src_offsets_ptr,
+      &out_splits_ptr,
+      &dst_offsets_ptr,
+      &team,
+      &ne};
+  nvshmemx_collective_launch(
+      (const void*)make2dExchangePlan,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -1022,4 +1166,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
   m.impl("_make_a2a_exchange_plan", c10d::nvshmem_extension::_make_a2a_exchange_plan);
   m.impl("_all_to_all_get", c10d::nvshmem_extension::_all_to_all_get);
+  m.impl("_make_a2a_2d_exchange_plan", c10d::nvshmem_extension::_make_a2a_2d_exchange_plan);
 }

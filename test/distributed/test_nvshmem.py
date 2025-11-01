@@ -678,6 +678,85 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             symm_mem.all_to_all_v(inp, out, plan, group_name)
             torch.testing.assert_close(out[:out_numel], expected)
 
+    @skipIfRocm
+    @parametrize("align", [1])  # `major_align` of output
+    def test_make_a2a_2d_exchange_plan(self, align: int) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        orig_inp_splits = torch.randint(
+            k, (nsplits,), dtype=torch.int64, device=self.device
+        )
+
+        # Create symm_mem tensors
+        in_splits = symm_mem.empty(nsplits, dtype=torch.int64, device=self.device)
+        src_offsets = symm_mem.empty(nsplits, dtype=torch.int64, device=self.device)
+        out_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).fill_(0)
+        dst_offsets = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).fill_(0)
+
+        in_splits.copy_(orig_inp_splits)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        plan = symm_mem.make_a2a_2d_exchange_plan(
+            in_splits, src_offsets, out_splits, dst_offsets, group_name
+        )
+
+        # Exchange input splits to get output splits
+        expected_out_splits = torch.zeros_like(orig_inp_splits)
+        dist.all_to_all_single(expected_out_splits, orig_inp_splits)
+        # We do a .t() here because there is a rank-major to expert-major shuffle
+        expected_out_splits = expected_out_splits.reshape(self.world_size, ne).t()
+        torch.testing.assert_close(plan.out_splits, expected_out_splits.reshape(-1))
+
+        # Check dst offsets
+        out_split_list = expected_out_splits.tolist()
+        for i in range(ne):
+            expert_sum = 0
+            for j in range(self.world_size):
+                expert_sum += out_split_list[i][j]
+            # # Align up expert_sum
+            # expert_sum_aligned = (expert_sum + align - 1) // align * align
+            # # If 0, make it at least `align` (bc cutlass currently does not support empty bins)
+            # expert_sum_aligned = max(expert_sum_aligned, align)
+            # # last element absorbs the padding
+            # out_split_list[i][-1] += expert_sum_aligned - expert_sum
+
+        out_splits_padded = torch.tensor(out_split_list, device=self.device).reshape(-1)
+        out_offsets = torch.cumsum(out_splits_padded, dim=0)  # inclusive scan
+        # Make it exclusive scan because that's what `all_to_all_vdev_2d` returns
+        out_offsets = torch.cat(
+            [torch.zeros(1, device=self.device), out_offsets[:-1]]
+        ).to(torch.int64)
+        expected_dst_offsets = torch.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        )
+        dist.all_to_all_single(
+            expected_dst_offsets,
+            out_offsets.reshape(ne, self.world_size).t().contiguous(),
+        )
+        torch.testing.assert_close(
+            expected_dst_offsets,
+            plan.dst_offsets,
+            msg=f"""
+            Expecting
+            {expected_dst_offsets}
+            Got
+            {plan.dst_offsets}""",
+        )
+
 
 # Help function used by multiple tests
 def dispatch_then_combine(device, align: int, group) -> None:
