@@ -771,7 +771,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
     maybe_subclass_meta: Optional[SubclassMeta]
     num_fw_outs_saved_for_bw: Optional[int]
 
-    # Used by RuntimeWrapepr
+    # Used by RuntimeWrapper
     indices_of_inps_to_detach: list[int]
 
     # Time taken to trace/compile the forward
