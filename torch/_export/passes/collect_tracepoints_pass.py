@@ -48,7 +48,7 @@ class CollectTracepointsPass(PassBase):
             for node in module.graph.nodes:
                 if node.op != "call_function":
                     continue
-                if node.target == torch.ops.higher_order._export_tracepoint:
+                if node.target is torch.ops.higher_order._export_tracepoint:
                     kind = node.kwargs["kind"]
                     if kind == "module_call_outputs":
                         nn_module_stack = node.meta["nn_module_stack"]
@@ -64,7 +64,7 @@ class CollectTracepointsPass(PassBase):
             for node in reversed(module.graph.nodes):
                 if node.op != "call_function":
                     continue
-                if node.target == torch.ops.higher_order._export_tracepoint:
+                if node.target is torch.ops.higher_order._export_tracepoint:
                     kind = node.kwargs["kind"]
                     if kind == "module_call_inputs":
                         nn_module_stack = node.meta["nn_module_stack"]
@@ -94,7 +94,7 @@ class CollectTracepointsPass(PassBase):
             for node in module.graph.nodes:
                 if node.op != "call_function":
                     continue
-                if node.target == torch.ops.higher_order._export_tracepoint:
+                if node.target is torch.ops.higher_order._export_tracepoint:
                     # There's some subtlety worth noting. Here fqn corresponds to
                     # the call name, whereas path corresponds to the module name.
                     # They are not necessarily the same! When a submodule is shared

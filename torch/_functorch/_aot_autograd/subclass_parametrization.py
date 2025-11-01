@@ -98,7 +98,7 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
                 module, name, UnwrapTensorSubclass()
             )
 
-    for name, child in module.named_children():
+    for child in module.children():
         unwrap_tensor_subclass_parameters(child)
 
     return module

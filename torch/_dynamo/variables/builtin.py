@@ -1828,17 +1828,20 @@ class BuiltinVariable(VariableTracker):
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
-        if isinstance(obj, variables.IteratorVariable):
-            ret = obj
-        elif isinstance(obj, variables.RangeVariable):
-            ret = obj.call_method(tx, "__iter__", [], {})
-        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
-            ret = obj  # type: ignore[assignment]
+        # avoid the overhead of tracing the polyfill if we already know the class implemented __iter__
+        if isinstance(
+            obj,
+            (
+                variables.ListVariable,
+                variables.RangeVariable,
+                variables.IteratorVariable,
+                variables.ConstDictVariable,
+                variables.NNModuleVariable,
+                variables.TensorVariable,
+            ),
+        ):
+            return obj.call_method(tx, "__iter__", [], {})
         else:
-            # Handle the case where we are iterating over a tuple, list or iterator
-            ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
-
-        if ret is None:
             # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
             # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
             # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
@@ -1854,7 +1857,7 @@ class BuiltinVariable(VariableTracker):
                 # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
                 # that forwards the next_variable call to the object.
                 ret = variables.ObjectIteratorVariable(ret)
-        return ret
+            return ret
 
     call_tuple = _call_tuple_list
     call_list = _call_tuple_list
@@ -1905,11 +1908,11 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
 
-    def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
+    def call_dict(self, tx: "InstructionTranslator", /, *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     @staticmethod
-    def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+    def call_custom_dict(tx: "InstructionTranslator", user_cls, /, *args, **kwargs):
         args = list(args)
         if (
             len(args) == 1
@@ -1929,7 +1932,7 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict_fromkeys(
-        tx: "InstructionTranslator", user_cls, *args, **kwargs
+        tx: "InstructionTranslator", user_cls, /, *args, **kwargs
     ):
         if user_cls not in {dict, OrderedDict, defaultdict}:
             unimplemented_v2(

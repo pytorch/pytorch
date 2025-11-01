@@ -34,7 +34,7 @@ from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
-from ..source import is_from_local_source
+from ..source import is_constant_source, is_from_local_source
 from ..utils import (
     cmp_name_to_op_mapping,
     dict_items,
@@ -46,6 +46,7 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
+from .lists import ListIteratorVariable
 
 
 if TYPE_CHECKING:
@@ -53,7 +54,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-# [Adding a new supported class within the keys of ConstDictVarialble]
+# [Adding a new supported class within the keys of ConstDictVariable]
 # - Add its tracker type to is_hashable
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
@@ -779,6 +780,12 @@ class ConstDictVariable(VariableTracker):
         elif name == "__ior__":
             self.call_method(tx, "update", args, kwargs)
             return self
+        elif name == "__iter__":
+            if self.source and not is_constant_source(self.source):
+                tx.output.guard_on_key_order.add(self.source)
+            return ListIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -787,12 +794,16 @@ class ConstDictVariable(VariableTracker):
         return [x.vt for x in self.items.keys()]
 
     def call_obj_hasattr(self, tx, name):
-        # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
-        # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
-        if self.user_cls is dict:
-            if name in self.user_cls.__dict__:
+        # dict not allow setting arbitrary attributes.  OrderedDict and
+        # defaultdict allow arbitrary setattr, but not deletion of default attrs
+        if any(
+            self.user_cls is t
+            for t in (dict, collections.OrderedDict, collections.defaultdict)
+        ):
+            if hasattr(self.user_cls, name):
                 return ConstantVariable.create(True)
-            return ConstantVariable.create(False)
+            if self.user_cls is dict:
+                return ConstantVariable.create(False)
 
         msg = f"hasattr on {self.user_cls} is not supported"
         unimplemented_v2(
@@ -879,6 +890,13 @@ class MappingProxyVariable(VariableTracker):
             )
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
+        if self.python_type() is types.MappingProxyType:
+            return ConstantVariable.create(name in types.MappingProxyType.__dict__)
+        return super().call_obj_hasattr(tx, name)
+
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
@@ -912,7 +930,13 @@ class DefaultDictVariable(ConstDictVariable):
         if isinstance(arg, variables.BuiltinVariable):
             return arg.fn in (list, tuple, dict, set)
         else:
-            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
+            return isinstance(
+                arg,
+                (
+                    variables.functions.BaseUserFunctionVariable,
+                    variables.functions.PolyfilledFunctionVariable,
+                ),
+            )
 
     def call_method(
         self,
@@ -1388,6 +1412,10 @@ class DictViewVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
+        elif name == "__iter__":
+            return ListIteratorVariable(
+                self.view_items_vt, mutation_type=ValueMutationNew()
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
