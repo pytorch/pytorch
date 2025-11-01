@@ -13,11 +13,11 @@ import importlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 import torch
 import torch.distributed as dist

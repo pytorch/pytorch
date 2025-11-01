@@ -3,8 +3,8 @@
 import functools
 import itertools
 import operator
-from collections.abc import Iterable, Sequence
-from typing import Callable, cast, Optional, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -150,7 +150,7 @@ def normalize_dims(dims: DimsType, ndim: int) -> DimsSequenceType:
     elif isinstance(dims, list):
         dims = [normalize_dim(dim, ndim) for dim in dims]
     elif isinstance(dims, tuple):
-        dims = tuple([normalize_dim(dim, ndim) for dim in dims])
+        dims = tuple(normalize_dim(dim, ndim) for dim in dims)
     return dims
 
 

@@ -3047,9 +3047,13 @@ class TestReductions(TestCase):
             torch.tensor([1], dtype=torch.float, device=device),
             actual)
         # tensors with inf; min, max not provided -- should throw a RuntimeError
-        with self.assertRaisesRegex(RuntimeError, r'range of \[inf, inf\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
             torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device))
-        with self.assertRaisesRegex(RuntimeError, r'range of \[1, inf\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
+            torch.histc(torch.tensor([float("-inf")], dtype=torch.float, device=device))
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
+            torch.histc(torch.tensor([float("-inf"), float("inf")], dtype=torch.float, device=device))
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device))
         # tensors with inf; min, max provided
         self.assertEqual(
@@ -3129,6 +3133,20 @@ class TestReductions(TestCase):
         self.assertEqual(
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_histc_value_corner_cases(self, device, dtype):
+        min_val = torch.finfo(dtype).min
+        actual = torch.histc(
+            torch.tensor([min_val, min_val, min_val], dtype=dtype, device=device),
+            bins=4)
+        self.assertEqual(3.0, actual.sum())
+        max_val = torch.finfo(dtype).max
+        actual = torch.histc(
+            torch.tensor([max_val, max_val, max_val], dtype=dtype, device=device),
+            bins=4)
+        self.assertEqual(3.0, actual.sum())
 
     @onlyCUDA
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long)

@@ -51,3 +51,5 @@ google/gemma-2-2b,8
 google/gemma-3-4b-it,8
 openai/whisper-tiny,8
 Qwen/Qwen3-0.6B,8
+mistralai/Mistral-7B-Instruct-v0.3, 8
+openai/gpt-oss-20b, 8

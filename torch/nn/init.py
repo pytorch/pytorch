@@ -2,7 +2,8 @@
 
 import math
 import warnings
-from typing import Callable, Literal, Optional as _Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Literal, Optional as _Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

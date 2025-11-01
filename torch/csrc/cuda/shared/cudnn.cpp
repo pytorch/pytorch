@@ -13,6 +13,8 @@ using version_tuple = std::tuple<size_t, size_t, size_t>;
 #ifdef USE_CUDNN
 #include <cudnn.h>
 
+TORCH_MAKE_PYBIND_ENUM_FASTER(cudnnRNNMode_t)
+
 namespace {
 
 version_tuple getCompileVersion() {

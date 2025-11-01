@@ -9,21 +9,16 @@
 #if !(                                                 \
     defined(__VSX__) || defined(CPU_CAPABILITY_VSX) || \
     defined(CPU_CAPABILITY_ZVECTOR))
-#if defined(CPU_CAPABILITY_SVE256)
-#include <ATen/cpu/vec/sve/vec_common_sve.h>
-#else
-// clang-format off
-#include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_double.h>
+#include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_int.h>
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
-#endif
 #if !defined(CPU_CAPABILITY_SVE256) || !defined(__ARM_FEATURE_BF16)
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #endif
-#include <ATen/cpu/vec/vec256/vec256_half.h>
-#include <ATen/cpu/vec/vec256/vec256_complex_float.h>
 #include <ATen/cpu/vec/vec256/vec256_complex_double.h>
+#include <ATen/cpu/vec/vec256/vec256_complex_float.h>
+#include <ATen/cpu/vec/vec256/vec256_half.h>
 // clang-format on
 #elif defined(__VSX__) || defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
@@ -55,34 +50,6 @@ namespace at::vec {
 // namespace` which changes the name mangling, but can still be
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
-
-inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
-  stream << val.val_;
-  return stream;
-}
-inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
-  stream << static_cast<int>(val.val_);
-  return stream;
-}
-inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
-  stream << static_cast<unsigned int>(val.val_);
-  return stream;
-}
-
-template <typename T>
-std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
-  T buf[Vectorized<T>::size()];
-  vec.store(buf);
-  stream << "vec[";
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    if (i != 0) {
-      stream << ", ";
-    }
-    stream << buf[i];
-  }
-  stream << "]";
-  return stream;
-}
 
 #if defined(CPU_CAPABILITY_AVX2)
 

@@ -905,7 +905,6 @@ def _export_to_aten_ir(
             # make sure we don't override any meta
             if "desc" in new_output_node.meta:
                 del new_output_node.meta["desc"]
-            assert len(new_output_node.meta) == 0
             new_output_node.meta.update(old_output_node.meta)
 
     # TODO unfortunately preserving graph-level metadata and output node's meta
@@ -1265,6 +1264,9 @@ def _process_export_inputs(
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
     kwargs = kwargs if kwargs is not None else {}
+    if pytree.is_namedtuple_instance(args):
+        args = tuple(args)
+
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
     verify_additional_inputs: Callable[[ExportedProgram], None]

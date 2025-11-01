@@ -42,6 +42,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -1236,6 +1237,72 @@ class AOTInductorTestsTemplate:
             Model(dtype),
             (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
             dynamic_shapes=dynamic_shapes,
+        )
+
+    @unittest.skipIf(
+        TEST_WITH_ROCM or not IS_SM90,
+        "scaled_grouped_mm is only supported on SM90",
+    )
+    @skipIfXpu
+    def test_scaled_grouped_mm(self):
+        # Test torch._scaled_grouped_mm AOTI lowering
+        # cuda only
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, weight, scale_a, scale_b, offsets):
+                # x: [num_groups, batch, in_features] - FP8 inputs
+                # weight: [total_out_features, in_features] - FP8 weights (transposed)
+                # scale_a: [num_groups] - input scales
+                # scale_b: [num_groups] - weight scales
+                # offsets: [num_groups] - cumulative output sizes
+                output = torch._scaled_grouped_mm(
+                    x,
+                    weight.t(),
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    offs=offsets,
+                    use_fast_accum=True,
+                )
+                return output.half()
+
+        dtype = torch.float16
+        num_groups = 3
+        batch_size = 64
+        in_features = 128
+        out_features_list = [64, 128, 256]  # Different output sizes for each group
+
+        device = GPU_TYPE
+
+        # Calculate offsets (cumulative output sizes)
+        offsets = torch.cumsum(torch.tensor(out_features_list), dim=0).to(
+            device, dtype=torch.int32
+        )
+        total_out_features = sum(out_features_list)
+
+        # Create FP8 input tensors - stacked for all groups
+        x_fp16 = torch.randn(
+            num_groups, batch_size, in_features, dtype=dtype, device=device
+        )
+        x_fp8 = x_fp16.to(torch.float8_e4m3fn)
+
+        # Create FP8 weight tensor - concatenated and transposed
+        weight_fp16 = torch.randn(
+            total_out_features, in_features, dtype=dtype, device=device
+        )
+        weight_fp8 = weight_fp16.to(torch.float8_e4m3fn)
+
+        # Create scales
+        scale_a = torch.ones(num_groups, batch_size, device=device, dtype=torch.float32)
+        scale_b = torch.ones(total_out_features, device=device, dtype=torch.float32)
+
+        self.check_model(
+            Model(),
+            (x_fp8, weight_fp8, scale_a, scale_b, offsets),
         )
 
     @unittest.skipIf(
@@ -4041,7 +4108,7 @@ class AOTInductorTestsTemplate:
         expected_original_fqns = {
             "L__self___test_param": "test_param",
             "L__self___test_buf": "test_buf",
-            "getattr_L__self___foo_bar___0__": "foo_bar.0",
+            "L__self___foo_bar_0": "foo_bar.0",
             "L__self___foo_bar_test_param": "foo_bar.test_param",
             "L__self___foo_bar_test_buf": "foo_bar.test_buf",
         }
@@ -4052,7 +4119,7 @@ class AOTInductorTestsTemplate:
         expected_dtypes = {
             "L__self___test_param": 6,
             "L__self___test_buf": 6,
-            "getattr_L__self___foo_bar___0__": 6,
+            "L__self___foo_bar_0": 6,
             "L__self___foo_bar_test_param": 6,
             "L__self___foo_bar_test_buf": 6,
         }
@@ -5073,6 +5140,52 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
 
             self.check_model(Model(N, K, self.device), example_inputs)
+
+    def test_aoti_user_defined_triton_kernel_profiling(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                add_kernel[(4,)](x, y, out, n_elements=4, BLOCK_SIZE=16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+
+        with (
+            config.patch({"cpp.enable_kernel_profile": True}),
+            torch.profiler.profile(
+                record_shapes=True,
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+            ) as prof,
+        ):
+            self.check_model(Model(), example_inputs)
+        with common_utils.TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                import json
+
+                j = json.load(f)
+                op_events = [
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "kernels_.add_kernel_0"
+                ]
+                self.assertEqual(len(op_events), 1)
+                self.assertEqual(
+                    op_events[0]["args"].get("Input Args", ""),
+                    ["in_ptr0", "in_ptr1", "out_ptr", "n_elements"],
+                )
 
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
@@ -7148,6 +7261,37 @@ class AOTInductorTestsTemplate:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
 
+    def test_unbounded_expr_substitutions(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, a, b):
+                u0, s0 = a.item(), b.item()
+                u_max = max(u0, 15)
+                # construct the equality rule Max(15, u0) == s0 * Max(15, u0)
+                torch._check(u_max == s0 * u_max)
+                # size x - [Max(u0, 15), 64]
+                x = x.expand(u_max, *x.shape).clone()
+                return x @ y
+
+        model = Model()
+
+        example_inputs = (
+            torch.randn((64,), dtype=torch.bfloat16, device=self.device),
+            torch.randn((64, 16), dtype=torch.bfloat16, device=self.device),
+            torch.tensor(19, device=self.device),
+            torch.tensor(1, device=self.device),
+        )
+        torch._dynamo.mark_dynamic(example_inputs[-1], 0)
+
+        so_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        compiled_outputs = compiled(*example_inputs)
+
+        eager_outputs = model(*example_inputs)
+        torch.testing.assert_close(eager_outputs, compiled_outputs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -7274,8 +7418,6 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
-    # aten::_embedding_bag backward is not currently implemented for the MPS device.
-    "test_embedding_bag": fail_mps(),
     # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
     "test_scaled_dot_product_efficient_attention": fail_mps(),
     # aten::_int_mm is not implemented for MPS backend

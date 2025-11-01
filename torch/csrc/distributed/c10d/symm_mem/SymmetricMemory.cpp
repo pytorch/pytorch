@@ -499,6 +499,9 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
   m.def(
       "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
+  m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
+  m.def(
+      "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
@@ -507,6 +510,14 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
   m.def(
       "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
+  m.def(
+      "_make_a2a_exchange_plan(Tensor in_splits, Tensor(a!) src_offsets, Tensor(a!) out_splits, Tensor(a!) dst_offsets, str group_name) -> ()");
+  m.def(
+      "_all_to_all_get(Tensor input, Tensor(a!) out, Tensor src_offsets, Tensor out_splits, Tensor dst_offsets, str group_name, Tensor? b_start, Tensor? b_len, Tensor? b_head) -> ()");
+  m.def(
+      "_make_a2a_2d_exchange_plan(Tensor in_splits, Tensor(a!) src_offsets, Tensor(a!) out_splits, Tensor(a!) dst_offsets, str group_name) -> ()");
+  m.def(
+      "_all_to_all_v_2d_index_push(Tensor input, Tensor(a!) out, Tensor topk_indices, Tensor occurrences, Tensor dst_offsets, str group_name, Tensor b_start, Tensor b_len, Tensor b_head) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

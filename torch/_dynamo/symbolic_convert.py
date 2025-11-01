@@ -465,9 +465,6 @@ def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
 
 
 def is_stdlib(mod: object) -> bool:
-    if sys.version_info < (3, 10):
-        # For < 3.10, no easy way to identify a stdlib module name.
-        return False
     if not isinstance(mod, types.ModuleType):
         return False
     return mod.__name__.split(".")[0] in sys.stdlib_module_names
@@ -3769,18 +3766,17 @@ class InstructionTranslatorBase(
 
         self.package = package
 
-        if sys.version_info >= (3, 10):
-            from .resume_execution import (
-                CO_ASYNC_GENERATOR,
-                CO_COROUTINE,
-                CO_GENERATOR,
-                CO_ITERABLE_COROUTINE,
-            )
+        from .resume_execution import (
+            CO_ASYNC_GENERATOR,
+            CO_COROUTINE,
+            CO_GENERATOR,
+            CO_ITERABLE_COROUTINE,
+        )
 
-            if f_code.co_flags & (
-                CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
-            ):
-                self.push(BuiltinVariable(None))
+        if f_code.co_flags & (
+            CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+        ):
+            self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False

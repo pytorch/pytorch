@@ -2,7 +2,8 @@
 import enum
 import timeit
 import textwrap
-from typing import overload, Any, Callable, NoReturn, Optional, Union
+from typing import overload, Any, NoReturn, Optional, Union
+from collections.abc import Callable
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit

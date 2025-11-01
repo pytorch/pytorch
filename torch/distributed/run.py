@@ -373,8 +373,9 @@ import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
+from collections.abc import Callable
 from importlib import metadata
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -770,14 +771,9 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     logs_specs_cls = None
     if logs_specs_name is not None:
         eps = metadata.entry_points()
-        if hasattr(eps, "select"):  # >= 3.10
-            group = eps.select(group="torchrun.logs_specs")
-            if group.select(name=logs_specs_name):
-                logs_specs_cls = group[logs_specs_name].load()
-
-        elif specs := eps.get("torchrun.logs_specs"):  # < 3.10
-            if entrypoint_list := [ep for ep in specs if ep.name == logs_specs_name]:
-                logs_specs_cls = entrypoint_list[0].load()
+        group = eps.select(group="torchrun.logs_specs")
+        if group.select(name=logs_specs_name):
+            logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
             raise ValueError(
