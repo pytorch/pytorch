@@ -1,18 +1,14 @@
-import collections
 from typing import Any, Optional
 
 import torch
 from torch.fx import Proxy
 
 from .. import graph_break_hints
-from ..bytecode_transformation import create_call_function
 from ..device_interface import get_interface_for_device
 from ..exc import TYPE_CHECKING, unimplemented_v2
-from ..source import AttrSource, CallFunctionNoArgsSource, TorchSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
-from .lazy import LazyVariableTracker
 from .misc import GetAttrVariable
 
 
@@ -67,42 +63,6 @@ def _(
     pass
 
 
-class SymbolicStreamState:
-    """Track the currently entered stream if any"""
-
-    def __init__(self) -> None:
-        from ..source import CurrentStreamSource
-
-        cur_stack: list[StreamVariable] = []
-        if torch.accelerator.is_available():
-            stream_var = LazyVariableTracker.create(
-                torch.accelerator.current_stream(),
-                source=CurrentStreamSource(torch.accelerator.current_stream().device),
-            )
-            cur_stack = [stream_var]  # type: ignore[list-item]
-
-        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
-            cur_stack
-        )
-
-    def enter_stream(self, stream: "StreamVariable") -> None:
-        self.cur_stream_stack.append(stream)
-
-    def exit_stream(self) -> None:
-        self.cur_stream_stack.pop()
-
-    def cur_stream(self, device: Optional[torch.device] = None) -> "StreamVariable":
-        if device is not None:
-            for stream in reversed(self.cur_stream_stack):
-                if stream.device == device:
-                    return stream
-
-        return self.cur_stream_stack[-1]
-
-    def in_stream_context(self) -> bool:
-        return len(self.cur_stream_stack) > 0
-
-
 class StreamContextVariable(ContextWrappingVariable):
     """This represents torch.cuda.StreamContext"""
 
@@ -131,12 +91,12 @@ class StreamContextVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        # pyrefly: ignore [read-only]
         self.device = device
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
-        tx.symbolic_stream_state.enter_stream(self._get_target_values()[0])
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.fork.default,
@@ -148,7 +108,6 @@ class StreamContextVariable(ContextWrappingVariable):
     def exit(self, tx: "InstructionTranslator", *args: tuple[Any]) -> "VariableTracker":
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
-        tx.symbolic_stream_state.exit_stream()
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.join.default,
@@ -213,9 +172,6 @@ class StreamVariable(StreamContextVariable):
         device: torch.device,
         **kwargs: Any,
     ) -> None:
-        # Index into the user object table
-        # used to pass arbitrary objects to the graph
-        user_object_index = kwargs.pop("user_obj_index", None)
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert value.device.type == device.type, (
@@ -226,8 +182,6 @@ class StreamVariable(StreamContextVariable):
         self.value = value
         # pyrefly: ignore [read-only]
         self.device = device
-
-        self.user_object_index = user_object_index
 
     def python_type(self) -> type:
         return torch.Stream
@@ -278,6 +232,7 @@ class StreamVariable(StreamContextVariable):
                 return ConstantVariable.create(NotImplemented)
 
             if other.source:
+                assert self.source is not None
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             return ConstantVariable.create(
                 cmp_name_to_op_mapping[name](self.value, other.value)  # type: ignore[arg-type]
@@ -307,27 +262,15 @@ class StreamVariable(StreamContextVariable):
         # If we got here, this stream is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source
-        if self.user_object_index is not None:
-            codegen.add_push_null(
-                lambda: codegen.load_import_from(
-                    torch._dynamo.graph_bytecode_inputs.__name__,
-                    "get_external_object_by_index",
-                )
-            )
-            codegen.append_output(codegen.create_load_const(self.user_object_index))
-            codegen.extend_output(create_call_function(1, False))
-        else:
-            # TODO mlazos: evaluate if we still need this
-            prefix = f"_stream_{self.device}"
-            name = codegen.tx.output.install_global_by_id(prefix, self.value)
-            codegen.append_output(codegen.create_load_global(name, add=True))
-
-    @staticmethod
-    def construct_in_graph_stream(index: int, codegen: "PyCodegen") -> None:
-        # Use source to create the right bytecode, this
-        # isn't an actual input
-        source = CallFunctionNoArgsSource(AttrSource(TorchSource(), "Stream"))
-        codegen(source)
+        # Since we just proved that - for other such structures, like lists and dicts, reconstruction
+        # is fine and sound according to dynamo principles of treating collectives. However,
+        # streams are special in that we want to preserve the identity of the stream as the same as in the graph
+        # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
+        # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
+        # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
+        prefix = f"_stream_{self.device}"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
     def _get_target_values(self) -> list["StreamVariable"]:
         return [self]

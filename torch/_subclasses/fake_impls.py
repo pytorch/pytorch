@@ -213,6 +213,11 @@ def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
     return r
 
 
+@register_op_impl(aten._async_error.default)
+def _async_error(fake_mode, func, msg: str):
+    pass
+
+
 @register_op_impl(aten.to.prim_Device)
 @register_op_impl(aten.to.device)
 def non_kwarg_to(fake_mode, func, *args, **kwargs):
