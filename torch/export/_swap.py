@@ -26,7 +26,7 @@ def _get_getitem_users(node: torch.fx.Node) -> set[torch.fx.Node]:
         if user.op == "output":
             continue
 
-        assert user.op == "call_function" and user.target == operator.getitem, (
+        assert user.op == "call_function" and user.target is operator.getitem, (
             f"Expected getitem node as user for {node}, instead got {user}"
         )
         getitem_users.update(list(user.users.keys()))

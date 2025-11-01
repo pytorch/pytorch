@@ -1188,7 +1188,7 @@ class CppVecOverrides(CppOverrides):
                     # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
                     if len(new_args) == 2:
                         new_args = promote_args(new_args)
-                    elif func == CppVecOverrides.where:
+                    elif func is CppVecOverrides.where:
                         new_args[1:] = promote_args(new_args[1:])
 
                 # Broadcast scalar args to vector

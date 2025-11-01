@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <torch/headeronly/core/Dispatch.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
 
 // MY_PRIVATE_CHECK_SELECTIVE_BUILD is a prelude to case block. For
