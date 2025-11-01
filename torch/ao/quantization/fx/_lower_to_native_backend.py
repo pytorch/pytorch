@@ -227,7 +227,7 @@ def is_dequantize_node(node):
 def is_getattr_tensor_metadata_node(node):
     return (
         node.op == "call_function"
-        and node.target == getattr
+        and node.target is getattr
         and node.args[1] == "shape"
     )
 
@@ -952,14 +952,14 @@ def _lower_static_weighted_ref_functional(
         # Linear prepack args: (quantized weights[, bias])
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
-        if func_node.target == F.linear:
+        if func_node.target is F.linear:
             weight_dtype = quantized_weight.args[-1]
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
         elif func_node.target in CONV_FUNCTIONAL_OPS:
             prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
             # For conv1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
-            if func_node.target == F.conv1d:
+            if func_node.target is F.conv1d:
                 for i in [2, 3, 4]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
@@ -967,7 +967,7 @@ def _lower_static_weighted_ref_functional(
             prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
             # For conv_transpose1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
-            if func_node.target == F.conv_transpose1d:
+            if func_node.target is F.conv_transpose1d:
                 # Note prepack_args[5] is groups.
                 for i in [2, 3, 4, 6]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
@@ -984,7 +984,7 @@ def _lower_static_weighted_ref_functional(
             # They are not needed for compute op (i.e., quantized::linear)
             kwargs = func_node.kwargs
             # F.linear uses 'bias' key for bias while qlinear_prepack uses 'B' for bias
-            if func_node.target == F.linear and "bias" in kwargs:
+            if func_node.target is F.linear and "bias" in kwargs:
                 kwargs = kwargs.copy()
                 kwargs["B"] = kwargs["bias"]
                 del kwargs["bias"]
@@ -1039,7 +1039,7 @@ def _lower_dynamic_weighted_ref_functional(
         # Handle cases where the functional op is wrapped in a ReLU
         if (
             func_node.op == "call_function"
-            and func_node.target == F.relu
+            and func_node.target is F.relu
             or func_node.op == "call_module"
             and type(modules[str(func_node.target)]) is torch.nn.ReLU
         ):
@@ -1111,7 +1111,7 @@ def _lower_dynamic_weighted_ref_functional(
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
         prepack_kwargs = {}
-        if func_node.target == F.linear:
+        if func_node.target is F.linear:
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
             kwargs = func_node.kwargs.copy()
             if "bias" in kwargs:
@@ -1122,7 +1122,7 @@ def _lower_dynamic_weighted_ref_functional(
             prepack_op = get_qconv_prepack_op(func_node.target)
             # For conv1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
-            if func_node.target == F.conv1d:
+            if func_node.target is F.conv1d:
                 for i in [2, 3, 4]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
