@@ -17,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     is_out_variant_op,
     OpInfo,
     OpSchema,
+    OutputSharding,
     OutputSpecType,
 )
 from torch.distributed.tensor._random import is_rng_supported_mesh
@@ -101,6 +102,8 @@ class OpDispatcher:
 
     def __init__(self) -> None:
         self.sharding_propagator = ShardingPropagator()
+        # NOTE: must stay in sync with is_random_op in
+        # torch/csrc/autograd/python_variable.cpp
         self._random_ops = {
             aten.native_dropout.default,
             aten.normal_.default,
@@ -181,19 +184,12 @@ class OpDispatcher:
         # being hit?
         return op_call.redispatch(DispatchKeySet(DispatchKey.DTensor), *args, **kwargs)
 
-    def _dispatch_fast_path_python_tail(
+    def _dispatch_get_local_results_slow_path(
         self,
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
-        kwargs: dict[str, object],
         op_info: OpInfo,
     ) -> object:
-        """
-        Main dispatching logic, called from C++ fast path.  Follows precedence order:
-        (1) custom_op_handler
-        (2) registered sharding strategy, then rule
-        (3) composite implicit autograd decomposition
-        """
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
 
@@ -300,6 +296,24 @@ class OpDispatcher:
                         raise NotImplementedError(
                             f"return type {ret_type} in DTensor op is not supported"
                         )
+        return local_results
+
+    def _dispatch_fast_path_python_tail(
+        self,
+        op_call: torch._ops.OpOverload,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        compute_mesh: DeviceMesh,
+        output_sharding: OutputSharding,
+        local_results: object,
+        participating: bool,
+    ) -> object:
+        """
+        Tail of main dispatching logic, called from C++ fast path.  Follows precedence order:
+        (1) custom_op_handler
+        (2) registered sharding strategy, then rule
+        (3) composite implicit autograd decomposition
+        """
 
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
@@ -309,7 +323,7 @@ class OpDispatcher:
                 assert local_results is None or isinstance(local_results, bool)
                 r = torch.tensor(
                     int(local_results) if local_results is not None else 1,
-                    device=mesh.device_type,
+                    device=compute_mesh.device_type,
                 )
                 dist.all_reduce(r, op=dist.ReduceOp.MIN)
                 local_results = bool(r.item())

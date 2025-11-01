@@ -995,6 +995,15 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_dispatch_fast_path_python_tail"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_dtensor_get_local_results_slow_path,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("DTensor")
+        .attr("_op_dispatcher")
+        .attr("_dispatch_get_local_results_slow_path"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_output_sharding_class,
     py::module::import("torch")
         .attr("distributed")
@@ -1033,14 +1042,18 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(_spec)                                                    \
   _(_unwrap_to_op_info_impl)                                  \
   _(args_schema)                                              \
+  _(compute_mesh)                                             \
   _(device_mesh)                                              \
   _(dtype)                                                    \
+  _(get_coordinate)                                           \
   _(kwargs_schema)                                            \
   _(ndim)                                                     \
   _(needs_pytree)                                             \
+  _(needs_redistribute)                                       \
   _(op)                                                       \
   _(op_to_schema_info)                                        \
   _(output_sharding)                                          \
+  _(output_spec)                                              \
   _(schema_info)                                              \
   _(shape)                                                    \
   _(sharding_propagator)                                      \
@@ -1272,7 +1285,8 @@ class NativeShardingPropagatorCache {
   c10::FastMap<NativeOpSchema, py::object> repr_;
 };
 
-static std::optional<NativeOpSchema> create_native_op_schema(
+static std::optional<std::pair<NativeOpSchema, /*ComputeMesh*/ py::object>>
+create_native_op_schema(
     const c10::OperatorHandle& op,
     py::handle py_op,
     torch::jit::Stack* stack);
@@ -1302,6 +1316,133 @@ void cleanup_thread_local_native_sharding_propagator_caches() {
   for (auto& [_, popt_cache] : all_thread_caches) {
     popt_cache->reset();
   }
+}
+
+static void replace_dtensors_with_local_tensor(torch::jit::Stack& stack);
+
+static bool is_random_op(const c10::OperatorHandle& op) {
+  const auto& op_name = op.operator_name();
+  if (op_name.name.size() <= 6 ||
+      memcmp(op_name.name.data(), "aten::", 6) != 0) {
+    return false;
+  }
+  static constexpr std::array<std::string_view, 6> random_names = {{
+      "native_dropout",
+      "normal_",
+      "rand_like",
+      "randn_like",
+      "uniform_",
+      "bernoulli",
+  }};
+  std::string_view name_without_namespace(
+      op_name.name.c_str() + 6, op_name.name.size() - 6);
+  if (name_without_namespace == "bernoulli_") {
+    return op_name.overload_name == "float";
+  }
+  if (name_without_namespace == "randint_like") {
+    return op_name.overload_name == "default" ||
+        op_name.overload_name == "low_dtype" ||
+        op_name.overload_name == "low_dtype_out";
+  }
+  const auto it = std::find(
+      random_names.begin(), random_names.end(), name_without_namespace);
+  if (it == random_names.end()) {
+    return false;
+  }
+  return op_name.overload_name == "default";
+}
+
+// Puts local results on the stack. Return true for success, false for bailout
+// to slow path.
+static bool get_local_results(
+    const c10::OperatorHandle& op,
+    py::handle output_sharding,
+    py::handle compute_mesh,
+    bool participating,
+    torch::jit::Stack* stack) {
+  if (participating) {
+    // computation that happens in the current rank of the mesh, normal case
+    if (checked_istrue(
+            output_sharding.attr(dtensor_interned_strings.needs_redistribute)
+                .ptr()) ||
+        is_random_op(op)) {
+      // Bail out to slow path.
+      return false;
+    }
+    // normal case, run local sharded op computation.
+
+    // It is slightly inefficient that we take another pass over
+    // arguments here when we just did one in create_native_op_schema to
+    // create the comparison key. However, we have a crucial difference:
+    // in the NativeOpSchema, we don't want to waste time dealing with
+    // defaulted args. Here, we need to provide defaulted args because
+    // we are going to make a local op call.
+    replace_dtensors_with_local_tensor(*stack);
+    op.callBoxed(*stack);
+  } else {
+    // For a non-participating device (happens on rank that does not
+    // belong to the device mesh), we do:
+    //
+    //   1. if the return type is scalar, set the local result to
+    //   None.
+    //   2. if the return type is Tensor or List[Tensor], return
+    //   empty tensor(s) with correct dtype.
+    auto spec = output_sharding.attr(dtensor_interned_strings.output_spec);
+    if (spec.is_none()) {
+      stack->clear();
+      stack->emplace_back(); // Return None.
+      return true;
+    }
+
+    const auto default_tensor = [](py::handle spec) -> Tensor {
+      auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
+      TORCH_CHECK(
+          !tensor_meta.is_none(), py::str(spec), " has no tensor metadata.");
+      const auto sizes = tensor_meta.attr(dtensor_interned_strings.shape);
+      TORCH_CHECK(
+          PyTuple_Check(sizes.ptr()), "spec.tensor_meta.shape must be a tuple");
+      const auto dtype = tensor_meta.attr(dtensor_interned_strings.dtype);
+      TORCH_CHECK(
+          THPDtype_Check(dtype.ptr()),
+          "spec.tensor_meta.dtype must be a torch.dtype");
+      const auto scalar_type =
+          reinterpret_cast<THPDtype*>(dtype.ptr())->scalar_type;
+      if (py::reinterpret_steal<py::tuple>(py::object(sizes)).empty()) {
+        // scalar tensor
+        return torch::zeros({}, scalar_type);
+      } else {
+        // non-scalar tensor
+        return torch::empty({0}, scalar_type);
+      }
+    };
+    auto handle_sequence = [&default_tensor, &op, stack](auto sequence) {
+      stack->clear();
+      for (const auto& item : sequence) {
+        TORCH_CHECK(
+            !item.is_none(),
+            "return type ",
+            op.schema().returns().at(0).type(),
+            " in DTensor op is not supported");
+        stack->push_back(default_tensor(item));
+      }
+    };
+
+    if (py::isinstance(spec, get_dtensor_spec_class())) {
+      stack->clear();
+      stack->push_back(default_tensor(spec));
+    } else if (PyList_Check(spec.ptr())) {
+      handle_sequence(py::reinterpret_borrow<py::list>(spec));
+    } else if (PyTuple_Check(spec.ptr())) {
+      handle_sequence(py::reinterpret_borrow<py::tuple>(spec));
+    } else if (PySequence_Check(spec.ptr())) {
+      handle_sequence(py::reinterpret_borrow<py::sequence>(spec));
+    } else {
+      // return None.
+      stack->clear();
+      stack->emplace_back();
+    }
+  }
+  return true;
 }
 
 void callDTensorOpDispatch(
@@ -1342,7 +1483,7 @@ void callDTensorOpDispatch(
     native_sharding_propagator_cache =
         &get_thread_local_native_sharding_propagator_cache();
     cached_sharding =
-        native_sharding_propagator_cache->find(*opt_native_op_schema);
+        native_sharding_propagator_cache->find(opt_native_op_schema->first);
   }
   py::object py_op_info;
   if (!cached_sharding) {
@@ -1367,25 +1508,65 @@ void callDTensorOpDispatch(
     cached_sharding = sharding;
     if (opt_native_op_schema.has_value()) {
       native_sharding_propagator_cache->insert(
-          *opt_native_op_schema, std::move(sharding));
+          opt_native_op_schema->first, std::move(sharding));
     }
-  } else {
-    py_op_info = checked_vectorcall(
-        op_dispatcher.attr(dtensor_interned_strings._unwrap_to_op_info_impl)
-            .ptr(),
-        py_op.ptr(),
-        args.ptr(),
-        kwargs.ptr(),
-        Py_False);
+    py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
   }
 
-  py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
+  const auto get_py_op_info_if_needed = [&, &args = args, &kwargs = kwargs]() {
+    if (!py_op_info) {
+      py_op_info = checked_vectorcall(
+          op_dispatcher.attr(dtensor_interned_strings._unwrap_to_op_info_impl)
+              .ptr(),
+          py_op.ptr(),
+          args.ptr(),
+          kwargs.ptr(),
+          Py_False);
+      py_op_info.attr(dtensor_interned_strings.output_sharding) =
+          cached_sharding;
+    }
+  };
+
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !kwargs.is_none(),
       "Python op_dispatch implementation expects non-None kwargs");
+
+  py::object compute_mesh;
+  if (opt_native_op_schema.has_value()) {
+    compute_mesh = std::move(opt_native_op_schema->second);
+  } else {
+    get_py_op_info_if_needed();
+    compute_mesh = py_op_info.attr(dtensor_interned_strings.compute_mesh);
+  }
+
+  const bool participating =
+      !checked_vectorcall(
+           compute_mesh.attr(dtensor_interned_strings.get_coordinate).ptr())
+           .is_none();
+  const bool local_results_success = get_local_results(
+      op, cached_sharding, compute_mesh, participating, stack);
+  py::object py_local_results;
+  if (local_results_success) {
+    py_local_results = torch::jit::createPyObjectForStack(std::move(*stack));
+  } else {
+    get_py_op_info_if_needed();
+    py_local_results = checked_vectorcall(
+        get_dtensor_get_local_results_slow_path().ptr(),
+        py_op.ptr(),
+        args.ptr(),
+        py_op_info.ptr());
+  }
+
   const auto dispatch = get_dtensor_dispatch();
   auto result = checked_vectorcall(
-      dispatch.ptr(), py_op.ptr(), args.ptr(), kwargs.ptr(), py_op_info.ptr());
+      dispatch.ptr(),
+      py_op.ptr(),
+      args.ptr(),
+      kwargs.ptr(),
+      compute_mesh.ptr(),
+      cached_sharding.ptr(),
+      py_local_results.ptr(),
+      participating ? Py_True : Py_False);
   stack->clear();
   pushPyOutToStack(op, stack, std::move(result), "DTensor op dispatch");
 }
@@ -1774,6 +1955,17 @@ static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
   return {TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS, std::move(py_tensor)};
 }
 
+static void replace_dtensors_with_local_tensor(torch::jit::Stack& stack) {
+  for (auto& arg : stack) {
+    const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(arg);
+    if (tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+        tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+      arg = THPVariable_Unpack(
+          py_tensor.attr(dtensor_interned_strings._local_tensor).ptr());
+    }
+  }
+}
+
 static py::object try_find_mesh_from_args(
     const c10::OperatorHandle& op,
     const OperatorArgsKwargsView& args_kwargs) {
@@ -1852,7 +2044,8 @@ static PyObject* get_runtime_schema_info_for_op(py::handle py_op) {
   return runtime_schema_info;
 }
 
-static std::optional<NativeOpSchema> create_native_op_schema(
+static std::optional<std::pair<NativeOpSchema, /*ComputeMesh*/ py::object>>
+create_native_op_schema(
     const c10::OperatorHandle& op,
     py::handle py_op,
     torch::jit::Stack* stack) {
@@ -1991,7 +2184,9 @@ static std::optional<NativeOpSchema> create_native_op_schema(
     }
   }
 
-  return NativeOpSchema(op, std::move(comparison_key), comparison_key_hash);
+  return std::make_pair(
+      NativeOpSchema(op, std::move(comparison_key), comparison_key_hash),
+      std::move(compute_mesh));
 }
 
 using getter = PyObject* (*)(PyObject*, void*);
