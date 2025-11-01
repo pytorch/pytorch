@@ -187,3 +187,11 @@ openai/whisper-tiny,fail_to_run,0
 
 
 Qwen/Qwen3-0.6B,fail_to_run,0
+
+
+
+mistralai/Mistral-7B-Instruct-v0.3,fail_to_run,0
+
+
+
+openai/gpt-oss-20b,fail_to_run,0

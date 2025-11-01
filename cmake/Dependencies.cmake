@@ -821,9 +821,9 @@ if(NOT Python_Interpreter_FOUND)
   message(FATAL_ERROR "Python3 could not be found.")
 endif()
 
-if(${Python_VERSION} VERSION_LESS 3.9)
+if(${Python_VERSION} VERSION_LESS 3.10)
   message(FATAL_ERROR
-    "Found Python libraries version ${Python_VERSION}. Python < 3.9 is no longer supported by PyTorch.")
+    "Found Python libraries version ${Python_VERSION}. Python < 3.10 is no longer supported by PyTorch.")
 endif()
 
 # ---[ Python + Numpy
@@ -1134,7 +1134,7 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
-if(USE_TENSORPIPE)
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
@@ -1552,6 +1552,12 @@ endif()
 #
 # End ATen checks
 #
+
+# Install `fmtlib` header.
+# This was the default behavior before version 12.0.0.
+# Since PyTorch C API depends on it, make it available for projects that
+# depend on PyTorch.
+set(FMT_INSTALL ON)
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)

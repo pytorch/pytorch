@@ -599,6 +599,26 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(new_tensor.shape, new_meta_tensor.shape)
         self.assertEqual(new_tensor.stride(), new_meta_tensor.stride())
 
+    @with_comms
+    def test_one_chunk_mesh(self):
+        # mesh size is 1 on second dim
+        mesh = init_device_mesh(self.device_type, (4, 1))
+
+        srcs = [Shard(1), Replicate(), Partial()]
+        dsts = [Shard(0), Shard(1), Replicate()]
+
+        comm_mode = CommDebugMode()
+
+        for src, dst in itertools.product(srcs, dsts):
+            tensor = torch.randn(16, 8, device=self.device_type)
+            dt = DTensor.from_local(tensor, mesh, [Shard(0), src])
+
+            with comm_mode:
+                out = dt.redistribute(mesh, [Shard(0), dst])
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(out.placements, [Shard(0), dst])
+
 
 instantiate_parametrized_tests(RedistributeTest)
 

@@ -1124,6 +1124,17 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       && scale.is_contiguous());
 }
 
+bool check_size_stride(const at::Tensor& scale, int dim, int size, int stride) {
+  // For Blockwise1x128 and Blockwise128x128,
+  // when the scale tensor has a dimension of size 1, the stride is effectively
+  // "meaningless", i.e. PyTorch decides to use a stride of 1. Thus, the regular
+  // stride check fails. Here, we relax the stride check when the effective
+  // stride is 1.
+
+  return (
+      scale.size(dim) == size && (size <= 1 || scale.stride(dim) == stride));
+}
+
 // 1x16 blocks for packed nvfp4 data and fp8_e4m3fn scales
 bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
   // Multiply t.size(1) by 2 to adjust for fp4x2 packing
@@ -1149,15 +1160,24 @@ bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
 }
 
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
-      && scale.size(0) == t.size(0) && scale.size(1) == ceil_div<int64_t>(t.size(1), 128)
-      && scale.stride(0) == 1 && scale.stride(1) == t.size(0));
+  return (
+      isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat &&
+      scale.dim() == 2 && check_size_stride(scale, 0, t.size(0), 1) &&
+      check_size_stride(
+          scale, 1, ceil_div<int64_t>(t.size(1), 128), t.size(0)));
 }
 
 bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
-  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
-      && scale.size(0) == ceil_div<int64_t>(t.size(0), 128) && scale.size(1) == ceil_div<int64_t>(t.size(1), 128)
-      && scale.stride(0) == round_up<int64_t>(ceil_div<int64_t>(t.size(1), 128), 4) && scale.stride(1) == 1);
+  return (
+      isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat &&
+      scale.dim() == 2 &&
+      check_size_stride(
+          scale,
+          0,
+          ceil_div<int64_t>(t.size(0), 128),
+          round_up<int64_t>(ceil_div<int64_t>(t.size(1), 128), 4)) &&
+      check_size_stride(
+          scale, 1, ceil_div<int64_t>(t.size(1), 128), 1));
 }
 
 bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingType desired_scaling) {

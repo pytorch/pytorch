@@ -51,6 +51,7 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
     hashable,
+    is_annotate_wrapped_function,
     is_lru_cache_wrapped_function,
     NP_SUPPORTED_MODULES,
     unwrap_if_wrapper,
@@ -154,6 +155,7 @@ manual_torch_name_rule_map: dict[
         type[UserFunctionVariable],
     ],
 ] = {
+    "torch.fx.traceback.annotate": UserFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -3002,6 +3004,8 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     continue
                 obj = torch_dir + k[len("torch/") :]
             if obj is not None:
+                if is_annotate_wrapped_function(obj):
+                    obj = obj.__wrapped__
                 if is_lru_cache_wrapped_function(obj):
                     obj = obj.__wrapped__
                 if obj in d and d[obj] != v:
@@ -3406,6 +3410,7 @@ MOD_INLINELIST = [
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._dynamo.test_case",
+    "torch._export.non_strict_utils",
     "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
@@ -3426,6 +3431,7 @@ MOD_INLINELIST = [
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export._tree_utils",
+    "torch.export._unlift",
     "torch.export._wrapper_utils",
     "torch.fx._pytree",
     "torch.fx._symbolic_trace",

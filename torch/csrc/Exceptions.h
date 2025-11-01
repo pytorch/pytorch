@@ -15,7 +15,9 @@
 #include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/pybind.h>
 
+#if defined(USE_DISTRIBUTED)
 #include <torch/csrc/distributed/c10d/exception.h>
+#endif
 
 inline void PyErr_SetString(PyObject* type, const std::string& message) {
   PyErr_SetString(type, message.c_str());

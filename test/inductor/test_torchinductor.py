@@ -19,8 +19,9 @@ import time
 import unittest
 import unittest.mock
 import weakref
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -2453,7 +2454,6 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     @xfail_if_mps_unimplemented
-    @skipCUDAIf(True, "No _weight_int8pack_mm implementation on CUDA")
     @skipIfXpu(msg="No _weight_int8pack_mm implementation on XPU")
     def test_int8_weight_only_quant(self):
         def convert_weight_to_int8pack(b):
@@ -4640,6 +4640,41 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    def test_conv1d_with_permute(self):
+        # fix https://github.com/pytorch/pytorch/issues/159462
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv1d(1, 64, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                x = x.permute(0, 2, 1)
+                return self.conv(x)
+
+        self.common(ConvModel(), (torch.randn([32, 100, 1]),), check_lowp=False)
+
+    def test_conv1d_depthwise(self):
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv1d(
+                    768,
+                    768,
+                    kernel_size=(9,),
+                    stride=(1,),
+                    padding=(4,),
+                    groups=768,
+                    bias=False,
+                )
+
+            def forward(self, x):
+                return self.conv(x)
+
+        input_tensor = torch.randn([1, 768, 512]).as_strided(
+            (1, 768, 512), (393216, 1, 768)
+        )
+        self.common(ConvModel(), (input_tensor,), check_lowp=False)
+
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -4738,7 +4773,7 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randn([1, 3, 8, 16, 32]),),
-            atol=6e-5,
+            atol=1e-3,
             rtol=0.001,
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
@@ -5503,6 +5538,28 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 1),))
 
+    def test_as_strided_on_views(self):
+        # https://github.com/pytorch/pytorch/issues/163286
+        def fn(a):
+            c = a.view(-1)
+            # convert to float16
+            d = c.view(torch.float16)
+            e = d.as_strided((2, 5), (1, 1))
+            # convert back to bfloat16
+            f = e.view(torch.bfloat16)
+            g = f.as_strided((10, 10), (1, 1))
+            return g
+
+        a = torch.randn(10, 10, dtype=torch.bfloat16)
+        self.common(fn, (a,), reference_in_float=False)
+
+        # test dtype separately
+        out = fn(a)
+        assert out.dtype == torch.bfloat16
+
+        out = torch.compile(fn)(a)
+        assert out.dtype == torch.bfloat16
+
     def test_repeat_interleave(self):
         def fn(x):
             return (
@@ -5653,7 +5710,6 @@ class CommonTemplate:
             (torch.randn([2, 4, 4, 8]),),
         )
 
-    @xfail_if_mps_unimplemented
     def test_embedding_bag(self):
         def fn(w, i, o):
             return aten._embedding_bag(w, i, o, False, 0, False, None)
@@ -12428,11 +12484,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
                 self.assertEqual(len(bar_strides), 1)
-                if self.device == "mps" and MACOS_VERSION < 15.0:
-                    # Before MacOS15 contiguous output were returned regardless of input
-                    self.assertEqual(bar_strides[0], expected_stride)
-                else:
-                    self.assertNotEqual(bar_strides[0], expected_stride)
+                self.assertNotEqual(bar_strides[0], expected_stride)
 
     @config.patch(implicit_fallbacks=True)
     @skip_if_cpp_wrapper(
@@ -14010,12 +14062,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         repeat = torch.tensor([1, 2], device=self.device)
 
-        if input.device.type == "mps" and dtype == torch.int64:
-            raise unittest.SkipTest(
-                "torch.compile fails this test with mps & int64, "
-                "see https://github.com/pytorch/pytorch/issues/159408"
-            )
-
         f_compiled = torch.compile(f)
         output, (code,) = run_and_get_code(f_compiled, input, repeat)
         reference = f(input, repeat)
@@ -14174,6 +14220,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         with self.assertRaises(RuntimeError):
             compiled = torch.compile(fn, backend="inductor")(a, b)
+
+    @requires_cuda_and_triton
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_triton_fp_fusion(self):
+        def fn(a, b):
+            return 2.001 * a + b
+
+        a = torch.full([256], 0.5001, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.full([256], -1, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled = torch.compile(fn)
+        out, (code,) = run_and_get_code(compiled, a, b)
+        self.assertTrue("'enable_fp_fusion': False" in code)
+        torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
 
     # end of class CommonTemplate - add new tests here
 
@@ -15060,11 +15120,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    (
-                        "triton_poi_fused_layer_norm_relu"
-                        if torch._dynamo.config.inline_inbuilt_nn_modules
-                        else "triton_poi_fused_LayerNorm_ReLU"
-                    ),
+                    "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

@@ -2,8 +2,8 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn as nn

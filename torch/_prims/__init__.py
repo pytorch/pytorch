@@ -145,7 +145,6 @@ __all__ = [
     "conj",
     "expand_dims",
     "slice",
-    "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
     "squeeze",
     "transpose",

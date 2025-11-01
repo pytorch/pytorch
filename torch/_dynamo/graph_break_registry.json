@@ -2726,5 +2726,15 @@
       "Explanation": "Object does not allow us to make a weakref to it",
       "Hints": []
     }
+  ],
+  "GB0273": [
+    {
+      "Gb_type": "Keyword args passed to exception constructor",
+      "Context": "{self} with kwargs {init_kwargs}",
+      "Explanation": "Dynamo does not know how to handle keyword args passed to an exception constructor",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

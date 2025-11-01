@@ -31,13 +31,17 @@ from ..pattern_matcher import (
     KeywordArg,
     Match,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     stable_topological_sort,
 )
 from .decompose_mem_bound_mm import check_device
 from .replace_random import replace_random_passes
 
+
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="joint_graph_passes"
+)
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()

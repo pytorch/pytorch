@@ -116,6 +116,16 @@ class Stream(torch._C._CudaStreamBase):
     def __repr__(self):
         return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
 
+    def __cuda_stream__(self):
+        """Implements the CUDA Stream Protocol:
+        https://nvidia.github.io/cuda-python/cuda-core/latest/interoperability.html#cuda-stream-protocol
+
+        Returns:
+            tuple: A 2-tuple of (version, handle) where version is the protocol version
+                   and handle is the address of cudaStream_t (CUDA) or hipStream_t (ROCm) as a Python int.
+        """
+        return (0, self.cuda_stream)
+
 
 class ExternalStream(Stream):
     r"""Wrapper around an externally allocated CUDA stream.

@@ -149,9 +149,9 @@ PIP_SOURCES = {
         supported_platforms={"Linux"},
         accelerator="rocm",
     ),
-    "rocm-6.4": PipSource(
-        name="rocm-6.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
+    "rocm-7.0": PipSource(
+        name="rocm-7.0",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm7.0",
         supported_platforms={"Linux"},
         accelerator="rocm",
     ),

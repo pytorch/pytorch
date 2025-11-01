@@ -374,8 +374,8 @@ class DtypePropagationOpsHandler:
         )
 
     @staticmethod
-    def device_assert_async(cond, msg: str) -> torch.dtype:
-        return torch.bool
+    def device_assert_async(cond, msg: str) -> None:
+        return None
 
 
 if TYPE_CHECKING:

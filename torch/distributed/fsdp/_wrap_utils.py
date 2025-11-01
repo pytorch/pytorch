@@ -3,8 +3,9 @@ import collections
 import functools
 import inspect
 import warnings
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Union
+from typing import Any, Union
 
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (

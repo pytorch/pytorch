@@ -5308,7 +5308,7 @@ add_docstr(
 index_select(input, dim, index, *, out=None) -> Tensor
 
 Returns a new tensor which indexes the :attr:`input` tensor along dimension
-:attr:`dim` using the entries in :attr:`index` which is a `LongTensor`.
+:attr:`dim` using the entries in :attr:`index`.
 
 The returned tensor has the same number of dimensions as the original tensor
 (:attr:`input`).  The :attr:`dim`\ th dimension has the same size as the length
