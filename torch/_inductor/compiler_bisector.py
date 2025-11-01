@@ -509,6 +509,9 @@ class CompilerBisector:
                 cls.delete_bisect_status()
                 cls.in_process_cache = None
 
+                if BACKENDS["inductor"][0].name == "pre_grad_graph":
+                    del BACKENDS["inductor"][0]
+
             cleanup_handler = atexit.register(cleanup)
 
             class DisableBisect:
