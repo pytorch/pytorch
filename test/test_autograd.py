@@ -15298,6 +15298,14 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(y.grad, 2 * torch.ones_like(x))
         self.assertEqual(z.grad, torch.ones_like(x))
 
+    def test_atan2_zero_gradient(self):
+        x = torch.tensor([0.0], requires_grad=True)
+        y = torch.tensor([0.0], requires_grad=True)
+        z = torch.atan2(x, y)
+        z.backward()
+        self.assertEqual(x.grad, torch.zeros_like(x))
+        self.assertEqual(y.grad, torch.zeros_like(y))
+    
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
