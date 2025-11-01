@@ -1764,8 +1764,8 @@ Tensor narrow_tensor_symint(
       start.dim() == 0 &&
           isIntegralType(start.scalar_type(), /*includeBool=*/false),
       "start must be an 0-dim integral Tensor.");
-  int64_t st = start.item<int64_t>();
-  return at::narrow_symint(self, dim, c10::SymInt(st), std::move(length));
+  c10::SymInt st = start.item().toSymInt();
+  return at::narrow_symint(self, dim, std::move(st), std::move(length));
 }
 
 std::
