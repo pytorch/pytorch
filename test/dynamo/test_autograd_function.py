@@ -1125,32 +1125,32 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[5, 4]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_weight_, args_tensor_mask = [True, True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_weight_ = None
+        autograd_function_apply: "f32[5, 4]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weight_, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_weight_ = l_x_ = None
         return (autograd_function_apply,)
 
     class fwd_body_0(torch.nn.Module):
-        def forward(self, ctx : torch.autograd.function.Function, x: "f32[5, 3]", weight: "f32[4, 3]"):
+        def forward(self, l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-            t: "f32[3, 4]" = weight.t()
-            y: "f32[5, 4]" = x.matmul(t);  t = None
+            t: "f32[3, 4]" = l_weight_.t()
+            y: "f32[5, 4]" = l_x_.matmul(t);  t = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (y, [weight, x])
+            return (y, (l_weight_, l_x_))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, function_ctx : torch.autograd.function.Function, y: "f32[5, 4]", weight: "f32[4, 3]", x: "f32[5, 3]"):
+        def forward(self, y, l_weight_, l_x_):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             contiguous: "f32[5, 4]" = y.contiguous();  y = None
 
-            grad_x: "f32[5, 3]" = contiguous.matmul(weight);  weight = None
+            grad_x: "f32[5, 3]" = contiguous.matmul(l_weight_);  l_weight_ = None
 
             transpose: "f32[4, 5]" = contiguous.transpose(0, 1);  contiguous = None
-            grad_weight: "f32[4, 3]" = transpose.matmul(x);  transpose = x = None
+            grad_weight: "f32[4, 3]" = transpose.matmul(l_x_);  transpose = l_x_ = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (grad_x, grad_weight)
+            return (grad_weight, grad_x)
 """,
         )
 
@@ -1309,24 +1309,24 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, args_tensor_mask = [True, True], non_differentiable_idx = [1]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = [1]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
         getitem: "f32[]" = autograd_function_apply[0]
         getitem_1: "f32[]" = autograd_function_apply[1];  autograd_function_apply = None
         return (getitem, getitem_1)
 
     class fwd_body_0(torch.nn.Module):
-        def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", y: "f32[]"):
+        def forward(self, l_x_: "f32[]", l_y_: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-            out1: "f32[]" = x.sin();  x = None
+            out1: "f32[]" = l_x_.sin();  l_x_ = None
 
-            out2: "f32[]" = y * 2;  y = None
+            out2: "f32[]" = l_y_ * 2;  l_y_ = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((out1, out2), [])
+            return ((out1, out2), ())
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, ctx : torch.autograd.function.Function, grad1: "f32[]", grad2: "f32[]"):
+        def forward(self, grad1, grad2):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             cos: "f32[]" = grad1.cos();  grad1 = None
