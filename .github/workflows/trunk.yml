@@ -1,13 +1,13 @@
 name: trunk
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
-    tags:
-      - ciflow/trunk/*
+  # push:
+  #   branches:
+  #     - main
+  #     - release/*
+  #     - landchecks/*
+  #   tags:
+  #     - ciflow/trunk/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
