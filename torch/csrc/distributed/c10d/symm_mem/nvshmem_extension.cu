@@ -374,7 +374,10 @@ void _all_to_all_get_inner(
     const int64_t* out_splits_ptr,
     int64_t* dst_offsets_ptr,
     std::string group_name,
-    std::optional<nvshmem_team_t> team) {
+    std::optional<nvshmem_team_t> team,
+    const std::optional<at::Tensor>& b_start = std::nullopt,
+    const std::optional<at::Tensor>& b_len = std::nullopt,
+    const std::optional<at::Tensor>& b_head = std::nullopt) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   c10d::symmetric_memory::rendezvous(out, group_name);
 
@@ -397,20 +400,24 @@ void _all_to_all_get_inner(
     team_to_use = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   }
 
+  bool has_signal = b_head.has_value();
+
   // CTA Tuning
   auto input_size = input.numel() * input.element_size();
-  int num_blocks = get_a2a_nblocks(
-    input_size,
-    input_hdl->get_world_size(),
-    input_hdl->world_within_direct_access());
+  int num_blocks = has_signal ?
+    b_head.value().size(0) :
+    get_a2a_nblocks(
+      input_size,
+      input_hdl->get_world_size(),
+      input_hdl->world_within_direct_access());
 
   // Stride at dim 0
   size_t stride_bytes = input.stride(0) * input.element_size();
   auto input_ptr = input.const_data_ptr();
   auto output_ptr = out.mutable_data_ptr();
 
-  // All to all data exchange
-  void* args[] = {
+  // Required args
+  std::vector<void*> args = {
       &input_ptr,
       &output_ptr,
       &src_offsets_ptr,
@@ -418,11 +425,24 @@ void _all_to_all_get_inner(
       &dst_offsets_ptr,
       &stride_bytes,
       &team_to_use};
+
+  // Optional args for signals
+  void *b_start_ptr, *b_len_ptr, *b_head_ptr;
+  if (has_signal) {
+    b_start_ptr = b_start.value().mutable_data_ptr();
+    b_len_ptr = b_len.value().mutable_data_ptr();
+    b_head_ptr = b_head.value().mutable_data_ptr();
+    args.push_back(b_start_ptr);
+    args.push_back(b_len_ptr);
+    args.push_back(b_head_ptr);
+  }
+
+  auto functor = has_signal ? (const void*)allToAllGet_signal_out : (const void*)allToAllGet;
   C10_CUDA_CHECK(cudaLaunchKernel(
-      (const void*)allToAllGet,
+      functor,
       dim3(num_blocks),
       dim3(THREADS_PER_BLOCK),
-      args,
+      args.data(),
       0,
       stream));
 }
@@ -1048,7 +1068,10 @@ void _all_to_all_get(
     at::Tensor& src_offsets,
     at::Tensor& out_splits,
     at::Tensor& dst_offsets,
-    std::string group_name) {
+    std::string group_name,
+    const std::optional<at::Tensor>& b_start = std::nullopt,
+    const std::optional<at::Tensor>& b_len = std::nullopt,
+    const std::optional<at::Tensor>& b_head = std::nullopt) {
   // Perform a 1D AllToAllv shuffle operation, with source offset information, and get operations.
   c10d::symmetric_memory::rendezvous(src_offsets, group_name);
   c10d::symmetric_memory::rendezvous(out_splits, group_name);
@@ -1059,7 +1082,10 @@ void _all_to_all_get(
   auto dst_offsets_ptr = dst_offsets.mutable_data_ptr<int64_t>();
 
   _all_to_all_get_inner(
-      input, out, src_offsets_ptr, out_splits_ptr, dst_offsets_ptr, group_name, /*team=*/ std::nullopt);
+      input, out, src_offsets_ptr, out_splits_ptr, dst_offsets_ptr, group_name,
+      /*team=*/ std::nullopt,  // determined inside
+      b_start, b_len, b_head   // optional signals
+  );
 }
 
 /* 2D all-to-all-v exchange plan */

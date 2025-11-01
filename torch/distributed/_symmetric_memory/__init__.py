@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -1867,6 +1867,9 @@ def all_to_all_v(
     out: torch.Tensor,
     plan: ExchangePlan,
     group_name: str,
+    b_start: Optional[torch.Tensor] = None,
+    b_len: Optional[torch.Tensor] = None,
+    b_head: Optional[torch.Tensor] = None,
 ) -> None:
     r"""
     Perform an all-to-all-v operation given an `ExchangePlan`.
@@ -1885,6 +1888,9 @@ def all_to_all_v(
         plan.out_splits,
         plan.dst_offsets,
         group_name,
+        b_start,
+        b_len,
+        b_head,
     )
 
 
