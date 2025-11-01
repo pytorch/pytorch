@@ -780,7 +780,7 @@ class DataTypePropagation:
             # we can infer output node if it only have 1 arg
             return None
 
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             node_arg = node.args[0]
             assert isinstance(node_arg, torch.fx.Node), type(node_arg)
             return self.deduce_node_dtype(node_arg)
