@@ -1028,6 +1028,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
 #define FOR_EACH_DTENSOR_INTERNED_STRING(_)                   \
   MAYBE_FOR_EACH_PYTHON_3_10_MINUS_DTENSOR_INTERNED_STRING(_) \
   _(_comparison_key)                                          \
+  _(_custom_op_handlers)                                      \
   _(_local_tensor)                                            \
   _(_spec)                                                    \
   _(args_schema)                                              \
@@ -1316,6 +1317,26 @@ void callDTensorOpDispatch(
   py::handle cached_sharding;
   auto [args, kwargs] = parseIValuesToPyArgsKwargs(op, *stack);
 
+  const auto op_dispatcher = get_dtensor_op_dispatcher();
+  {
+    const auto custom_op_handlers =
+        op_dispatcher.attr(dtensor_interned_strings._custom_op_handlers);
+    TORCH_CHECK(
+        PyDict_Check(custom_op_handlers.ptr()),
+        "_custom_op_handlers must be a dict!");
+    PyObject* custom_op_handler =
+        PyDict_GetItemWithError(custom_op_handlers.ptr(), py_op.ptr());
+    if (custom_op_handler) {
+      auto result = checked_vectorcall(
+          custom_op_handler, py_op.ptr(), args.ptr(), kwargs.ptr());
+      stack->clear();
+      pushPyOutToStack(op, stack, std::move(result), "DTensor op dispatch");
+      return;
+    } else if (PyErr_Occurred()) {
+      throw py::error_already_set();
+    }
+  }
+
   NativeShardingPropagatorCache* native_sharding_propagator_cache = nullptr;
   if (opt_native_op_schema.has_value()) {
     native_sharding_propagator_cache =
@@ -1325,7 +1346,6 @@ void callDTensorOpDispatch(
   }
   // For now, Python OpInfo is needed even for the fast path;
   // we are in the middle of an incremental port.
-  const auto op_dispatcher = get_dtensor_op_dispatcher();
   py::object py_op_info = checked_vectorcall(
       op_dispatcher.attr(dtensor_interned_strings.unwrap_to_op_info).ptr(),
       py_op.ptr(),

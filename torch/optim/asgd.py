@@ -307,7 +307,7 @@ def _multi_tensor_asgd(
         if not all(
             p.device.type == mu.device.type == eta.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, mu, eta, step in zip(params, mus, etas, state_steps)
+            for p, mu, eta, step in zip(params, mus, etas, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params, mus, etas, and state_steps must be on "

@@ -276,7 +276,7 @@ class ForLoopIndexingPattern(Pattern):
         def same_ops(list1, list2) -> bool:
             if len(list1) != len(list2):
                 return False
-            for op1, op2 in zip(list1, list2):
+            for op1, op2 in zip(list1, list2, strict=True):
                 if op1.name != op2.name:
                     return False
             return True
