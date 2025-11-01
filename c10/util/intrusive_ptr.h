@@ -12,6 +12,10 @@ template <typename, typename...>
 class class_;
 }
 
+namespace torch::utils {
+class PyObjectPreservation;
+}
+
 namespace c10 {
 class intrusive_ptr_target;
 namespace raw {
@@ -110,9 +114,8 @@ template <class T>
 inline void maybe_incref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
   if constexpr (TargetTraits<T>::can_have_pyobject) {
     // If the refcount transitioned from 1 to 2, we need to incref the PyObject.
-    // In other words, we need to ensure that the PyObject stays alive if
-    // we have a non-Python reference to this object.
-    // (The PyObject holds one reference to the C++ object.)
+    // In other words, we need to ensure that the PyObject stays alive now
+    // that we have a C++ reference to this object in addition to the PyObject itself.
     if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 2)) {
       TargetTraits<T>::incref_pyobject(self);
     }
@@ -128,8 +131,7 @@ inline void maybe_decref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
   if constexpr (TargetTraits<T>::can_have_pyobject) {
     // If the refcount transitioned from 2 to 1, we need to decref the PyObject.
     // In other words, we don't want to keep the PyObject alive if there are
-    // no C++ references to this object anymore.
-    // (The PyObject holds one reference to the C++ object.)
+    // no C++ references to this object other than the PyObject itself.
     if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 1)) {
       TargetTraits<T>::decref_pyobject(self);
     }
@@ -222,6 +224,8 @@ class C10_API intrusive_ptr_target {
   template <class, class>
   friend struct detail::TargetTraits;
 
+  friend class torch::utils::PyObjectPreservation;
+
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
   // directly.
@@ -289,12 +293,6 @@ class C10_API intrusive_ptr_target {
   intrusive_ptr_target& operator=(
       const intrusive_ptr_target& /*other*/) noexcept {
     return *this;
-  }
-
-  bool set_has_pyobject() noexcept {
-    uint64_t combined = combined_refcount_.fetch_or(
-        detail::kHasPyObject, std::memory_order_acq_rel);
-    return !detail::has_pyobject(combined) && detail::refcount(combined) > 1;
   }
 
  private:
