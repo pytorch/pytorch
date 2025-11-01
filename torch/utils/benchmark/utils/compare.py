@@ -51,7 +51,7 @@ class _Column:
         unit_digits = max(d for d in leading_digits if d is not None)
         decimal_digits = min(
             max(m.significant_figures - digits, 0)
-            for digits, m in zip(leading_digits, self._flat_results)
+            for digits, m in zip(leading_digits, self._flat_results, strict=True)
             if (m is not None) and (digits is not None)
         ) if self._trim_significant_figures else 1
         length = unit_digits + decimal_digits + (1 if decimal_digits else 0)
@@ -99,7 +99,7 @@ class _Row:
         env = f"({concrete_results[0].env})" if self._render_env else ""
         env = env.ljust(self._env_str_len + 4)
         output = ["  " + env + concrete_results[0].as_row_name]
-        for m, col in zip(self._results, self._columns or ()):
+        for m, col in zip(self._results, self._columns or (), strict=False):
             if m is None:
                 output.append(col.num_to_str(None, 1, None))
             else:
@@ -141,7 +141,7 @@ class _Row:
             ]
 
         row_contents = [column_strings[0].ljust(col_widths[0])]
-        for col_str, width, result, best_value in zip(column_strings[1:], col_widths[1:], self._results, best_values):
+        for col_str, width, result, best_value in zip(column_strings[1:], col_widths[1:], self._results, best_values, strict=False):
             col_str = col_str.center(width)
             if self._colorize != Colorize.NONE and result is not None and best_value is not None:
                 col_str = self.color_segment(col_str, result.median, best_value)
@@ -206,7 +206,7 @@ class Table:
         prior_env = ""
         row_group = -1
         rows_by_group: list[list[list[Optional[common.Measurement]]]] = []
-        for (num_threads, env, _), row in zip(self.row_keys, ordered_results):
+        for (num_threads, env, _), row in zip(self.row_keys, ordered_results, strict=True):
             thread_transition = (num_threads != prior_num_threads)
             if thread_transition:
                 prior_num_threads = num_threads
@@ -250,10 +250,10 @@ class Table:
         for sr in string_rows:
             sr.extend(["" for _ in range(num_cols - len(sr))])
 
-        col_widths = [max(len(j) for j in i) for i in zip(*string_rows)]
-        finalized_columns = ["  |  ".join(i.center(w) for i, w in zip(string_rows[0], col_widths))]
+        col_widths = [max(len(j) for j in i) for i in zip(*string_rows, strict=True)]
+        finalized_columns = ["  |  ".join(i.center(w) for i, w in zip(string_rows[0], col_widths, strict=True))]
         overall_width = len(finalized_columns[0])
-        for string_row, row in zip(string_rows[1:], self.rows):
+        for string_row, row in zip(string_rows[1:], self.rows, strict=True):
             finalized_columns.extend(row.row_separator(overall_width))
             finalized_columns.append("  |  ".join(row.finalize_column_strings(string_row, col_widths)))
 
