@@ -450,6 +450,14 @@ def _suggest_or_raise_constraint_violation(
         raise constraint_violation_error
 
 
+def _normalize_shuffle_graph(shuffle_gm: torch.fx.GraphModule) -> None:
+    shuffle_gm.graph.eliminate_dead_code()
+    shuffle_gm.recompile()
+    for name, buffer in list(shuffle_gm.named_buffers()):
+        delattr(shuffle_gm, name)
+        setattr(shuffle_gm, name, buffer)
+
+
 @dataclass(frozen=True)
 class PyTreeifyOutput:
     graph_module: torch.fx.GraphModule
@@ -526,8 +534,7 @@ def pytreeify(
     in_shuffle_graph = make_fx(
         InShuffle(), tracing_mode="symbolic", proxy_module_inputs=True
     )(*flat_real_args)
-    in_shuffle_graph.graph.eliminate_dead_code()
-    in_shuffle_graph.recompile()
+    _normalize_shuffle_graph(in_shuffle_graph)
 
     output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
 
@@ -575,8 +582,7 @@ def pytreeify(
     out_shuffle_graph = make_fx(
         out_shuffle, tracing_mode="symbolic", proxy_module_inputs=True
     )(*flat_out_shuffle_args)
-    out_shuffle_graph.graph.eliminate_dead_code()
-    out_shuffle_graph.recompile()
+    _normalize_shuffle_graph(out_shuffle_graph)
 
     assert out_shuffle.out_spec is not None
     return PyTreeifyOutput(
