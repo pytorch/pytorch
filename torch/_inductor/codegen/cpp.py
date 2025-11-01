@@ -165,6 +165,8 @@ MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
     torch.float16,
     torch.uint8,
     torch.int8,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
 ]
 
 
@@ -2541,7 +2543,7 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
-            return "AOTI_TORCH_CHECK"
+            return "STD_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
 
