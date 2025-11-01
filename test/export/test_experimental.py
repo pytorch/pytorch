@@ -579,6 +579,26 @@ def forward(self, args_0):
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
+    def test_dynamo_graph_capture_with_tensor_constant(self):
+        outer = torch.randn(2, 3)
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                z = x + outer
+                return z
+
+        foo = MyModel()
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        trace_inputs = make_inputs()
+        gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+        test_inputs = make_inputs()
+        self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+        self.assertEqual(len(list(gm.buffers())), len(list(foo.buffers())))
+        self.assertEqual(len(list(gm.parameters())), len(list(foo.parameters())))
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
         class DummyOp(torch.autograd.Function):
