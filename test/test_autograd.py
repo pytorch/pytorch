@@ -15305,7 +15305,7 @@ class TestAutogradMultipleDispatch(TestCase):
         z.backward()
         self.assertEqual(x.grad, torch.zeros_like(x))
         self.assertEqual(y.grad, torch.zeros_like(y))
-    
+
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
