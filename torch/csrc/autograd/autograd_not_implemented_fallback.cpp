@@ -5,7 +5,12 @@
 #include <ATen/core/TorchDispatchUtils.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/_async_error.h>
+#endif
 
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>

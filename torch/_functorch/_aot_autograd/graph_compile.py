@@ -41,7 +41,7 @@ from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -50,10 +50,9 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
 from .. import config
+from .aot_autograd_result import GenericAOTAutogradResult, serialize_graph_module
 from .autograd_cache import (
     AOTAutogradCache,
-    GenericAOTAutogradCacheEntry,
-    serialize_graph_module,
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
@@ -89,6 +88,7 @@ from .schemas import (
 )
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
+    _get_symint_hints,
     contain_metadata_mutation_ops,
     get_cuda_generator_meta_val,
     make_boxed_func,
@@ -396,7 +396,7 @@ def _cache_inference_info(
         else:
             return hasattr(compiled_fw, "_fx_graph_cache_key")
 
-    entry: Optional[GenericAOTAutogradCacheEntry] = None
+    entry: Optional[GenericAOTAutogradResult] = None
     if cache_info is not None and should_save_cache():
         time_taken_ns = time.time_ns() - cache_info.start_time_ns
         guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
@@ -1773,27 +1773,8 @@ def _aot_stage2b_bw_compile(
 
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
-                # value. Using suppress_guards and guard_or_true to avoid that.
-
-                stride_different = False
-                fake_mode = detect_fake_mode()
-                suppress_ctx = (
-                    fake_mode.shape_env.suppress_guards()
-                    if fake_mode is not None and fake_mode.shape_env is not None
-                    else nullcontext()
-                )
-
-                # Inductor can choose different strides for activations than
-                # what backward graph has. if we can't statically tell that
-                # strides are the same, we assume they are not.
-                with suppress_ctx:
-                    for k in range(len(ph_arg.stride())):
-                        # real_stride can't be symbolic.
-                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
-                            stride_different = True
-                            break
-
-                if stride_different:
+                # value. Using the hints to avoid that.
+                if _get_symint_hints(ph_arg.stride()) != real_stride:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
@@ -2049,7 +2030,7 @@ def _cache_autograd_info(
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     try_save_cache_entry: Optional[Callable] = None
-    entry: Optional[GenericAOTAutogradCacheEntry] = None
+    entry: Optional[GenericAOTAutogradResult] = None
 
     if aot_config.cache_info is not None:
         forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
@@ -2062,7 +2043,7 @@ def _cache_autograd_info(
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
-        ) -> Optional[GenericAOTAutogradCacheEntry]:
+        ) -> Optional[GenericAOTAutogradResult]:
             cache_info = aot_config.cache_info
 
             def should_save_cache():
@@ -2158,7 +2139,6 @@ def _aot_stage2b_compile_forward_or_inference(
     - FunctionalizedRngRuntimeWrapper
     - FakifiedOutWrapper
     """
-
     # Validation
     if not is_inference and num_fw_outs_saved_for_bw is None:
         raise ValueError(

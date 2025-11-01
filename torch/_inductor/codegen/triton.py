@@ -745,7 +745,12 @@ class TritonPrinter(PythonPrinter):
         )
 
     def _print_Float(self, expr: sympy.Expr) -> str:
-        if config.is_fbcode() and torch.version.hip:
+        if expr.is_integer:
+            # sympy considers 0.0 to be integer, but triton doesn't.
+            # this workaround prints the float as an integer
+            # xref: https://github.com/sympy/sympy/issues/26620
+            ret = str(int(expr))
+        elif config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
             ret = f"tl.full([], {expr}, tl.float64)"
@@ -3363,6 +3368,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 indexing_str += f".broadcast_to({value_shape})"
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
+            self.atomic_add_found = True
             indexing_str = indexing.index_str
             if (
                 is_sympy_integer_like(index)
@@ -5054,6 +5060,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
             "no_x_dim": self.no_x_dim,
+            "atomic_add_found": self.atomic_add_found,
             "num_load": self.num_load,
             "num_store": self.num_store,
             "num_reduction": self.num_reduction,
