@@ -3332,7 +3332,9 @@ std::tuple<Tensor, Tensor> atan2_backward(
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>{Tensor(), Tensor()};
   }
-  auto recip = (self * self + other * other).reciprocal();
+  auto denom = self * self + other * other;
+  auto recip = denom.reciprocal();
+  recip = at::where(denom == 0, at::zeros_like(recip), recip);
   return std::tuple<Tensor, Tensor>{
       output_mask[0] ? grad * other * recip : Tensor(),
       output_mask[1] ? grad * -self * recip : Tensor()};
