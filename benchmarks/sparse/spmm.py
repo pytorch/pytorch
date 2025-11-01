@@ -52,19 +52,18 @@ def test_sparse_coo_and_csr(m, n, k, nnz, test_count):
         start.record()
         coo.matmul(mat)
         stop.record()
-
         times.append(start.elapsed_time(stop))
 
-        coo_mean_time = sum(times) / len(times)
+    coo_mean_time = sum(times) / len(times)
 
-        times = []
-        for _ in range(test_count):
-            start.record()
-            csr.matmul(mat)
-            stop.record()
-            times.append(start.elapsed_time(stop))
+    times = []
+    for _ in range(test_count):
+        start.record()
+        csr.matmul(mat)
+        stop.record()
+        times.append(start.elapsed_time(stop))
 
-            csr_mean_time = sum(times) / len(times)
+    csr_mean_time = sum(times) / len(times)
 
     return coo_mean_time, csr_mean_time
 
