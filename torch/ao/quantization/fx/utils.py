@@ -215,7 +215,7 @@ def collect_producer_nodes(node: Node) -> Optional[list[Node]]:
                 # hit input, can't fold in this case
                 return None
             nodes.append(arg)
-            if not (arg.op == "call_function" and arg.target == getattr):
+            if not (arg.op == "call_function" and arg.target is getattr):
                 frontier.append(arg)
     return nodes
 
