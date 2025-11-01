@@ -389,11 +389,9 @@ Tensor internal_new_from_data(
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
     c10::impl::ExcludeDispatchKeyGuard functorch_back_guard(
         c10::DispatchKey::FuncTorchDynamicLayerBackMode);
-    // We disable Fake and DeferredInit handlers for similar reasons as
-    // functorch.
-    c10::impl::ExcludeDispatchKeyGuard fake_and_deferred_init_guard(
-        c10::DispatchKeySet{
-            c10::DispatchKey::Fake, c10::DispatchKey::DeferredInit});
+    // We disable Fake handler for similar reasons as functorch.
+    c10::impl::ExcludeDispatchKeyGuard fake_guard(
+        c10::DispatchKeySet{c10::DispatchKey::Fake});
     // Note [Functionalization <> torch.Tensor constructor]
     // Functionalization "lifts" the newly constructed tensor into a wrapper
     // using aten::lift().

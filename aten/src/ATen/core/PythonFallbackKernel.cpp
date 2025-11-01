@@ -49,7 +49,8 @@ public:
 private:
   c10::impl::LocalDispatchKeySet saved_;
 };
-
+} // namespace
+namespace at::impl {
 void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
@@ -138,7 +139,8 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
 
   TORCH_INTERNAL_ASSERT(0, "Hit Python dispatch key but no arguments had PyInterpreter (no tensor args?)");
 }
-
+} // namespace at::impl
+namespace {
 void pythonDispatcherFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   auto* state = c10::impl::PythonDispatcherTLS::get_state();
   TORCH_INTERNAL_ASSERT(state, "Hit PythonDispatcher dispatch key but PythonDispatcherTLS was not set");
@@ -197,7 +199,7 @@ MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
 } // namespace at::impl
 
 TORCH_LIBRARY_IMPL(_, Python, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallback>());
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&at::impl::pythonFallback>());
 }
 
 TORCH_LIBRARY_IMPL(_, PythonDispatcher, m) {

@@ -223,6 +223,8 @@ enum class DispatchKey : uint16_t {
 
   Python,
 
+  DTensor,
+
   // Out-of-core key for Fake Tensor in torchdistx.
   // See https://pytorch.org/torchdistx/latest/fake_tensor.html
   // TODO: delete this in favor of Python-implemented fake tensor
@@ -380,10 +382,6 @@ enum class DispatchKey : uint16_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
-
-  // Out-of-core key for Deferred Module Initialization in torchdistx.
-  // See https://pytorch.org/torchdistx/latest/deferred_init.html
-  DeferredInit,
 
   // Used by Python key logic to know the set of tls on entry to the dispatcher
   // This kernel assumes it is the top-most non-functorch-related DispatchKey.
