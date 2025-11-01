@@ -607,7 +607,7 @@ class X86InductorQuantizer(Quantizer):
             _annotate_nodes_not_quantize(linear_node)
             return
         input_qspec_map = {}
-        assert linear_node.target == torch.ops.aten.linear.default
+        assert linear_node.target is torch.ops.aten.linear.default
         has_bias = len(linear_node.args) == 3
         input_index = 0
         weight_index = 1
@@ -1396,7 +1396,7 @@ class X86InductorQuantizer(Quantizer):
         """  # noqa: B950
         edge_or_node: tuple[Node, Node]
         if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
-            if node.target == torch.ops.aten.max_pool2d.default:
+            if node.target is torch.ops.aten.max_pool2d.default:
                 maxpool_node = node
                 if not _is_all_annotated(
                     [

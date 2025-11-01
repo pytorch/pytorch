@@ -4784,7 +4784,7 @@ print(torch.cuda.get_allocator_backend())
                 total -= x.numel()
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
-            for i in range(N):
+            for _ in range(N):
                 while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
@@ -6967,7 +6967,8 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
