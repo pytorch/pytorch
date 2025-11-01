@@ -941,6 +941,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(input, [1, 2, 3]), input + 1)
         self.assertEqual(fn(input, (1, 2, 3)), input + 1)
 
+    def test_pos_only_args_with_same_name_in_star_kwargs(self):
+        def fn(a, b=3, /, **kwargs):
+            return (
+                a * b + kwargs.get("a", -13) * kwargs.get("b", 42),
+                "a" in kwargs,
+                "b" in kwargs,
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a = torch.randn(4)
+        b = torch.randn(4)
+        x = torch.randn(4)
+        y = torch.randn(4)
+        self.assertEqual(fn(a), opt_fn(a))
+        self.assertEqual(fn(a, a=x), opt_fn(a, a=x))
+        self.assertEqual(fn(a, b=y), opt_fn(a, b=y))
+        self.assertEqual(fn(a, b=b, a=x), opt_fn(a, b=b, a=x))
+        self.assertEqual(fn(a, a=x, b=y), opt_fn(a, a=x, b=y))
+        self.assertEqual(fn(a, b, a=x, b=y), opt_fn(a, b, a=x, b=y))
+
     @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
