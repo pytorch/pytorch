@@ -213,8 +213,7 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
   TORCH_CHECK(loss.is_mps());
 
   @autoreleasepool {
-    std::string key =
-        op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
