@@ -8111,7 +8111,6 @@ aot_autograd_failures = {
     xfail("corrcoef"),
     xfail("quantile"),
     xfail("nanquantile"),
-    xfail("narrow"),
     xfail("istft"),
     xfail("linalg.eig"),
     skip("as_strided_scatter"),
