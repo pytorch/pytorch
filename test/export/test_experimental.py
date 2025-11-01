@@ -522,6 +522,25 @@ def forward(self, args_0):
         )
         self.assertEqual(ep(*inps), MyModel()(*inps))
 
+    def test_dynamo_graph_capture_full_tracing_context(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x.shape[0]
+
+        foo = Foo()
+
+        def make_inputs(b: int):
+            ret = (torch.randn(b, 3),)
+            torch._dynamo.mark_dynamic(ret[0], 0)
+            return ret
+
+        trace_inputs = make_inputs(2)
+        gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+        test_inputs = make_inputs(3)
+        self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+        self.assertIsNotNone(gm.meta["tracing_context"].fake_mode)
+        self.assertEqual(len(gm.meta["tracing_context"].tensor_to_context), 1)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
         class DummyOp(torch.autograd.Function):
