@@ -1454,13 +1454,38 @@ class CompileResult(Generic[_T]):
     def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
         grid = GridExpr.from_meta(self.inductor_meta, self.config)
         # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
+
+        # Add hook support for DebugMode
+        from torch.utils._debug_mode import _call_triton_kernel_hooks_pre, _call_triton_kernel_hooks_post
+        scope["_call_triton_kernel_hooks_pre"] = _call_triton_kernel_hooks_pre
+        scope["_call_triton_kernel_hooks_post"] = _call_triton_kernel_hooks_post
+
+        # Different subclasses have different attributes for the kernel name
+        if hasattr(self, "fn"):
+            scope["_kernel_name"] = getattr(self.fn, "name", str(self.fn))
+        elif hasattr(self, "kernel"):
+            scope["_kernel_name"] = getattr(self.kernel, "name", str(self.kernel))
+        else:
+            scope["_kernel_name"] = "unknown_kernel"
+
+        # Build the args tuple at runtime by passing the argument names
+        args_tuple_str = f"({', '.join(def_args)}{',' if len(def_args) == 1 else ''})"
+
+        # Argument names as a tuple of strings
+        arg_names_tuple = f"({', '.join(repr(arg) for arg in def_args)}{',' if len(def_args) == 1 else ''})"
+
         lines = [
             f"def launcher({', '.join(def_args)}, stream):",
             *[f"    {line}" for line in grid.prefix],
             f"    grid_0 = {grid.x_grid}",
             f"    grid_1 = {grid.y_grid}",
             f"    grid_2 = {grid.z_grid}",
+            # Pre-execution hook - unpack args tuple with *
+            f"    _hook_token = _call_triton_kernel_hooks_pre(_kernel_name, (grid_0, grid_1, grid_2), {arg_names_tuple}, *{args_tuple_str}, **{{}})",
+            # Run the kernel
             f"    runner({', '.join(runner_args)})",
+            # Post-execution hook - unpack args tuple with *
+            f"    _call_triton_kernel_hooks_post(_hook_token, *{args_tuple_str}, **{{}})",
         ]
         launcher_code = "\n".join(lines)
         exec(launcher_code, scope)

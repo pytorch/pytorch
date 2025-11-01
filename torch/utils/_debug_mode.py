@@ -20,12 +20,35 @@ if TYPE_CHECKING:
     from torch.distributed._tools.mod_tracker import ModTracker
 
 
-__all__ = ["DebugMode", "get_active_debug_mode"]
+__all__ = ["DebugMode", "get_active_debug_mode", "_TritonKernelCall"]
 
 
 REDISTRIBUTE_FUNC = "redistribute_input"
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
+_TRITON_KERNEL_HOOKS: list[Callable] = []
+
+# Thread-local flag to skip recording during hash computation
+import threading
+_in_triton_hash_computation = threading.local()
+
+
+@contextlib.contextmanager
+def _skip_triton_hash_logging():
+    """Context manager to skip logging operations during hash computation."""
+    global _in_triton_hash_computation
+    old_value = getattr(_in_triton_hash_computation, 'value', False)
+    _in_triton_hash_computation.value = True
+    try:
+        yield
+    finally:
+        _in_triton_hash_computation.value = old_value
+
+
+def _is_in_triton_hash_computation():
+    """Check if we're currently computing hashes for Triton kernels."""
+    global _in_triton_hash_computation
+    return getattr(_in_triton_hash_computation, 'value', False)
 
 
 def _stringify_shape(shape) -> str:
@@ -294,10 +317,140 @@ class _NNModuleCall(_DebugCall):
         ]
 
 
+class _TritonKernelCall(_DebugCall):
+    """Triton kernel launch from inductor"""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        grid: tuple,
+        args: tuple,
+        kwargs: dict,
+        call_depth: int,
+        stack: bool = False,
+        arg_names: Optional[tuple[str, ...]] = None,
+    ):
+        super().__init__(call_depth, stack=stack)
+        self.kernel_name = kernel_name
+        self.grid = grid
+        self.args = args
+        self.kwargs = kwargs
+        self.arg_names = arg_names  # Names of the arguments
+
+        self.args_str: Optional[str] = None
+        self.kwargs_str: Optional[str] = None
+        self.grid_str: Optional[str] = None
+
+        # For tracking pre/post kernel state
+        self.pre_hashes: Optional[dict] = None  # Hashes before kernel execution
+        self.post_hashes: Optional[dict] = None  # Hashes after kernel execution
+        self.modified_args: Optional[set[int]] = None  # Indices of modified arguments (outputs)
+
+    def stringify_args(self, attributes: list[str]) -> None:
+        self.args_str = ", ".join(_arg_to_str(arg, attributes) for arg in self.args)
+        if self.kwargs:
+            self.kwargs_str = ", " + ", ".join(
+                f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
+            )
+        else:
+            self.kwargs_str = ""
+        self.grid_str = str(self.grid)
+        del self.args
+        del self.kwargs
+
+    def render(self, attributes: list[str]) -> str:
+        if self.args_str is not None:
+            args_str = self.args_str
+            kwargs_str = self.kwargs_str
+            grid_str = self.grid_str
+        else:
+            # Build args string with names and input/output annotations
+            args_parts = []
+            for i, arg in enumerate(self.args):
+                arg_str = _arg_to_str(arg, attributes)
+
+                # Add argument name if available
+                if self.arg_names and i < len(self.arg_names):
+                    name = self.arg_names[i]
+                    arg_str = f"{name}={arg_str}"
+
+                # Mark as output if it was modified
+                if self.modified_args and i in self.modified_args:
+                    arg_str = f"[OUT] {arg_str}"
+
+                args_parts.append(arg_str)
+
+            args_str = ", ".join(args_parts)
+            kwargs_str = (
+                ", " + ", ".join(
+                    f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
+                )
+                if self.kwargs
+                else ""
+            )
+            grid_str = str(self.grid)
+
+        base_str = f"[Triton] {self.kernel_name}[grid={grid_str}]({args_str}{kwargs_str})"
+
+        if self.log:
+            base_str += f"  # {self.log}"
+        return base_str
+
+    def __iter__(self):
+        # for BC; tuple(self) returns (kernel_name, args, kwargs, call_depth)
+        if self.args_str is not None:
+            yield from [self.kernel_name, self.args_str, self.kwargs_str, self.call_depth]
+        else:
+            yield from [self.kernel_name, self.args, self.kwargs, self.call_depth]
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert out is None or isinstance(out, dict)
     return out
+
+
+def _call_triton_kernel_hooks_pre(kernel_name: str, grid: tuple, arg_names: tuple, *args, **kwargs):
+    """
+    Hook function called from generated inductor code before Triton kernel execution.
+    Returns a token that can be used for post-execution hooks.
+    """
+    global _TRITON_KERNEL_HOOKS
+
+    if not _TRITON_KERNEL_HOOKS:
+        return None
+
+    # Store pre-execution state for each hook
+    hook_tokens = []
+    for hook in _TRITON_KERNEL_HOOKS:
+        try:
+            token = hook(kernel_name, grid, arg_names, args, kwargs, pre_execution=True)
+            hook_tokens.append(token)
+        except Exception as e:
+            # Don't let hooks break kernel execution
+            import warnings
+            warnings.warn(f"Triton kernel pre-hook failed: {e}")
+            hook_tokens.append(None)
+
+    return hook_tokens
+
+
+def _call_triton_kernel_hooks_post(hook_tokens, *args, **kwargs):
+    """
+    Hook function called from generated inductor code after Triton kernel execution.
+    """
+    global _TRITON_KERNEL_HOOKS
+
+    if not hook_tokens or not _TRITON_KERNEL_HOOKS:
+        return
+
+    for hook, token in zip(_TRITON_KERNEL_HOOKS, hook_tokens):
+        try:
+            hook(None, None, None, args, kwargs, pre_execution=False, token=token)
+        except Exception as e:
+            # Don't let hooks break kernel execution
+            import warnings
+            warnings.warn(f"Triton kernel post-hook failed: {e}")
 
 
 def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> None:
@@ -332,6 +485,7 @@ class DebugMode(TorchDispatchMode):
         record_nn_module=False,
         store_original_args=False,
         record_stack_trace=False,
+        record_triton_kernels=False,
     ):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -366,6 +520,9 @@ class DebugMode(TorchDispatchMode):
         # For stack trace recording, stores log call stack traces in .stack_trace.
         self.record_stack_trace = record_stack_trace
 
+        # Records Triton kernel calls from compiled inductor code.
+        self.record_triton_kernels = record_triton_kernels
+
         self.operators = []
         self.call_depth = 0
 
@@ -398,6 +555,10 @@ class DebugMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        # Skip recording if we're computing hashes for Triton kernels
+        if _is_in_triton_hash_computation():
+            return func(*args, **kwargs)
 
         # Record the operation with its call depth
         call = None
@@ -444,6 +605,11 @@ class DebugMode(TorchDispatchMode):
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
 
+        if self.record_triton_kernels:
+            self._triton_kernel_hook = self._make_triton_kernel_hook()
+            global _TRITON_KERNEL_HOOKS
+            _TRITON_KERNEL_HOOKS.append(self._triton_kernel_hook)
+
         super().__enter__()
         if self.record_nn_module:
             self.module_tracker.__enter__()  # type: ignore[attribute, union-attr]
@@ -456,6 +622,9 @@ class DebugMode(TorchDispatchMode):
             self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
+        if self.record_triton_kernels:
+            global _TRITON_KERNEL_HOOKS
+            _TRITON_KERNEL_HOOKS.remove(self._triton_kernel_hook)
 
     def module_tracker_setup(self):
         from torch.distributed._tools.mod_tracker import ModTracker
@@ -473,6 +642,104 @@ class DebugMode(TorchDispatchMode):
             self.call_depth -= 1
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
+
+    def _make_triton_kernel_hook(self):
+        """Create a hook function that records Triton kernel calls."""
+        # Track whether hash logging is enabled
+        hash_logging_enabled = False
+        for mode_stack_item in _get_current_dispatch_mode_stack():
+            if isinstance(mode_stack_item, DebugMode):
+                # Check if hash logging context is active
+                # We'll detect this by checking if _DISPATCH_LOG_HOOKS is non-empty
+                break
+
+        def triton_kernel_hook(
+            kernel_name: Optional[str],
+            grid: Optional[tuple],
+            arg_names: Optional[tuple],
+            args: tuple,
+            kwargs: dict,
+            pre_execution: bool = True,
+            token: Optional[Any] = None
+        ):
+            if pre_execution:
+                # Pre-execution: create and record the call
+                call = _TritonKernelCall(
+                    kernel_name=kernel_name,
+                    grid=grid,
+                    args=args,
+                    kwargs=kwargs,
+                    arg_names=arg_names,
+                    call_depth=1,  # Triton kernels are at a fixed depth in compiled code
+                    stack=self.record_stack_trace,
+                )
+
+                # Compute pre-execution hashes if hash logging is enabled
+                if _DISPATCH_LOG_HOOKS:
+                    call.pre_hashes = {}
+                    for i, arg in enumerate(args):
+                        if isinstance(arg, torch.Tensor):
+                            try:
+                                # Skip logging hash computation operations
+                                with _skip_triton_hash_logging():
+                                    with torch._C._DisablePythonDispatcher():
+                                        hash_val = default_hash_fn(arg, use_scalar=True)
+                                        call.pre_hashes[i] = hash_val
+                            except Exception:
+                                pass
+
+                self._record_call(call)
+                return call  # Return the call object as the token
+
+            else:
+                # Post-execution: update the call with post-execution state
+                if token is None:
+                    return
+
+                call = token
+
+                # Compute post-execution hashes and detect modified arguments
+                if _DISPATCH_LOG_HOOKS:
+                    call.post_hashes = {}
+                    call.modified_args = set()
+
+                    for i, arg in enumerate(args):
+                        if isinstance(arg, torch.Tensor):
+                            try:
+                                # Skip logging hash computation operations
+                                with _skip_triton_hash_logging():
+                                    with torch._C._DisablePythonDispatcher():
+                                        hash_val = default_hash_fn(arg, use_scalar=True)
+                                        call.post_hashes[i] = hash_val
+
+                                        # Check if this argument was modified
+                                        if i in call.pre_hashes and call.pre_hashes[i] != hash_val:
+                                            call.modified_args.add(i)
+                            except Exception:
+                                pass
+
+                    # Add hash info to log
+                    if call.modified_args:
+                        output_names = []
+                        for i in call.modified_args:
+                            if call.arg_names and i < len(call.arg_names):
+                                output_names.append(call.arg_names[i])
+                            else:
+                                output_names.append(f"arg{i}")
+
+                        if not call.log:
+                            call.log = {}
+                        call.log["outputs"] = output_names
+                        call.log["pre_hashes"] = {
+                            (call.arg_names[i] if call.arg_names and i < len(call.arg_names) else f"arg{i}"): call.pre_hashes.get(i)
+                            for i in range(len(args)) if isinstance(args[i], torch.Tensor)
+                        }
+                        call.log["post_hashes"] = {
+                            (call.arg_names[i] if call.arg_names and i < len(call.arg_names) else f"arg{i}"): call.post_hashes.get(i)
+                            for i in range(len(args)) if isinstance(args[i], torch.Tensor)
+                        }
+
+        return triton_kernel_hook
 
     @contextlib.contextmanager
     def record_redistribute_calls(
