@@ -16,6 +16,7 @@ from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
+from torch._guards import TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -650,6 +651,10 @@ def dynamo_graph_capture_for_export(
         )
         assert out.backend_input is not None
         graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
+        graph_module.meta["fake_mode"].allow_non_fake_inputs = True
+        tracing_context = TracingContext(graph_module.meta["fake_mode"])
+        tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
+        graph_module.meta["tracing_context"] = tracing_context
         return graph_module
 
     return inner
