@@ -110,7 +110,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
             # pyrefly: ignore [missing-attribute]
             arg.op == "call_function"
             # pyrefly: ignore [missing-attribute]
-            and arg.target == operator.getitem
+            and arg.target is operator.getitem
             # pyrefly: ignore [missing-attribute]
             and arg.args[1] == i
         ):

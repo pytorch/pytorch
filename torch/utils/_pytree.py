@@ -1068,10 +1068,13 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
-# "type": the type of root Node of the pytree
-# context: some context that is useful in unflattening the pytree
-# children_specs: specs for each child of the root Node
-# num_leaves: the number of leaves
+#   "type": the type of root Node of the pytree
+#   context: some context that is useful in unflattening the pytree
+#   children(): specs for each child of the root Node
+#   num_nodes: the total number of nodes
+#   num_leaves: the number of leaves
+#   num_children: the number of children of the root Node (i.e., len(children()))
+#   is_leaf(): whether the root Node is a leaf
 @dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
@@ -1086,11 +1089,11 @@ class TreeSpec:
         self,
         type: Any,
         context: Context,  # keep for backward compatibility
-        children: list[Self],  # keep for backward compatibility
+        children_specs: list[Self],  # keep for backward compatibility
     ) -> None:
         object.__setattr__(self, "type", type)
         object.__setattr__(self, "_context", context)
-        object.__setattr__(self, "_children", children)
+        object.__setattr__(self, "_children", children_specs)
         self.__post_init__()
 
     def __post_init__(self) -> None:
