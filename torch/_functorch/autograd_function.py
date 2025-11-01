@@ -743,20 +743,21 @@ class AutogradFunctionApply(HigherOrderOperator):
 
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
-        args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        # args_tensor_mask = fwd_kwargs["args_tensor_mask"]
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
-        length_of_tensor_args = sum(args_tensor_mask)
+        new_fwd_args = fwd_args
+        # length_of_tensor_args = sum(args_tensor_mask)
         # Filter out the original tensor args from fwd_args,
         # lifted freevars should not be args of ApplyTemplate.apply
         # since we don't need to calculate the gradients of them.
-        new_fwd_args = fwd_args[:length_of_tensor_args]
+        # new_fwd_args = fwd_args[:length_of_tensor_args]
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
             # pyrefly: ignore  # bad-override
             def forward(ctx, *args):
                 nonlocal saved_values
-                output, saved_values = fwd(None, *fwd_args)
+                output, saved_values = fwd(*fwd_args)
 
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:
@@ -770,7 +771,7 @@ class AutogradFunctionApply(HigherOrderOperator):
 
             @staticmethod
             def backward(ctx, *grad):
-                return bwd(None, *grad, *saved_values)
+                return bwd(*grad, *saved_values)
 
         return ApplyTemplate.apply(*new_fwd_args)
 
