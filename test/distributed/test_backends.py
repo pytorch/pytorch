@@ -1,8 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import warnings
 
 import torch.distributed as dist
+from torch.distributed.distributed_c10d import (
+    Backend,
+    BackendConfig,
+    ProcessGroup,
+    _get_backend_type,
+    _resolve_default_backend,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -42,6 +50,86 @@ class TestMiscCollectiveUtils(TestCase):
         backend_pg = pg._get_backend_name()
         assert backend_pg == backend
         dist.destroy_process_group()
+
+    def test_get_backend_type_builtin(self) -> None:
+        """Ensure built-in backends map to ProcessGroup.BackendType."""
+        self.assertEqual(
+            _get_backend_type("gloo"),
+            ProcessGroup.BackendType.GLOO,
+        )
+        self.assertEqual(
+            _get_backend_type("NCCL"),
+            ProcessGroup.BackendType.NCCL,
+        )
+
+    def test_get_backend_type_custom_backend(self) -> None:
+        """Ensure registered plugins resolve to CUSTOM."""
+        existing_plugin = Backend._plugins.get("TEST_CUSTOM")
+        try:
+            Backend._plugins["TEST_CUSTOM"] = Backend._BackendPlugin(
+                lambda *args, **kwargs: None,
+                False,
+            )
+            self.assertEqual(
+                _get_backend_type("test_custom"),
+                ProcessGroup.BackendType.CUSTOM,
+            )
+        finally:
+            if existing_plugin is None:
+                Backend._plugins.pop("TEST_CUSTOM", None)
+            else:
+                Backend._plugins["TEST_CUSTOM"] = existing_plugin
+
+    def test_get_backend_type_invalid_backend(self) -> None:
+        """Unknown backend names should raise ValueError."""
+        with self.assertRaisesRegex(ValueError, "Unknown backend"):
+            _get_backend_type("unknown_backend")
+
+    def test_init_process_group_invalid_backend(self, device) -> None:
+        """init_process_group should fail fast on unknown backend strings."""
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29501"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with self.assertRaisesRegex(ValueError, "Unknown backend"):
+                dist.init_process_group(
+                    backend="typo-backend",
+                    rank=0,
+                    world_size=1,
+                    init_method="env://",
+                )
+
+    def test_resolve_default_backend_prefers_nccl(self) -> None:
+        """Multi-backend strings should prefer NCCL when present."""
+        backend = "cpu:gloo,cuda:nccl"
+        backend_config = BackendConfig(backend)
+        result = _resolve_default_backend(backend, backend_config)
+        self.assertEqual(result, ProcessGroup.BackendType.NCCL)
+
+    def test_resolve_default_backend_prefers_custom(self) -> None:
+        """Multi-backend strings should prefer CUSTOM when plugin specified."""
+        backend = "cpu:test_custom"
+        existing_plugin = Backend._plugins.get("TEST_CUSTOM")
+        try:
+            Backend._plugins["TEST_CUSTOM"] = Backend._BackendPlugin(
+                lambda *args, **kwargs: None,
+                False,
+            )
+            backend_config = BackendConfig(backend)
+            result = _resolve_default_backend(backend, backend_config)
+            self.assertEqual(result, ProcessGroup.BackendType.CUSTOM)
+        finally:
+            if existing_plugin is None:
+                Backend._plugins.pop("TEST_CUSTOM", None)
+            else:
+                Backend._plugins["TEST_CUSTOM"] = existing_plugin
+
+    def test_resolve_default_backend_fallback_gloo(self) -> None:
+        """Multi-backend strings fall back to GLOO when no special devices."""
+        backend = "cpu:gloo"
+        backend_config = BackendConfig(backend)
+        result = _resolve_default_backend(backend, backend_config)
+        self.assertEqual(result, ProcessGroup.BackendType.GLOO)
 
 
 devices = ["cpu", "cuda", "hpu"]
