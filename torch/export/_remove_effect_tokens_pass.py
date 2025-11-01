@@ -52,7 +52,7 @@ def _remove_effect_tokens_from_graph_helper(
         func = node.args[1]
         assert isinstance(func, (torch._ops.OpOverload, torch._ops.HigherOrderOperator))
 
-        if func == torch.ops.higher_order.call_torchbind:
+        if func is torch.ops.higher_order.call_torchbind:
             custom_obj_meta = node.args[2].meta["val"]  # type: ignore[union-attr]
             assert isinstance(custom_obj_meta, CustomObjArgument)
             if custom_obj_meta.fake_val:

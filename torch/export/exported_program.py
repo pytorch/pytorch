@@ -281,7 +281,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
         # due to core aten decomp table having non-functional entries. Once we have
-        # a tigher check around core aten decomp, we should warn users about them.
+        # a tighter check around core aten decomp, we should warn users about them.
         # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
 
         # if it is a valid CIA op we can mess with in export, we check if it is:
@@ -798,7 +798,7 @@ def _remove_unnecessary_copy_op_pass(
                     ):
                         if (
                             out.op == "call_function"
-                            and out.target == torch.ops.aten.copy.default
+                            and out.target is torch.ops.aten.copy.default
                         ):
                             out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
                             gm.graph.erase_node(out)

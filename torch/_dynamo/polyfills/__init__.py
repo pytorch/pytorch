@@ -10,7 +10,7 @@ Python polyfills for common builtins.
 
 import types
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ne
 from typing import Any, TYPE_CHECKING
@@ -294,30 +294,27 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
 
 
 # Used with something like dict(obj)
-def construct_dict(cls, /, *args, **kwargs):
-    dst = cls.__new__(cls)
+def construct_dict(cls, data=(), /, **kwargs):
+    dct = cls.__new__(cls)
 
-    if args:
-        src = args[0]
+    if not isinstance(data, Iterable):
+        raise TypeError(f"{type(data)} object is not iterable")
 
-        if not isinstance(src, Iterable):
-            raise TypeError(f"{type(src)} object is not iterable")
-
-        # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
-            for key in src:
-                # This will inline the __getitem__ of the src object
-                dst[key] = src[key]
-        else:
-            # likely a sequence like tuple of pairs
-            for key, value in src:
-                dst[key] = value
+    # Ensure that the overridden __iter__ method is invoked
+    if isinstance(data, Mapping):
+        for key, value in data.items():
+            # This will inline the __getitem__ of the src object
+            dct[key] = value
+    else:
+        # likely a sequence like tuple of pairs
+        for key, value in data:
+            dct[key] = value
 
     if kwargs:
-        for key in kwargs:
-            dst[key] = kwargs[key]
+        for key, value in kwargs.items():
+            dct[key] = value
 
-    return dst
+    return dct
 
 
 def foreach_map_fn(*args):

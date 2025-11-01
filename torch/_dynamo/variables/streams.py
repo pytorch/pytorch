@@ -91,6 +91,7 @@ class StreamContextVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        # pyrefly: ignore [read-only]
         self.device = device
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
@@ -231,6 +232,7 @@ class StreamVariable(StreamContextVariable):
                 return ConstantVariable.create(NotImplemented)
 
             if other.source:
+                assert self.source is not None
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             return ConstantVariable.create(
                 cmp_name_to_op_mapping[name](self.value, other.value)  # type: ignore[arg-type]

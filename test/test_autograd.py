@@ -582,14 +582,14 @@ class TestAutograd(TestCase):
         ctx_1 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, unpack)
         ctx_2 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x)
 
-        for i in range(10):
+        for _ in range(10):
             with ctx_2:
                 ctx_1.__enter__()
                 x = torch.randn(3, 3, requires_grad=True)
                 x.sin().sum().backward()
 
         # Clean up
-        for i in range(10):
+        for _ in range(10):
             ctx_1.__exit__()
 
         # Validate there are no more hooks on the stack
@@ -2989,7 +2989,7 @@ class TestAutograd(TestCase):
         state = set()
         with torch.enable_grad():
             coro = coro_no_grad(state)
-            for i in range(5):
+            for _ in range(5):
                 next(coro)
 
             coro.close()
@@ -2998,7 +2998,7 @@ class TestAutograd(TestCase):
         state = set()
         with torch.no_grad():
             coro = coro_enable_grad(state)
-            for i in range(5):
+            for _ in range(5):
                 next(coro)
 
             coro.close()
@@ -5293,7 +5293,7 @@ Done""",
         rnn = torch.nn.LSTM(10, 20, 2)
         total_time_s = 0
         with profile(record_shapes=True, use_kineto=kineto_available()) as prof:
-            for i in range(20):
+            for _ in range(20):
                 input = torch.randn(5, 3, 10)
                 h = torch.randn(2, 3, 20)
                 c = torch.randn(2, 3, 20)
@@ -5925,7 +5925,7 @@ Done""",
         self.assertTrue(p_a == p_g or p_b == p_g)
 
         # Run backwards multiple times to ensure accumulation works.
-        for i in range(10):
+        for _ in range(10):
             loss.backward(retain_graph=True)
 
         # non-contiguous indices and value, we should trigger a copy.
@@ -5943,7 +5943,7 @@ Done""",
         self.assertFalse(p_b == p_g)
 
         # Run backwards multiple times to ensure accumulation works.
-        for i in range(10):
+        for _ in range(10):
             loss.backward(retain_graph=True)
 
     def test_gradcheck_single_input(self):
@@ -7132,7 +7132,7 @@ for shape in [(1,), ()]:
         )
 
         feat_combined = []
-        for r in range(num_inp):
+        for _ in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = True
@@ -7202,7 +7202,7 @@ for shape in [(1,), ()]:
                 self.use_checkpoint = use_checkpoint
                 self.use_reentrant = use_reentrant
                 self.layers = nn.ModuleList()
-                for i in range(self.n):
+                for _ in range(self.n):
                     layer = nn.Sequential(
                         nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
                     )
@@ -7513,7 +7513,7 @@ for shape in [(1,), ()]:
 
         feat_combined = []
         feat_combined_no_checkpoint = []
-        for r in range(num_inp):
+        for _ in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = input_requires_grad
@@ -11714,7 +11714,7 @@ class TestAutogradDeviceType(TestCase):
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, dtype=torch.double, device=device))
 
-        for i in range(2):
+        for _ in range(2):
             with torch.no_grad():
                 asd.set_(asd[1:])
                 asd.grad = None
@@ -11942,7 +11942,7 @@ class TestAutogradDeviceType(TestCase):
 
         # Child gpu graph (much longer than parent graph).
         prev = t2 * t2
-        for i in range(10):
+        for _ in range(10):
             prev = prev * t2
         reentrant_root = prev
 
