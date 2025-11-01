@@ -2768,14 +2768,6 @@ def as_storage_and_layout(
             exact_strides=exact_strides,
         )
     if isinstance(x, StorageBox):
-        _, layout = as_storage_and_layout(
-            x.data,
-            freeze=freeze,
-            want_contiguous=want_contiguous,
-            stride_order=stride_order,
-            allow_padding=allow_padding,
-            exact_strides=exact_strides,
-        )
         return x, x.data.get_layout()
     if isinstance(x, Buffer):
         if freeze:
