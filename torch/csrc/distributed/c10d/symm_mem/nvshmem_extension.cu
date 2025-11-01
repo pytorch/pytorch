@@ -295,6 +295,61 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
 #endif
 }
 
+// This kernel extends `allToAllGet` with an out signal that indicates readiness of a "token" after each fetch.
+// `b_start`, `b_len` and `b_head` are fed into `_allToAllV_2d_index_push_kernel`.
+__global__ void allToAllGet_signal_out(
+    void *send_data, void *recv_data, int64_t* source_offsets, int64_t* output_splits, int64_t* dst_offsets, size_t stride, nvshmem_team_t team,
+    int64_t* b_start, int64_t* b_len, int64_t* b_head) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
+  int mype = nvshmem_team_my_pe(team);
+  int npes = nvshmem_team_n_pes(team);
+  int bid = blockIdx.x;
+  CUDA_KERNEL_ASSERT(gridDim.x % npes == 0 && " Number of blocks must be multiple of npes\n");
+  int blocks_per_peer = gridDim.x / npes;
+
+  // dst_offset must be provided to this kernel e.g. via exchange plan
+  CUDA_KERNEL_ASSERT(dst_offsets != nullptr && " dst_offset must be provided\n");
+  int64_t* out_offsets = dst_offsets;
+
+  // Target a different peer based on bid, in shifting manner
+  int peer_shift = bid / blocks_per_peer;
+  int peer = (mype + peer_shift) % npes;
+  auto peer_global = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
+  // Total number of tokens from `peer`
+  auto peer_tokens = output_splits[peer];
+  // Amount to get from `peer` in this block
+  int64_t block_tokens = peer_tokens / blocks_per_peer;
+  // Being lazy here, we should handle the residual if the division is not exact
+  CUDA_KERNEL_ASSERT(block_tokens * blocks_per_peer == peer_tokens);
+  // Assign to b_len
+  b_len[bid] = block_tokens;
+  // This block's offset in the data from `peer`, all 3 offsets below are in unit of token
+  auto block_offset = block_tokens * (bid % blocks_per_peer);
+  auto source_offset = source_offsets[peer] + block_offset;
+  int64_t write_offset = out_offsets[peer] + block_offset;
+  // Assign to b_start
+  b_start[bid] = write_offset;
+  auto b_head_ptr = b_head + bid;
+
+  // Now let's start data fetch, token by token
+  for (int i = 0; i < block_tokens; i++) {
+    auto write_head = write_offset + i;
+    // Use blocking API for now
+    nvshmemx_getmem_block(
+      (char*)recv_data + write_head * stride,
+      (char*)send_data + (source_offset + i) * stride,
+      stride,  // byte size of 1 token
+      peer_global);
+    // Advance ready signal, use release here as a memory fence, scope is local GPU.
+    // Writing `write_head + 1` because that's the protocol with downstream kernel.
+    asm volatile("st.release.gpu.global.s64 [%0], %1;" :: "l"(__cvta_generic_to_global(b_head_ptr)), "l"(write_head + 1) : "memory");
+  }
+#endif
+}
+
 static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
   // Check user setting first
   int num_blocks = c10d::symmetric_memory::getenv_nblocks();
