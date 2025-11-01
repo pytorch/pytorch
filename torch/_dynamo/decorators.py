@@ -890,6 +890,7 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
+    "nested_graph_breaks",
 )
 
 from . import config
@@ -960,6 +961,26 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     This decorator will also apply to recursively invoked functions.
     """
     ctx = patch_dynamo_config(dont_skip_tracing=True)
+    if fn:
+        return ctx(fn)
+    return ctx
+
+
+@overload
+def disable_nested_graph_breaks(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def disable_nested_graph_breaks(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
+def disable_nested_graph_breaks(fn: Optional[Any] = None) -> Any:
+    """
+    Context manager/decorator to disable nested graph breaks when tracing
+    this function and any nested functions. Used when nested graph breaks
+    is causing problems.
+    """
+    ctx = patch_dynamo_config(nested_graph_breaks=False)
     if fn:
         return ctx(fn)
     return ctx

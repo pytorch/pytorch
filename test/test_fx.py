@@ -2365,7 +2365,7 @@ class TestFX(JitTestCase):
 
         g = torch.fx.Graph()
         x = g.placeholder("x")
-        for i in range(depth):
+        for _ in range(depth):
             x = g.call_function(torch.relu, (x,))
         g.output(x)
 

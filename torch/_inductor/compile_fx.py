@@ -469,7 +469,7 @@ def _unlift_graph(
         gm,
         lifted_inputs,
         mutated_outputs,
-        pytree.LeafSpec(),
+        pytree.treespec_leaf(),
         None,
     )
     return unlifted_gm
@@ -1550,9 +1550,12 @@ class _InProcessFxCompile(FxCompile):
                             payload_fn=lambda: inductor_kernel_stack_trace_str,
                         )
                         if inductor_kernel_stack_trace_str:
-                            get_metrics_context().add_to_set(
-                                "inductor_provenance", inductor_kernel_stack_trace_str
-                            )
+                            metrics_context = get_metrics_context()
+                            if metrics_context.in_progress():
+                                metrics_context.add_to_set(
+                                    "inductor_provenance",
+                                    inductor_kernel_stack_trace_str,
+                                )
 
                     node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
@@ -2444,6 +2447,11 @@ def compile_fx(
     """
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
+
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    if CompilerBisector.disable_subsystem("inductor", "pre_grad_graph"):
+        return model_
 
     if config_patches:
         with config.patch(config_patches):

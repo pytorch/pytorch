@@ -2,12 +2,14 @@
 import operator
 import os
 import tempfile
+from threading import Event
 
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
     SubprocPool,
 )
+from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -79,6 +81,59 @@ class TestCompileWorker(TestCase):
                 self.assertEqual(os.path.exists(temp_log.name), True)
             finally:
                 pool.shutdown()
+
+
+class TestTimer(TestCase):
+    def test_basics(self):
+        done = Event()
+
+        def doit():
+            done.set()
+
+        t = Timer(0.1, doit)
+        t.sleep_time = 0.1
+        t.record_call()
+        self.assertTrue(done.wait(4))
+        t.quit()
+
+    def test_repeated_calls(self):
+        done = Event()
+
+        def doit():
+            done.set()
+
+        t = Timer(0.1, doit)
+        t.sleep_time = 0.1
+        for i in range(10):
+            t.record_call()
+            self.assertTrue(done.wait(4))
+            done.clear()
+        t.quit()
+
+    def test_never_fires(self):
+        done = Event()
+
+        def doit():
+            done.set()
+
+        t = Timer(999, doit)
+        t.sleep_time = 0.1
+        t.record_call()
+        self.assertFalse(done.wait(4))
+        t.quit()
+
+    def test_spammy_calls(self):
+        done = Event()
+
+        def doit():
+            done.set()
+
+        t = Timer(1, doit)
+        t.sleep_time = 0.1
+        for i in range(400):
+            t.record_call()
+        self.assertTrue(done.wait(4))
+        t.quit()
 
 
 if __name__ == "__main__":

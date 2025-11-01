@@ -341,7 +341,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, d):
             y = 0
-            for idx, (key, value) in enumerate(d.items()):
+            for idx, value in enumerate(d.values()):
                 if idx == 0:
                     y += torch.sin(x * value)
                 else:
@@ -366,7 +366,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, d):
             y = 0
-            for idx, (key, value) in enumerate(d.items()):
+            for idx, value in enumerate(d.values()):
                 if idx == 0:
                     y += torch.sin(x * value)
                 else:
@@ -847,7 +847,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             d = {"a": 2, "b": 3, "c": 5 * x}
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():  # noqa: PERF102
+            for v in mp.values():
                 y += torch.cos(x * v)
             return mp
 
@@ -864,7 +864,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():  # noqa: PERF102
+            for v in mp.values():
                 y += torch.cos(x * v)
             d["d"] = 4
             return mp
@@ -885,7 +885,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, mp):
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():  # noqa: PERF102
+            for v in mp.values():
                 y += torch.cos(x * v)
             if isinstance(mp, types.MappingProxyType):
                 y *= 2
