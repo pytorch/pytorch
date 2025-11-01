@@ -198,19 +198,16 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
 }
 
 // This kernel is used to exchange output splits and source offsets between peers.
-// `in_out_splits` is of size (3, npes) and contains:
 // - input splits (IN)
 // - output splits (OUT) and
 // - source offsets (OUT).
-__global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_splits_offsets, nvshmem_team_t team) {
+__device__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* source_offsets, int64_t* output_splits, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
   int mype = nvshmem_team_my_pe(team);
   int npes = nvshmem_team_n_pes(team);
-  auto output_splits = out_splits_offsets;
-  auto source_offsets = out_splits_offsets + npes;
   int tid = threadIdx.x;
 
   CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
@@ -232,27 +229,38 @@ __global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_split
 #endif
 }
 
+// This is a kernel wrapper for `exchangeSplitAndOffset`.
+__global__ void exchangeSplitAndOffsetKernel(int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, nvshmem_team_t team) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  exchangeSplitAndOffset(in_splits, src_offsets, out_splits, team);
+#endif
+}
+
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
-__global__ void allToAllV(void *send_data, void *recv_data, int64_t* out_splits_offsets, size_t stride, nvshmem_team_t team) {
+__global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_offsets, int64_t* output_splits, int64_t* dst_offsets, size_t stride, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
   int mype = nvshmem_team_my_pe(team);
   int npes = nvshmem_team_n_pes(team);
-  auto output_splits = out_splits_offsets;
-  auto source_offsets = out_splits_offsets + npes;
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int blocks_per_peer = max(gridDim.x / npes, 1);
 
-  // Calculate the output offsets
-  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  // Calculate the output offsets if not provided
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
-  prefixSum(peer_offsets, output_splits, npes);
-  __syncthreads();
+  int64_t* out_offsets = dst_offsets;
+  if (out_offsets == nullptr) {
+    CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+    prefixSum(peer_offsets, output_splits, npes);
+    __syncthreads();
+    out_offsets = peer_offsets;
+  }
 
   // Target a different peer based on bid
   for (int i = bid / blocks_per_peer; i < npes; i += gridDim.x / blocks_per_peer) {
@@ -267,19 +275,78 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* out_splits_
     // This block's offset in the data from `peer`
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
-    auto write_offset = peer_offsets[peer] * stride + block_offset;
+    auto write_offset = out_offsets[peer] * stride + block_offset;
     nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       block_size,
       peer_global);
   }
-  // Write out the output offsets (to the scratchpad line)
-  if (bid == 0 && tid < npes) {
-    source_offsets[tid] = peer_offsets[tid];
+
+  // Write out the output offsets if not provided
+  if (dst_offsets == nullptr) {
+    if (bid == 0 && tid < npes) {
+      // source_offsets alias dst_offsets space when dst_offsets is not provided
+      source_offsets[tid] = out_offsets[tid];
+    }
   }
   // Make sure getmem_nbi calls finish
   nvshmem_quiet();
+#endif
+}
+
+// This kernel extends `allToAllGet` with an out signal that indicates readiness of a "token" after each fetch.
+// `b_start`, `b_len` and `b_head` are fed into `_allToAllV_2d_index_push_kernel`.
+__global__ void allToAllGet_signal_out(
+    void *send_data, void *recv_data, int64_t* source_offsets, int64_t* output_splits, int64_t* dst_offsets, size_t stride, nvshmem_team_t team,
+    int64_t* b_start, int64_t* b_len, int64_t* b_head) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
+  int mype = nvshmem_team_my_pe(team);
+  int npes = nvshmem_team_n_pes(team);
+  int bid = blockIdx.x;
+  CUDA_KERNEL_ASSERT(gridDim.x % npes == 0 && " Number of blocks must be multiple of npes\n");
+  int blocks_per_peer = gridDim.x / npes;
+
+  // dst_offset must be provided to this kernel e.g. via exchange plan
+  CUDA_KERNEL_ASSERT(dst_offsets != nullptr && " dst_offset must be provided\n");
+  int64_t* out_offsets = dst_offsets;
+
+  // Target a different peer based on bid, in shifting manner
+  int peer_shift = bid / blocks_per_peer;
+  int peer = (mype + peer_shift) % npes;
+  auto peer_global = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
+  // Total number of tokens from `peer`
+  auto peer_tokens = output_splits[peer];
+  // Amount to get from `peer` in this block
+  int64_t block_tokens = peer_tokens / blocks_per_peer;
+  // Being lazy here, we should handle the residual if the division is not exact
+  CUDA_KERNEL_ASSERT(block_tokens * blocks_per_peer == peer_tokens);
+  // Assign to b_len
+  b_len[bid] = block_tokens;
+  // This block's offset in the data from `peer`, all 3 offsets below are in unit of token
+  auto block_offset = block_tokens * (bid % blocks_per_peer);
+  auto source_offset = source_offsets[peer] + block_offset;
+  int64_t write_offset = out_offsets[peer] + block_offset;
+  // Assign to b_start
+  b_start[bid] = write_offset;
+  auto b_head_ptr = b_head + bid;
+
+  // Now let's start data fetch, token by token
+  for (int i = 0; i < block_tokens; i++) {
+    auto write_head = write_offset + i;
+    // Use blocking API for now
+    nvshmemx_getmem_block(
+      (char*)recv_data + write_head * stride,
+      (char*)send_data + (source_offset + i) * stride,
+      stride,  // byte size of 1 token
+      peer_global);
+    // Advance ready signal, use release here as a memory fence, scope is local GPU.
+    // Writing `write_head + 1` because that's the protocol with downstream kernel.
+    asm volatile("st.release.gpu.global.s64 [%0], %1;" :: "l"(__cvta_generic_to_global(b_head_ptr)), "l"(write_head + 1) : "memory");
+  }
 #endif
 }
 
@@ -298,6 +365,68 @@ static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
   return std::min(num_blocks, max_blocks);
 }
 
+// Perform a 1D AllToAllv shuffle operation, with source offset information, and get operations.
+// ** Caller must ensure that the splits and offsets are (i) symmetric addresses and (ii) have been rendezvoused. **
+void _all_to_all_get_inner(
+    at::Tensor& input,
+    at::Tensor& out,
+    int64_t* src_offsets_ptr,
+    const int64_t* out_splits_ptr,
+    int64_t* dst_offsets_ptr,
+    std::string group_name,
+    std::optional<nvshmem_team_t> team) {
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  c10d::symmetric_memory::rendezvous(out, group_name);
+
+  // Verify inputs
+  TORCH_CHECK_EQ(input.device(), out.device());
+  TORCH_CHECK(input.dtype() == out.dtype(), "input and out must have the same dtype");
+  TORCH_CHECK(input.stride(0) == out.stride(0), "input and out must have the same stride at dim 0");
+  TORCH_CHECK(input.is_contiguous() && out.is_contiguous(), "input and out must be contiguous");
+
+  auto device = input.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  // Get team if not provided
+  nvshmem_team_t team_to_use;
+  if (team.has_value()) {
+    team_to_use = team.value();
+  } else {
+    auto& team_manager = TeamManager::get(device);
+    team_to_use = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  }
+
+  // CTA Tuning
+  auto input_size = input.numel() * input.element_size();
+  int num_blocks = get_a2a_nblocks(
+    input_size,
+    input_hdl->get_world_size(),
+    input_hdl->world_within_direct_access());
+
+  // Stride at dim 0
+  size_t stride_bytes = input.stride(0) * input.element_size();
+  auto input_ptr = input.const_data_ptr();
+  auto output_ptr = out.mutable_data_ptr();
+
+  // All to all data exchange
+  void* args[] = {
+      &input_ptr,
+      &output_ptr,
+      &src_offsets_ptr,
+      &out_splits_ptr,
+      &dst_offsets_ptr,
+      &stride_bytes,
+      &team_to_use};
+  C10_CUDA_CHECK(cudaLaunchKernel(
+      (const void*)allToAllGet,
+      dim3(num_blocks),
+      dim3(THREADS_PER_BLOCK),
+      args,
+      0,
+      stream));
+}
+
 void all_to_all_vdev(
     at::Tensor& input,
     at::Tensor& out,
@@ -312,63 +441,40 @@ void all_to_all_vdev(
    *  - `out_splits_offsets` is a 2D tensor of size (2, npes). The rows are (in order):
         output splits and output offsets.
   */
-  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
-  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
-  auto in_splits_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
-  auto out_splits_offsets_hdl = c10d::symmetric_memory::rendezvous(out_splits_offsets, group_name);
-  int rank = input_hdl->get_rank();
-  int world_size = input_hdl->get_world_size();
+  auto symm_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
+  c10d::symmetric_memory::rendezvous(out_splits_offsets, group_name);
+  int world_size = symm_hdl->get_world_size();
 
-  void* input_ptr = input.data_ptr();
-  void* output_ptr = out.mutable_data_ptr();
   int64_t* in_splits_ptr = (int64_t*)(in_splits.const_data_ptr());
   int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets.mutable_data_ptr());
 
-  TORCH_CHECK_EQ(input.device(), out.device());
-  auto device = input.device();
+  TORCH_CHECK_EQ(in_splits.device(), out_splits_offsets.device());
+  auto device = in_splits.device();
   c10::cuda::CUDAGuard guard(device);
   auto& team_manager = TeamManager::get(device);
-  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto team = team_manager.get_team(group_name, symm_hdl->get_rank_to_global_rank());
   auto stream = at::cuda::getCurrentCUDAStream(device.index());
 
   // Exchange output splits and source offsets
-  // Use collective launch because kernel involves nvshmem barrier
+  // Borrowing the space of out_offsets as a temporary exchange pad for source offsets.
+  auto tmp_src_offsets_ptr = out_splits_offsets_ptr + world_size;
   void* args0[] = {
       &in_splits_ptr,
+      &tmp_src_offsets_ptr,
       &out_splits_offsets_ptr,
       &team};
+  // Use collective launch because kernel involves nvshmem barrier
   nvshmemx_collective_launch(
-      (const void*)exchangeSplitAndOffset,
+      (const void*)exchangeSplitAndOffsetKernel,
       dim3(1),
       dim3(THREADS_PER_BLOCK),
       args0,
       0,
       stream);
 
-  // CTA Tuning
-  auto input_size = input.numel() * input.element_size();
-  int num_blocks = get_a2a_nblocks(
-    input_size,
-    input_hdl->get_world_size(),
-    input_hdl->world_within_direct_access());
-
-  // Stride at dim 0 (assuming input is contiguous, TODO)
-  size_t stride_bytes = input.stride(0) * input.element_size();
-
-  // All to all data exchange
-  void* args1[] = {
-      &input_ptr,
-      &output_ptr,
-      &out_splits_offsets_ptr,
-      &stride_bytes,
-      &team};
-  nvshmemx_collective_launch(
-      (const void*)allToAllV,
-      dim3(num_blocks),
-      dim3(THREADS_PER_BLOCK),
-      args1,
-      0,
-      stream);
+  // Get data based on exchange plan
+  _all_to_all_get_inner(
+      input, out, tmp_src_offsets_ptr, out_splits_offsets_ptr, nullptr, group_name, team);
 }
 
 // Start of `all_to_all_vdev_2d`
@@ -863,6 +969,370 @@ void all_to_all_vdev_2d_offset(
       0,
       stream);
 }
+
+// This kernel is used to exchange output splits and source offsets between peers.
+__global__ void makeExchangePlan(int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, int64_t* dst_offsets, nvshmem_team_t team) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  // Given input splits, exchange the input offsets output splits
+  exchangeSplitAndOffset(in_splits, src_offsets, out_splits, team);
+
+  // Calculate the output offsets
+  int npes = nvshmem_team_n_pes(team);
+  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  __shared__ int64_t out_offsets[THREADS_PER_BLOCK];
+  prefixSum(out_offsets, out_splits, npes);
+  __syncthreads();
+
+  // Write out the output offsets
+  int tid = threadIdx.x;
+  if (tid < npes) {
+    dst_offsets[tid] = out_offsets[tid];
+  }
+#endif
+}
+
+void _make_a2a_exchange_plan(
+    at::Tensor& in_splits,
+    at::Tensor& src_offsets,
+    at::Tensor& out_splits,
+    at::Tensor& dst_offsets,
+    std::string group_name) {
+  // Make an exchange plan for a 1D AllToAllv shuffle operation.
+  auto in_splits_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
+  auto src_offsets_hdl = c10d::symmetric_memory::rendezvous(src_offsets, group_name);
+  auto out_splits_hdl = c10d::symmetric_memory::rendezvous(out_splits, group_name);
+  auto dst_offsets_hdl = c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
+
+  // Verify inputs
+  auto npes = in_splits_hdl->get_world_size();
+  TORCH_CHECK(npes <= THREADS_PER_BLOCK, "Number of peers must be smaller than THREADS_PER_BLOCK", THREADS_PER_BLOCK);
+  TORCH_CHECK(in_splits.size(0) == npes && src_offsets.size(0) == npes && out_splits.size(0) == npes && dst_offsets.size(0) == npes,
+      "in_splits, src_offsets, out_splits and dst_offsets must have the same size as world_size");
+  TORCH_CHECK(in_splits.scalar_type() == at::kLong && src_offsets.scalar_type() == at::kLong
+      && out_splits.scalar_type() == at::kLong && dst_offsets.scalar_type() == at::kLong,
+      "splits and offsets must be int64");
+
+  auto in_splits_ptr = in_splits.const_data_ptr<int64_t>();
+  auto src_offsets_ptr = src_offsets.mutable_data_ptr<int64_t>();
+  auto out_splits_ptr = out_splits.mutable_data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.mutable_data_ptr<int64_t>();
+
+  auto device = in_splits.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, in_splits_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  // Exchange output splits and source offsets
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &in_splits_ptr,
+      &src_offsets_ptr,
+      &out_splits_ptr,
+      &dst_offsets_ptr,
+      &team};
+  nvshmemx_collective_launch(
+      (const void*)makeExchangePlan,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+}
+
+void _all_to_all_get(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& src_offsets,
+    at::Tensor& out_splits,
+    at::Tensor& dst_offsets,
+    std::string group_name) {
+  // Perform a 1D AllToAllv shuffle operation, with source offset information, and get operations.
+  c10d::symmetric_memory::rendezvous(src_offsets, group_name);
+  c10d::symmetric_memory::rendezvous(out_splits, group_name);
+  c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
+
+  auto src_offsets_ptr = src_offsets.mutable_data_ptr<int64_t>();
+  auto out_splits_ptr = out_splits.const_data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.mutable_data_ptr<int64_t>();
+
+  _all_to_all_get_inner(
+      input, out, src_offsets_ptr, out_splits_ptr, dst_offsets_ptr, group_name, /*team=*/ std::nullopt);
+}
+
+/* 2D all-to-all-v exchange plan */
+
+#define MAX_N_PEERS (THREADS_PER_BLOCK / WARP_SIZE)
+#define MAX_LOCAL_EXPERTS 8
+#define MAX_N_EXPERTS (MAX_N_PEERS * MAX_LOCAL_EXPERTS)
+
+
+// This kernel is used to exchange output splits and dest offsets between peers.
+__global__ void make2dExchangePlan(int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, int64_t* dst_offsets, nvshmem_team_t team, int ne) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  int peer = threadIdx.x / WARP_SIZE;
+  int my_pe = nvshmem_team_my_pe(team);
+  int npes = nvshmem_team_n_pes(team);
+  int nsplits = ne * npes;
+  CUDA_KERNEL_ASSERT(npes <= MAX_N_PEERS && " Number of peers must be smaller than MAX_N_PEERS\n");
+  CUDA_KERNEL_ASSERT(nsplits <= MAX_N_EXPERTS && " Number of splits must be smaller than MAX_N_EXPERTS\n");
+
+  // Gather input splits from peers
+  __shared__ int64_t in_splits_all[MAX_N_PEERS][MAX_N_EXPERTS];
+  // Use 1 warp per peer, to get into shared memory
+  if (peer < npes) {
+    auto global_peer_id = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
+    nvshmemx_int64_get_warp(in_splits_all[peer], in_splits, nsplits, global_peer_id);
+  }
+  __syncthreads();
+
+  // Write to output splits
+  int local_expert = threadIdx.x % WARP_SIZE;
+  if (local_expert < ne) {
+    // experts I own
+    int expert_id = ne * my_pe + local_expert;
+    // out_splits is (ne, npes) flattened
+    out_splits[local_expert * npes + peer] = in_splits_all[peer][expert_id];
+  }
+  __syncthreads();
+
+  // This is the aggregate per expert. There are a total of npes * ne experts,
+  // and we arrange it as a 2D matrix
+  __shared__ int64_t aggregate_per_expert[MAX_N_PEERS][MAX_LOCAL_EXPERTS];
+  // Calculate the cusum of splits for an expert
+  // One thread per expert, for all experts
+  auto& cusum_per_expert = in_splits_all;  // in-place prefix sum
+  if (peer < npes && local_expert < ne) {
+    int expert = peer * ne + local_expert;
+    int64_t tmp = 0, cusum = 0;
+    // This prefix sum is in the row direction, thus we cannot use cub helper
+    for (int rank = 0; rank < npes; rank++) {
+      tmp = in_splits_all[rank][expert];
+      cusum_per_expert[rank][expert] = cusum;
+      cusum += tmp;
+    }
+    aggregate_per_expert[peer][local_expert] = cusum;
+  }
+  __syncthreads();
+
+  // Calculate each expert's offset within their ranks
+  // There are two solutions below. The first one uses warpScan, and the second
+  // one uses manual prefix sum. warpScan's result is not stable, so we use the
+  // second one for now. (Since ne is usually small, the performance difference
+  // is negligible)
+#if 0
+  // Solution 1: use warpScan
+  __shared__ int64_t cusum_per_rank[MAX_N_PEERS][MAX_LOCAL_EXPERTS];
+  // One warp per target rank
+  prefixSum_warp<MAX_N_PEERS>(cusum_per_rank[peer], aggregate_per_expert[peer], ne);
+#else
+  // Solution 2: manual sum
+  auto& cusum_per_rank = aggregate_per_expert;  // in-place prefix sum
+  if (peer < npes && local_expert == 0) {
+    int64_t tmp = 0, cusum = 0;
+    // Summing the experts of a rank
+    for (int e = 0; e < ne; e++) {
+      tmp = aggregate_per_expert[peer][e];
+      cusum_per_rank[peer][e] = cusum;
+      cusum += tmp;
+    }
+  }
+#endif
+  __syncthreads();
+
+  // Now add the in-rank offsets to the in-expert offsets, then "I" will know
+  // where to write my data in the dest rank
+  if (peer < npes && local_expert < ne) {
+    int expert = peer * ne + local_expert;
+    dst_offsets[expert] = cusum_per_expert[my_pe][expert] + cusum_per_rank[peer][local_expert];
+  }
+#endif
+}
+
+void _make_a2a_2d_exchange_plan(
+    at::Tensor& in_splits,
+    at::Tensor& src_offsets,
+    at::Tensor& out_splits,
+    at::Tensor& dst_offsets,
+    std::string group_name) {
+  // Make an exchange plan for a AllToAllv_2D shuffle operation.
+  auto in_splits_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
+  auto src_offsets_hdl = c10d::symmetric_memory::rendezvous(src_offsets, group_name);
+  auto out_splits_hdl = c10d::symmetric_memory::rendezvous(out_splits, group_name);
+  auto dst_offsets_hdl = c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
+
+  // Verify inputs
+  auto npes = in_splits_hdl->get_world_size();
+  int nsplits = in_splits.size(0);
+  TORCH_CHECK(nsplits % npes == 0, "Number of splits must be a multiple of number of peers");
+  TORCH_CHECK(src_offsets.size(0) == nsplits && out_splits.size(0) == nsplits && dst_offsets.size(0) == nsplits,
+      "in_splits, src_offsets, out_splits and dst_offsets must have the same size");
+  TORCH_CHECK(in_splits.scalar_type() == at::kLong && src_offsets.scalar_type() == at::kLong
+      && out_splits.scalar_type() == at::kLong && dst_offsets.scalar_type() == at::kLong,
+      "splits and offsets must be int64");
+  // Number of experts per rank
+  int ne = nsplits / npes;
+
+  auto in_splits_ptr = in_splits.const_data_ptr<int64_t>();
+  auto src_offsets_ptr = src_offsets.mutable_data_ptr<int64_t>();
+  auto out_splits_ptr = out_splits.mutable_data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.mutable_data_ptr<int64_t>();
+
+  auto device = in_splits.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, in_splits_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  // Exchange output splits and source offsets
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &in_splits_ptr,
+      &src_offsets_ptr,
+      &out_splits_ptr,
+      &dst_offsets_ptr,
+      &team,
+      &ne};
+  nvshmemx_collective_launch(
+      (const void*)make2dExchangePlan,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+}
+
+/* ld.volatile.global: This refers to a volatile load from global memory. This
+ * ensures that the data is read directly from memory every time, preventing the
+ * compiler from optimizing the access by referring to a cached value. */
+__device__ __forceinline__ int64_t ld_volatile_global(int64_t *ptr) {
+  int64_t ans;
+  asm volatile("ld.volatile.global.s64 %0, [%1];" : "=l"(ans) : "l"((uintptr_t)__cvta_generic_to_global(ptr)) : "memory");
+  return ans;
+}
+
+/* This function ensures that no memory access instruction that appears after the
+ * ld.acquire in the program can be reordered to execute before it. Scope: within
+ * the GPU itself. */
+__device__ __forceinline__ void fence_acquire_gpu() {
+  static __device__ int dummy;
+  int tmp;
+  asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
+  dummy = tmp;
+}
+
+__global__ void _allToAllV_2d_index_push_kernel(
+    void *send_data, void *recv_data,
+    int64_t* topk_indices, int64_t* occurrences, int64_t* dst_offsets,
+    int topk, int n_local_experts, size_t stride, nvshmem_team_t team,
+    int64_t* b_start, int64_t* b_len, int64_t* b_head) {
+  /* Args:
+   * send_data: the data to be sent
+   * recv_data: the data to be received
+   * topk_indices: (n_tokens, topk), the experts to send current token to
+   * dst_offsets: (n_experts), the destination offsets of the expert chunk to be sent, within the destination rank
+   * occurrences: (n_tokens, topk), the rank of current token within the tokens to be sent to an expert
+   * stride: the stride of the data to be sent, i.e. token hidden size * element size, in bytes
+   * b_start: the start offsets of the data to be sent by each CUDA block (equivalent to offset of data received from each rail)
+   * b_len: the length of the data to be sent by each CUDA block
+   * b_head: the most recent ready-to-send token index, plus 1, for each CUDA block
+  */
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  auto bid = blockIdx.x;
+  auto tail = b_start[bid];
+  auto end = b_start[bid] + b_len[bid];
+  // Use volatile bc we need to re-read its value
+  volatile auto head_ptr = b_head + bid;
+  while (tail < end) {
+    while (tail >= ld_volatile_global(head_ptr)) {
+      // Wait for producer kernel to mark newer ready tokens
+    }
+    // Ready signal has been provided by producer kernel (on the same GPU).
+    // To make sure the token data is readily written by the producer kernel, we
+    // use an acquire fence here, with scope of the same GPU.
+    fence_acquire_gpu();
+
+    // New token has arrived
+    auto send_ptr = (char*)send_data + tail * stride;
+    // Loop over the topk experts
+    for (int k = 0; k < topk; k++) {
+      auto expert = topk_indices[tail * topk + k];
+      // Get the destination rank
+      auto dst_rank = expert / n_local_experts;
+      auto dst_rank_global = nvshmem_team_translate_pe(team, dst_rank, NVSHMEM_TEAM_WORLD);
+      // Get the destination offset
+      auto dst_offset = dst_offsets[expert] + occurrences[tail * topk + k];
+      // Get the destination pointer
+      auto dst_ptr = (char*)recv_data + dst_offset * stride;
+      // Send the data, i.e. 1 token
+      nvshmemx_putmem_nbi_block(dst_ptr, send_ptr, stride, dst_rank_global);
+    }
+    tail++;
+  }
+  // Make sure all data has been sent
+  nvshmem_quiet();
+#endif
+}
+
+void _all_to_all_v_2d_index_push(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& topk_indices,
+    at::Tensor& occurrences,
+    at::Tensor& dst_offsets,
+    std::string group_name,
+    at::Tensor& b_start,
+    at::Tensor& b_len,
+    at::Tensor& b_head) {
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  c10d::symmetric_memory::rendezvous(out, group_name);
+  c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
+
+  auto input_ptr = input.data_ptr();
+  auto out_ptr = out.data_ptr();
+  auto topk_indices_ptr = topk_indices.data_ptr<int64_t>();
+  auto occurrences_ptr = occurrences.data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.data_ptr<int64_t>();
+  auto b_start_ptr = b_start.data_ptr<int64_t>();
+  auto b_len_ptr = b_len.data_ptr<int64_t>();
+  auto b_head_ptr = b_head.data_ptr<int64_t>();
+
+  auto topk = topk_indices.size(1);
+  auto n_local_experts = dst_offsets.size(0) / input_hdl->get_world_size();
+  auto stride_bytes = input.stride(0) * input.element_size();
+
+  auto device = input.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  TORCH_CHECK(
+      b_start.size(0) == b_len.size(0) && b_start.size(0) == b_head.size(0),
+      "Block start, len and head should have same size");
+
+  int nblocks = b_start.size(0);
+  void* args[] = {
+      &input_ptr, &out_ptr,
+      &topk_indices_ptr, &occurrences_ptr, &dst_offsets_ptr,
+      &topk, &n_local_experts, &stride_bytes, &team,
+      &b_start_ptr, &b_len_ptr, &b_head_ptr
+  };
+  C10_CUDA_CHECK(cudaLaunchKernel(
+      (const void*)_allToAllV_2d_index_push_kernel,
+      dim3(nblocks),
+      dim3(THREADS_PER_BLOCK),
+      args,
+      0,
+      stream));
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -876,4 +1346,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
+  m.impl("_make_a2a_exchange_plan", c10d::nvshmem_extension::_make_a2a_exchange_plan);
+  m.impl("_all_to_all_get", c10d::nvshmem_extension::_all_to_all_get);
+  m.impl("_make_a2a_2d_exchange_plan", c10d::nvshmem_extension::_make_a2a_2d_exchange_plan);
+  m.impl("_all_to_all_v_2d_index_push", c10d::nvshmem_extension::_all_to_all_v_2d_index_push);
 }
