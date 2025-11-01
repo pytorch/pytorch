@@ -54,7 +54,7 @@ def _fixed_indexer_cute(
     CuTe interprets linear indices in colexicographic (column-major) order,
     whereas Inductor's default _fixed_indexer uses lexicographic (row-major) order.
 
-    For size=[2, 128] with index=[b, q_idx]:
+    For size=[4, 128] with index=[b, q_idx]:
     - Lexicographic:    b*128 + q_idx*1
     - Colexicographic:  b*1 + q_idx*2
 
@@ -82,6 +82,11 @@ def _fixed_indexer_cute(
 def patch_fixed_layout_indexer_for_cutedsl():
     """
     Temporarily swap FixedLayout.make_indexer so CuteDSL sees colexicographic indexing.
+
+    Note [CuteDSL indexer patch]:
+    Flex flash attention only supports a limited set of IR ops (pointwise, reads, no stores),
+    so temporarily changing the indexing order is safe for the kernels we emit today.
+    TODO(dynamic shapes): Reconfirm once flex flash attention supports dynamic shapes.
     """
     original_make_indexer = FixedLayout.make_indexer
 
@@ -268,6 +273,7 @@ def create_flex_flash_attention_kernel(
     )
 
     def wrap_choice_render(choice):
+        # See Note [CuteDSL indexer patch]
         original_make_kernel_render = choice.make_kernel_render
 
         def make_kernel_render_with_patch(*args, **kwargs):
