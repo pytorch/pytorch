@@ -7,6 +7,7 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -709,7 +710,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             torch.testing.assert_close(out[:out_numel], expected)
 
     @skipIfRocm
-    @parametrize("align", [1])  # `major_align` of output
+    @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_make_a2a_2d_exchange_plan(self, align: int) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -741,7 +742,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         dist.barrier()
 
         plan = symm_mem.make_a2a_2d_exchange_plan(
-            in_splits, src_offsets, out_splits, dst_offsets, group_name
+            in_splits, src_offsets, out_splits, dst_offsets, group_name, align
         )
 
         # Exchange input splits to get output splits
@@ -757,12 +758,12 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             expert_sum = 0
             for j in range(self.world_size):
                 expert_sum += out_split_list[i][j]
-            # # Align up expert_sum
-            # expert_sum_aligned = (expert_sum + align - 1) // align * align
-            # # If 0, make it at least `align` (bc cutlass currently does not support empty bins)
-            # expert_sum_aligned = max(expert_sum_aligned, align)
-            # # last element absorbs the padding
-            # out_split_list[i][-1] += expert_sum_aligned - expert_sum
+            # Align up expert_sum
+            expert_sum_aligned = (expert_sum + align - 1) // align * align
+            # If 0, make it at least `align` (bc cutlass currently does not support empty bins)
+            expert_sum_aligned = max(expert_sum_aligned, align)
+            # last element absorbs the padding
+            out_split_list[i][-1] += expert_sum_aligned - expert_sum
 
         out_splits_padded = torch.tensor(out_split_list, device=self.device).reshape(-1)
         out_offsets = torch.cumsum(out_splits_padded, dim=0)  # inclusive scan
@@ -1039,6 +1040,39 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         dispatch_then_combine(self.device, align=8, group=subgroup)
 
 
+class HierRouter(nn.Module):
+    def __init__(self, hid_dim, n_experts, topk_experts, n_groups, topk_groups):
+        super().__init__()
+        self.n_experts = n_experts
+        self.topk_experts = topk_experts
+        self.n_groups = n_groups
+        self.topk_groups = topk_groups
+        self.lin = nn.Linear(hid_dim, n_experts)
+
+    def forward(self, x):
+        seq_len = x.size(0)
+        scores = self.lin(x)
+        # scores = torch.rand(seq_len, self.n_experts, device=x.device)
+        group_scores = (
+            scores.view(seq_len, self.n_groups, -1)
+            .topk(self.topk_groups, dim=-1)[0]
+            .sum(dim=-1)
+        )  # [seqlen, n_group]
+        group_idx = torch.topk(group_scores, k=self.topk_groups, dim=-1, sorted=False)[
+            1
+        ]  # [seqlen, top_k_group]
+        group_mask = torch.zeros_like(group_scores)  # [seqlen, n_group]
+        group_mask.scatter_(1, group_idx, 1)  # [seqlen, n_group]
+        score_mask = (
+            group_mask.unsqueeze(-1)
+            .expand(seq_len, self.n_groups, self.n_experts // self.n_groups)
+            .reshape(seq_len, -1)
+        )  # [seqlen, e]
+        tmp_scores = scores.masked_fill(~score_mask.bool(), 0.0)  # [seqlen, e]
+        _, topk_idx = torch.topk(tmp_scores, k=self.topk_experts, dim=-1, sorted=False)
+        return group_idx, topk_idx
+
+
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class HierarchicalA2ATest(MultiProcContinuousTest):
@@ -1050,7 +1084,11 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
 
     def init_mesh(self) -> None:
         # Arrange gpus into [nnodes, ranks_per_node] mesh
-        ranks_per_node = 2
+        ranks_per_node = device_module.device_count()
+        # If there is only one node, virtually cut it into two nodes
+        if ranks_per_node == self.world_size:
+            ranks_per_node = ranks_per_node // 2
+
         nnodes = self.world_size // ranks_per_node
         self.dm = init_device_mesh(
             device_type, (nnodes, ranks_per_node), mesh_dim_names=("inter", "intra")
@@ -1186,6 +1224,133 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
             self.intra_group.group_name,
             major_align=8,
         )
+
+    def test_router(self):
+        """
+        Test HierRouter for node-limited routing
+        """
+        torch.manual_seed(self.rank + 42)
+        hid_dim = 1024
+        n_experts = 256
+        topk_experts = 8
+        n_groups = 8
+        topk_groups = 4
+
+        with torch.device(self.device):
+            router = HierRouter(hid_dim, n_experts, topk_experts, n_groups, topk_groups)
+
+        seqlen = 128
+        x = torch.rand(seqlen, hid_dim, device=self.device)
+        topk_node_idx, topk_expert_idx = router(x)
+
+        node_in_range = topk_node_idx < n_groups
+        expert_in_range = topk_expert_idx < n_experts
+        self.assertTrue(torch.all(node_in_range))
+        self.assertTrue(torch.all(expert_in_range))
+
+    def test_dedup_a2a(self) -> None:
+        """
+        Test "Deduplicated All-To-All" aka "Hierachical All-To-All"
+        """
+        self._init_device()
+        self.init_mesh()
+        torch.manual_seed(self.rank + 42)
+        dtype = torch.float
+        # Alignment of output expert chunks, group GEMM requirement
+        align = 8
+
+        seqlen = 1024
+        hid_dim = 1024
+        inp = torch.randn((seqlen, hid_dim), dtype=dtype, device=self.device)
+
+        nnodes = self.inter_group.size()
+
+        # Total # of experts
+        n_experts = 32
+        # Number of experts per node
+        experts_per_node = n_experts // nnodes
+        # Global # topk experts
+        topk_experts = 8
+        # Limit token routing to half of the nodes
+        topk_nodes = nnodes // 2
+
+        # Router
+        with torch.device(self.device):
+            router = HierRouter(hid_dim, n_experts, topk_experts, nnodes, topk_nodes)
+
+        # Router tokens
+        # Decision includes topk nodes and topk experts.
+        # topk experts may not evenly distribute among topk nodes.
+        # topk expert indices are global expert indices.
+        topk_node_idx, topk_expert_idx = router(inp)
+
+        # Dedup dispatch
+        from torch.nn.parallel.moe import dedup_dispatch
+
+        # A ratio between worst-case output buffer size versus input seqlen
+        out_len_ratio = n_experts
+        (
+            intra_out,
+            topk_indices_intranode_out,
+            inter_plan,
+            intra_plan,
+            _inter_out,
+            _recv_intra_inp_splits,
+        ) = dedup_dispatch(
+            inp,
+            topk_node_idx,
+            topk_expert_idx,
+            n_experts,
+            self.inter_group,
+            self.intra_group,
+            out_len_ratio,
+            align,
+        )
+        torch.cuda.synchronize(self.device)
+
+        # Numeric Verfication
+        def verify():
+            filler = torch.full_like(
+                topk_indices_intranode_out, fill_value=experts_per_node
+            )
+            topk_indices_intranode = torch.where(
+                topk_indices_intranode_out >= 0, topk_indices_intranode_out, filler
+            )
+            sorted_indices_intra = torch.argsort(topk_indices_intranode.view(-1))
+            expanded_inp_intra = _inter_out[sorted_indices_intra // topk_experts]
+            expanded_seqlen_intra = _inter_out.shape[0] * topk_experts
+            expanded_inp_intra_symm = symm_mem.empty(
+                expanded_seqlen_intra, hid_dim, dtype=dtype, device=self.device
+            ).copy_(expanded_inp_intra)
+            expanded_intra_in_splits = symm_mem.empty(
+                experts_per_node, dtype=torch.int64, device=self.device
+            ).copy_(_recv_intra_inp_splits)
+            intra_out_splits_offsets = symm_mem.empty(
+                (
+                    2,
+                    experts_per_node,
+                ),
+                dtype=torch.int64,
+                device=self.device,
+            )
+            max_out_len_intra = seqlen * out_len_ratio
+            intra_out_golden = symm_mem.empty(
+                max_out_len_intra, hid_dim, dtype=dtype, device=self.device
+            ).fill_(-1)
+
+            torch.ops.symm_mem.all_to_all_vdev_2d(
+                expanded_inp_intra_symm,
+                intra_out_golden,
+                expanded_intra_in_splits,
+                intra_out_splits_offsets,
+                self.intra_group.group_name,
+                align,
+            )
+
+            tot_recv_len = intra_out_splits_offsets[0].sum()
+            self.assertEqual(intra_out[:tot_recv_len], intra_out_golden[:tot_recv_len])
+
+        verify()
 
 
 if __name__ == "__main__":

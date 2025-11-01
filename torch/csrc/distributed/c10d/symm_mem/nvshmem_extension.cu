@@ -268,12 +268,11 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
     auto peer_global = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
     // Total amount from `peer`
     auto peer_size = output_splits[peer] * stride;
-    // Amount to get from `peer` in this block
-    auto block_size = peer_size / blocks_per_peer;
-    // Being lazy here, we should handle the residual if the division is not exact
-    CUDA_KERNEL_ASSERT(block_size * blocks_per_peer == peer_size);
+    // Amount to get from `peer` in this block, divide up
+    auto block_size = (peer_size + blocks_per_peer - 1) / blocks_per_peer;
     // This block's offset in the data from `peer`
     auto block_offset = block_size * (bid % blocks_per_peer);
+    block_size = std::min(block_size, peer_size - block_offset);
     auto source_offset = source_offsets[peer] * stride + block_offset;
     auto write_offset = out_offsets[peer] * stride + block_offset;
     nvshmemx_getmem_nbi_block(
@@ -293,6 +292,19 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
   // Make sure getmem_nbi calls finish
   nvshmem_quiet();
 #endif
+}
+
+/*
+- global: Specifies the memory space being accessed, in this case, the GPU's global memory.
+- release: Specifies the memory consistency semantic. A release store
+instruction ensures that all prior memory writes are visible to other threads
+before the release store itself becomes visible.
+- gpu: Refers to the scope of the memory fence. In this context, it guarantees
+that the memory operation is synchronized across the entire GPU. (But not across
+GPUs)
+*/
+__device__ __forceinline__ void st_release_gpu(int64_t *ptr, int64_t val) {
+  asm volatile("st.release.gpu.global.s64 [%0], %1;" :: "l"(__cvta_generic_to_global(ptr)), "l"(val) : "memory");
 }
 
 // This kernel extends `allToAllGet` with an out signal that indicates readiness of a "token" after each fetch.
@@ -320,14 +332,14 @@ __global__ void allToAllGet_signal_out(
   auto peer_global = nvshmem_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD);
   // Total number of tokens from `peer`
   auto peer_tokens = output_splits[peer];
-  // Amount to get from `peer` in this block
-  int64_t block_tokens = peer_tokens / blocks_per_peer;
-  // Being lazy here, we should handle the residual if the division is not exact
-  CUDA_KERNEL_ASSERT(block_tokens * blocks_per_peer == peer_tokens);
+  // Amount to get from `peer` in this block, take ceil if cannot evenly divide
+  int64_t block_tokens = (peer_tokens + (blocks_per_peer - 1)) / blocks_per_peer;
+  int bid_in_peer = bid % blocks_per_peer;
+  block_tokens = std::min(block_tokens, peer_tokens - bid_in_peer * block_tokens);
   // Assign to b_len
   b_len[bid] = block_tokens;
   // This block's offset in the data from `peer`, all 3 offsets below are in unit of token
-  auto block_offset = block_tokens * (bid % blocks_per_peer);
+  auto block_offset = block_tokens * bid_in_peer;
   auto source_offset = source_offsets[peer] + block_offset;
   int64_t write_offset = out_offsets[peer] + block_offset;
   // Assign to b_start
@@ -345,7 +357,7 @@ __global__ void allToAllGet_signal_out(
       peer_global);
     // Advance ready signal, use release here as a memory fence, scope is local GPU.
     // Writing `write_head + 1` because that's the protocol with downstream kernel.
-    asm volatile("st.release.gpu.global.s64 [%0], %1;" :: "l"(__cvta_generic_to_global(b_head_ptr)), "l"(write_head + 1) : "memory");
+    st_release_gpu(b_head_ptr, write_head + 1);
   }
 #endif
 }
@@ -404,6 +416,12 @@ void _all_to_all_get_inner(
 
   // CTA Tuning
   auto input_size = input.numel() * input.element_size();
+  // If there is signal, we launch the same amount of blocks as the width of the
+  // signal, i.e. the instruction comes from the user.  Otherwise, we launch
+  // blocks as the input size.  There could be a possibility that the signal
+  // passed in should be always of a maximum width, e.g. 32, and for this op to
+  // determine how many blocks are needed. But it would require a way to convey
+  // this information out.
   int num_blocks = has_signal ?
     b_head.value().size(0) :
     get_a2a_nblocks(
@@ -416,33 +434,32 @@ void _all_to_all_get_inner(
   auto input_ptr = input.const_data_ptr();
   auto output_ptr = out.mutable_data_ptr();
 
-  // Required args
-  std::vector<void*> args = {
+  // Optional args for signals
+  void *b_start_ptr = nullptr, *b_len_ptr = nullptr, *b_head_ptr = nullptr;
+  if (has_signal) {
+    b_start_ptr = b_start.value().mutable_data_ptr();
+    b_len_ptr = b_len.value().mutable_data_ptr();
+    b_head_ptr = b_head.value().mutable_data_ptr();
+  }
+
+  void* args[] = {
       &input_ptr,
       &output_ptr,
       &src_offsets_ptr,
       &out_splits_ptr,
       &dst_offsets_ptr,
       &stride_bytes,
-      &team_to_use};
-
-  // Optional args for signals
-  void *b_start_ptr, *b_len_ptr, *b_head_ptr;
-  if (has_signal) {
-    b_start_ptr = b_start.value().mutable_data_ptr();
-    b_len_ptr = b_len.value().mutable_data_ptr();
-    b_head_ptr = b_head.value().mutable_data_ptr();
-    args.push_back(b_start_ptr);
-    args.push_back(b_len_ptr);
-    args.push_back(b_head_ptr);
-  }
+      &team_to_use,
+      &b_start_ptr,
+      &b_len_ptr,
+      &b_head_ptr};
 
   auto functor = has_signal ? (const void*)allToAllGet_signal_out : (const void*)allToAllGet;
   C10_CUDA_CHECK(cudaLaunchKernel(
       functor,
       dim3(num_blocks),
       dim3(THREADS_PER_BLOCK),
-      args.data(),
+      args,
       0,
       stream));
 }
@@ -1096,7 +1113,7 @@ void _all_to_all_get(
 
 
 // This kernel is used to exchange output splits and dest offsets between peers.
-__global__ void make2dExchangePlan(int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, int64_t* dst_offsets, nvshmem_team_t team, int ne) {
+__global__ void make2dExchangePlan(int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, int64_t* dst_offsets, int64_t major_align, nvshmem_team_t team, int ne) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
@@ -1164,6 +1181,12 @@ __global__ void make2dExchangePlan(int64_t* in_splits, int64_t* src_offsets, int
     for (int e = 0; e < ne; e++) {
       tmp = aggregate_per_expert[peer][e];
       cusum_per_rank[peer][e] = cusum;
+      // Align up to user-specified alignment
+      tmp = (tmp + major_align - 1) / major_align * major_align;
+      if (tmp == 0) {
+        // If chunk size is 0, we need to add major_align to make sure grouped gemm does not see an empty tensor
+        tmp = major_align;
+      }
       cusum += tmp;
     }
   }
@@ -1184,7 +1207,8 @@ void _make_a2a_2d_exchange_plan(
     at::Tensor& src_offsets,
     at::Tensor& out_splits,
     at::Tensor& dst_offsets,
-    std::string group_name) {
+    std::string group_name,
+    std::optional<int64_t> major_align) {
   // Make an exchange plan for a AllToAllv_2D shuffle operation.
   auto in_splits_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
   auto src_offsets_hdl = c10d::symmetric_memory::rendezvous(src_offsets, group_name);
@@ -1202,6 +1226,10 @@ void _make_a2a_2d_exchange_plan(
       "splits and offsets must be int64");
   // Number of experts per rank
   int ne = nsplits / npes;
+
+  // If `major_align` is not provided, use 1 as the default value.
+  int64_t major_align_val = major_align.value_or(1);
+  TORCH_CHECK(major_align_val > 0, "major_align must be positive");
 
   auto in_splits_ptr = in_splits.const_data_ptr<int64_t>();
   auto src_offsets_ptr = src_offsets.mutable_data_ptr<int64_t>();
@@ -1221,6 +1249,7 @@ void _make_a2a_2d_exchange_plan(
       &src_offsets_ptr,
       &out_splits_ptr,
       &dst_offsets_ptr,
+      &major_align_val,
       &team,
       &ne};
   nvshmemx_collective_launch(
@@ -1270,11 +1299,23 @@ __global__ void _allToAllV_2d_index_push_kernel(
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
+  int npes = nvshmem_team_n_pes(team);
+  auto n_experts = npes * n_local_experts;
   auto bid = blockIdx.x;
-  auto tail = b_start[bid];
-  auto end = b_start[bid] + b_len[bid];
-  // Use volatile bc we need to re-read its value
+  volatile auto start_ptr = b_start + bid;
+  volatile auto len_ptr = b_len + bid;
   volatile auto head_ptr = b_head + bid;
+  int64_t tail, len, tmp;
+  do {
+    tmp = ld_volatile_global(start_ptr);
+  } while (tmp < 0);
+  tail = tmp;
+  do {
+    tmp = ld_volatile_global(len_ptr);
+  } while (tmp < 0);
+  len = tmp;
+  auto end = tail + len;
+  // Use volatile bc we need to re-read its value
   while (tail < end) {
     while (tail >= ld_volatile_global(head_ptr)) {
       // Wait for producer kernel to mark newer ready tokens
@@ -1289,6 +1330,11 @@ __global__ void _allToAllV_2d_index_push_kernel(
     // Loop over the topk experts
     for (int k = 0; k < topk; k++) {
       auto expert = topk_indices[tail * topk + k];
+      if (expert < 0 || expert >= n_experts) {
+        // Ignore expert IDs out of range (in reality, these IDs refers to
+        // experts in other nodes)
+        continue;
+      }
       // Get the destination rank
       auto dst_rank = expert / n_local_experts;
       auto dst_rank_global = nvshmem_team_translate_pe(team, dst_rank, NVSHMEM_TEAM_WORLD);

@@ -1900,6 +1900,7 @@ def make_a2a_2d_exchange_plan(
     out_splits: torch.Tensor,
     dst_offsets: torch.Tensor,
     group_name: str,
+    major_align: Optional[int] = None,
 ) -> ExchangePlan:
     r"""
     Create an all-to-all-2d exchange plan given the input splits. This is a
@@ -1910,11 +1911,12 @@ def make_a2a_2d_exchange_plan(
         out_splits (class:`torch.Tensor`): the output splits for the exchange plan (OUT).
         dst_offsets (class:`torch.Tensor`): the destination offsets for the exchange plan (OUT).
         group_name (str): the group over which to exchange the splits and offsets.
+        major_align (int): the alignment of the first token, in the receive buffer, for the chunk each expert receives.
     Returns:
         An `ExchangePlan` capturing the above tensors.
     """
     torch.ops.symm_mem._make_a2a_2d_exchange_plan(
-        in_splits, src_offsets, out_splits, dst_offsets, group_name
+        in_splits, src_offsets, out_splits, dst_offsets, group_name, major_align
     )
     return ExchangePlan(in_splits, src_offsets, out_splits, dst_offsets)
 
