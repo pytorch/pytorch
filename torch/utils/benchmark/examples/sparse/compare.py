@@ -115,10 +115,10 @@ def main():
         pickle.loads(i) for i in serialized_results
     ])
 
-    print("== Unformatted " + "=" * 80 + "\n" + "/" * 95 + "\n")
+    print(f"== Unformatted {'=' * 80}\n{'/' * 95}\n")
     comparison.print()
 
-    print("== Formatted " + "=" * 80 + "\n" + "/" * 93 + "\n")
+    print(f"== Formatted {'=' * 80}\n{'/' * 93}\n")
     comparison.trim_significant_figures()
     comparison.colorize()
     comparison.print()

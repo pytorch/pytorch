@@ -79,7 +79,7 @@ def write_decomposition_util_file(path: str) -> None:
         decomposition_mappings,
         DECOMP_END,
     ]
-    print("writing file to : ", path + "/" + DECOMPOSITION_UTIL_FILE_NAME)
+    print(f"writing file to :  {path}/{DECOMPOSITION_UTIL_FILE_NAME}")
     with open(os.path.join(path, DECOMPOSITION_UTIL_FILE_NAME), "wb") as out_file:
         final_output = "".join(file_components)
         out_file.write(final_output.encode("utf-8"))

@@ -571,4 +571,4 @@ with open(filename, "w", encoding="utf8") as fout:
         fout.write(c + "\n")
 
 
-print("Created " + filename)
+print(f"Created {filename}")

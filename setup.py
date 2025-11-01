@@ -1576,10 +1576,10 @@ def print_box(msg: str) -> None:
     msg = textwrap.dedent(msg).strip()
     lines = ["", *msg.split("\n"), ""]
     max_width = max(len(l) for l in lines)
-    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
+    print(f"+{'-' * (max_width + 4)}+", file=sys.stderr, flush=True)
     for line in lines:
         print(f"|  {line:<{max_width}s}  |", file=sys.stderr, flush=True)
-    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
+    print(f"+{'-' * (max_width + 4)}+", file=sys.stderr, flush=True)
 
 
 def main() -> None:

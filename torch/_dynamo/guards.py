@@ -4459,8 +4459,8 @@ def guard_error_hook(
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
-    print("lambda " + ", ".join(guard_manager.args) + ":")
-    print(" ", " and\n  ".join(guard_manager.code_parts))
+    print(f"lambda {', '.join(guard_manager.args)}:")
+    print(f"  {' and\n  '.join(guard_manager.code_parts)}")
 
     print(guard_manager)
 

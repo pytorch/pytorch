@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
     if args.dry_run:
         print(yaml_content)
-        print("\nWill write the above schema to" + args.prefix + commit.yaml_path)
+        print(f"\nWill write the above schema to {args.prefix}{commit.yaml_path}")
     else:
         with open(os.path.join(args.prefix, commit.yaml_path), "w") as f:
             f.write(yaml_content)

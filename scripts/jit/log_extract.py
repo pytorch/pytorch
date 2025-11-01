@@ -146,7 +146,7 @@ def run():
             if graph_set and i not in graph_set:
                 continue
             quoted.append('"""' + ir + '"""')
-        print("[" + ", ".join(quoted) + "]")
+        print(f"[{', '.join(quoted)}]")
 
 
 if __name__ == "__main__":

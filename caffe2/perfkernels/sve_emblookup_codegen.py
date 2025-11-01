@@ -253,7 +253,7 @@ def main():
     with open(filename, "w") as fout:
         fout.write("\n".join(code) + "\n")
 
-    print("Created " + filename)
+    print(f"Created {filename}")
 
 
 if __name__ == "__main__":

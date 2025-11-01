@@ -77,7 +77,7 @@ def main():
     for m in measurements[:15]:
         print(f"{time_fn(m) * 1e9:>4.1f} ns / element     {m.description}")
 
-    print("\n" + template.format("Worst:"))
+    print(f"\n{template.format("Worst:")}")
     for m in measurements[-15:]:
         print(f"{time_fn(m) * 1e9:>4.1f} ns / element     {m.description}")
 

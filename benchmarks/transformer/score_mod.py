@@ -929,7 +929,7 @@ def generate_FA_callable(
             )
             raise
     else:
-        print("Unknown backend " + backend)
+        print(f"Unknown backend {backend}")
         return None
 
     B, Hq, M, Hkv, N, D = shape

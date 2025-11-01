@@ -990,7 +990,7 @@ class TestBenchmarkUtils(TestCase):
         def print_new_expected(s: str) -> None:
             print(f'{"":>12}"""\\', end="")
             for l in s.splitlines(keepends=False):
-                print("\n" + textwrap.indent(repr(l)[1:-1], " " * 12), end="")
+                print(f"\n{textwrap.indent(repr(l)[1:-1], ' ' * 12)}", end="")
             print('"""\n')
 
         if expecttest.ACCEPT:

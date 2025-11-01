@@ -1177,7 +1177,7 @@ def hipify(
         preprocess_file_and_save_result(output_directory, filepath, all_files, header_include_dirs,
                                         stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
-    print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
+    print(f"{bcolors.OKGREEN}Successfully preprocessed all matching files.{bcolors.ENDC}", file=sys.stderr)
 
     # Show detailed summary
     if show_detailed:
