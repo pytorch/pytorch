@@ -157,14 +157,6 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
     for i, name in enumerate(spec.all_pos_names):
         if i < len(args):
             ba[name] = wrap_bound_arg(tx, args[i])
-        elif name in rem_kw:
-            if name in spec.posonly_names:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[ConstantVariable.create(f"{name} is positional-only")],
-                )
-            ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
             default_source = None
@@ -180,7 +172,7 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
                 tx,
                 args=[
                     ConstantVariable.create(
-                        f"Missing required positional argument: {name}"
+                        f"Missing required positional argument: {name!r}"
                     )
                 ],
             )
