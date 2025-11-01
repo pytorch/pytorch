@@ -421,7 +421,7 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
     };
   }
 
-  DLTensor& dl_tensor = src->dl_tensor;
+  DLTensor const& dl_tensor = src->dl_tensor;
   Device device = getATenDevice(dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
 

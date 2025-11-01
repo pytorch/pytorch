@@ -76,7 +76,7 @@ template <
     PyObject* (*Convert)(ConvertArgT)>
 static PyObject* getTupleAttr(PyObject* obj, void* _unused) {
   HANDLE_TH_ERRORS
-  THPCppFunction* self = (THPCppFunction*)obj;
+  THPCppFunction const* self = (THPCppFunction*)obj;
   auto& arr = ((T*)(self->cdata.get()))->*ptr;
   auto num_elems = arr.size();
   THPObjectPtr py_tuple(PyTuple_New(num_elems));
@@ -98,14 +98,14 @@ template <
     PyObject* (*Convert)(ConvertArgT)>
 static PyObject* getValueAttr(PyObject* obj, void* _unused) {
   HANDLE_TH_ERRORS
-  THPCppFunction* self = (THPCppFunction*)obj;
+  THPCppFunction const* self = (THPCppFunction*)obj;
   auto& val = ((T*)(self->cdata.get()))->*ptr;
   return Convert(val);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* accumulateGradVar(PyObject* _self, void* _unused) {
-  THPCppFunction* self = (THPCppFunction*)_self;
+  THPCppFunction const* self = (THPCppFunction*)_self;
   auto grad_acc = (AccumulateGrad*)self->cdata.get();
   return THPVariable_Wrap(grad_acc->variable);
 }

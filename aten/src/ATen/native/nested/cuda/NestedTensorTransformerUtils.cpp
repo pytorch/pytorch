@@ -99,7 +99,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
       return true;
     }
 
-    int64_t* previous_tensor_stride = tensor_strides.data_ptr<int64_t>();
+    int64_t const* previous_tensor_stride = tensor_strides.data_ptr<int64_t>();
 
     // Check initially that the first tensor's strides
     // are in strictly descending order

@@ -654,7 +654,7 @@ void LazyGraphExecutor::ExtractIRAndPrepareTensorData(
   ir_values.reserve(indices.size());
   tensor_data_vec.reserve(indices.size());
   for (auto index : indices) {
-    LazyTensorPtr& tensor = (*tensors)[index];
+    LazyTensorPtr const& tensor = (*tensors)[index];
     Value ir_value = tensor->CurrentIrValue();
     ir_values.push_back(ir_value);
     const BackendDevice& tensor_device = tensor->GetDevice();
@@ -676,7 +676,7 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
   tensors_data.reserve(indices.size());
   for (const auto i : c10::irange(indices.size())) {
     auto index = indices[i];
-    LazyTensorPtr& tensor = (*tensors)[index];
+    LazyTensorPtr const& tensor = (*tensors)[index];
     // If the config.force_ltc_data flag is true, the purpose of this tensor
     // sync operation is to truncate the IR graph and materialize device data in
     // place of IR graph, on selected tensors. But since operation will complete

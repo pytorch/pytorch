@@ -230,7 +230,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     if (self->input_values != nullptr && profiler_need_input) {
       THPObjectPtr input_fast(
           PySequence_Fast(self->input_values, "input must be a sequence"));
-      PyObject** input_items = PySequence_Fast_ITEMS(input_fast.get());
+      PyObject* const* input_items = PySequence_Fast_ITEMS(input_fast.get());
       for (int i = 0; i < PySequence_Fast_GET_SIZE(input_fast.get()); i++) {
         PyObject* item = input_items[i];
         auto match = torch::jit::tryToInferType(item);

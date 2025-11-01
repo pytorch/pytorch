@@ -119,7 +119,7 @@ c10::intrusive_ptr<c10::TensorImpl> LTCTensorImpl::shallow_copy_and_detach(
 
 void LTCTensorImpl::shallow_copy_from(
     const c10::intrusive_ptr<TensorImpl>& impl) {
-  LTCTensorImpl* ltc_impl = dynamic_cast<LTCTensorImpl*>(impl.get());
+  LTCTensorImpl const* ltc_impl = dynamic_cast<LTCTensorImpl*>(impl.get());
   TORCH_INTERNAL_ASSERT(ltc_impl);
   copy_tensor_metadata(
       /*src_impl=*/ltc_impl,

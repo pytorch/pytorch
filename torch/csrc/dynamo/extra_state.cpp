@@ -102,7 +102,7 @@ void destroy_extra_state(void* obj) {
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
-  ExtraState* old_extra_state = get_extra_state(code);
+  ExtraState const* old_extra_state = get_extra_state(code);
   CHECK(extra_state == nullptr || old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
@@ -221,10 +221,10 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     throw py::type_error("expected a code object!");
   }
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
-  ExtraState* extra = get_extra_state(code);
+  ExtraState const* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
-    for (CacheEntry& e : extra->cache_entry_list) {
+    for (CacheEntry const& e : extra->cache_entry_list) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
   }
@@ -274,10 +274,10 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
     throw py::type_error("expected a code object!");
   }
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
-  ExtraState* extra = get_extra_state(code);
+  ExtraState const* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
-    for (PrecompileEntry& e : extra->precompile_entries) {
+    for (PrecompileEntry const& e : extra->precompile_entries) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
   }

@@ -58,7 +58,7 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
     const at::Tensor& tensor) {
   std::pair<at::RecordFunctionHandle, int> producer_op_pair(0, -1);
   if (tensor.defined()) {
-    at::TensorImpl* ten_addr = tensor.unsafeGetTensorImpl();
+    at::TensorImpl const* ten_addr = tensor.unsafeGetTensorImpl();
     // See if Address is in the map already
     if (producer_tensor_map_.count((void*)ten_addr) > 0) {
       producer_op_pair = producer_tensor_map_[(void*)ten_addr];

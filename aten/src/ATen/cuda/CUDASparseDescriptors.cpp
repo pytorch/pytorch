@@ -18,7 +18,7 @@ namespace {
 // type, cuSparse routines return CUSPARSE_STATUS_ARCH_MISMATCH error
 void check_supported_cuda_type(cudaDataType cuda_type) {
   if (cuda_type == CUDA_R_16F) {
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    cudaDeviceProp const* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(
         prop->major >= 5 && ((10 * prop->major + prop->minor) >= 53),
         "Sparse operations with CUDA tensors of Float16 type are not supported on GPUs with compute capability < 5.3 (current: ",
@@ -29,7 +29,7 @@ void check_supported_cuda_type(cudaDataType cuda_type) {
   }
 #if !defined(USE_ROCM)
   if (cuda_type == CUDA_R_16BF) {
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    cudaDeviceProp const* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(
         prop->major >= 8,
         "Sparse operations with CUDA tensors of BFloat16 type are not supported on GPUs with compute capability < 8.0 (current: ",

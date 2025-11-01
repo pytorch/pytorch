@@ -181,7 +181,7 @@ inline Variable valueToTensor(
 }
 
 static void recordSliceTrace(PyObject* obj) {
-  PySliceObject* sliceobj = (PySliceObject*)obj;
+  PySliceObject const* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
     torch::jit::tracer::ArgumentStash::stashValue(
         std::string("start"),
