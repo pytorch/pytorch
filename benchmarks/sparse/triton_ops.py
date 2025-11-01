@@ -1,4 +1,5 @@
 import contextlib
+
 import torch
 from torch._inductor.runtime.benchmarking import benchmarker
 
@@ -186,11 +187,10 @@ if __name__ == "__main__":
         outfile_ctx = open(args.outfile, "a")
 
     with outfile_ctx as outfile:
-
         ops = args.ops.split(",")
-    
+
         b = args.b
-    
+
         m_list = args.m or [1024]
         n_list = args.n or [None]
         k_list = args.k or [None]
@@ -204,13 +204,17 @@ if __name__ == "__main__":
         num_stages_list = args.num_stages or [None]
         sparsity_list = args.sparsity or [0.5]
         dtype = getattr(torch, args.dtype)
-    
+
         if args.star > 0:
             import torch.sparse._triton_ops
-    
-            assert {len(m_list), len(n_list), len(k_list), len(bm_list), len(bk_list)} == {
-                1
-            }
+
+            assert {
+                len(m_list),
+                len(n_list),
+                len(k_list),
+                len(bm_list),
+                len(bk_list),
+            } == {1}
             m = m_list[0]
             n = n_list[0] or m
             k = k_list[0] or m
@@ -221,7 +225,9 @@ if __name__ == "__main__":
             elif "bsr_dense_mm_with_meta" in ops:
                 meta = torch.sparse._triton_ops.bsr_dense_mm_meta(m, k, n, bm, bk)
             else:
-                raise NotImplementedError(f"--star not implemented for operations in {ops}")
+                raise NotImplementedError(
+                    f"--star not implemented for operations in {ops}"
+                )
             if "bsr_scatter_mm6" in ops:
                 if split_n_list[0] is None:
                     split_n_list = [
@@ -232,15 +238,19 @@ if __name__ == "__main__":
                 elif split_n_list[0] == 0:
                     split_n_list = [meta["SPLIT_N"]]
                 if tile_m_list[0] is None:
-                    tile_m_list = [meta["TILE_M"] // 2, meta["TILE_M"], meta["TILE_M"] * 2][
-                        int(meta["TILE_M"] == 16) :
-                    ]
+                    tile_m_list = [
+                        meta["TILE_M"] // 2,
+                        meta["TILE_M"],
+                        meta["TILE_M"] * 2,
+                    ][int(meta["TILE_M"] == 16) :]
                 elif tile_m_list[0] == 0:
                     tile_m_list = [meta["TILE_M"]]
                 if tile_n_list[0] is None:
-                    tile_n_list = [meta["TILE_N"] // 2, meta["TILE_N"], meta["TILE_N"] * 2][
-                        int(meta["TILE_N"] == 16) :
-                    ]
+                    tile_n_list = [
+                        meta["TILE_N"] // 2,
+                        meta["TILE_N"],
+                        meta["TILE_N"] * 2,
+                    ][int(meta["TILE_N"] == 16) :]
                 elif tile_n_list[0] == 0:
                     tile_n_list = [meta["TILE_N"]]
                 if group_size_list[0] is None:
@@ -276,52 +286,52 @@ if __name__ == "__main__":
                 ][int(meta["num_stages"] == 1) :]
             elif num_stages_list[0] == 0:
                 num_stages_list = [meta["num_stages"]]
-    
+
         device = args.device
         dense_dense_mm_sizes = set()
         target_performance = None
         performance_rtol = 1e-2
-    
+
         best_messages = []
-    
+
         @atexit.register
         def show_best_messages(best_messages=best_messages):
             print("TOP 10:")
             for m in best_messages[-10:]:
                 print(m)
             sys.stdout.flush()
-    
+
         for m, k, n, bm, bk, sparsity in itertools.product(
             m_list, k_list, n_list, bm_list, bk_list, sparsity_list
         ):
             k = k or m
             n = n or m
             bk = bk or bm
-    
+
             if bm > m or bk > k:
                 # Skip invalid parameter combinations
                 continue
-    
+
             blocksize = (bm, bk)
-    
+
             if isinstance(sparsity, int):
                 # integer sparsity value corresponds to desired nnz value
                 sparsity = 1 - bk * bm * sparsity / (m * k)
-    
+
             if sparsity > 1 or sparsity < 0:
                 continue
-    
+
             x = create_blocked_tensor(
                 b, m, k, blocksize, sparsity, dtype, device
             ).to_sparse_bsr(blocksize)
-    
+
             # recompute sparsity
             sparsity = 1 - bk * bm * x._nnz() / (m * k)
-    
+
             y = make_tensor(k, n, dtype=dtype, device=device)
-    
+
             bsr_size = f"{b}x{m}x{k}" if b > 0 else f"{k}x{n}"
-    
+
             for op in ops:
                 if op == "dense_dense_mm":
                     if (m, k, n) in dense_dense_mm_sizes:
@@ -368,7 +378,7 @@ if __name__ == "__main__":
                             num_warps=num_warps,
                         ),
                     ).get(op, {})
-    
+
                     meta_str = ";".join(
                         f"{k}={v}" for k, v in meta.items() if v is not None
                     )
