@@ -105,10 +105,11 @@ void initModule(PyObject* module) {
          c10::DeviceIndex device_index,
          int64_t device_type) {
         torch::utils::device_lazy_init(at::kMTIA);
-        at::detail::getMTIAHooks().setCurrentStream(c10::Stream::unpack3(
-            stream_id,
-            device_index,
-            static_cast<c10::DeviceType>(device_type)));
+        at::detail::getMTIAHooks().setCurrentStream(
+            c10::Stream::unpack3(
+                stream_id,
+                device_index,
+                static_cast<c10::DeviceType>(device_type)));
       });
 
   m.def("_mtia_setCurrentStream", [](const c10::Stream& stream) {
