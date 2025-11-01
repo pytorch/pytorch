@@ -783,6 +783,24 @@ _scaled_rowwise_rowwise(
   return out;
 }
 
+void
+_check_deepseek_support() {
+#ifndef USE_ROCM
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (dprops->major != 9) {
+    // Only on Hopper GPUs
+    TORCH_CHECK_NOT_IMPLEMENTED(
+      dprops->major == 9,
+      "DeepSeek style (1x128, 128x128) scaling only supported in CUDA for SM90")
+  }
+  // Only in cublasLt >= 12.9
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900,
+    "DeepSeek style (1x128, 128x128) scaling requires cublasLt >= 12.9"
+  );
+#endif
+}
+
 Tensor&
 _scaled_block1x128_block1x128(
           const Tensor& mat_a, const Tensor& mat_b,
