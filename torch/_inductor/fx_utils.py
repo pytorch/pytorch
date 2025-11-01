@@ -61,17 +61,11 @@ def matches_module_function_pattern(
 
 
 @dataclass(frozen=True)
-class _FakeTensorUpdaterHash:
-    updated_nodes: tuple["_FxNodeHash", ...]
-
-
-@dataclass(frozen=True)
 class _FxNodeHash:
     node: torch.fx.Node
     target: torch.fx.node.Target
     args_id: int
     kwargs_id: int
-    subgraph_updater_hash: Optional[_FakeTensorUpdaterHash] = None
 
 
 class FakeTensorUpdater:
@@ -106,33 +100,18 @@ class FakeTensorUpdater:
         # Import here to avoid circular import issues.
         from torch._inductor.compile_fx import _get_subgraph_names
 
-        self.subgraph_updaters = {
-            name: FakeTensorUpdater(getattr(self.gm, name))
-            for name in _get_subgraph_names(self.gm)
+        self.subgraphs: dict[str, torch.fx.GraphModule] = {
+            name: getattr(self.gm, name) for name in _get_subgraph_names(self.gm)
+        }
+        self.subgraph_updaters: dict[str, FakeTensorUpdater] = {
+            name: FakeTensorUpdater(subgraph)
+            for name, subgraph in self.subgraphs.items()
         }
 
         for node in self.gm.graph.nodes:
             self.processed_hashes.add(self.hash_node(node))
 
-    def _is_subgraph_node(self, node: Any) -> bool:
-        return (
-            isinstance(node, torch.fx.Node)
-            and node.op == "get_attr"
-            and node.target in self.subgraph_updaters
-        )
-
     def hash_node(self, node: torch.fx.Node) -> _FxNodeHash:
-        if self._is_subgraph_node(node):
-            assert isinstance(node.target, str)
-            return _FxNodeHash(
-                node,
-                node.target,
-                id(node.args),
-                id(node.kwargs),
-                _FakeTensorUpdaterHash(
-                    tuple(self.subgraph_updaters[node.target].processed_hashes)
-                ),
-            )
         return _FxNodeHash(node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self) -> int:
@@ -239,6 +218,12 @@ class FakeTensorUpdater:
 
             return False
 
+        def _node_invokes_subgraph(node: torch.fx.Node) -> bool:
+            return node.op == "call_function" and node.target in (
+                control_deps,
+                torch.ops.higher_order.invoke_subgraph,
+            )
+
         def should_process_node(node: torch.fx.Node) -> bool:
             return (
                 callable(node.target)
@@ -253,12 +238,7 @@ class FakeTensorUpdater:
                 and not hasattr(node.target, "_inductor_lowering_function")
             )
 
-        # Since subgraph I/O semantics are assumed not to change, it's safe to
-        # unconditionally update them first.
         nodes_updated: int = 0
-        for updater in self.subgraph_updaters.values():
-            nodes_updated += updater.incremental_update()
-
         to_process = OrderedSet[int]()
         for node in self.gm.graph.nodes:
             # NB: Be very careful about skipping nodes (via continues) here
@@ -268,15 +248,9 @@ class FakeTensorUpdater:
             if (
                 self.hash_node(node) in self.processed_hashes
                 and id(node) not in to_process
+                # Always run updates on nodes that invoke subgraphs
+                and not _node_invokes_subgraph(node)
             ):
-                continue
-
-            # If this is a subgraph node, and we're here, then the subgraph update above
-            # found new nodes.  Any users of this subgraph also need to update, but we
-            # can otherwise short-circuit the process at this point.
-            if self._is_subgraph_node(node):
-                to_process.update(id(user) for user in node.users)
-                self.processed_hashes.add(self.hash_node(node))
                 continue
 
             if not should_process_node(node):
@@ -286,8 +260,39 @@ class FakeTensorUpdater:
             if not is_valid:
                 continue
 
-            with V.fake_mode, enable_python_dispatcher():
-                new_fake_tensor = node.target(*args, **kwargs)
+            if _node_invokes_subgraph(node):
+                if node.target is torch.ops.higher_order.invoke_subgraph:
+                    subgraph, subgraph_name, *args = args
+
+                    # If the arguments being passed into the subgraph differ from the
+                    # existing args, update the placeholder nodes in the subgraph.
+                    for p, a in zip(subgraph.graph.find_nodes(op="placeholder"), args):
+                        if not is_fake_tensor_same(a, get_fake(p, subgraph), node=p):
+                            p.meta["val"] = a
+                            nodes_updated += 1
+
+                    # Unconditionally run incremental_update on all subgraph updaters.
+                    nodes_updated += self.subgraph_updaters[
+                        subgraph_name
+                    ].incremental_update()
+
+                    # Grab the FakeTensor(s) from the output node, to avoid having to
+                    # recompute them.
+                    _, output_args, _ = get_fake_args_kwargs(
+                        subgraph.graph.output_node(), subgraph
+                    )
+                    match len(output_args):
+                        case 0:
+                            new_fake_tensor = None
+                        case 1:
+                            new_fake_tensor = output_args[0]
+                        case _:
+                            new_fake_tensor = output_args
+                else:
+                    raise RuntimeError("Unsupported subgraph operation")
+            else:
+                with V.fake_mode, enable_python_dispatcher():
+                    new_fake_tensor = node.target(*args, **kwargs)
 
             if "val" in node.meta and is_fake_tensor_same(
                 new_fake_tensor, node.meta["val"], node=node
@@ -345,7 +350,7 @@ def get_fake(x: Any, gm: Optional[torch.fx.GraphModule]) -> Any:
 
 def get_fake_args_kwargs(
     x: torch.fx.Node, gm: Optional[torch.fx.GraphModule] = None
-) -> tuple[bool, tuple[Any], dict[str, Any]]:
+) -> tuple[bool, tuple[Any, ...], dict[str, Any]]:
     """
     First value returns a boolean if any of the input nodes don't have a faketensor and
     weren't resolved from gm.
