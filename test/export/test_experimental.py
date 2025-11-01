@@ -541,6 +541,44 @@ def forward(self, args_0):
         self.assertIsNotNone(gm.meta["tracing_context"].fake_mode)
         self.assertEqual(len(gm.meta["tracing_context"].tensor_to_context), 1)
 
+    def test_dynamo_graph_capture_dict_keys_getitem(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        foo = Module()
+
+        class BlockMask:
+            def __init__(self, d):
+                self.d = d
+
+        block_mask = BlockMask(torch.randn(4))
+
+        def pre_hook_function(m, input):
+            block_mask.d = input[0] + 1
+            return input  # Return a tuple of modified inputs
+
+        foo.register_forward_pre_hook(pre_hook_function)
+
+        def make_inputs():
+            return (torch.randn(4),)
+
+        trace_inputs = make_inputs()
+        gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+        test_inputs = make_inputs()
+        self.assertExpectedInline(
+            gm.code.strip("\r\n "),
+            """\
+def forward(self, args_0):
+    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
+    L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    l_args_0_ = L_args_0_
+    add = l_args_0_ + 1
+    mul = l_args_0_ * 2;  l_args_0_ = None
+    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul, add), self._out_spec)""",
+        )
+        self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
         class DummyOp(torch.autograd.Function):
