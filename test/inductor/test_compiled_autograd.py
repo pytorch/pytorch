@@ -405,7 +405,7 @@ main()
                 self.grad_acc_hooks = []
                 self.grad_acc = []
                 self.params = [self.fc1.weight, self.fc2.weight]
-                for i, param in enumerate(self.params):
+                for param in self.params:
 
                     def wrapper(param):
                         param_tmp = param.expand_as(param)
@@ -1558,7 +1558,7 @@ main()
             dtype=input_tensor.dtype, device=DEVICE
         )
 
-        for iteration in range(10):
+        for _ in range(10):
             for param in model_parameters:
                 param.grad = None
             output_tensor = model(
@@ -1599,7 +1599,7 @@ main()
 
         eager_check()
 
-        for i in range(5):
+        for _ in range(5):
             with compiled_autograd._enable(compiler_fn):
                 eager_check()
 

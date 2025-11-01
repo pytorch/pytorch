@@ -17,7 +17,7 @@ __all__: list[str] = []
 
 
 class _Checkpointer:
-    """This base class specefies a high level API for saving and loading
+    """This base class specifies a high level API for saving and loading
     distributed `state_dict` 's. It provides an abstraction over the low-level APIs
     provided by :py:mod:`torch.distributed.checkpoint.storage`, essentially calling
     :py:meth: `torch.distributed.state_dict_saver.save` and

@@ -132,7 +132,6 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
-    CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
     DictGetItemSource,
@@ -182,7 +181,6 @@ from .utils import (
     common_constant_types,
     dataclass_fields,
     dict_keys,
-    get_current_stream,
     get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -319,7 +317,7 @@ class GuardManagerWrapper:
             is_diff_guard_node = (
                 node.get_source() in self.diff_guard_sources or node.fail_count() > 0
             )
-            for idx, (key_mgr, val_mgr) in sorted(
+            for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
@@ -442,7 +440,7 @@ class GuardManagerWrapper:
             is_subtree_tag_safe = True
 
             # Recurse to get the tag safe roots from subtree.
-            for idx, (key_mgr, val_mgr) in sorted(
+            for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 if key_mgr is not None:
@@ -450,9 +448,7 @@ class GuardManagerWrapper:
                 if val_mgr is not None:
                     tag_safe_roots.extend(visit(val_mgr))
 
-            for idx, (key_mgr, val_mgr) in sorted(
-                node.get_key_value_managers().items()
-            ):
+            for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
 
@@ -763,7 +759,6 @@ def _get_closure_vars() -> dict[str, object]:
             "___dataclass_fields": dataclass_fields,
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
-            "___get_current_stream": get_current_stream,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1449,13 +1444,6 @@ class GuardBuilder(GuardBuilderBase):
                 python_lambda=lambda _: get_torch_function_mode_stack_at(
                     source._get_index()
                 ),
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
-        elif istype(source, CurrentStreamSource):
-            out = root_guard_manager.lambda_manager(
-                python_lambda=lambda _: get_current_stream(source.device),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

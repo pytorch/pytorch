@@ -1,5 +1,6 @@
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/SymInt.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -1710,11 +1711,14 @@ Tensor narrow_symint(
       "], but got ",
       start,
       ")")
-  if (start < 0) {
-    start = start + cur_size;
-  }
+  // Bounds check without converting start:
+  // - If start < 0: need (start + cur_size) + length <= cur_size, i.e., start +
+  // length <= 0
+  // - If start >= 0: need start + length <= cur_size
+  auto end = start + length;
   TORCH_SYM_CHECK(
-      start.sym_le(cur_size - length),
+      (start.sym_lt(0).sym_and((end).sym_le(0)))
+          .sym_or(start.sym_ge(0).sym_and((end).sym_le(cur_size))),
       "start (",
       start,
       ") + length (",
@@ -1722,7 +1726,31 @@ Tensor narrow_symint(
       ") exceeds dimension size (",
       cur_size,
       ").");
-  return at::slice_symint(self, dim, start, start + length, 1);
+
+  if (TORCH_GUARD_OR_FALSE(start.sym_ge(0).sym_or(end.sym_ne(0)))) {
+    return at::slice_symint(self, dim, start, end, 1);
+  } else if (TORCH_GUARD_OR_FALSE(start.sym_lt(0))) {
+    // Avoid the complex symbolic expressions path for non-unbacked.
+    return at::slice_symint(self, dim, start + cur_size, end + cur_size, 1);
+  } else {
+    // Cannot statically determine the condition due to unbacked.
+    // This is an interesting situation; when start is negative and
+    // start + length == 0, slice and narrow do different things.
+    // i.e., x.narrow(0, -2, 2) != x[-2:0]; in that case, we want to
+    // pass curr_size instead of 0. Otherwise, they would do the same thing.
+    // This says at runtime: if start < 0 and end == 0, then pass curr_size
+    // instead of 0.
+
+    auto use_different = start.sym_lt(0).sym_and(end.sym_eq(0)).toSymInt();
+    auto result =
+        at::slice_symint(self, dim, start, end + use_different * cur_size, 1);
+
+    // Ensure slice allocated unbacked size is specialized to length.
+    SymInt new_size = result.sym_size(dim);
+    TORCH_SYM_CHECK(new_size.sym_eq(length), "")
+
+    return result;
+  }
 }
 
 // This overload exists purely for XLA, because they wanted to pass in

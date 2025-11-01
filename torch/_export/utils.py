@@ -681,7 +681,7 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if node.target in aten_to_variants:
             if (
-                node.prev.target == torch.ops.aten._assert_tensor_metadata.default
+                node.prev.target is torch.ops.aten._assert_tensor_metadata.default
                 and node.args[0] == node.prev.args[0]
             ):
                 # skip if already guarded
@@ -1477,7 +1477,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         flattened, _ = flatten_fn(obj)
 
         # NOTE: This helper function will replicate an nn.Module in the exactly same
-        #       structure to be used together with _reparametrize_module. This will
+        #       structure to be used together with _reparameterize_module. This will
         #       create a clone of the module with the new parameters and buffers without
         #       affecting the original module.
         def copy_module(mod: torch.nn.Module):
