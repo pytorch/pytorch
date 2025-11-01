@@ -42,7 +42,7 @@ extern "C" {
 #if IS_PYTHON_3_14_PLUS
 
 #define F_CODE(x) \
-  ((PyCodeObject*)THP_PyStackRef_AsPyObjectBorrow(&x->f_executable))
+  ((PyCodeObject*)THP_PyStackRef_AsPyObjectBorrow(&(x)->f_executable))
 #define PREV_INSTR(x) (x)->instr_ptr
 
 #else
@@ -59,7 +59,7 @@ extern "C" {
 
 #if IS_PYTHON_3_14_PLUS
 #define FUNC(x) \
-  ((PyFunctionObject*)THP_PyStackRef_AsPyObjectBorrow(&x->f_funcobj))
+  ((PyFunctionObject*)THP_PyStackRef_AsPyObjectBorrow(&(x)->f_funcobj))
 #elif IS_PYTHON_3_12_PLUS
 #define FUNC(x) ((PyFunctionObject*)(x)->f_funcobj)
 #else
