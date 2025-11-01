@@ -198,33 +198,33 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(seq_len=seq_len, dtype=dtype, device=device)
         flash_vs_triton(q, k, v, score_mod=_causal)
 
-    # @dtypes(torch.float16, torch.bfloat16)
-    # def test_flash_attention_kernel_called(self, device, dtype):
-    #     """Test that flash attention kernel is actually called when force_flash=True."""
-    #     q, k, v = create_test_tensors(dtype=dtype, device=device)
-    #     compiled_fn = torch.compile(flex_attention)
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_kernel_called(self, device, dtype):
+        """Test that flash attention kernel is actually called when force_flash=True."""
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+        compiled_fn = torch.compile(flex_attention)
 
-    #     # Test that flash kernel is called with force_flash=True
-    #     with cuda_kernel_profiler("flash_attncute") as prof_result:
-    #         compiled_fn(
-    #             q, k, v, score_mod=_causal, kernel_options={"force_flash": True}
-    #         )
+        # Test that flash kernel is called with force_flash=True
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            compiled_fn(
+                q, k, v, score_mod=_causal, kernel_options={"force_flash": True}
+            )
 
-    #     self.assertTrue(
-    #         prof_result["found"],
-    #         f"Flash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
-    #     )
+        self.assertTrue(
+            prof_result["found"],
+            f"Flash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
+        )
 
-    #     # Test that flash kernel is NOT called with force_flash=False
-    #     with cuda_kernel_profiler("flash_attncute") as prof_result:
-    #         compiled_fn(
-    #             q, k, v, score_mod=_causal, kernel_options={"force_flash": False}
-    #         )
+        # Test that flash kernel is NOT called with force_flash=False
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            compiled_fn(
+                q, k, v, score_mod=_causal, kernel_options={"force_flash": False}
+            )
 
-    #     self.assertFalse(
-    #         prof_result["found"],
-    #         f"Flash attention kernel unexpectedly found when force_flash=False. Kernels: {prof_result['kernel_names']}",
-    #     )
+        self.assertFalse(
+            prof_result["found"],
+            f"Flash attention kernel unexpectedly found when force_flash=False. Kernels: {prof_result['kernel_names']}",
+        )
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_with_alibi_learned(self, device, dtype):
