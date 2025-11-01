@@ -2851,5 +2851,17 @@
         "Move the Placement usage outside the compiled region"
       ]
     }
+  ],
+  "GB0283": [
+    {
+      "Gb_type": "cannot resume from torch._dynamo.step_unsupported()",
+      "Context": "",
+      "Explanation": "traced torch._dynamo.step_unsupported(), but Dynamo is instructed to error on graph break. This graph break is used for debugging only.",
+      "Hints": [
+        "Remove the torch._dynamo.step_unsupported() call.",
+        "Make sure fullgraph=False and error_on_graph_break=False.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
   ]
 }
