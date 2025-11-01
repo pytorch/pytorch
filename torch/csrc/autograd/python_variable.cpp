@@ -950,6 +950,14 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("DTensorSpec"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_dtensor_op_dispatcher,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("DTensor")
+        .attr("_op_dispatcher"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_custom_op_handler,
     py::module::import("torch")
         .attr("distributed")
@@ -1127,11 +1135,24 @@ void callDTensorOpDispatch(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !kwargs.is_none(),
       "Python op_dispatch implementation expects non-None kwargs");
-  auto result = checked_vectorcall(
-      dispatch.ptr(),
-      torch::detail::getTorchApiFunction(op).ptr(),
-      args.ptr(),
-      kwargs.ptr());
+  const auto py_op = torch::detail::getTorchApiFunction(op);
+  const auto custom_op_handlers =
+      get_dtensor_op_dispatcher().attr("_custom_op_handlers");
+  TORCH_CHECK(
+      PyDict_Check(custom_op_handlers.ptr()),
+      "_custom_op_handlers must be a dict!");
+  PyObject* custom_op_handler =
+      PyDict_GetItemWithError(custom_op_handlers.ptr(), py_op.ptr());
+  py::object result;
+  if (custom_op_handler) {
+    result = checked_vectorcall(
+        custom_op_handler, py_op.ptr(), args.ptr(), kwargs.ptr());
+  } else if (PyErr_Occurred()) {
+    throw py::error_already_set();
+  } else {
+    result = checked_vectorcall(
+        dispatch.ptr(), py_op.ptr(), args.ptr(), kwargs.ptr());
+  }
   stack->clear();
   pushPyOutToStack(op, stack, std::move(result), "DTensor op dispatch");
 }
