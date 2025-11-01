@@ -195,6 +195,7 @@
 - func: _async_error(str msg) -> ()
   dispatch:
     CompositeExplicitAutograd: _async_error
+    Meta: _async_error_meta
 
 - func: _print(str s) -> ()
   dispatch:
