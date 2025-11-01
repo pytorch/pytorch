@@ -279,7 +279,7 @@ class TestFlexFlash(InductorTestCase):
         assert not scales_view.is_contiguous()
 
         def score_view_mod(score, b, h, q_idx, kv_idx):
-            return score * scales_view[h]
+            return score + scales_view[h]
 
         flash_vs_triton(q, k, v, score_mod=score_view_mod)
 
@@ -389,7 +389,8 @@ class TestFlexFlash(InductorTestCase):
 
         def mask_with_view_buffer(b, h, q_idx, kv_idx):
             bias_value = mask_bias_view[h]
-            return (q_idx >= kv_idx) | (bias_value > 0)
+            double_bias = bias_value * 2
+            return (q_idx >= kv_idx) | (double_bias > 0)
 
         block_mask = create_block_mask(
             mask_with_view_buffer,
