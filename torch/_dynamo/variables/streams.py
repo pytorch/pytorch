@@ -212,7 +212,6 @@ class StreamVariable(StreamContextVariable):
         self,
         proxy: Proxy,
         value: torch.Stream,
-        device: torch.device,
         **kwargs: Any,
     ) -> None:
         # Index into the user object table
@@ -220,15 +219,15 @@ class StreamVariable(StreamContextVariable):
         user_object_index = kwargs.pop("user_obj_index", None)
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert value.device.type == device.type, (
-            "stream value is not equal to the passed device"
+        super().__init__(
+            target_values=[], initial_values=None, device=value.device, **kwargs
         )
-        super().__init__(target_values=[], initial_values=None, device=device, **kwargs)
+
         self.proxy = proxy
         self.value = value
         # pyrefly: ignore [read-only]
-        self.device = device
-
+        self.device = value.device
+        # pyrefly: ignore [read-only]
         self.user_object_index = user_object_index
 
     def python_type(self) -> type:
