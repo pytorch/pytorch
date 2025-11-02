@@ -220,21 +220,22 @@ class Interpreter:
         calling convention, where you pass a list of arguments, which will be cleared
         by the interpreter.  This ensures that input tensors are promptly deallocated.
         """
-        placeholder_nodes = [n for n in self.graph.nodes if n.op == "placeholder"]
-        expected_args = len(placeholder_nodes)
-        actual_args = len(args_list)
-        if actual_args != expected_args:
-            detail = (
-                "extra arguments"
-                if actual_args > expected_args
-                else "missing arguments"
-            )
+        args_iter = iter(args_list)
+        env = {}
+        try:
+            for n in self.graph.nodes:
+                if n.op == "placeholder":
+                    env[n] = next(args_iter)
+        except StopIteration as e:
             raise RuntimeError(
-                f"Interpreter.boxed_run expected {expected_args} arguments "
-                f"for placeholders but received {actual_args} ({detail})."
+                f"Interpreter.boxed_run expected {len(env) + 1} arguments for placeholders "
+                f"but received {len(args_list)} (missing arguments)"
+            ) from e
+        if len(args_list) != len(env):
+            raise RuntimeError(
+                f"Interpreter.boxed_run expected {len(env)} arguments for placeholders "
+                f"but received {len(args_list)} (extra arguments)"
             )
-
-        env = {n: arg for n, arg in zip(placeholder_nodes, args_list)}
         args_list.clear()
         return self.run(initial_env=env)
 
