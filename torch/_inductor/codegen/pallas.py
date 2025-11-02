@@ -1,5 +1,8 @@
+# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import hashlib
-from typing import Any, Optional
+from typing import Any, Optional, Sequence, TYPE_CHECKING
 
 import sympy
 
@@ -19,6 +22,16 @@ from .common import (
 )
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
+if TYPE_CHECKING:
+    from ..ir import IRNode
+    from ..scheduler import BaseSchedulerNode
+
+
+class Unsupported(RuntimeError):
+    """Exception raised when an operation is not supported by the Pallas backend."""
+
+    pass
+
 
 class PallasKernelOverrides(OpOverrides):
     """
@@ -29,123 +42,123 @@ class PallasKernelOverrides(OpOverrides):
     """
 
     @staticmethod
-    def sin(x):
+    def sin(x: str) -> str:
         return f"jnp.sin({x})"
 
     @staticmethod
-    def cos(x):
+    def cos(x: str) -> str:
         return f"jnp.cos({x})"
 
     @staticmethod
-    def tan(x):
+    def tan(x: str) -> str:
         return f"jnp.tan({x})"
 
     @staticmethod
-    def sinh(x):
+    def sinh(x: str) -> str:
         return f"jnp.sinh({x})"
 
     @staticmethod
-    def cosh(x):
+    def cosh(x: str) -> str:
         return f"jnp.cosh({x})"
 
     @staticmethod
-    def tanh(x):
+    def tanh(x: str) -> str:
         return f"jnp.tanh({x})"
 
     @staticmethod
-    def asin(x):
+    def asin(x: str) -> str:
         return f"jnp.arcsin({x})"
 
     @staticmethod
-    def acos(x):
+    def acos(x: str) -> str:
         return f"jnp.arccos({x})"
 
     @staticmethod
-    def atan(x):
+    def atan(x: str) -> str:
         return f"jnp.arctan({x})"
 
     @staticmethod
-    def exp(x):
+    def exp(x: str) -> str:
         return f"jnp.exp({x})"
 
     @staticmethod
-    def exp2(x):
+    def exp2(x: str) -> str:
         return f"jnp.exp2({x})"
 
     @staticmethod
-    def expm1(x):
+    def expm1(x: str) -> str:
         return f"jnp.expm1({x})"
 
     @staticmethod
-    def log(x):
+    def log(x: str) -> str:
         return f"jnp.log({x})"
 
     @staticmethod
-    def log10(x):
+    def log10(x: str) -> str:
         return f"jnp.log10({x})"
 
     @staticmethod
-    def log2(x):
+    def log2(x: str) -> str:
         return f"jnp.log2({x})"
 
     @staticmethod
-    def log1p(x):
+    def log1p(x: str) -> str:
         return f"jnp.log1p({x})"
 
     @staticmethod
-    def sqrt(x):
+    def sqrt(x: str) -> str:
         return f"jnp.sqrt({x})"
 
     @staticmethod
-    def rsqrt(x):
+    def rsqrt(x: str) -> str:
         return f"(1.0 / jnp.sqrt({x}))"
 
     @staticmethod
-    def abs(x):
+    def abs(x: str) -> str:
         return f"jnp.abs({x})"
 
     @staticmethod
-    def neg(x):
+    def neg(x: str) -> str:
         return f"(-{x})"
 
     @staticmethod
-    def floor(x):
+    def floor(x: str) -> str:
         return f"jnp.floor({x})"
 
     @staticmethod
-    def ceil(x):
+    def ceil(x: str) -> str:
         return f"jnp.ceil({x})"
 
     @staticmethod
-    def trunc(x):
+    def trunc(x: str) -> str:
         return f"jnp.trunc({x})"
 
     @staticmethod
-    def round(x):
+    def round(x: str) -> str:
         return f"jnp.round({x})"
 
     @staticmethod
-    def sigmoid(x):
+    def sigmoid(x: str) -> str:
         return f"(1.0 / (1.0 + jnp.exp(-{x})))"
 
     @staticmethod
-    def relu(x):
+    def relu(x: str) -> str:
         return f"jnp.maximum({x}, 0)"
 
     @staticmethod
-    def pow(a, b):
+    def pow(a: str, b: str) -> str:
         return f"jnp.power({a}, {b})"
 
     @staticmethod
-    def maximum(a, b):
+    def maximum(a: str, b: str) -> str:
         return f"jnp.maximum({a}, {b})"
 
     @staticmethod
-    def minimum(a, b):
+    def minimum(a: str, b: str) -> str:
         return f"jnp.minimum({a}, {b})"
 
     @staticmethod
-    def where(cond, a, b):
+    def where(cond: str, a: str, b: str) -> str:
         return f"jnp.where({cond}, {a}, {b})"
 
 
@@ -278,7 +291,7 @@ class PallasKernel(SIMDKernel):
 
         return code.getvalue()
 
-    def call_kernel(self, name: str, node=None) -> None:  # type: ignore[override]
+    def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
@@ -300,7 +313,12 @@ class PallasScheduling(SIMDScheduling):
         # Start minimal: no special features advertised
         return OrderedSet()
 
-    def define_kernel(self, src_code: str, node_schedule, kernel: PallasKernel) -> str:  # type: ignore[override]
+    def define_kernel(
+        self,
+        src_code: str,
+        node_schedule: Sequence[BaseSchedulerNode],
+        kernel: PallasKernel,
+    ) -> str:  # type: ignore[override]
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
