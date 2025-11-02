@@ -81,7 +81,6 @@ TMA_TEST_XFAIL = dict.fromkeys(
         "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
         "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
         "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
-        "test_broadcast_with_singleton_dims",
     ),
     TMA_XFAIL,
 )
@@ -476,12 +475,12 @@ class CommonTemplate:
             self.assertExpectedInline(
                 load_lines,
                 """\
-    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[1, 0], offsets=[yoffset, xoffset]), boundary_check=[0, 1])
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[0, 1], offsets=[yoffset, xoffset]), boundary_check=[0, 1])
     tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[YBLOCK], order=[0], offsets=[yoffset]), boundary_check=[0], eviction_policy='evict_last')[:, None]""",  # noqa: B950
             )
             self.assertExpectedInline(
                 store_lines,
-                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[1, 0], offsets=[yoffset, xoffset]), tl.broadcast_to(tmp2, [YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[0, 1], offsets=[yoffset, xoffset]), tl.broadcast_to(tmp2, [YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
@@ -1020,7 +1019,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
 
-    @xfail_if_use_tensor_descriptor
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y
@@ -1157,13 +1155,13 @@ class CommonTemplate:
         self.assertExpectedInline(
             load_lines,
             """\
-    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",  # noqa: B950
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[0, 1, 2], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[0, 1, 2], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",  # noqa: B950
         )
 
         self.assertExpectedInline(
             store_lines,
-            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",  # noqa: B950
+            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[0, 1, 2], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",  # noqa: B950
         )
 
         # Check the indices. These are used for non-block pointers.
@@ -1417,7 +1415,7 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     @parametrize(
         "view_size,permute_order,num_tensor_descriptors,expect_transpose",
         [
-            ((128,), (0), 3, False),
+            ((128,), (0,), 3, False),
             ((128, 128), (0, 1), 3, False),
             ((128, 64), (1, 0), 3, True),
             ((256, 32, 16), (2, 0, 1), 3, True),
