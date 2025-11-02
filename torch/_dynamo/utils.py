@@ -4696,9 +4696,7 @@ def clear_torch_function_mode_stack() -> None:
 
 
 def get_current_stream(device: torch.device) -> torch.Stream:
-    from .device_interface import get_interface_for_device
-
-    return get_interface_for_device(device).current_stream()
+    return torch.accelerator.current_stream(device)
 
 
 # call from C dynamo in order to inspect values in pdb
