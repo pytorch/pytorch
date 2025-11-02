@@ -147,8 +147,6 @@ def check_stubs_exist(code: str) -> list[LintMessage]:
     from pathlib import Path
 
     try:
-        # Check for stub files (reused from pyrefly_init.py)
-        # TODO: Consolidate the check / logic
         repo_root = find_repo_root()
 
         expected_stub_files = [

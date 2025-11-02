@@ -5,7 +5,8 @@ Initializer script for pyrefly linter.
 This script:
 1. Installs required pip packages for pyrefly
 2. Checks if .pyi stub files exist
-3. If stub files are missing, generates them
+3. Checks if the commit hash has changed since stubs were last generated
+4. Regenerates stub files if they're missing or if the commit has changed
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from pathlib import Path
 
 
 def find_repo_root() -> Path:
-    """Find repository root using git."""
+    """Find repository root using git or hg, with fallback to searching for torch/."""
+    # Try git first
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -26,8 +28,36 @@ def find_repo_root() -> Path:
             check=True,
         )
         return Path(result.stdout.strip())
-    except subprocess.CalledProcessError:
-        sys.exit("Not in a git repository")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Try hg (Mercurial)
+    try:
+        result = subprocess.run(
+            ["hg", "root"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Fallback: search for torch/ directory
+    cwd = Path.cwd()
+    if (cwd / "torch").is_dir():
+        return cwd
+
+    for parent in cwd.parents:
+        if (parent / "torch").is_dir():
+            return parent
+
+    # Last resort: use current directory
+    print(
+        "Warning: Could not find repository root, using current directory",
+        file=sys.stderr,
+    )
+    return cwd
 
 
 def install_packages(dry_run: str) -> bool:
@@ -92,53 +122,90 @@ def check_stub_files() -> tuple[bool, list[str]]:
     return all_exist, missing_files
 
 
-def generate_stub_files() -> bool:
-    """Generate .pyi stub files by running generation scripts."""
+def get_current_commit_hash() -> str | None:
+    """Get current commit hash from git or hg.
+
+    Returns commit hash string, or None if not in a VCS repository.
+    """
+    # Try git first
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Try hg (Mercurial)
+    try:
+        result = subprocess.run(
+            ["hg", "id", "-i"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    return None
+
+
+def check_commit_changed() -> bool:
+    """Check if the current commit differs from when stubs were last generated.
+
+    Returns True if stubs need regeneration (commit changed or no record exists).
+    """
     repo_root = find_repo_root()
+    stub_commit_file = repo_root / ".pyrefly_stub_commit"
 
-    print("Generating .pyi stub files...")
+    # If the commit file doesn't exist, we need to generate
+    if not stub_commit_file.exists():
+        return True
 
-    # Step 1: Generate torch version
-    print("Generating torch version...")
-    result = subprocess.run(
-        [sys.executable, "-m", "tools.generate_torch_version", "--is_debug=false"],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        print("Failed to generate torch version", file=sys.stderr)
+    try:
+        # Read the saved commit hash
+        saved_commit = stub_commit_file.read_text().strip()
+
+        # Get the current commit hash
+        current_commit = get_current_commit_hash()
+
+        # If we can't get a commit hash, check if saved was "unknown"
+        # If so, assume stubs are still valid; otherwise regenerate
+        if current_commit is None:
+            if saved_commit == "unknown":
+                return False  # Both unknown, assume valid
+            return True  # Was tracked before, now can't track - regenerate
+
+        # Return True if commits differ (need regeneration)
+        return saved_commit != current_commit
+
+    except OSError as e:
+        print(f"Warning: Could not check commit hash: {e}", file=sys.stderr)
+        # If we can't check, assume we need to regenerate to be safe
+        return True
+
+
+def generate_stub_files() -> bool:
+    """Generate .pyi stub files by calling the generate_stubs.sh script."""
+    repo_root = find_repo_root()
+    generate_script = repo_root / "tools" / "linter" / "adapters" / "generate_stubs.sh"
+
+    if not generate_script.exists():
+        print(
+            f"Error: generate_stubs.sh not found at {generate_script}", file=sys.stderr
+        )
         return False
 
-    # Step 2: Generate main stub files
-    print("Generating main stub files...")
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "tools.pyi.gen_pyi",
-            "--native-functions-path",
-            "aten/src/ATen/native/native_functions.yaml",
-            "--tags-path",
-            "aten/src/ATen/native/tags.yaml",
-            "--deprecated-functions-path",
-            "tools/autograd/deprecated.yaml",
-        ],
-        cwd=repo_root,
-    )
+    result = subprocess.run([str(generate_script)])
+
     if result.returncode != 0:
-        print("Failed to generate main stub files", file=sys.stderr)
+        print("Failed to generate stub files", file=sys.stderr)
         return False
 
-    # Step 3: Generate DataPipe stub files
-    print("Generating DataPipe stub files...")
-    result = subprocess.run(
-        [sys.executable, "torch/utils/data/datapipes/gen_pyi.py"],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        print("Failed to generate DataPipe stub files", file=sys.stderr)
-        return False
-
-    print("All stub files generated successfully")
     return True
 
 
@@ -161,21 +228,34 @@ def main() -> None:
     if not install_packages(args.dry_run):
         sys.exit(1)
 
-    # Step 2: Check stub files
+    # Step 2: Check stub files and commit hash
     print("\n Checking for .pyi stub files...")
     all_exist, missing_files = check_stub_files()
+    commit_changed = check_commit_changed()
 
-    if all_exist:
-        print("All .pyi stub files already exist")
-    else:
-        print(f"Missing {len(missing_files)} stub file(s):")
+    need_regeneration = False
+    regeneration_reason = []
+
+    if not all_exist:
+        need_regeneration = True
+        regeneration_reason.append(f"Missing {len(missing_files)} stub file(s)")
         for missing in missing_files:
             print(f"     - {missing}")
+
+    if commit_changed and all_exist:
+        need_regeneration = True
+        regeneration_reason.append("Commit hash changed since last generation")
+        print("Commit has changed since stubs were last generated")
+
+    if not need_regeneration:
+        print("All .pyi stub files exist and are up to date")
+    else:
+        print(f"Stub regeneration needed: {', '.join(regeneration_reason)}")
 
         if args.dry_run == "1":
             print("\n[DRY RUN] Would generate stub files, but skipping in dry run mode")
         else:
-            print("\n Generating missing stub files...")
+            print("\n Generating stub files...")
             if not generate_stub_files():
                 sys.exit(1)
 

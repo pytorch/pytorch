@@ -81,6 +81,7 @@ torch/_VF.pyi
 torch/return_types.pyi
 torch/nn/functional.pyi
 torch/utils/data/datapipes/datapipe.pyi
+.pyrefly_stub_commit
 torch/csrc/autograd/generated/*
 torch/csrc/functionalization/generated/*
 torch/csrc/lazy/generated/*.[!m]*
