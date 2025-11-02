@@ -1096,7 +1096,7 @@ def default_partition(
         ):
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
-            assert all(user.target == operator.getitem for user in users)
+            assert all(user.target is operator.getitem for user in users)
             saved_values.extend(users)
         else:
             backward_usages = [
@@ -1752,7 +1752,7 @@ def solve_min_cut(
     def should_ban_recomputation(node):
         if node.op != "call_function":
             return False
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             return False
         if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
             return True

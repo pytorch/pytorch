@@ -392,7 +392,7 @@ def _handle_call_function_node(
         node: The FX node to translate.
         node_name_to_values: A mapping of FX node names to their produced ir.Value.
     """
-    if node.target == operator.getitem:
+    if node.target is operator.getitem:
         _handle_getitem_node(node, node_name_to_values)
     # Add op to the graph
     op = str(node.target)
@@ -402,7 +402,7 @@ def _handle_call_function_node(
         if input_ is None:
             inputs.append(None)
         elif hasattr(input_, "name"):
-            if isinstance(input_, torch.fx.Node) and input_.target == operator.getitem:
+            if isinstance(input_, torch.fx.Node) and input_.target is operator.getitem:
                 actual_input = _handle_getitem_node(input_, node_name_to_values)
                 inputs.append(actual_input)
             else:
@@ -527,7 +527,7 @@ def _handle_call_function_node_with_lowering(
         opset: The ONNX Script opset object for constructing ONNX nodes.
         node_name_to_local_functions: A mapping of subgraph names to the corresponding ONNX functions.
     """
-    if node.target == operator.getitem:
+    if node.target is operator.getitem:
         source = node.all_input_nodes[0]
         source_outputs = node_name_to_values[source.name]
         if isinstance(source_outputs, Sequence):

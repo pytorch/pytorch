@@ -706,7 +706,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
         return _is_custom_module_lstm(a, named_modules)
 
     def match_getitem(a):
-        return a.op == "call_function" and a.target == operator.getitem
+        return a.op == "call_function" and a.target is operator.getitem
 
     def match_tuple(a):
         return a.op == "call_function" and a.target is tuple
@@ -722,7 +722,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
                 return None
             # Match next arg, for tuple the arg is a tuple of a list, e.g. ([dq_1, other_node],)
             if i < len(match_pattern) - 1:
-                if match == match_tuple:
+                if match is match_tuple:
                     a = a.args[0][0]  # type: ignore[assignment,index]
                 else:
                     a = a.args[0]  # type: ignore[assignment]
@@ -810,7 +810,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
                         find_patterns(
                             user, index_stack, current_pattern, matched_patterns, seen
                         )
-            elif user.op == "call_function" and user.target == operator.getitem:
+            elif user.op == "call_function" and user.target is operator.getitem:
                 if len(index_stack) > 0:
                     if user.args[1] == index_stack[-1]:
                         index_stack.pop()
@@ -837,7 +837,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
             )
         if not (
             last_getitem.op == "call_function"
-            and last_getitem.target == operator.getitem
+            and last_getitem.target is operator.getitem
         ):
             raise AssertionError(
                 "last getitem node must be a call_function with target operator.getitem"

@@ -20,6 +20,8 @@ from typing_extensions import ParamSpec, TypeAlias
 
 from torch.utils._ordered_set import OrderedSet
 
+from .ir import ComputedBuffer
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -103,11 +105,59 @@ class MixOrderReduction:
     """
 
     @staticmethod
+    def is_split_reduction(node: BaseSchedulerNode) -> bool:
+        return node.is_reduction() and all(
+            subnode.node._split_size is not None
+            for subnode in node.get_nodes()
+            if isinstance(subnode, SchedulerNode)
+            and subnode.is_reduction()
+            and isinstance(subnode.node, ComputedBuffer)
+        )
+
+    @classmethod
+    def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
+        if cls.is_split_reduction(node):
+            xnumel = None
+            rnumel = None
+            for subnode in node.get_nodes():
+                if not (
+                    isinstance(subnode, SchedulerNode)
+                    and subnode.is_reduction()
+                    and isinstance(subnode.node, ComputedBuffer)
+                ):
+                    continue
+
+                assert subnode.node._original_ranges is not None
+                curxnumel = V.graph.sizevars.simplify(
+                    sympy_product(subnode.node._original_ranges)
+                )
+                assert subnode.node._original_reduction_ranges is not None
+                currnumel = V.graph.sizevars.simplify(
+                    sympy_product(subnode.node._original_reduction_ranges)
+                )
+
+                if xnumel is None:
+                    xnumel = curxnumel
+                    rnumel = currnumel
+                else:
+                    assert V.graph.sizevars.statically_known_equals(
+                        xnumel, curxnumel
+                    ), f"{xnumel} v.s. {curxnumel}"
+                    assert V.graph.sizevars.statically_known_equals(
+                        rnumel, currnumel
+                    ), f"{rnumel} v.s. {currnumel}"
+
+            assert xnumel is not None
+            return (xnumel, rnumel)
+        else:
+            return node.group[1]  # type: ignore[return-value]
+
+    @classmethod
     def has_mix_reduction_orders(
-        node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        g1 = node1.group[1]
-        g2 = node2.group[1]
+        g1 = cls.get_numel_rnumel(node1)
+        g2 = cls.get_numel_rnumel(node2)
 
         if len(g1) != 2 or len(g2) != 2 or g1 == g2:
             return False
@@ -171,6 +221,7 @@ class MixOrderReduction:
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         if not config.triton.mix_order_reduction:
             return False
+
         if not node1.is_gpu() or not node2.is_gpu():
             return False
         device_type = node1.get_device().type  # type: ignore[union-attr]
@@ -191,7 +242,7 @@ class MixOrderReduction:
         if len(common_reads) == 0:
             return False
 
-        g1 = node1.group[1]
+        g1 = cls.get_numel_rnumel(node1)
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
@@ -202,7 +253,7 @@ class MixOrderReduction:
             return False
 
         contiguous_node, other_node = (
-            (node1, node2) if node1.group[1][1] == ncol else (node2, node1)
+            (node1, node2) if g1[1] == ncol else (node2, node1)
         )
 
         if not all(
@@ -228,7 +279,7 @@ class MixOrderReduction:
 
         # Other reduction types like max/min is not supported yet.
         # There are no real use case as well.
-        return all(
+        out = all(
             subnode.node.get_reduction_type()  # type: ignore[union-attr]
             in {
                 "sum",
@@ -237,6 +288,7 @@ class MixOrderReduction:
             for subnode in other_node.get_nodes()
             if subnode.is_reduction()
         )
+        return out
 
     @classmethod
     def are_mix_order_reductions(
@@ -261,9 +313,8 @@ class MixOrderReduction:
             index_name = index_names[0]
             index_expr = loop_body.indexing_exprs[index_name]
             var_ranges = loop_body.var_ranges
-            if len(var_ranges) != 2:
-                return False
 
+            # assumes the final symbol is for reduction
             var_symbols = list(var_ranges.keys())
             stride_vars = V.graph.sizevars.stride_vars(
                 index_expr,
@@ -1423,14 +1474,25 @@ class SchedulerNode(BaseSchedulerNode):
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
     def swap_pw_red_dimension(self) -> None:
-        assert len(self._body.sizes[0]) == 2
-        self.apply_new_loop_order([1, 0])
+        num_rdims = self._body.get_original_num_rdims()
+        num_pwdims = len(self._body.iter_vars) - num_rdims
+        pwdims = tuple(range(num_pwdims))
+        rdims = tuple(range(num_pwdims, num_pwdims + num_rdims))
+
+        self.apply_new_loop_order(rdims + pwdims)
         assert len(self.group[1]) == 2
         self.group = self.group[0], (self.group[1][1], self.group[1][0])
 
     def extract_pw_from_reduction(self) -> BaseSchedulerNode:
         self._body = self._body.extract_pw_from_reduction()
         return self
+
+    def cancel_reduction_split(self) -> None:
+        if not MixOrderReduction.is_split_reduction(self):
+            return
+        assert isinstance(self.node, ir.ComputedBuffer)
+        with self.node.with_original_inner_fn():
+            self._compute_attrs()
 
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
@@ -4494,6 +4556,15 @@ class Scheduler:
         single fused node.
         """
         if node1 is node2:
+            return False
+
+        # We don't further fuse with FusedMixOrderReductions for now.
+        # It's not a big deal since the score for fusion with
+        # mix order reduction is low. When we do this kind of fusion,
+        # the participants should have already been well fused.
+        if isinstance(node1, FusedMixOrderReductions) or isinstance(
+            node2, FusedMixOrderReductions
+        ):
             return False
 
         why = WhyNoFuse(node1, node2)
