@@ -36,6 +36,15 @@ class DummyUserDict(UserDict):
     pass
 
 
+class FakeMapping:
+    def __init__(self, value: Any) -> None:
+        self._value = value
+        self.keys = lambda: ["a", "b", "c"]
+
+    def __getitem__(self, key: str) -> Any:
+        return self._value
+
+
 class DictTests(torch._dynamo.test_case.TestCase):
     def test_dict_subclass_instantiation(self):
         def fn(x):
@@ -665,6 +674,18 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(module_dict), len(modules))
         for k1, m2 in zip(modules, module_dict.children()):
             self.assertTrue(modules[k1] is m2)
+
+    # FIXME: see comment in torch/_dynamo/polyfills/__init__.py:mutable_mapping_update
+    @unittest.expectedFailure
+    def test_dict_construct_from_mapping_like(self):
+        def fn(x):
+            fm = FakeMapping(x)
+            d = dict(fm, x=x)
+            return d
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
