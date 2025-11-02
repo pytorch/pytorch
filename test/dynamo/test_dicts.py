@@ -39,7 +39,7 @@ class DummyUserDict(UserDict):
 class FakeMapping:
     def __init__(self, value: Any) -> None:
         self._value = value
-        self.keys = lambda: ["a", "b", "c"]
+        self.keys = lambda: ["a", "b", "c"]  # not required to be a method
 
     def __getitem__(self, key: str) -> Any:
         return self._value
