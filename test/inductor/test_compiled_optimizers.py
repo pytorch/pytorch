@@ -899,7 +899,7 @@ class CompiledOptimizerTests(TestCase):
         compiled = torch.compile(_get_value)
 
         x = torch.ones(2, 2)
-        mark_static_address(x)
+        mark_static_address(x, guard=True)
 
         ret_val = compiled(x)
 
