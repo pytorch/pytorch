@@ -56,6 +56,14 @@ struct numeric_limits<int8_t> {
 };
 
 template <>
+struct numeric_limits<uint16_t> {
+  static inline __host__ __device__ uint16_t lowest() { return 0; }
+  static inline __host__ __device__ uint16_t max() { return UINT16_MAX; }
+  static inline __host__ __device__ uint16_t lower_bound() { return 0; }
+  static inline __host__ __device__ uint16_t upper_bound() { return UINT16_MAX; }
+};
+
+template <>
 struct numeric_limits<int16_t> {
   static inline __host__ __device__ int16_t lowest() { return INT16_MIN; }
   static inline __host__ __device__ int16_t max() { return INT16_MAX; }
@@ -64,11 +72,34 @@ struct numeric_limits<int16_t> {
 };
 
 template <>
+struct numeric_limits<uint32_t> {
+  static inline __host__ __device__ uint32_t lowest() { return 0; }
+  static inline __host__ __device__ uint32_t max() { return UINT32_MAX; }
+  static inline __host__ __device__ uint32_t lower_bound() { return 0; }
+  static inline __host__ __device__ uint32_t upper_bound() { return UINT32_MAX; }
+};
+
+template <>
 struct numeric_limits<int32_t> {
   static inline __host__ __device__ int32_t lowest() { return INT32_MIN; }
   static inline __host__ __device__ int32_t max() { return INT32_MAX; }
   static inline __host__ __device__ int32_t lower_bound() { return INT32_MIN; }
   static inline __host__ __device__ int32_t upper_bound() { return INT32_MAX; }
+};
+
+template <>
+struct numeric_limits<uint64_t> {
+#ifdef _MSC_VER
+  static inline __host__ __device__ uint64_t lowest() { return 0; }
+  static inline __host__ __device__ uint64_t max() { return _UI64_MAX; }
+  static inline __host__ __device__ uint64_t lower_bound() { return 0; }
+  static inline __host__ __device__ uint64_t upper_bound() { return _UI64_MAX; }
+#else
+  static inline __host__ __device__ uint64_t lowest() { return 0; }
+  static inline __host__ __device__ uint64_t max() { return UINT64_MAX; }
+  static inline __host__ __device__ uint64_t lower_bound() { return 0; }
+  static inline __host__ __device__ uint64_t upper_bound() { return UINT64_MAX; }
+#endif
 };
 
 template <>
