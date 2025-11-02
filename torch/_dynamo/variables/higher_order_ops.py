@@ -2977,7 +2977,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.parent_source = parent_source
 
     def rewire_bwd_graph_outputs(
-        self, fwd_graph, fwd_freevars, bwd_graph, orig_fwd_args
+        self, fwd_graph, fwd_freevars, bwd_graph, orig_fwd_args, bwd_out
     ):
         # Ensure fwd-input and bwd-output consistency - autograd.Function
         # requires that the inputs of the forward line up correctly with the
@@ -2986,6 +2986,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # responsibility to do this lineup. To do this, we use the original user
         # point as the anchor point to provide this mapping.
 
+        # if isinstance(bwd_out, variables.TensorVariable):
+        #     return
         # Dynamo traced forward graph can have different number and ordering of inputs than the original forward graph
         orig_arg_positions = {}
         for idx, arg in enumerate(orig_fwd_args):
@@ -3006,12 +3008,22 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # rewire the outputs of the bwd_graph in the new autograd.Function so
         # that they are consistent with the new fwd inputs.
 
+        if len(new_arg_positions_in_orig_fwd) == 1 and isinstance(
+            bwd_out, variables.TensorVariable
+        ):
+            return
+        # breakpoint()
         # Rewrite the output of bwd_graph to remove the grad output for the non-Tensor args.
         bwd_outputs = None
         for node in bwd_graph.find_nodes(op="output"):
             bwd_outputs = node.args[0]
             break
 
+        if bwd_outputs is None:
+            return
+
+        if not isinstance(bwd_outputs, (list, tuple)):
+            bwd_outputs = (bwd_outputs,)
         rewired_bwd_outputs = []
         for original_fwd_position in new_arg_positions_in_orig_fwd.values():
             if original_fwd_position is None:
@@ -3023,10 +3035,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
             bwd_graph.erase_node(node)
             break
         bwd_graph.output(tuple(rewired_bwd_outputs))
+        # breakpoint()
         bwd_graph.lint()
 
     def handle_saved_tensors_wiring(
-        self, fwd_graph, fwd_freevars, bwd_graph, bwd_freevars, bwd_args
+        self, ctx, fwd_graph, fwd_freevars, bwd_graph, bwd_freevars, bwd_args
     ):
         # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
         fwd_outputs = []
@@ -3035,20 +3048,67 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_graph.erase_node(node)
             break
 
+        # symint_nodes = []
+        # for node in fwd_graph.find_nodes(op="placeholder"):
+        #     if isinstance(node.meta.get("example_value"), torch.SymInt):
+        #         symint_nodes.append(node)
+
+        fwd_symint_proxies = []
+        for main_var in fwd_freevars.values():
+            if isinstance(main_var.node.meta.get("example_value", None), torch.SymInt):
+                fwd_symint_proxies.append(main_var)
+
+        def transform(outer_proxy):
+            if outer_proxy in fwd_freevars:
+                return fwd_freevars[outer_proxy].node
+            elif outer_proxy is None:
+                return None
+            else:
+                return outer_proxy.node
+
+        saved_tensor_proxies = list(
+            {
+                x.as_proxy(): None
+                for x in ctx.saved_tensors.tensors + ctx.smuggled_tensors.tensors
+            }.keys()
+        )
+        saved_tensor_nodes_fwd = [transform(x) for x in saved_tensor_proxies]
+        symint_nodes_fwd = [x.node for x in fwd_symint_proxies]
+
         # Because we lift the bwd_freevars as inputs of the bwd_graph,
         # we have to manually add the bwd_freevars as output of fwd_graph.
         # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
         # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
-        fwd_proxy_of_bwd_freevars = []
-        for k in bwd_freevars.keys():
-            if k in fwd_freevars:
-                fwd_proxy_of_bwd_freevars.append(fwd_freevars[k].node)
-        new_fwd_graph_outputs = (fwd_outputs, tuple(fwd_proxy_of_bwd_freevars))
+        # fwd_proxy_of_bwd_freevars = []
+        # for k in bwd_freevars.keys():
+        #     if k in fwd_freevars:
+        #         fwd_proxy_of_bwd_freevars.append(fwd_freevars[k].node)
+
+        new_fwd_graph_outputs = (
+            fwd_outputs,
+            tuple(symint_nodes_fwd + saved_tensor_nodes_fwd),
+        )
         fwd_graph.output(new_fwd_graph_outputs)
         fwd_graph.lint()
 
+        bwd_symint_proxies = []
+        for main_var in bwd_freevars.values():
+            if isinstance(main_var.node.meta.get("example_value", None), torch.SymInt):
+                bwd_symint_proxies.append(main_var)
+
         new_graph = torch.fx.Graph()
         env = {}
+
+        def transform(outer_proxy):
+            if outer_proxy in bwd_freevars:
+                return bwd_freevars[outer_proxy].node
+            else:
+                return None
+                # raise RuntimeError("A saved tensor was not found in bwd_freevars")
+
+        saved_tensor_nodes_bwd = [transform(x) for x in saved_tensor_proxies]
+        symint_nodes_bwd = [x.node for x in bwd_symint_proxies]
+        # [transform(x.as_proxy()) for x in ctx.saved_tensors.tensors]
 
         # # Add new placeholder nodes in the order specified by the inputs
         # for node in inputs:
@@ -3058,16 +3118,26 @@ class AutogradFunctionApplyVariable(VariableTracker):
         #     # pyrefly: ignore  # unsupported-operation
         #     env[node] = new_node
         count = 0
+        num_tangents = len(bwd_args) - 1
+        seen_tangents = 0
         for node in bwd_graph.nodes:
-            assert node.op == "placeholder"
-            count = count + 1
-            if count == 1:
-                env[node] = None
-                continue
-            new_node = new_graph.placeholder(node.name)
-            env[node] = new_node
-            if count == len(bwd_args):
+            if node.op != "placeholder":
+                assert seen_tangents == num_tangents
                 break
+            if count == 0:
+                # ctx
+                env[node] = None
+                count += 1
+                continue
+
+            example_value = node.meta.get("example_value")
+            if isinstance(example_value, torch.Tensor) or example_value is None:
+                seen_tangents = seen_tangents + 1
+                if seen_tangents > num_tangents:
+                    break
+
+                new_node = new_graph.placeholder(node.name)
+                env[node] = new_node
 
         # for bwd_arg in bwd_args[1:]:
         #     if isinstance(bwd_arg, variables.TensorVariable):
@@ -3076,11 +3146,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
         #         if bwd_proxy in bwd_freevars:
         #             env[bwd_freevars[bwd_proxy].node] = new_node
 
-        for freevar_proxy in bwd_freevars.values():
-            bwd_node = freevar_proxy.node
-            new_node = new_graph.placeholder(bwd_node.name)
-            env[bwd_node] = new_node
+        for node in symint_nodes_bwd + saved_tensor_nodes_bwd:
+            if node is None:
+                new_graph.placeholder("unused")
+            else:
+                new_node = new_graph.placeholder(node.name)
+                env[node] = new_node
+        # for freevar_proxy in bwd_freevars.values():
+        #     bwd_node = freevar_proxy.node
+        #     new_node = new_graph.placeholder(bwd_node.name)
+        #     env[bwd_node] = new_node
 
+        # breakpoint()
         for node in bwd_graph.nodes:
             if node in env:
                 # Node must be one of our inputs. (Any member of env which wasn't an
@@ -3103,6 +3180,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     output_values.append(x)
             new_graph.output(tuple(output_values))
+        elif old_outputs is None:
+            new_graph.output(None)
         else:
             new_graph.output(env[old_outputs])
 
@@ -3196,6 +3275,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
             restore_side_effects=False,
             tracer=fwd_tracer,
         )
+
+        # For inputs that are not used but need to be captured, so that the gradient is tracked.
+        for arg in args:
+            if isinstance(arg, variables.TensorVariable):
+                fwd_tracer.maybe_lift_tracked_freevar_to_input(arg.as_proxy())
 
         if ctx in tx.output.side_effects.store_attr_mutations:
             if (
@@ -3328,10 +3412,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     raise e
 
-        if not isinstance(bwd_out, variables.TensorVariable):
-            self.rewire_bwd_graph_outputs(fwd_graph, fwd_freevars, bwd_graph, args)
+        # if not isinstance(bwd_out, variables.TensorVariable):
+        self.rewire_bwd_graph_outputs(fwd_graph, fwd_freevars, bwd_graph, args, bwd_out)
         fwd_graph, bwd_graph = self.handle_saved_tensors_wiring(
-            fwd_graph, fwd_freevars, bwd_graph, bwd_freevars, bwd_args
+            ctx, fwd_graph, fwd_freevars, bwd_graph, bwd_freevars, bwd_args
         )
 
         # TODO: assert that bwd_graph didn't capture values that were

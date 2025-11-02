@@ -604,22 +604,22 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
+        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weird_b, l_weird_c, l_x_, l_z_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_weird_b = l_weird_c = l_x_ = l_z_ = None
         return (autograd_function_apply,)
 
     class fwd_body_0(torch.nn.Module):
-        def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", z: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, l_weird_b: "f32[]", l_weird_c: "f32[]", l_x_: "f32[]", l_z_: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[]" = l_weird_b * l_weird_c
-            clone: "f32[]" = x.clone();  x = None
+            clone: "f32[]" = l_x_.clone();  l_x_ = None
             mul_1: "f32[]" = mul * clone;  mul = clone = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (mul_1, [l_weird_b, l_weird_c])
+            return (mul_1, (l_weird_b, l_weird_c))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, ctx : torch.autograd.function.Function, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, grad, l_weird_b, l_weird_c):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[]" = grad * l_weird_b;  l_weird_b = None
@@ -627,7 +627,7 @@ class GraphModule(torch.nn.Module):
             mul_2: "f32[]" = grad * 2;  grad = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (mul_1, mul_2)
+            return (None, None, mul_1, mul_2)
 """,
         )
 
@@ -1125,21 +1125,21 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[5, 4]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weight_, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_weight_ = l_x_ = None
+        autograd_function_apply: "f32[5, 4]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_weight_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_weight_ = None
         return (autograd_function_apply,)
 
     class fwd_body_0(torch.nn.Module):
-        def forward(self, l_weight_: "f32[4, 3]", l_x_: "f32[5, 3]"):
+        def forward(self, l_x_: "f32[5, 3]", l_weight_: "f32[4, 3]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             t: "f32[3, 4]" = l_weight_.t()
             y: "f32[5, 4]" = l_x_.matmul(t);  t = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (y, (l_weight_, l_x_))
+            return (y, (l_x_, l_weight_))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, y, l_weight_, l_x_):
+        def forward(self, y, l_x_, l_weight_):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             contiguous: "f32[5, 4]" = y.contiguous();  y = None
@@ -1150,7 +1150,7 @@ class GraphModule(torch.nn.Module):
             grad_weight: "f32[4, 3]" = transpose.matmul(l_x_);  transpose = l_x_ = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (grad_weight, grad_x)
+            return (grad_x, grad_weight)
 """,
         )
 
@@ -1259,7 +1259,7 @@ class GraphModule(torch.nn.Module):
         def foo(x):
             return Foo.apply(x)
 
-        foo(torch.randn(2, requires_grad=True))
+        foo(torch.randn(2, requires_grad=True)).sum().backward()
         self.assertEqual(cnts.frame_count, 1)
 
     def test_mark_non_differentiable(self):

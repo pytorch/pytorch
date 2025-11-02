@@ -897,6 +897,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "proxy",
         "inference",
         "saved_tensors",
+        "smuggled_tensors",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -906,6 +907,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         value_type=None,
         inference=False,
         saved_tensors=None,
+        smuggled_tensors=None,
         needs_input_grad=None,
         non_differentiable=None,
         **kwargs,
@@ -913,6 +915,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
         self.saved_tensors = saved_tensors
+        self.smuggled_tensors = smuggled_tensors
         self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
 
@@ -931,6 +934,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 AutogradFunctionContextVariable,
                 inference=True,
                 saved_tensors=SavedTensorBox(),
+                smuggled_tensors=SavedTensorBox(),
                 needs_input_grad=needs_input_grad,
             ),
             {},
@@ -956,6 +960,12 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__setattr__":
+            if len(args) == 2 and isinstance(args[1], variables.TensorVariable):
+                tx.output.current_tracer.maybe_lift_tracked_freevar_to_input(
+                    args[1].as_proxy()
+                )
+                self.smuggled_tensors.tensors.append(args[1])
+
             return super().call_method(tx, name, args, kwargs)
         elif name == "mark_non_differentiable":
             if kwargs:
@@ -997,6 +1007,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if len(self.saved_tensors.tensors) > 0:
             self.saved_tensors.tensors = []
         for arg in args:
+            tx.output.current_tracer.maybe_lift_tracked_freevar_to_input(arg.as_proxy())
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 
