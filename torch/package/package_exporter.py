@@ -652,7 +652,7 @@ class PackageExporter:
             memo: defaultdict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (

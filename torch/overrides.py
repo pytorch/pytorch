@@ -1657,7 +1657,8 @@ def _get_overloaded_args(
         if (
             arg_type not in overloaded_types
             and hasattr(arg_type, "__torch_function__")
-            and arg_type.__torch_function__ != torch._C._disabled_torch_function_impl
+            and arg_type.__torch_function__
+            is not torch._C._disabled_torch_function_impl
         ):
             # Create lists explicitly for the first type (usually the only one
             # done) to avoid setting up the iterator for overloaded_args.

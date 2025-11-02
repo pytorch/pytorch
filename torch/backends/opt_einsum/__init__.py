@@ -70,7 +70,7 @@ def _set_strategy(_strategy: str) -> None:
 
 
 def _get_strategy() -> str:
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return strategy
 
 
