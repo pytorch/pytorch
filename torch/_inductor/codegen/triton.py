@@ -1929,6 +1929,7 @@ class TritonKernelOverrides(TritonOverrides):
         name: str,
         reduction_type: str,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
@@ -3114,7 +3115,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
-    def partial_accumulate(self, name: str, reduction_type, val):
+    def partial_accumulate(
+        self, name: str, reduction_type, val, extra_meta: dict[str, Any]
+    ):
         self.saved_partial_accumulate.append(
             PartialAccumulate(name, reduction_type, val)
         )
@@ -4568,14 +4571,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 accumname2var[name] = self.cse.namedvar(name, dtype=torch.float)
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
-            self.body.writeline("for suboff in range(0, split_size, XBLOCK):")
+            self.body.writeline("for _ in range(0, split_size, XBLOCK):")
             with self.body.indent(offset=1):
+                self.body.splice(self.indexing_code)
                 self.body.writelines(
                     [
-                        "x0 = xindex + suboff",
+                        "xindex += XBLOCK",
+                        # TODO we force XBLOCK==1 for now so there is
+                        # no need to update the xmask
                     ]
                 )
-                self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
                 self.body.splice(self.stores)
@@ -5367,7 +5372,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
         line = f"{entry.name} = {self.kexpr(self.rename_indexing(entry.expr))}"
-        if entry.root.is_loop:
+
+        # mix order reduction introduces an extra loop across the x
+        # dimension
+        if entry.root.is_loop or (self.mix_order_reduction and entry.prefix == "x"):
             self.indexing_code.writeline(line)
         else:
             # lift non-reduction stores outside loop

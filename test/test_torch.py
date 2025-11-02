@@ -2263,8 +2263,8 @@ class TestTorchDeviceType(TestCase):
             if num_observations > 0:
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
                 aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
-                for correction, _fw, _aw in product([0, 1, 2], [None, fweights], [None, aweights]):
-                    check(x, correction, fweights, aweights)
+                for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
+                    check(x, correction, fw, aw)
 
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
