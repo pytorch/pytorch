@@ -39,7 +39,7 @@ well. This can be done with::
 To create the virtual environment with a specific Python interpreter, you can
 pass in the --python argument::
 
-    $ ./tools/nightly.py --python /path/to/python3.12
+    $ ./tools/nightly.py pull --python /path/to/python3.12
     $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 Pulling will recreate a fresh virtual environment and reinstall the development

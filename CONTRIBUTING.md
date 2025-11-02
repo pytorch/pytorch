@@ -74,15 +74,23 @@ First, you need to [fork the PyTorch project on GitHub](https://github.com/pytor
 Then clone the PyTorch project and setup the development environment:
 
 ```bash
+# Clone and setup the Git repository
 git clone git@github.com:<USERNAME>/pytorch.git
 cd pytorch
 git remote add upstream git@github.com:pytorch/pytorch.git
 
+# Setup a development virtual environment with torch-nightly installed
 make setup-env
-# Or run `make setup-env-cuda` for pre-built CUDA binaries
-# Or run `make setup-env-rocm` for pre-built ROCm binaries
+# Or run `make setup-env-cuda` for torch-nightly built with CUDA binaries
+# Or run `make setup-env-rocm` for torch-nightly built with ROCm binaries
+
+# Activate the virtual environment
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
+
+This allow contributors to develop and test pure Python changes without needing to compile any C++ code.
+
+See section [Nightly Checkout & Pull](#nightly-checkout--pull) for more details about the setup tool of the development virtual environment.
 
 ### Tips and Debugging
 
@@ -210,7 +218,7 @@ To create the virtual environment with a specific Python interpreter, you can
 pass in the `--python` argument:
 
 ```bash
-./tools/nightly.py --python /path/to/python3.12
+./tools/nightly.py pull --python /path/to/python3.12
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
