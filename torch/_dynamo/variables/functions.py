@@ -154,25 +154,30 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
     rem_kw = dict(kwargs)
 
     # 1) Bind all positional (pos-only + pos-or-kw)
+    # 1.1) Apply pos-defaults first (maybe overridden later)
+    for name, idx in spec.pos_default_map.items():
+        default_source = None
+        if fn_source and not (
+            ConstantVariable.is_literal(spec.defaults[idx])
+            and config.skip_guards_on_constant_func_defaults
+        ):
+            default_source = DefaultsSource(fn_source, idx)
+        ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+    # 1.2) Fill in provided positional args
     for i, name in enumerate(spec.all_pos_names):
         if i < len(args):
+            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, args[i])
-        elif name in spec.pos_default_map:
-            idx = spec.pos_default_map[name]
-            default_source = None
-            if fn_source and not (
-                ConstantVariable.is_literal(spec.defaults[idx])
-                and config.skip_guards_on_constant_func_defaults
-            ):
-                default_source = DefaultsSource(fn_source, idx)
-            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
-        else:
+        elif name in rem_kw and name not in spec.posonly_names:
+            # Maybe override pos-defaults applied above
+            ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
+        elif name not in ba:
             raise_observed_exception(
                 TypeError,
                 tx,
                 args=[
                     ConstantVariable.create(
-                        f"Missing required positional argument: {name!r}"
+                        f"Missing required positional argument: {name}"
                     )
                 ],
             )
