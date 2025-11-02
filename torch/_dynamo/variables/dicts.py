@@ -911,6 +911,8 @@ class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
+        if default_factory is None:
+            default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
 
     def is_python_constant(self):
@@ -952,8 +954,11 @@ class DefaultDictVariable(ConstDictVariable):
             if args[0] in self:
                 return self.getitem_const(tx, args[0])
             else:
-                if self.default_factory is None:
-                    raise KeyError(f"{args[0]}")
+                if (
+                    self.default_factory.is_python_constant()
+                    and self.default_factory.as_python_constant() is None
+                ):
+                    raise_observed_exception(KeyError, tx, args=[args[0]])
                 else:
                     default_var = self.default_factory.call_function(tx, [], {})
                     super().call_method(
