@@ -500,14 +500,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.defaultdict:
             if len(args) == 0:
-                args = [None]
+                default_factory = variables.ConstantVariable.create(None)
+            else:
+                default_factory, *args = args
             dict_vt = variables.BuiltinVariable.call_custom_dict(
-                tx, dict, *args[1:], **kwargs
+                tx, dict, *args, **kwargs
             )
             return DefaultDictVariable(
                 dict_vt.items,
                 collections.defaultdict,
-                args[0],
+                default_factory,
                 mutation_type=ValueMutationNew(),
             )
         elif is_typeddict(self.value):
