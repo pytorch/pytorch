@@ -619,7 +619,7 @@ class GraphModule(torch.nn.Module):
             return (mul_1, (l_weird_b, l_weird_c))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad, l_weird_b, l_weird_c):
+        def forward(self, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[]" = grad * l_weird_b;  l_weird_b = None
@@ -1139,7 +1139,7 @@ class GraphModule(torch.nn.Module):
             return (y, (l_x_, l_weight_))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, y, l_x_, l_weight_):
+        def forward(self, y: "f32[5, 4]", l_x_: "f32[5, 3]", l_weight_: "f32[4, 3]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             contiguous: "f32[5, 4]" = y.contiguous();  y = None
@@ -1326,7 +1326,7 @@ class GraphModule(torch.nn.Module):
             return ((out1, out2), ())
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, grad1, grad2):
+        def forward(self, grad1: "f32[]", grad2: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             cos: "f32[]" = grad1.cos();  grad1 = None

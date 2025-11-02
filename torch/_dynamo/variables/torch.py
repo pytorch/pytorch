@@ -262,9 +262,7 @@ class BaseTorchVariable(VariableTracker):
             # Dont need to guard on wrappers
             pass
         else:
-            # Installing an ID_MATCH to preserve the old behavior. But making it
-            # unclassified so that we can eventually remove it.
-            install_guard(source.make_guard(GuardBuilder.UNCLASSIFIED_ID_MATCH))
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:

@@ -3189,7 +3189,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             new_graph.output(env[old_outputs])
 
-        new_graph.eliminate_dead_code()
         new_graph.lint()
         return fwd_graph, new_graph
 
@@ -3415,7 +3414,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         )
                 else:
                     raise e
-
         # if not isinstance(bwd_out, variables.TensorVariable):
         self.rewire_bwd_graph_outputs(fwd_graph, fwd_freevars, bwd_graph, args, bwd_out)
         fwd_graph, bwd_graph = self.handle_saved_tensors_wiring(
