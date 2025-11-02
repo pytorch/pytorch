@@ -276,7 +276,7 @@ def getattr_and_trace(*args, **kwargs):
     return fn(*args[2:], **kwargs)
 
 
-def mapping_get(obj, key, value=None):
+def mapping_get(obj, key, value=None, /):
     try:
         return obj.__getitem__(key)
     except KeyError:
@@ -293,28 +293,30 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
-# Used with something like dict(obj)
-def construct_dict(cls, data=(), /, **kwargs):
-    dct = cls.__new__(cls)
-
-    if not isinstance(data, Iterable):
-        raise TypeError(f"{type(data)} object is not iterable")
-
-    # Ensure that the overridden __iter__ method is invoked
+def mutable_mapping_update(self, data=(), /, **kwargs):
     if isinstance(data, Mapping):
+        # Merge standard mappings with PyMapping_Items
         for key, value in data.items():
-            # This will inline the __getitem__ of the src object
-            dct[key] = value
+            self[key] = value
+    elif hasattr(data, "keys"):
+        # Merge mapping-like objects with PyMapping_Keys + PyObject_GetItem
+        for key in data.keys():
+            self[key] = data[key]
     else:
-        # likely a sequence like tuple of pairs
+        # Likely a sequence of pairs
         for key, value in data:
-            dct[key] = value
+            self[key] = value
 
     if kwargs:
         for key, value in kwargs.items():
-            dct[key] = value
+            self[key] = value
 
-    return dct
+
+# Used with something like dict(obj)
+def construct_dict(cls, data=(), /, **kwargs):
+    self = cls.__new__(cls)
+    mutable_mapping_update(self, data, **kwargs)
+    return self
 
 
 def foreach_map_fn(*args):
