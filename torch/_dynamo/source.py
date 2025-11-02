@@ -20,7 +20,8 @@ the code needed to recreate values.
 import dataclasses
 import enum
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch._guards import ChainedSource, Guard, GuardSource, Source
 
@@ -110,11 +111,14 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
-def _get_source_debug_name(source: Source) -> str:
-    try:
-        return source.name()
-    except NotImplementedError:
+def _get_source_debug_name(source: Optional[Source]) -> str:
+    if source is None:
         return "<unknown source>"
+    else:
+        try:
+            return source.name()
+        except NotImplementedError:
+            return "<unknown source>"
 
 
 @dataclasses.dataclass(frozen=True)

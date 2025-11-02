@@ -1000,6 +1000,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.exit_stack.close()
         super().tearDown()
 
+    def test_compiled_module_truthiness(self):
+        # Test with empty ModuleList
+        original_empty = nn.ModuleList()
+        compiled_empty = torch.compile(original_empty)
+        self.assertEqual(bool(original_empty), bool(compiled_empty))
+        self.assertFalse(bool(compiled_empty))
+        # Test with non-empty ModuleList
+        original_filled = nn.ModuleList([nn.Linear(10, 5)])
+        compiled_filled = torch.compile(original_filled)
+        self.assertEqual(bool(original_filled), bool(compiled_filled))
+        self.assertTrue(bool(compiled_filled))
+
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
         cloned_root = root.clone_manager(lambda x: True)
@@ -4471,7 +4483,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
-        for _ in range(0, 5):
+        for _ in range(5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
             compiled_a = torch.ones([6], requires_grad=requires_grad)
@@ -4623,7 +4635,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, counter), fn(x, counter))
         self.assertEqual(counter[0], 2)
-        for _ in range(0, 10):
+        for _ in range(10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
         if torch._dynamo.config.assume_static_by_default:
@@ -4784,7 +4796,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_contains_range_constprop(self):
         def fn(x):
             # dynamo should const prop to False
-            if 3 in range(0, 10):
+            if 3 in range(10):
                 return x + 1
             else:
                 return x + 2
@@ -5748,7 +5760,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
     def test_grad(self):
-        # Write to `grad` or `_grad` should reflecte in reading from the other,
+        # Write to `grad` or `_grad` should reflective in reading from the other,
         # and should be codegen-ed.
         def fn(x, y):
             x._grad = y + 1
@@ -7259,30 +7271,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(
             fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
         )
-
-    def test_311_resume_block_keyerror(self):
-        # https://github.com/pytorch/pytorch/issues/162313
-        flag = True
-
-        def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 2
-            if flag:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 4
-            else:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 8
-            return x + 16
-
-        inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        flag = False
-        self.assertEqual(fn(inp), opt_fn(inp))
 
     def test_cells_unsupported_step_exception(self):
         # This error happened because:

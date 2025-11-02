@@ -439,7 +439,7 @@ class JitTestCase(JitCommonTestCase):
         state = model.get_debug_state()
         plan = get_execution_plan(state)
         num_bailouts = plan.code.num_bailouts()
-        for i in range(0, num_bailouts):
+        for i in range(num_bailouts):
             plan.code.request_bailout(i)
             bailout_outputs = model(*inputs)
             self.assertEqual(bailout_outputs, expected)
