@@ -438,7 +438,9 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
         if self.rank == 0:
             self.assertEqual(len(full_sd), len(ref_full_sd))
             self.assertEqual(list(full_sd.keys()), list(ref_full_sd.keys()))
-            for param, ref_param in zip(full_sd.values(), ref_full_sd.values()):
+            for param, ref_param in zip(
+                full_sd.values(), ref_full_sd.values(), strict=True
+            ):
                 self.assertEqual(param.device, torch.device("cpu"))
                 self.assertEqual(param.device, ref_param.device)
                 self.assertEqual(param, ref_param)
