@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._debug_mode import DebugMode
+from torch.utils._debug_mode import _OpCall, _RedistributeCall, DebugMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -58,6 +58,42 @@ class TestDTensorDebugMode(TestCase):
   <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 32]| S(0))
     aten::sum(dt: f32[8, 32]| S(0))
       aten::sum(t: f32[1, 32])""",
+        )
+
+        self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
+        self.assertTrue(isinstance(debug_mode.operators[2], _RedistributeCall))
+        self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
+
+        # check stringification
+        self.assertTrue(hasattr(debug_mode.operators[0], "args_str"))
+        self.assertFalse(hasattr(debug_mode.operators[0], "args"))
+
+        # check recording hook
+        def mm(x, y):
+            return (x @ y).sum()
+
+        eager_out = mm(x_dtensor, y_dtensor)
+
+        # check recording hook for compiled variant
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.record_outputs(),
+            DebugMode.log_tensor_hashes(),
+        ):
+            compiled_out = torch.compile(mm, backend="aot_eager")(x_dtensor, y_dtensor)
+
+        # check numerical equivalence
+        self.assertTrue(torch.equal(eager_out, compiled_out))
+        sum_op = next(
+            iter(
+                op
+                for op in debug_mode.operators
+                if isinstance(op, _OpCall) and str(op.op) == "aten.sum.default"
+            )
+        )
+        self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
+        self.assertTrue(
+            "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
         )
 
     def test_debug_string_inside_context(self):
@@ -263,6 +299,7 @@ class TestDTensorDebugMode(TestCase):
             record_torchfunction=True,
             record_faketensor=True,
             record_tensor_attributes=["a1", "a2"],
+            store_original_args=True,
         ) as debug_mode:
             torch.matmul(y, x)
 
@@ -274,6 +311,9 @@ class TestDTensorDebugMode(TestCase):
       aten::mm(t: f32[64, 8], t: f32[8, 8]{a1=x1, a2=x2})
       aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])""",
         )
+
+        self.assertTrue(hasattr(debug_mode.operators[0], "args"))
+        self.assertEqual(id(debug_mode.operators[0].args[0]), id(y))
 
     @parametrize("has_inner_mode", [True, False])
     @parametrize("has_outer_mode", [True, False])
@@ -329,6 +369,46 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode() as debug_mode:
             f(x)
         self.assertEqual(len(debug_mode.debug_string()), 0)
+
+    def test_nn_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.abc = Foo()
+                self.xyz = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.xyz(self.abc(x))
+
+        mod = Bar()
+        inp = torch.randn(4, 4)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            _ = mod(inp)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [nn.Mod] Bar
+      [nn.Mod] Bar.abc
+        [nn.Mod] Bar.abc.l1
+          aten::t(t: f32[4, 4])
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
+        [nn.Mod] Bar.abc.l2
+          aten::t(t: f32[4, 4])
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
+      [nn.Mod] Bar.xyz
+        aten::t(t: f32[4, 4])
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
+        )
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

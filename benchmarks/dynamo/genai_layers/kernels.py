@@ -8,9 +8,18 @@ import torch
 import torch.nn.functional as F
 
 
+# more important shapes used by internal models
+extra_shapes_for_norm = (
+    (1152 * 500, 384),
+    (1152 * 500, 512),
+    (1152 * 1000, 384),
+    (1152 * 1000, 512),
+)
+
+
 class CrossEntropyForward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -106,8 +115,8 @@ class CrossEntropyForward(BenchmarkKernel):
 
 
 class CrossEntropyBackward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -194,8 +203,8 @@ class CrossEntropyBackward(BenchmarkKernel):
 
 
 class SoftmaxForward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -259,8 +268,8 @@ class SoftmaxForward(BenchmarkKernel):
 
 
 class SoftmaxBackward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -329,8 +338,8 @@ class SoftmaxBackward(BenchmarkKernel):
 
 
 class RMSNormForward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -346,7 +355,7 @@ class RMSNormForward(BenchmarkKernel):
             (32768, 65536),
             (16384, 131072),
             (8192, 262144),
-        )
+        ) + extra_shapes_for_norm
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w = args
@@ -383,7 +392,22 @@ class RMSNormForward(BenchmarkKernel):
         from quack.rmsnorm import _rmsnorm_fwd
 
         x, w = args
-        return lambda: _rmsnorm_fwd(x, w, eps=1e-6)
+        y = torch.empty_like(x)
+
+        def quack_fwd():
+            _rmsnorm_fwd(
+                x,
+                w,
+                out=y,
+                bias=None,
+                rstd=None,
+                residual=None,
+                residual_out=None,
+                eps=1e-6,
+            )
+            return y
+
+        return quack_fwd
 
     def liger(self, args, kwargs) -> Any:
         from liger_kernel.transformers.rms_norm import LigerRMSNorm
@@ -404,9 +428,14 @@ class RMSNormForward(BenchmarkKernel):
 
 
 class RMSNormBackward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
-        self.available_backends = ["eager", "compiled", "quack", "liger"]
+    def __init__(self, script_args):
+        super().__init__(script_args)
+        self.available_backends = [
+            "eager",
+            "compiled",
+            "quack",
+            "liger",
+        ]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
         # TODO: OOM for (32768, 65536) on h100
@@ -418,8 +447,7 @@ class RMSNormBackward(BenchmarkKernel):
             (32768, 4096),
             (32768, 8192),
             (32768, 16384),
-            (32768, 32768),
-        )
+        ) + extra_shapes_for_norm
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w, dy = args
@@ -454,8 +482,11 @@ class RMSNormBackward(BenchmarkKernel):
             y, [x, w], grad_outputs=dy, retain_graph=True
         )
 
+    def compute_rstd(self, x, eps):
+        return torch.rsqrt(torch.mean(x.float().square(), dim=-1, keepdim=True) + eps)
+
     def quack(self, args, kwargs=None) -> Any:
-        from quack.rmsnorm import _rmsnorm_backward
+        from quack.rmsnorm import _get_sm_count, _rmsnorm_bwd
 
         (
             x,
@@ -463,15 +494,40 @@ class RMSNormBackward(BenchmarkKernel):
             dy,
         ) = args
         M, N = x.shape
-        rstd = torch.randn(M, device="cuda", dtype=torch.float32)
-        return lambda: _rmsnorm_backward(x, w, dy, rstd)
+
+        rstd = self.compute_rstd(x, eps=1e-6)
+        dx = torch.empty_like(x)
+        sm_count = _get_sm_count(x.size(1), x.device)
+        dw_partial = torch.empty(
+            sm_count, x.size(1), device=x.device, dtype=torch.float32
+        )
+
+        def quack_bwd():
+            _rmsnorm_bwd(
+                x,
+                w,
+                dy,
+                rstd,
+                dx,
+                dw_partial,
+                db_partial=None,
+                dresidual_out=None,
+                dresidual=None,
+                sm_count=sm_count,
+            )
+            dw = dw_partial.sum(dim=0).to(w.dtype)
+            return dx, dw
+
+        return quack_bwd
 
     def liger(self, args, kwargs=None) -> Any:
         from liger_kernel.transformers.rms_norm import LigerRMSNorm
 
         x, w, dy = args
         M, N = x.shape
-        liger_rmsnorm = LigerRMSNorm(hidden_size=N, eps=1e-6).cuda()
+        liger_rmsnorm = LigerRMSNorm(
+            hidden_size=N, eps=1e-6, casting_mode="gemma"
+        ).cuda()
         liger_rmsnorm.weight.data.copy_(w)
         y = liger_rmsnorm(x)
         return lambda: torch.autograd.grad(
@@ -489,8 +545,8 @@ class RMSNormBackward(BenchmarkKernel):
 
 
 class LayerNormForward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -505,7 +561,7 @@ class LayerNormForward(BenchmarkKernel):
             (32768, 16384),
             (32768, 32768),
             (32768, 65536),
-        )
+        ) + extra_shapes_for_norm
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w = args
@@ -563,8 +619,8 @@ class LayerNormForward(BenchmarkKernel):
 
 
 class LayerNormBackward(BenchmarkKernel):
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
-        super().__init__(compile_mode)
+    def __init__(self, script_args):
+        super().__init__(script_args)
         self.available_backends = ["eager", "compiled", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -579,7 +635,7 @@ class LayerNormBackward(BenchmarkKernel):
             (32768, 16384),
             (32768, 32768),
             (32768, 65536),
-        )
+        ) + extra_shapes_for_norm
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w, dy = args
@@ -614,20 +670,31 @@ class LayerNormBackward(BenchmarkKernel):
             y, [x, w], grad_outputs=dy, retain_graph=True
         )
 
+    def compute_mean_rstd(self, x, eps):
+        x = x.float()
+
+        var, mean = torch.var_mean(x, dim=-1, keepdim=True, correction=0)
+        rstd = torch.rsqrt(var + eps)
+        return mean, rstd
+
     def liger(self, args, kwargs) -> Any:
-        from liger_kernel.transformers.layer_norm import LigerLayerNorm
+        """
+        Call layer_norm_backward directly rather than calling
+        liger_kernel.transformers.layer_norm.LigerLayerNorm and
+        torch.autograd.grad.
+
+        The latter fashion saves mean/rstd in x.dtype which can fail
+        accuracy test. We call layer_norm_backward with fp32 mean and
+        rstd.
+        """
+        from liger_kernel.ops.layer_norm import layer_norm_backward
 
         x, w, dy = args
+        eps = 1e-6
+        mean, rstd = self.compute_mean_rstd(x, eps)
         M, N = x.shape
-        liger_layernorm = LigerLayerNorm(hidden_size=N, eps=1e-6).cuda()
-        liger_layernorm.weight.data.copy_(w)
-        liger_layernorm.bias.data.copy_(
-            torch.zeros(N, device="cuda", dtype=torch.float32)
-        )
-        y = liger_layernorm(x)
-        return lambda: torch.autograd.grad(
-            y, [x, liger_layernorm.weight], grad_outputs=dy, retain_graph=True
-        )
+
+        return lambda: layer_norm_backward(dy, x, w, None, mean, rstd)[0:2]
 
     def benchmark(self):
         for M, N in self.get_shapes():

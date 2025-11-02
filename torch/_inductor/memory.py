@@ -913,8 +913,8 @@ def reorder_for_peak_memory(
     try:
         validate_graph_acyclic(nodes)
         validate_unique_buffer_names(nodes, name_to_buf, name_to_freeable_input_buf)
-    except RuntimeError as e:
-        torch_log.error("Memory planning validation failed: %s", e)
+    except RuntimeError:
+        torch_log.exception("Memory planning validation failed")
         if not is_fbcode():  # TODO: remove after ensuring OSS side is safe
             raise
 
@@ -928,7 +928,7 @@ def reorder_for_peak_memory(
     # other methods
     for method in methods:
         try:
-            if method == topological_sort_lpmf:
+            if method is topological_sort_lpmf:
                 order = method(
                     nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
                 )
@@ -942,8 +942,8 @@ def reorder_for_peak_memory(
                 PeakMemoryResult(order, peak_memory, method.__name__)
             )
             torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
-        except Exception as e:
-            torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
+        except Exception:
+            torch_log.exception("Failed to reorder for %s", method.__name__)
             if not is_fbcode():  # TODO: remove after ensuring OSS side is safe
                 raise
 
