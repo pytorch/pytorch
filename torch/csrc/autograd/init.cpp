@@ -1265,6 +1265,32 @@ static PyObject* is_anomaly_check_nan_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_autograd_traceback_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
+  AnomalyMode::set_save_traceback(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_autograd_traceback_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (AnomalyMode::should_save_traceback()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* python_enter_dual_level(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   // It is unlikely that the depth of forward nesting will overflow int64_t so
@@ -1583,6 +1609,14 @@ static PyMethodDef methods[] = {
     {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
     {"is_anomaly_check_nan_enabled",
      is_anomaly_check_nan_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"set_autograd_traceback_enabled",
+     set_autograd_traceback_enabled,
+     METH_O,
+     nullptr},
+    {"is_autograd_traceback_enabled",
+     is_autograd_traceback_enabled,
      METH_NOARGS,
      nullptr},
     {"_is_multithreading_enabled",

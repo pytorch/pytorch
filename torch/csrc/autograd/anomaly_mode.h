@@ -16,14 +16,21 @@ struct TORCH_API AnomalyMode {
   static bool should_check_nan() {
     return _check_nan;
   }
-  static void set_enabled(bool enabled, bool check_nan = true) {
-    _enabled = enabled;
-    _check_nan = check_nan;
+
+  // Autograd traceback saving - can be enabled independent from anomaly mode.
+  static bool should_save_traceback() {
+    return _save_traceback;
   }
+  static void set_save_traceback(bool save_traceback) {
+    _save_traceback = save_traceback;
+  }
+
+  static void set_enabled(bool enabled, bool check_nan = true);
 
  private:
   static bool _enabled;
   static bool _check_nan;
+  static bool _save_traceback;
 };
 
 /// A RAII guard that enables Anomaly Detection Mode.
