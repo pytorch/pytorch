@@ -1,3 +1,4 @@
+import collections
 from typing import Any, Callable, Optional
 
 import torch
@@ -12,6 +13,7 @@ from ..exc import TYPE_CHECKING, unimplemented_v2
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
+from .lazy import LazyVariableTracker
 from .misc import GetAttrVariable
 
 
@@ -66,6 +68,42 @@ def _(
     pass
 
 
+class SymbolicStreamState:
+    """Track the currently entered stream if any"""
+
+    def __init__(self) -> None:
+        from ..source import CurrentStreamSource
+
+        cur_stack: list[StreamVariable] = []
+        if torch.accelerator.is_available():
+            stream_var = LazyVariableTracker.create(
+                torch.accelerator.current_stream(),
+                source=CurrentStreamSource(torch.accelerator.current_stream().device),
+            )
+            cur_stack = [stream_var]  # type: ignore[list-item]
+
+        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
+            cur_stack
+        )
+
+    def enter_stream(self, stream: "StreamVariable") -> None:
+        self.cur_stream_stack.append(stream)
+
+    def exit_stream(self) -> None:
+        self.cur_stream_stack.pop()
+
+    def cur_stream(self, device: Optional[torch.device] = None) -> "StreamVariable":
+        if device is not None:
+            for stream in reversed(self.cur_stream_stack):
+                if stream.device == device:
+                    return stream
+
+        return self.cur_stream_stack[-1]
+
+    def in_stream_context(self) -> bool:
+        return len(self.cur_stream_stack) > 0
+
+
 class StreamContextVariable(ContextWrappingVariable):
     """This represents torch.cuda.StreamContext"""
 
@@ -100,6 +138,7 @@ class StreamContextVariable(ContextWrappingVariable):
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
+        tx.symbolic_stream_state.enter_stream(self._get_target_values()[0])
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.fork.default,
@@ -111,6 +150,7 @@ class StreamContextVariable(ContextWrappingVariable):
     def exit(self, tx: "InstructionTranslator", *args: tuple[Any]) -> "VariableTracker":
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
+        tx.symbolic_stream_state.exit_stream()
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.join.default,
