@@ -130,7 +130,7 @@ class CollectTracepointsPass(PassBase):
                         if isinstance(arg, torch.fx.Node):
                             for user in node.users:
                                 assert user.op == "call_function"
-                                assert user.target == operator.getitem
+                                assert user.target is operator.getitem
                                 assert isinstance(user.args[1], int)
                                 if user.args[1] == i:
                                     user.replace_all_uses_with(arg)
