@@ -301,7 +301,7 @@ def mutable_mapping_update(self, data=(), /, **kwargs):
     # FIXME: Need too many `VariableClass.call_obj_hasattr` changes to support this case.
     #   >>> class Foo:
     #   ...     def __init__(self):
-    #   ...         self.keys = lambda: ['a', 'b', 'c']
+    #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
     #   ...
     #   ...     def __getitem__(self, key):
     #   ...         return 0
