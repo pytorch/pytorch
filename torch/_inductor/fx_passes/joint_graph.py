@@ -893,6 +893,9 @@ def _other_is_broadcasted_in_dim(match):
     if isinstance(dim, int):
         dim = (dim,)
 
+    if any(d >= len(other_shape) for d in dim):
+        return False
+
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 
 
