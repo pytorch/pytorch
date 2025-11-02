@@ -1265,6 +1265,7 @@ class DeviceCachingAllocator {
         small_blocks(/*small=*/true) {
     C10_CUDA_CHECK(cudaGetDeviceProperties(&device_prop, id));
 
+    setMemoryFraction(CUDAAllocatorConfig::per_process_memory_fraction());
     stats.max_split_size =
         static_cast<int64_t>(AcceleratorAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
@@ -2027,6 +2028,11 @@ class DeviceCachingAllocator {
 
   /** set memory fraction to limit maximum allocated memory **/
   void setMemoryFraction(double fraction) {
+    TORCH_CHECK(
+        0 <= fraction && fraction <= 1,
+        "invalid fraction:",
+        fraction,
+        ". Please set within [0, 1].");
     allowed_memory_maximum = std::nullopt;
     if (fraction < 1.0) {
       allowed_memory_maximum = static_cast<size_t>(
@@ -3808,7 +3814,6 @@ class NativeCachingAllocator : public CUDAAllocator {
             static_cast<c10::DeviceIndex>(i));
       }
     }
-    CUDAAllocator::init(device_count);
   }
 
   bool initialized() override {
@@ -3867,11 +3872,6 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    TORCH_CHECK(
-        0 <= fraction && fraction <= 1,
-        "invalid fraction:",
-        fraction,
-        ". Please set within [0, 1].");
     device_allocator[device]->setMemoryFraction(fraction);
   }
 
