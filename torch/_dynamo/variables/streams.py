@@ -1,9 +1,12 @@
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
+from torch._dynamo.variables.dicts import ConstDictVariable
+from torch._dynamo.variables.lists import TupleVariable
 from torch.fx import Proxy
 
 from .. import graph_break_hints
+from ..bytecode_transformation import create_call_function
 from ..device_interface import get_interface_for_device
 from ..exc import TYPE_CHECKING, unimplemented_v2
 from .base import VariableTracker
@@ -172,6 +175,9 @@ class StreamVariable(StreamContextVariable):
         device: torch.device,
         **kwargs: Any,
     ) -> None:
+        # Index into the user object table
+        # used to pass arbitrary objects to the graph
+        user_object_index = kwargs.pop("user_obj_index", None)
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert value.device.type == device.type, (
@@ -182,6 +188,8 @@ class StreamVariable(StreamContextVariable):
         self.value = value
         # pyrefly: ignore [read-only]
         self.device = device
+
+        self.user_object_index = user_object_index
 
     def python_type(self) -> type:
         return torch.Stream
@@ -262,15 +270,36 @@ class StreamVariable(StreamContextVariable):
         # If we got here, this stream is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source
-        # Since we just proved that - for other such structures, like lists and dicts, reconstruction
-        # is fine and sound according to dynamo principles of treating collectives. However,
-        # streams are special in that we want to preserve the identity of the stream as the same as in the graph
-        # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
-        # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
-        # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
-        prefix = f"_stream_{self.device}"
-        name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(codegen.create_load_global(name, add=True))
+        if self.user_object_index is not None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    "get_external_object_by_index",
+                )
+            )
+            codegen.append_output(codegen.create_load_const(self.user_object_index))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            # TODO mlazos: evaluate if we still need this
+            prefix = f"_stream_{self.device}"
+            name = codegen.tx.output.install_global_by_id(prefix, self.value)
+            codegen.append_output(codegen.create_load_global(name, add=True))
+
+    @staticmethod
+    def make_construct_in_graph_stream_fn(
+        args: TupleVariable, kwargs: ConstDictVariable
+    ) -> Callable[[int, "PyCodegen"], None]:
+        def fn(index: int, codegen: "PyCodegen") -> None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.utils.__name__, "build_stream"
+                )
+            )
+            codegen(args)
+            codegen(kwargs)
+            codegen.extend_output(create_call_function(2, False))
+
+        return fn
 
     def _get_target_values(self) -> list["StreamVariable"]:
         return [self]

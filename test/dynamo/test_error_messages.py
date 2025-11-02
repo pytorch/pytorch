@@ -1540,7 +1540,7 @@ cannot resume from torch._dynamo.step_unsupported()
 
   Developer debug context:
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0283.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0284.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
