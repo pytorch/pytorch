@@ -11,7 +11,6 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
-  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
