@@ -169,9 +169,9 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
             # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw and (
-            # `kwargs` can have the same key as a pos-only arg
-            # If this case happens, we should not consume the `name` here and keep
-            # it in `kwargs`:
+            # `kwargs` can have the same key as a pos-only arg `name`.
+            # If this case happens, we should not consume the `name` here and
+            # keep it in `kwargs`:
             #   >>> def fn(a, /, **kwargs): return (a, kwargs)
             #   >>> fn(1, a=2)
             #   (1, {'a': 2})
