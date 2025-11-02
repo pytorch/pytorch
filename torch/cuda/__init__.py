@@ -253,7 +253,7 @@ def _extract_arch_version(arch_string: str) -> int:
     return int(base)
 
 
-class CompatInterval:
+class _CompatInterval:
     """
     Defines a range of compute capabilities starting at a given
     version and going up to the end of that major version. This
@@ -278,7 +278,7 @@ class CompatInterval:
         return result
 
 
-class CompatSet:
+class _CompatSet:
     """
     A set of compute capabilities. It exists primarily to support custom
     printing logic and is otherwise equivalent to a plain python set().
@@ -303,26 +303,26 @@ class CompatSet:
 # - The keys in dict correspond to known sm versions but the values
 #   are merely rules based on sm compatibility guarantees for NVIDIA
 #   devices while accounting for incompatibility of iGPU and dGPU.
-DEVICE_REQUIREMENT: dict[int, Union[CompatSet, CompatInterval]] = {
-    50: CompatInterval(start=50, exclude={53}),
-    52: CompatInterval(start=52, exclude={53}),
-    53: CompatSet({53}),
-    60: CompatInterval(start=60, exclude={62}),
-    61: CompatInterval(start=61, exclude={62}),
-    62: CompatSet({62}),
-    70: CompatInterval(start=70, exclude={72}),
-    72: CompatSet({72}),
-    75: CompatInterval(start=75),
-    80: CompatInterval(start=80, exclude={87}),
-    86: CompatInterval(start=86, exclude={87}),
-    87: CompatSet({87}),
-    89: CompatInterval(start=89),
-    90: CompatInterval(start=90),
-    100: CompatInterval(start=100, exclude={101}),
-    101: CompatSet({101, 110}),
-    103: CompatInterval(start=103),
-    110: CompatInterval(start=110),
-    120: CompatInterval(start=120),
+DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
+    50: _CompatInterval(start=50, exclude={53}),
+    52: _CompatInterval(start=52, exclude={53}),
+    53: _CompatSet({53}),
+    60: _CompatInterval(start=60, exclude={62}),
+    61: _CompatInterval(start=61, exclude={62}),
+    62: _CompatSet({62}),
+    70: _CompatInterval(start=70, exclude={72}),
+    72: _CompatSet({72}),
+    75: _CompatInterval(start=75),
+    80: _CompatInterval(start=80, exclude={87}),
+    86: _CompatInterval(start=86, exclude={87}),
+    87: _CompatSet({87}),
+    89: _CompatInterval(start=89),
+    90: _CompatInterval(start=90),
+    100: _CompatInterval(start=100, exclude={101}),
+    101: _CompatSet({101, 110}),
+    103: _CompatInterval(start=103),
+    110: _CompatInterval(start=110),
+    120: _CompatInterval(start=120),
 }
 
 
@@ -341,7 +341,7 @@ def _code_compatible_with_device(device_cc: int, code_cc: int):
             + " Please create an issue on Github if this is a valid compute capability.",
             stacklevel=2,
         )
-        return device_cc in CompatInterval(start=code_cc)
+        return device_cc in _CompatInterval(start=code_cc)
     return device_cc in DEVICE_REQUIREMENT[code_cc]
 
 
