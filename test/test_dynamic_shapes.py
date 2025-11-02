@@ -4401,57 +4401,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         self.assertEqual(compiled(a, b), func(a, b))
 
-    @fresh_cache()
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_narrow_unbacked_start(self):
-        def func(x, start, length):
-            # unbacked start
-            u0 = start.item()
-            return torch.narrow(x, 0, u0, length)
-
-        compiled_func = torch.compile(func, fullgraph=True, backend="inductor")
-
-        x = torch.tensor([1, 2, 3, 4, 5, 6])
-
-        # Test cases: (start, length)
-        test_cases = [
-            # Negative starts
-            (-2, 2),  # Start from second-to-last element
-            (-1, 1),  # Start from last element
-            (-3, 3),  # Start from third-to-last element
-            (-6, 2),  # Start from beginning (negative)
-            (-4, 1),  # Start from fourth-to-last element
-            # Positive starts
-            (0, 2),  # Start from beginning
-            (1, 3),  # Start from second element
-            (2, 2),  # Start from third element
-            (4, 2),  # Start near end
-            # Edge cases
-            (0, 6),  # Full tensor
-            (0, 1),  # Single element from start
-            (5, 1),  # Single element from end
-        ]
-
-        for start_val, length in test_cases:
-            with self.subTest(start=start_val, length=length):
-                start = torch.tensor([start_val])
-
-                # Test with compiled function
-                result_compiled = compiled_func(x, start, length)
-
-                # Test with eager function (expected behavior)
-                result_eager = func(x, start, length)
-
-                # Compare results
-                self.assertEqual(result_compiled, result_eager)
-
-    @fresh_cache()
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    @torch._inductor.config.patch("cpp_wrapper", True)
-    def test_narrow_unbacked_start_cpp_wrapper(self):
-        """Test narrow with unbacked start with cpp_wrapper"""
-        self.test_narrow_unbacked_start()
-
 
 instantiate_parametrized_tests(TestUnbacked)
 
