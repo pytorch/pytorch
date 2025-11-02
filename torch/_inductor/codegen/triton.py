@@ -28,7 +28,6 @@ from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
@@ -109,6 +108,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     from ..ir import IRNode
     from .common import BlockShapeType
@@ -2086,7 +2086,8 @@ class BlockParameters:
 
         @classmethod
         def create(
-            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv) -> BlockParameters.StrideSorter:
+            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv
+        ) -> BlockParameters.StrideSorter:
             """
             If the strides are not all known constants or if the strides are already
             sorted in descending order, return identity sort.
@@ -2103,7 +2104,7 @@ class BlockParameters:
                 # We should benchmark the effect of applying a transpose to these
                 # cases vs leaving them unsorted.
                 sort_idx = utils.argsort_sym(shape_env, original_strides, reverse=True)
-            except AssertionError as e:
+            except AssertionError:
                 # Symbolic shapes, failed to evaluate comparison expression
                 sort_idx = identity_sort
 
@@ -2141,19 +2142,18 @@ class BlockParameters:
         """
         Remove dimensions where removable_dims is True.
         """
+
         def filter_dims(it):
             return [
-                    item
-                    for item, is_removable in zip(it, removable_dims)
-                    if not is_removable
-                ]
+                item
+                for item, is_removable in zip(it, removable_dims)
+                if not is_removable
+            ]
 
         return BlockParameters(
-            **{
-                key: filter_dims(val)
-                for key, val in dataclasses.asdict(self).items()
-            },
+            **{key: filter_dims(val) for key, val in dataclasses.asdict(self).items()},
         )
+
 
 class CooperativeReductionWorkspaceCache:
     """
