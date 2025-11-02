@@ -357,7 +357,7 @@ try:
         def call_function(
             self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
-            if target != torch._assert:
+            if target is not torch._assert:
                 # Lift and runs the node target function
                 return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
