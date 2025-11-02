@@ -88,7 +88,7 @@ make setup-env
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
-This allow contributors to develop and test pure Python changes without needing to compile any C++ code.
+This allows contributors to develop and test pure Python changes without needing to compile any C++ code.
 
 See section [Nightly Checkout & Pull](#nightly-checkout--pull) for more details about the setup tool of the development virtual environment.
 
