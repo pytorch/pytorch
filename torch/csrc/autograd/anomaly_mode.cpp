@@ -8,6 +8,15 @@ namespace torch::autograd {
 
 bool AnomalyMode::_enabled = false;
 bool AnomalyMode::_check_nan = true;
+bool AnomalyMode::_save_traceback = false;
+
+void AnomalyMode::set_enabled(bool enabled, bool check_nan) {
+  _enabled = enabled;
+  _check_nan = check_nan;
+  // For backward compatibility: when anomaly mode is enabled, also enable
+  // traceback saving. When disabled, also disable traceback saving.
+  _save_traceback = enabled;
+}
 
 namespace {
 std::mutex& get_anomaly_guard_lock() {

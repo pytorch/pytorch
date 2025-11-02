@@ -1145,7 +1145,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
+  if (AnomalyMode::should_check_nan()) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];

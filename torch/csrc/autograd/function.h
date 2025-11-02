@@ -119,10 +119,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       update_topological_nr(edge);
     }
 
-    if (AnomalyMode::is_enabled()) {
+    if (AnomalyMode::should_save_traceback()) {
       metadata()->store_stack();
 
-      // If anomaly mode is enabled and graph is constructed, then assign the
+      // If traceback saving is enabled and graph is constructed, then assign the
       // currently evaluating node as the parent of this node.
       // A parent is a Node where this Node is created.
       // We are tracking the parents to track multiple backward operations.
