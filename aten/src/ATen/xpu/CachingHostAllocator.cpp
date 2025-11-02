@@ -36,6 +36,15 @@ struct XPUCachingHostAllocatorImpl
     // exit. Will be enabled once the issue is resolved.
     return false;
   }
+
+  XPUStream get_current_stream() const override {
+    return c10::xpu::getCurrentXPUStream();
+  }
+
+  bool stream_is_capturing(XPUStream s) const override {
+    return c10::xpu::CaptureStatus(s.queue().ext_oneapi_get_state()) ==
+        c10::xpu::CaptureStatus::Recording;
+  }
 };
 
 DECLARE_HOST_ALLOCATOR(

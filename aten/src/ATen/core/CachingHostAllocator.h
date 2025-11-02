@@ -825,9 +825,6 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual S get_current_stream() const = 0;
-  /* { */
-  /*   TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event"); */
-  /* } */
 
   virtual bool stream_is_capturing(S s) const = 0;
 

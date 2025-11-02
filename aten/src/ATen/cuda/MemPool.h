@@ -15,7 +15,7 @@ using c10::MempoolId_t;
 // An allocator pointer can be passed to the MemPool to define how the
 // allocations should be done in the pool. For example: using a different
 // system allocator such as ncclMemAlloc.
-struct C10_CUDA_API MemPool {
+struct TORCH_CUDA_CPP_API MemPool {
   MemPool(
       c10::cuda::CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
