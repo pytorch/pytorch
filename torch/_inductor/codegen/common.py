@@ -780,7 +780,7 @@ class DataTypePropagation:
             # we can infer output node if it only have 1 arg
             return None
 
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             node_arg = node.args[0]
             assert isinstance(node_arg, torch.fx.Node), type(node_arg)
             return self.deduce_node_dtype(node_arg)
@@ -2080,6 +2080,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
 
+        self.atomic_add_found = False
         self.num_load = 0
         self.num_store = 0
         self.num_reduction = 0
@@ -2184,6 +2185,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         name: str,
         reduction_type: ReductionType,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 

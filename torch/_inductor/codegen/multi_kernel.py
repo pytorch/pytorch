@@ -218,7 +218,7 @@ class MultiKernel:
             # the multi call kernel.
             multi_call_args = call_args
             multi_call_arg_types = arg_types
-            for i, kernel in enumerate(self.kernels):
+            for kernel in self.kernels:
                 additional_call_args, additional_arg_types = (
                     kernel.additional_call_args_and_types()
                 )

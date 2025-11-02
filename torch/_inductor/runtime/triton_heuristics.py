@@ -530,7 +530,7 @@ class CachingAutotuner(KernelInterface):
                 #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
                 #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                 #   = max_threads_per_multi_processor / (32 * num_warps)
-                # Using a tigher upper bound can reveal more optimization opportunities.
+                # Using a tighter upper bound can reveal more optimization opportunities.
                 max_blocks_per_sm = max(
                     device_prop.regs_per_multiprocessor // nreg_per_block, 1
                 )
@@ -2627,6 +2627,17 @@ def pointwise(
                         ),
                     ]
                 )
+                if inductor_meta.get("atomic_add_found"):
+                    configs.extend(
+                        [
+                            triton_config_with_settings(
+                                size_hints,
+                                64,
+                                num_warps=1,
+                                num_stages=1,  # 250% improvement
+                            )
+                        ]
+                    )
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
@@ -3695,8 +3706,7 @@ class MixOrderReductionGrid(GridExpr):
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
         assert split_size
-        assert xblock
-        assert split_size % xblock == 0
+        assert xblock == 1, "Mix order reduction force XBLOCK=1 right now"
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 
