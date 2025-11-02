@@ -530,6 +530,17 @@ class InductorChoices:
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
             return False
 
+        if (
+            config.max_fusion_unique_io_buffers is not None
+            and scheduler.fusion_prevent_too_many_reads_and_writes(
+                node1,
+                node2,
+                config.max_fusion_unique_io_buffers,
+            )
+        ):
+            WhyNoFuse(node1, node2)("fusion_prevent_too_many_reads_and_writes")
+            return False
+
         return True
 
     @staticmethod

@@ -1583,6 +1583,7 @@ def init_process_group(
     group_name: str = "",
     pg_options: Optional[Any] = None,
     device_id: Optional[Union[torch.device, int]] = None,
+    _ranks: Optional[list[int]] = None,
 ) -> None:
     """
     Initialize the default distributed process group.
@@ -1657,6 +1658,8 @@ def init_process_group(
             want to know NCCL initialization error early, you can also use this
             field. If an `int` is provided, the API assumes that the accelerator
             type at compile time will be used.
+        _ranks: The ranks in the process group. If provided, the process
+               group name will be the hash of all the ranks in the group.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
@@ -1761,7 +1764,10 @@ def init_process_group(
     internals of c10d. This means we can ignore the value
     they provide as it not exposed in a public way.
     """
-    group_name = _process_group_name([], use_hashed_name=False)
+    if _ranks is None or len(_ranks) == 0:
+        group_name = _process_group_name([], use_hashed_name=False)
+    else:
+        group_name = _process_group_name(_ranks, use_hashed_name=True)
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
@@ -2666,13 +2672,13 @@ def _coalescing_manager(
         # - coalesced `all_gather_into_tensor`
         # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
-        if op0 == all_reduce:
+        if op0 is all_reduce:
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             all_reduce_opts.asyncOp = async_ops
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
-        elif op0 == all_gather_into_tensor:
+        elif op0 is all_gather_into_tensor:
             inputs = []
             outputs = []
             for op in op_list:
@@ -2681,7 +2687,7 @@ def _coalescing_manager(
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
             work = group.allgather_into_tensor_coalesced(outputs, inputs)
-        elif op0 == reduce_scatter_tensor:
+        elif op0 is reduce_scatter_tensor:
             inputs = []
             outputs = []
             for op in op_list:
@@ -2810,7 +2816,7 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
     device = p2p_op_list[0].tensor.device
 
     def peer_kwarg(op: P2POp) -> dict[str, int]:
-        key = "group_dst" if op.op == isend else "group_src"
+        key = "group_dst" if op.op is isend else "group_src"
         return {key: op.group_peer}
 
     if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:

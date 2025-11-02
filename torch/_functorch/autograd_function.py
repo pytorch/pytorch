@@ -754,7 +754,7 @@ class AutogradFunctionApply(HigherOrderOperator):
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def forward(ctx, *args):
                 nonlocal saved_values
                 output, saved_values = fwd(*fwd_args)

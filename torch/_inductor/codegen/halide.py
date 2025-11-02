@@ -571,10 +571,12 @@ class HalideOverrides(OpOverrides):
         raise NotImplementedError("device_assert_async")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def partial_accumulate(
         name: str,
         reduction_type: str,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
