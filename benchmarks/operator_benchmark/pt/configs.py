@@ -1,6 +1,5 @@
 import operator_benchmark as op_bench
 
-
 """
 Configs shared by multiple benchmarks
 """
@@ -128,6 +127,19 @@ conv_3d_configs_short = op_bench.config_list(
     tags=["short"],
 )
 
+conv_3d_configs_long = op_bench.cross_product_configs(
+    IC=[32, 64],
+    OC=[32, 64],
+    kernel=[3],
+    stride=[1, 2],
+    N=[4, 8],
+    D=[8, 16],
+    H=[16, 32],
+    W=[16, 32],
+    device=["cpu", "cuda"],
+    tags=["long"],
+)
+
 linear_configs_short = op_bench.config_list(
     attr_names=["N", "IN", "OUT"],
     attrs=[
@@ -140,7 +152,6 @@ linear_configs_short = op_bench.config_list(
     },
     tags=["short"],
 )
-
 
 linear_configs_long = op_bench.cross_product_configs(
     N=[32, 64], IN=[128, 512], OUT=[64, 128], device=["cpu", "cuda"], tags=["long"]
