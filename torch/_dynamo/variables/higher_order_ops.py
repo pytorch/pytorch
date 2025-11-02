@@ -20,6 +20,7 @@ their semantic behavior.
 """
 
 import contextlib
+import copy
 import functools
 import inspect
 import itertools
@@ -3137,6 +3138,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     break
 
                 new_node = new_graph.placeholder(node.name)
+                new_node.meta = copy.copy(node.meta)
                 env[node] = new_node
 
         # for bwd_arg in bwd_args[1:]:
@@ -3151,6 +3153,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 new_graph.placeholder("unused")
             else:
                 new_node = new_graph.placeholder(node.name)
+                new_node.meta = copy.copy(node.meta)
                 env[node] = new_node
         # for freevar_proxy in bwd_freevars.values():
         #     bwd_node = freevar_proxy.node
@@ -3168,6 +3171,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 raise RuntimeError("placeholders should have been in env")
             elif node.op != "output":
                 env[node] = new_graph.node_copy(node, lambda x: env[x])
+                env[node].meta = copy.copy(node.meta)
 
         output_values = []
         old_outputs = bwd_graph.find_nodes(op="output")[0].args[0]
