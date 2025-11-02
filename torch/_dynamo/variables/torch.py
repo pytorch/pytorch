@@ -1270,6 +1270,35 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
 
+        @register(torch.accelerator.current_stream)
+        def handle_current_stream(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
+                unimplemented_v2(
+                    gb_type="unsupported arguments to torch.accelerator.current_stream",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="torch.accelerator.current_stream accepts one optional argument `device`",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+            try:
+                if kwargs:
+                    device = torch.device(kwargs["device"].as_python_constant())
+                elif args:
+                    device = torch.device(args[0].as_python_constant())
+                else:
+                    device = None
+
+                return tx.symbolic_stream_state.cur_stream(device)
+            except Exception as e:
+                unimplemented_v2(
+                    gb_type="bad device argument to torch.accelerator.current_stream",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=e,
+                )
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
@@ -1466,6 +1495,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             # constant fold functions need to be guarded.
             if self.value in constant_fold_functions_need_guards:
+                assert self.source is not None
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold

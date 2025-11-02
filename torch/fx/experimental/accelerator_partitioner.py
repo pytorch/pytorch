@@ -581,7 +581,7 @@ class Partitioner:
                 break
             if node.op in {"placeholder", "get_attr"}:
                 continue
-            if node.target == operator.__getitem__:
+            if node.target is operator.__getitem__:
                 continue
             input_nodes: dict[Node, None] = {}
             map_arg(node.args, input_nodes.setdefault)
@@ -659,7 +659,7 @@ class Partitioner:
                 find_combination, partitions = find_partition_to_combine_based_on_size(
                     sorted_partitions,
                     available_mem_bytes,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     partitions,
                 )
             return
@@ -705,7 +705,7 @@ class Partitioner:
                 non_embedding_partitions.append(partition)
             if new_partition:
                 partition = self.create_partition()
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 partition.left_mem_bytes = available_mem_bytes
                 return partition
             return None
@@ -1001,7 +1001,7 @@ class Partitioner:
                     node, n1, p0, p1, node_to_latency_mapping, transfer_rate_per_sec
                 )
                 if cost < min_cost:
-                    # pyrefly: ignore  # bad-assignment
+                    # pyrefly: ignore [bad-assignment]
                     node_pair = [node, n1]
                     min_cost = cost
             return cost, node_pair  # type: ignore[possibly-undefined]

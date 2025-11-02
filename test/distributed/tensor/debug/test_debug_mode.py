@@ -64,6 +64,38 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue(isinstance(debug_mode.operators[2], _RedistributeCall))
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
+        # check stringification
+        self.assertTrue(hasattr(debug_mode.operators[0], "args_str"))
+        self.assertFalse(hasattr(debug_mode.operators[0], "args"))
+
+        # check recording hook
+        def mm(x, y):
+            return (x @ y).sum()
+
+        eager_out = mm(x_dtensor, y_dtensor)
+
+        # check recording hook for compiled variant
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.record_outputs(),
+            DebugMode.log_tensor_hashes(),
+        ):
+            compiled_out = torch.compile(mm, backend="aot_eager")(x_dtensor, y_dtensor)
+
+        # check numerical equivalence
+        self.assertTrue(torch.equal(eager_out, compiled_out))
+        sum_op = next(
+            iter(
+                op
+                for op in debug_mode.operators
+                if isinstance(op, _OpCall) and str(op.op) == "aten.sum.default"
+            )
+        )
+        self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
+        self.assertTrue(
+            "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
+        )
+
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -267,6 +299,7 @@ class TestDTensorDebugMode(TestCase):
             record_torchfunction=True,
             record_faketensor=True,
             record_tensor_attributes=["a1", "a2"],
+            store_original_args=True,
         ) as debug_mode:
             torch.matmul(y, x)
 
@@ -278,6 +311,9 @@ class TestDTensorDebugMode(TestCase):
       aten::mm(t: f32[64, 8], t: f32[8, 8]{a1=x1, a2=x2})
       aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])""",
         )
+
+        self.assertTrue(hasattr(debug_mode.operators[0], "args"))
+        self.assertEqual(id(debug_mode.operators[0].args[0]), id(y))
 
     @parametrize("has_inner_mode", [True, False])
     @parametrize("has_outer_mode", [True, False])
