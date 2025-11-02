@@ -58,7 +58,7 @@ def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
         return False
     if torch.Tag.maybe_aliasing_or_mutating in op.tags:
         return True
-    return op == torch.ops.aten.native_batch_norm.default
+    return op is torch.ops.aten.native_batch_norm.default
 
 
 def _add_op_to_registry(registry, op, fn):
