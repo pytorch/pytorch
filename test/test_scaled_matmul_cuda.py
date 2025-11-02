@@ -1250,6 +1250,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 768, 512)])
+    @with_tf32_off
     def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block, M, N, K):
         torch.manual_seed(42)
 
