@@ -2854,6 +2854,14 @@
   ],
   "GB0283": [
     {
+      "Gb_type": "Failed to make weakref to graph-created external object",
+      "Context": "user_object: {example_value}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    }
+  ],
+  "GB0284": [
+    {
       "Gb_type": "cannot resume from torch._dynamo.step_unsupported()",
       "Context": "",
       "Explanation": "traced torch._dynamo.step_unsupported(), but Dynamo is instructed to error on graph break. This graph break is used for debugging only.",
