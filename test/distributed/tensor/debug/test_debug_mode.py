@@ -119,7 +119,7 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
         with DebugMode(
-            record_torchfunction=True, record_stack_trace="stack"
+            record_torchfunction=True, record_stack_trace=True
         ) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
