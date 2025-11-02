@@ -179,6 +179,10 @@ def aot_stage1_graph_capture(
             )
         )
 
+    if maybe_subclass_meta is not None and maybe_subclass_meta.fw_metadata is not None:
+        # TODO: maybe_subclass_meta.fw_metadata.static_input_indices is wrong. This is a hack to workaround.
+        maybe_subclass_meta.fw_metadata.static_input_indices = aot_state.fw_metadata.static_input_indices
+
     return AOTGraphCapture(
         wrappers=wrappers,
         graph_module=graph,
@@ -2209,7 +2213,7 @@ def _aot_stage2b_compile_forward_or_inference(
         # Set tracing context
         if tracing_context := torch._guards.TracingContext.try_get():
             tracing_context.fw_metadata = _get_inner_meta(
-                maybe_subclass_meta, fw_metadata
+                maybe_subclass_meta, fw_metadata # maybe_subclass_meta is wrong.
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:

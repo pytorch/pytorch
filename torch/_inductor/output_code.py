@@ -328,10 +328,11 @@ def cudagraph_partition_post_compile(
     # is cudagraphable. Non-cudagraphable ops (e.g., cpu ops) are inlined into
     # `call` function and not included in partition functions.
     cudagraphify_fns = []
-    for partition_metadata in partition_metadatas:
-        print("mutated_input_idxs: ", partition_metadata.mutated_input_idxs)
+    # TODO: remove this. only for debug
+    for i, partition_metadata in enumerate(partition_metadatas):
+        # print("mutated_input_idxs: ", partition_metadata.mutated_input_idxs)
 
-        print("static_input_idxs: ", partition_metadata.static_input_idxs)
+        print(f"post_compile. is_backward:{is_backward}, i:{i}, static_input_idxs: {partition_metadata.static_input_idxs}")
 
         cudagraphify_fn = partial(
             cudagraphify,
