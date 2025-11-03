@@ -32,7 +32,6 @@ __all__ = [
     "get_graph_provenance_json",
     "set_current_replay_node",
     "get_current_replay_node",
-    "register_fx_metadata",
 ]
 
 current_meta: dict[str, Any] = {}
@@ -47,8 +46,7 @@ should_preserve_node_meta = False
 _FX_METADATA_REGISTRY: dict[str, dict[str, Any]] = {}
 
 
-@compatibility(is_backward_compatible=False)
-def register_fx_metadata(module_name: str, metadata: dict[str, Any]) -> None:
+def _register_fx_metadata(module_name: str, metadata: dict[str, Any]) -> None:
     """
     Register FX metadata in the global in-memory registry.
 
