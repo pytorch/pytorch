@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Float4_e2m1fn_x2.h>
 #include <torch/headeronly/util/Float8_e4m3fn.h>
@@ -17,6 +18,8 @@
 #include <torch/headeronly/util/quint8.h>
 
 #include <cstdint>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
 
 namespace c10 {
 
@@ -270,10 +273,24 @@ namespace impl {
 template <c10::ScalarType N>
 struct ScalarTypeToCPPType;
 
-#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type) \
-  template <>                                                 \
-  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {  \
-    using type = cpp_type;                                    \
+#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type)                \
+  template <>                                                                \
+  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {                 \
+    using type = cpp_type;                                                   \
+                                                                             \
+    /* This is a workaround for the CUDA bug which prevents */               \
+    /* ::detail::ScalarTypeToCType<T>::type being used directly due to */    \
+    /* ambiguous reference which can't to be resolved. For some reason it */ \
+    /* can't pick between at::detail and at::cuda::detail. */                \
+    /* For repro example, please see: */                                     \
+    /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */    \
+    /* UPDATE: while the CUDA bug is fixed, we cannot remove the  */         \
+    /* workaround as it is BC breaking. However, it is recommended to  */    \
+    /* update any code that contains */                                      \
+    /*   decltype(ScalarTypeToCPPType<T>::t) */                              \
+    /* with */                                                               \
+    /*   ScalarTypeToCPPTypeT<T> */                                          \
+    static type t;                                                           \
   };
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
@@ -300,20 +317,41 @@ inline const char* toString(ScalarType t) {
 
 inline std::ostream& operator<<(
     std::ostream& stream,
-    at::ScalarType scalar_type) {
+    c10::ScalarType scalar_type) {
   return stream << toString(scalar_type);
+}
+
+inline ScalarType toUnderlying(ScalarType t) {
+  switch (t) {
+    case ScalarType::QUInt8:
+    case ScalarType::QUInt4x2:
+      [[fallthrough]];
+    case ScalarType::QUInt2x4:
+      return ScalarType::Byte;
+    case ScalarType::QInt8:
+      return ScalarType::Char;
+    case ScalarType::QInt32:
+      return ScalarType::Int;
+    default:
+      return t;
+  }
 }
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::dummy_int1_7_t;
 using c10::dummy_uint1_7_t;
 using c10::NumScalarTypes;
 using c10::ScalarType;
+using c10::toString;
+using c10::operator<<;
+using c10::toUnderlying;
+
 namespace impl {
 using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
-using c10::toString;
-using c10::operator<<;
-} // namespace torch::headeronly
+
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+C10_DIAGNOSTIC_POP()

@@ -71,9 +71,9 @@ def update_stack_example_value(node, metadata, dim=0, op=torch.stack):
     Update the example value of the node in the graph to enable followup split cat opt.
     """
     if node is not None and hasattr(node, "meta"):
-        if op == torch.stack:
+        if op is torch.stack:
             example_value = torch.stack(metadata, dim=dim)
-        elif op == torch.unbind:
+        elif op is torch.unbind:
             example_value = torch.unbind(metadata, dim=dim)  # type: ignore[assignment]
         else:
             return
@@ -85,9 +85,9 @@ def update_pointwise_example_value(pointwise_node, input, other, op):
     Update the example value of the add node in the graph to enable followup split cat opt.
     """
     if pointwise_node is not None and hasattr(pointwise_node, "meta"):
-        if op == torch.add:
+        if op is torch.add:
             example_value = torch.add(input, other)
-        elif op == torch.mul:
+        elif op is torch.mul:
             example_value = torch.mul(input, other)
         else:
             return
@@ -414,12 +414,12 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
                 # only consider the linear case so far
                 # pyre-fixme[16]
-                if input.target == aten.select or other.target == aten.select:  # type: ignore[union-attr]
+                if input.target is aten.select or other.target is aten.select:  # type: ignore[union-attr]
                     parent = (
                         # pyre-fixme[16]
                         input.args[0]  # type: ignore[union-attr]
                         # pyre-fixme[16]
-                        if input.target == aten.select  # type: ignore[union-attr]
+                        if input.target is aten.select  # type: ignore[union-attr]
                         else other.args[0]  # type: ignore[union-attr]
                     )
                 else:
@@ -838,7 +838,7 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
@@ -849,33 +849,33 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,
                 )
             elif group_weights is not None and group_biases is None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
-                # pyrefly: ignore  # not-callable
+                # pyrefly: ignore [not-callable]
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
                 )
             elif group_weights is None and group_biases is not None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
-                # pyrefly: ignore  # not-callable
+                # pyrefly: ignore [not-callable]
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,
@@ -950,7 +950,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
-            if self.op == torch.nn.functional.relu:
+            if self.op is torch.nn.functional.relu:
                 batch_op = graph.call_function(  # type: ignore[operator]
                     self.op,
                     args=(stack_inputs,),
@@ -958,6 +958,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 )
                 batch_op.meta["example_value"] = self.op(
                     stack_inputs.meta["example_value"],
+                    # pyrefly: ignore [bad-argument-type]
                     inplace=subset[0].kwargs.get("inplace", False),
                 )
             else:
