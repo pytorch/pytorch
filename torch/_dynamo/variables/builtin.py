@@ -305,8 +305,8 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.cache
-    def _constant_fold_functions() -> set[object]:
-        fns: set[object] = {
+    def _constant_fold_functions() -> set[Callable[..., Any]]:
+        fns: set[Callable[..., Any]] = {
             abs,
             all,
             any,
@@ -376,7 +376,7 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.cache
-    def _fx_graph_functions() -> set[Any]:
+    def _fx_graph_functions() -> set[Callable[..., Any]]:
         fns = {
             operator.abs,
             operator.pos,
@@ -418,7 +418,7 @@ class BuiltinVariable(VariableTracker):
             operator.ixor,
             operator.ior,
         }
-        return fns
+        return fns  # type: ignore[return-value]
 
     @staticmethod
     @functools.cache
@@ -1927,7 +1927,7 @@ class BuiltinVariable(VariableTracker):
                 list(obj.unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
-        return None  # type: ignore[return-value]
+        return None
 
     def _call_iter_tuple_generator(
         self,
@@ -2136,7 +2136,6 @@ class BuiltinVariable(VariableTracker):
                 "2 args",
                 f"{len(args)} args",
             )
-        assert len(args) >= 2
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
