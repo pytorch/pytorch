@@ -327,7 +327,7 @@ class SubgraphTemplate(KernelTemplate):
         input_nodes: list[Buffer],
         function_decomposition: Callable[..., Any],
         kwargs: dict[str, Any],
-        default_impl: Callable[..., Any] |None = None,
+        default_impl: Callable[..., Any] | None = None,
     ) -> Layout:
         """Infer output layout for custom ops using the default implementation when available.
         Note that the Subgraph assumes custom ops return exactly one tensor output.
