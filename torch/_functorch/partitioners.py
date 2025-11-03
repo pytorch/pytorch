@@ -180,6 +180,7 @@ def _extract_graph_with_inputs_outputs(
     outputs: list[fx.Node],
     outputs_descs: list[AOTOutput],
     subgraph: Optional[str] = None,
+    ignore_must_be_in_fw_bw: bool = False,
 ) -> fx.Graph:
     """
     Given a graph, extracts out a subgraph that takes the specified nodes as
@@ -203,13 +204,22 @@ def _extract_graph_with_inputs_outputs(
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if _must_be_in_backward(node) and subgraph != "backward" and node not in inputs:
-            env[node] = InvalidNode  # type: ignore[assignment]
-            continue
+        if not ignore_must_be_in_fw_bw:
+            if (
+                _must_be_in_backward(node)
+                and subgraph != "backward"
+                and node not in inputs
+            ):
+                env[node] = InvalidNode  # type: ignore[assignment]
+                continue
 
-        if _must_be_in_forward(node) and subgraph != "forward" and node not in inputs:
-            env[node] = InvalidNode  # type: ignore[assignment]
-            continue
+            if (
+                _must_be_in_forward(node)
+                and subgraph != "forward"
+                and node not in inputs
+            ):
+                env[node] = InvalidNode  # type: ignore[assignment]
+                continue
 
         if node in env:
             # Node must be one of our inputs. (Any member of env which wasn't an
@@ -1086,7 +1096,7 @@ def default_partition(
         ):
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
-            assert all(user.target == operator.getitem for user in users)
+            assert all(user.target is operator.getitem for user in users)
             saved_values.extend(users)
         else:
             backward_usages = [
@@ -1256,7 +1266,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     # Build the graph op-by-op by starting from the node all the way to the end
     # copy_ can be not using tangents at all, we must copy it.
     for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
-        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+        if node.op == "call_function" and node.target is torch.ops.aten.copy_.default:
             insert_node_in_graph(node)
 
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
@@ -1596,7 +1606,7 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
         if node.op == "output":
             continue
 
-        is_copy_ = node.target == torch.ops.aten.copy_.default
+        is_copy_ = node.target is torch.ops.aten.copy_.default
         if is_copy_:
             if _has_tag_must_be_in_backward(node):
                 has_mutation_in_bw.add(node.args[0])
@@ -1742,7 +1752,7 @@ def solve_min_cut(
     def should_ban_recomputation(node):
         if node.op != "call_function":
             return False
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             return False
         if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
             return True

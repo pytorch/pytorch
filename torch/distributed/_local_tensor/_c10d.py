@@ -3,12 +3,14 @@ import math
 import operator
 from collections.abc import Sequence
 from datetime import timedelta
+from typing import Callable
 
 import torch
 from torch._C import ScriptObject
 from torch._C._distributed_c10d import CallbackWork, FakeWork
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
+    _check_op,
     _get_default_group,
     _resolve_process_group,
     ProcessGroup,
@@ -774,7 +776,7 @@ def _local_send(
     assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
     src = int(tensor.__rank__)
 
-    LocalRunnerMode.current().signal_send(src, dst, tensor._local_tensors[src])
+    LocalRunnerMode.current()._signal_send(src, dst, tensor._local_tensors[src])
 
     work = FakeWork()
     work_so = Work.boxed(work)
@@ -803,7 +805,7 @@ def _local_recv_(
             assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
             tensor._local_tensors[dst] = obj
 
-        LocalRunnerMode.current().wait_recv(src, dst, _wait_and_store)
+        LocalRunnerMode.current()._wait_recv(src, dst, _wait_and_store)
         return True
 
     work = CallbackWork(_recv_and_store)
@@ -818,3 +820,62 @@ def _local_recv_any_source_(
     # "int tag) -> __torch__.torch.classes.c10d.Work";
 
     return _local_recv_(tensors, process_group_so, -1, tag)
+
+
+def _unpack_ranks(ranks: int | torch.SymInt) -> list[int]:
+    """
+    Unpacks the input `ranks` into a list of integer rank ids.
+    """
+    from . import LocalIntNode
+
+    if isinstance(ranks, torch.SymInt) and isinstance(ranks.node, LocalIntNode):
+        return list(ranks.node._local_ints.keys())
+    if isinstance(ranks, int):
+        return [ranks]
+    raise AssertionError(f"Unsupported ranks type {type(ranks)}")
+
+
+def _attach_rank(tensor: torch.Tensor, rank: int) -> torch.Tensor:
+    """
+    Attaches rank as an attribute to given tensor so that the send or recv implementation
+    knows which rank initiates the operation (note under local tensor mode ).
+    """
+    tensor.__rank__ = rank  # type: ignore[attr-defined]
+    return tensor
+
+
+def local_p2p_op(
+    src: int | torch.SymInt,
+    dst: int | torch.SymInt,
+    tensor: torch.Tensor,
+    op: Callable[[torch.Tensor, int], Work | None],
+) -> Work | None | list[Work | None]:
+    """
+    Runs a point-to-point (P2P) operation for all combinations of source and destination ranks.
+    """
+    _check_op(op)
+    w = []
+    for r in _unpack_ranks(src):
+        for p in _unpack_ranks(dst):
+            tensor = _attach_rank(tensor, r)
+            w.append(op(tensor, p))
+    return w
+
+
+def wait_all(work: Work | None | list[Work | None]) -> None:
+    """
+    Waits for all work objects in the input to complete.
+
+    A single Work object, None, or a list of Work objects (possibly containing None).
+    If None, does nothing. If a single Work, waits for it to complete. If a list, waits
+    for each non-None Work in the list to complete.å
+    """
+
+    if work is None:
+        return
+    if isinstance(work, Work):
+        work = [work]
+    for w in work:
+        if w is None:
+            continue
+        w.wait()

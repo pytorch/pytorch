@@ -64,6 +64,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 import torch
+import torch.distributed as dist
 from torch import Size, SymBool, SymInt, Tensor
 from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
@@ -1060,7 +1061,10 @@ _LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
 
 class LocalRunnerMode:
     """
-    A class for running multiple SPMD functions concurrently.
+    A class for running multiple SPMD functions concurrently, however at any point
+    in time only one function can be running. The main use case for the local runner
+    mode is to enable SPMD functions to be able to use send and recv to communicate
+    with each other. Without local runner mode send and recv are not supported.
     """
 
     runner_context = threading.local()
@@ -1076,7 +1080,9 @@ class LocalRunnerMode:
         self._run_id = -1
         self._run_cond = threading.Condition(self._run_lock)
 
-        self._recv_objects = {dst: {src: Queue() for src in ranks} for dst in ranks}
+        self._recv_objects: dict[int, dict[int, Queue]] = {
+            dst: {src: Queue() for src in ranks} for dst in ranks
+        }
         self._runners = [
             threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
@@ -1134,7 +1140,7 @@ class LocalRunnerMode:
 
         return None
 
-    def signal_send(self, src: int, dst: int, obj: object) -> None:
+    def _signal_send(self, src: int, dst: int, obj: object) -> None:
         assert obj is not None, "Cannot signal None"
         self._assert_holds_run_lock()
         # Only a single thread a time executes so it is safe to mutate
@@ -1144,7 +1150,7 @@ class LocalRunnerMode:
         # holding the lock
         self._run_cond.notify_all()
 
-    def wait_recv(self, src: int, dst: int, post: Callable[[object], None]) -> None:
+    def _wait_recv(self, src: int, dst: int, post: Callable[[object], None]) -> None:
         self._assert_holds_run_lock()
         # Wait for the object to be available
         while True:

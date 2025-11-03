@@ -50,6 +50,7 @@ class CompileArtifacts:
     compiled_fn: SerializableCallable
     original_code: types.CodeType
     closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
     source_info: "SourceInfo"
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
@@ -111,7 +112,10 @@ class AOTCompiledFunction:
         }
         # pyrefly: ignore [read-only]
         self.fn = types.FunctionType(
-            self._artifacts.bytecode, f_globals, closure=self._artifacts.closure
+            self._artifacts.bytecode,
+            f_globals,
+            closure=self._artifacts.closure,
+            argdefs=self._artifacts.argdefs,
         )
 
         if self._artifacts.guard_manager is None:
@@ -266,6 +270,7 @@ def aot_compile_fullgraph(
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
             closure=fn.__closure__,
+            argdefs=fn.__defaults__,
             source_info=source_info,
             device_type=device_type,
         )

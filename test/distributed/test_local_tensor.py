@@ -7,8 +7,11 @@ import torch
 import torch.distributed as dist
 from torch.distributed._local_tensor import (
     local_tensor_mode,
+    LocalIntNode,
+    LocalRunnerMode,
     LocalTensor,
     LocalTensorMode,
+    maybe_run_for_local_tensor,
 )
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -409,6 +412,64 @@ class TestLocalTensorWorld8(LocalTensorTestBase):
             local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
             full_tensor = dist_res.full_tensor()
             self.assertEqual(full_tensor, local_res)
+
+
+from torch.distributed._local_tensor._c10d import local_p2p_op, wait_all
+
+
+class TestLocalRunner(LocalTensorTestBase):
+    world_size = 4
+
+    @maybe_run_for_local_tensor
+    @staticmethod
+    def _get_peer(rank, world_size, dir) -> int:
+        return (rank + dir) % world_size
+
+    @staticmethod
+    def get_rank(world_size: int) -> torch.SymInt:
+        return torch.SymInt(LocalIntNode({r: r for r in range(world_size)}))
+
+    def _run(
+        self,
+        world_size: int,
+        rank: int,
+        actual: list[torch.Tensor | None],
+        expected: list[torch.Tensor | None],
+    ) -> None:
+        ltm = LocalTensorMode(world_size)
+        with ltm:
+            expected[rank] = ltm.rank_map(
+                lambda r: torch.tensor(
+                    [TestLocalRunner._get_peer(r, world_size, -1)], dtype=torch.int
+                )
+                if r == rank
+                else torch.tensor([-1], dtype=torch.int)
+            )
+            x = torch.ones(1, dtype=torch.int) * rank
+            y = torch.ones_like(x) * -1
+
+            next_rank = TestLocalRunner._get_peer(rank, world_size, +1)
+            prev_rank = TestLocalRunner._get_peer(rank, world_size, -1)
+
+            local_p2p_op(rank, next_rank, x, dist.isend)
+
+            rw = local_p2p_op(rank, prev_rank, y, dist.irecv)
+
+            wait_all(rw)
+
+            actual[rank] = y
+
+    def test_send_recv(self):
+        actual: list[torch.Tensor | None] = [None] * self.world_size
+        expected: list[torch.Tensor | None] = [None] * self.world_size
+        with LocalRunnerMode(
+            self.world_size,
+            self.world_size,
+            lambda rank: self._run(self.world_size, rank, actual, expected),
+        ):
+            pass
+
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
