@@ -4,7 +4,7 @@ import os
 import tempfile
 from threading import Event
 
-import torch._inductor.configs as config
+import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
