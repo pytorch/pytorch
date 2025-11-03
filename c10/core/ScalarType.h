@@ -26,6 +26,8 @@
 
 #include <torch/headeronly/core/ScalarType.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+
 namespace c10 {
 
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
@@ -132,22 +134,6 @@ inline ScalarType toQIntType(ScalarType t) {
       return ScalarType::QInt8;
     case ScalarType::Int:
       return ScalarType::QInt32;
-    default:
-      return t;
-  }
-}
-
-inline ScalarType toUnderlying(ScalarType t) {
-  switch (t) {
-    case ScalarType::QUInt8:
-    case ScalarType::QUInt4x2:
-      [[fallthrough]];
-    case ScalarType::QUInt2x4:
-      return ScalarType::Byte;
-    case ScalarType::QInt8:
-      return ScalarType::Char;
-    case ScalarType::QInt32:
-      return ScalarType::Int;
     default:
       return t;
   }
@@ -304,3 +290,5 @@ C10_API std::pair<std::string, std::string> getDtypeNames(
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()
