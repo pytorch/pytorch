@@ -82,7 +82,37 @@ def dedup_dispatch(
             - inter_out (class:`torch.Tensor`): the output tensor containing the
               dispatched tokens after inter-node communication. (for debug)
             - recv_intra_inp_splits (class:`torch.Tensor`): the input splits for the intra-node exchange plan. (for debug)
+
+    .. note::
+        This function must be run under a :class:`torch.cuda.MemPool` context backed by a Symmetric Memory allocator. For example:
+        ```
+        import torch
+        import torch.distributed._symmetric_memory as symm_mem
+        from torch.nn.parallel.moe import dedup_dispatch
+
+        allocator = symm_mem.get_mempool_allocator(device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            (
+                intra_out,
+                topk_indices_intranode_out,
+                inter_plan,
+                intra_plan,
+                *_,
+            ) = dedup_dispatch(
+                inp,
+                topk_node_idx,
+                topk_expert_idx,
+                n_experts,
+                inter_group,
+                intra_group,
+                out_len_ratio,
+                align,
+            )
+        ```
     """
+
     seqlen = inp.shape[0]
     if topk_node_idx.shape[0] != seqlen:
         raise ValueError(
@@ -107,37 +137,26 @@ def dedup_dispatch(
     topk_experts = topk_expert_idx.shape[1]
 
     # Convert indices to splits
-    splits = torch.histc(topk_node_idx, bins=nnodes, min=0, max=nnodes - 1)
+    in_splits = torch.histc(topk_node_idx, bins=nnodes, min=0, max=nnodes - 1)
     sorted_indices = torch.argsort(topk_node_idx.view(-1))
     expanded_inp = inp[sorted_indices // topk_nodes]
     expanded_topk_idx = topk_expert_idx[sorted_indices // topk_nodes]
-    expanded_seqlen = seqlen * topk_nodes
 
     # worst case: every token chooses me as 1 of the topk nodes
     max_out_len = seqlen * nnodes
 
     # Create symm_mem tensors
-    # TODO: use MemPool to avoid copy
-    inp = symm_mem.empty((expanded_seqlen, hid_dim), dtype=dtype, device=device).copy_(
-        expanded_inp
-    )
-    inter_out = symm_mem.empty((max_out_len, hid_dim), dtype=dtype, device=device)
-    in_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=device).copy_(splits)
-    src_offsets = symm_mem.empty(nnodes, dtype=torch.int64, device=device)
-    out_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=device)
-    dst_offsets = symm_mem.empty(nnodes, dtype=torch.int64, device=device)
+    inter_out = torch.empty((max_out_len, hid_dim), dtype=dtype, device=device)
+    src_offsets = torch.empty(nnodes, dtype=torch.int64, device=device)
+    out_splits = torch.empty(nnodes, dtype=torch.int64, device=device)
+    dst_offsets = torch.empty(nnodes, dtype=torch.int64, device=device)
 
     # Create intra-node topk indices, (expanded_seqlen, topk_experts)
-    topk_indices_intranode_in = symm_mem.empty(
-        (expanded_seqlen, topk_experts), dtype=torch.int64, device=device
-    )
-    topk_indices_intranode_out = symm_mem.empty(
-        (max_out_len, topk_experts), dtype=torch.int64, device=device
-    )
-    topk_indices_intranode_in.copy_(expanded_topk_idx)
     # Filler to indicate unused slots -- no expert to send this token to
     UNUSED = -1
-    topk_indices_intranode_out.fill_(UNUSED)
+    topk_indices_intranode_out = torch.full(
+        (max_out_len, topk_experts), UNUSED, dtype=torch.int64, device=device
+    )
 
     # Create inter-node exchange plan
     inter_plan = symm_mem.make_a2a_exchange_plan(
@@ -165,7 +184,7 @@ def dedup_dispatch(
         # Fire up inter-node token exchange
         # inp: (expanded_seqlen, hid_dim)
         symm_mem.all_to_all_v(
-            inp,
+            expanded_inp,
             inter_out,
             inter_plan,
             inter_node_group.group_name,
@@ -178,7 +197,7 @@ def dedup_dispatch(
 
     # Inter-node topk indices exchange, (expanded_seqlen, topk)
     symm_mem.all_to_all_v(
-        topk_indices_intranode_in,
+        expanded_topk_idx,
         topk_indices_intranode_out,
         inter_plan,
         inter_node_group.group_name,
@@ -190,7 +209,7 @@ def dedup_dispatch(
     # Now, some planning about intra-node exchange
 
     # Convert intra-node indices to splits
-    recv_intra_inp_splits = torch.histc(
+    intra_in_splits = torch.histc(
         topk_indices_intranode_out,
         bins=experts_per_node,
         min=0,
@@ -198,21 +217,11 @@ def dedup_dispatch(
     )
 
     # Create symm_mem tensors
-    # TODO: use MemPool to avoid copy
-    intra_in_splits = symm_mem.empty(
-        experts_per_node, dtype=torch.int64, device=device
-    ).copy_(recv_intra_inp_splits)
-    intra_src_offsets = symm_mem.empty(
-        experts_per_node, dtype=torch.int64, device=device
-    )
-    intra_out_splits = symm_mem.empty(
-        experts_per_node, dtype=torch.int64, device=device
-    )
-    intra_dst_offsets = symm_mem.empty(
-        experts_per_node, dtype=torch.int64, device=device
-    )
+    intra_src_offsets = torch.empty(experts_per_node, dtype=torch.int64, device=device)
+    intra_out_splits = torch.empty(experts_per_node, dtype=torch.int64, device=device)
+    intra_dst_offsets = torch.empty(experts_per_node, dtype=torch.int64, device=device)
     max_out_len_intra = seqlen * out_len_ratio
-    intra_out = symm_mem.empty(max_out_len_intra, hid_dim, dtype=dtype, device=device)
+    intra_out = torch.empty(max_out_len_intra, hid_dim, dtype=dtype, device=device)
 
     # Create intra-node exchange plan on a side stream, to overlap with the
     # occurrence calculation
@@ -261,6 +270,6 @@ def dedup_dispatch(
         topk_indices_intranode_out,
         inter_plan,
         intra_plan,  # necessary
-        inter_out,
-        recv_intra_inp_splits,  # for debug
+        inter_out,  # for debug
+        intra_in_splits,  # for debug
     )

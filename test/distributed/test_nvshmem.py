@@ -1284,28 +1284,34 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         # topk expert indices are global expert indices.
         topk_node_idx, topk_expert_idx = router(inp)
 
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
         # Dedup dispatch
         from torch.nn.parallel.moe import dedup_dispatch
 
         # A ratio between worst-case output buffer size versus input seqlen
         out_len_ratio = n_experts
-        (
-            intra_out,
-            topk_indices_intranode_out,
-            inter_plan,
-            intra_plan,
-            _inter_out,
-            _recv_intra_inp_splits,
-        ) = dedup_dispatch(
-            inp,
-            topk_node_idx,
-            topk_expert_idx,
-            n_experts,
-            self.inter_group,
-            self.intra_group,
-            out_len_ratio,
-            align,
-        )
+
+        with torch.cuda.use_mem_pool(mempool):
+            (
+                intra_out,
+                topk_indices_intranode_out,
+                inter_plan,
+                intra_plan,
+                _inter_out,
+                _recv_intra_inp_splits,
+            ) = dedup_dispatch(
+                inp,
+                topk_node_idx,
+                topk_expert_idx,
+                n_experts,
+                self.inter_group,
+                self.intra_group,
+                out_len_ratio,
+                align,
+            )
+
         torch.cuda.synchronize(self.device)
 
         # Numeric Verfication
