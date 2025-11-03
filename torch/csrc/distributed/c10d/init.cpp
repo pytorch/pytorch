@@ -2734,23 +2734,12 @@ Arguments:
               "supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
               "(test whether the backend supports collective time estimation)")
-          .def_property_readonly(
-              "supports_shrinking",
-              &::c10d::Backend::supportsShrinking,
-              "(test whether the backend supports communicator shrinking)")
           .def(
               "set_timeout",
               &::c10d::Backend::setTimeout,
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
-          .def(
-              "shrink",
-              &::c10d::Backend::shrink,
-              py::arg("ranks_to_exclude"),
-              py::arg("shrink_flags") = 0,
-              py::arg("opts_override") = nullptr,
-              py::call_guard<py::gil_scoped_release>())
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
