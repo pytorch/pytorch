@@ -2158,7 +2158,7 @@ class TestLinalg(TestCase):
 
             complementary_device = 'cpu'
 
-            #select available backends
+            # select available backends
             backends = ["default"]
             if torch.device(device).type == 'cuda':
                 if torch.cuda.has_magma:
