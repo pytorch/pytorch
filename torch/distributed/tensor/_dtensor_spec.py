@@ -129,10 +129,134 @@ class DTensorSpec:
         return default_shard_order
 
     @staticmethod
+    def _convert_shard_order_to_StridedShard(
+        shard_order: ShardOrder, placements: tuple[Placement, ...], mesh: DeviceMesh
+    ) -> tuple[Placement, ...]:
+        """
+        Convert ShardOrder to placements with _StridedShard.
+
+        This function converts a ShardOrder specification into a tuple of Placement objects,
+        using _StridedShard when a tensor dimension is sharded across multiple mesh dimensions
+        in a non-default order. The split_factor of each _StridedShard is determined by the
+        product of mesh dimension sizes that appear earlier in the shard order but later in
+        the placement tuple.
+
+        Args:
+            shard_order: ShardOrder specification indicating which tensor dimensions are
+                sharded on which mesh dimensions and in what execution order.
+            placements: Tuple of Placement objects that does not contain _StridedShard.
+            mesh: DeviceMesh containing the size information for each mesh dimension.
+
+        Returns:
+            Updated tuple of Placement objects with Shard or _StridedShard placements.
+
+        Algorithm:
+            For each ShardOrderEntry in shard_order:
+              - For each mesh dimension in the entry's mesh_dims (in order):
+                - Calculate split_factor as the product of mesh sizes for all mesh dimensions
+                  that appear:
+                  1. Earlier in the shard order (lower index in mesh_dims)
+                  2. Later in the placement tuple (higher mesh dimension index)
+                - If split_factor == 1: use normal Shard
+                - Otherwise: use _StridedShard with the calculated split_factor
+
+        Example:
+            >>> # xdoctest: +SKIP("Requires DeviceMesh")
+            >>> # Tensor dimension 0 sharded on mesh dims [2, 0, 1] in that order
+            >>> # mesh = DeviceMesh([4, 3, 2])  # sizes: mesh[0]=4, mesh[1]=3, mesh[2]=2
+            >>> shard_order = (ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 0, 1)),)
+            >>> placements = (Shard(0), Shard(0), Shard(0))
+            >>> # For mesh_dim=2 (index 0 in mesh_dims): no earlier dims, split_factor=1
+            >>> #   -> placements[2] = Shard(0)
+            >>> # For mesh_dim=0 (index 1 in mesh_dims): mesh_dim=2 is earlier and has index 2>0
+            >>> #   -> split_factor = mesh.size(2) = 2
+            >>> #   -> placements[0] = _StridedShard(0, split_factor=2)
+            >>> # For mesh_dim=1 (index 2 in mesh_dims): mesh_dim=2 is earlier and has index 2>1
+            >>> #   -> split_factor = mesh.size(2) = 2
+            >>> #   -> placements[1] = _StridedShard(0, split_factor=2)
+            >>> # Result: (_StridedShard(0, sf=2), _StridedShard(0, sf=2), Shard(0))
+        """
+        placements_list = list(placements)
+        for entry in shard_order:
+            tensor_dim = entry.tensor_dim
+            mesh_dims = entry.mesh_dims
+            for idx in range(len(mesh_dims)):
+                # TODO(zpcore): split_factor from `view` and `shard order`
+                # should be able to be multiplied into one. Need to loose the
+                # condition here.
+                if type(placements[idx]) is not Shard:
+                    raise ValueError(
+                        f"Only Shard placement can be converted to _StridedShard, "
+                        f"found {placements[idx]} in {placements=}."
+                    )
+                mesh_dim = mesh_dims[idx]
+                count = math.prod(mesh.size(i) for i in mesh_dims[:idx] if i > mesh_dim)
+                if count == 1:
+                    # user normal Shard
+                    placements_list[mesh_dim] = Shard(tensor_dim)
+                else:
+                    placements_list[mesh_dim] = _StridedShard(
+                        tensor_dim, split_factor=count
+                    )
+        return tuple(placements_list)
+
+    @staticmethod
     def _maybe_convert_StridedShard_to_shard_order(
         placements: tuple[Placement, ...], mesh: DeviceMesh
     ) -> Optional[ShardOrder]:
-        """Try convert _StridedShard to ShardOrder."""
+        """
+        Try to convert _StridedShard placements to ShardOrder.
+
+        This is the inverse of `_convert_shard_order_to_StridedShard`. It reconstructs the shard
+        order by examining the split_factor of each _StridedShard and determining its position
+        in the execution order. If the _StridedShard configuration cannot be represented as a
+        valid ShardOrder (i.e., there's no shard order that produces the observed split_factors),
+        this function returns None.
+
+        Args:
+            placements: Tuple of Placement objects that may contain _StridedShard.
+            mesh: DeviceMesh containing the size information for each mesh dimension.
+
+        Returns:
+            ShardOrder if conversion is possible, None otherwise. For placements without
+            _StridedShard, returns the default shard order.
+
+        Algorithm:
+            For each tensor dimension:
+              1. Iterate through placements in reverse order (right to left)
+              2. For each Shard/_StridedShard on the current tensor dimension:
+                 - Extract its split_factor (1 for normal Shard, split_factor for _StridedShard)
+                 - Find the position in the shard order where the accumulated product of
+                   mesh sizes equals the split_factor
+                 - accumulated_sf is computed as the product of mesh sizes of all mesh
+                   dimensions that appear earlier in the shard order
+              3. If no valid position is found for any split_factor, return None (unable to convert)
+              4. Otherwise, construct ShardOrderEntry with the determined mesh_dims order
+
+        Example:
+            >>> # xdoctest: +SKIP("Requires DeviceMesh")
+            >>> # mesh = DeviceMesh([4, 3, 2])  # sizes: mesh[0]=4, mesh[1]=3, mesh[2]=2
+            >>> # placements = (_StridedShard(0, sf=2), _StridedShard(0, sf=2), Shard(0))
+            >>> # Process tensor_dim=0 from right to left:
+            >>> #   - mesh_dim=2: Shard(0) with sf=1
+            >>> #     Try position 0: accumulated_sf=1, matches! Insert at position 0
+            >>> #     Current order: [2]
+            >>> #   - mesh_dim=1: _StridedShard(0, sf=2) with sf=2
+            >>> #     Try position 0: accumulated_sf=1, no match
+            >>> #     Try position 1: accumulated_sf=1*mesh.size(2)=2, matches! Insert at position 1
+            >>> #     Current order: [2, 1]
+            >>> #   - mesh_dim=0: _StridedShard(0, sf=2) with sf=2
+            >>> #     Try position 0: accumulated_sf=1, no match
+            >>> #     Try position 1: accumulated_sf=1*mesh.size(2)=2, matches! Insert at position 1
+            >>> #     Final order: [2, 0, 1]
+            >>> # Result: ShardOrder((ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 0, 1)),))
+            >>> # This means: first shard on mesh_dim=2, then mesh_dim=0, then mesh_dim=1
+
+        Note:
+            This function validates that _StridedShard can be represented as a ShardOrder.
+            Not all _StridedShard configurations are valid - the split_factor must match
+            the product of mesh sizes in some execution order.
+        """
         if not any(isinstance(p, _StridedShard) for p in placements):
             return DTensorSpec.compute_default_shard_order(placements)
         max_tensor_dim = max([i.dim for i in placements if isinstance(i, Shard)])
@@ -141,7 +265,11 @@ class DTensorSpec:
             tensor_dim_order: list[int] = []
             for mesh_dim in reversed(range(len(placements))):
                 cur_placement = placements[mesh_dim]
-                if isinstance(cur_placement, Shard) and cur_placement.dim == tensor_dim:
+                # _StridedShard may not be a subclass of Shard in the future, so write in this way:
+                if (
+                    isinstance(cur_placement, Shard | _StridedShard)
+                    and cur_placement.dim == tensor_dim
+                ):
                     cur_sf = 1
                     if isinstance(cur_placement, _StridedShard):
                         cur_sf = cur_placement.split_factor
@@ -164,23 +292,6 @@ class DTensorSpec:
                     )
                 )
         return tuple(shard_order)
-
-    @staticmethod
-    def _convert_shard_order_to_StridedShard(
-        shard_order: ShardOrder, placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> tuple[Placement, ...]:
-        """Convert ShardOrder to _StridedShard."""
-        placements_list = list(placements)
-        for entry in shard_order:
-            tensor_dim = entry.tensor_dim
-            mesh_dims = entry.mesh_dims
-            for idx in range(len(mesh_dims)):
-                mesh_dim = mesh_dims[idx]
-                count = math.prod(mesh.size(i) for i in mesh_dims[:idx] if i > mesh_dim)
-                placements_list[mesh_dim] = _StridedShard(
-                    tensor_dim, split_factor=count
-                )
-        return tuple(placements_list)
 
     def _verify_shard_order(self, shard_order: ShardOrder) -> None:
         """Verify that the shard_order is valid and matches the placements."""

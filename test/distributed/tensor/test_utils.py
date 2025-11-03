@@ -794,6 +794,8 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
             )
             x = torch.randn(32, 32, 32)
             for shard_order in shard_order_choices:
+                a = _distribute_tensor(x, mesh, None, shard_order)
+
                 placement_without_stridedshard = shard_order_to_placement(
                     shard_order, mesh
                 )
@@ -802,13 +804,13 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
                         shard_order, placement_without_stridedshard, mesh
                     )
                 )
-                a = distribute_tensor(x, mesh, placements_with_stridedshard)
+                b = distribute_tensor(x, mesh, placements_with_stridedshard)
                 shard_order_from_stridedshard = (
                     DTensorSpec._maybe_convert_StridedShard_to_shard_order(
                         placements_with_stridedshard, mesh
                     )
                 )
-                b = _distribute_tensor(x, mesh, None, shard_order_from_stridedshard)
+                self.assertEqual(shard_order, shard_order_from_stridedshard)
                 self.assertEqual(a.to_local(), b.to_local())
 
     @with_comms
