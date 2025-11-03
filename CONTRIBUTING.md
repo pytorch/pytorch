@@ -352,7 +352,7 @@ Learn more about the linter on the [lintrunner wiki page](https://github.com/pyt
 
 #### Running `pyrefly`
 
-`pyrefly` is an static type checker for Python. It is configured in `pyrefly.toml` 
+`pyrefly` is an static type checker for Python. It is configured in `pyrefly.toml`
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
