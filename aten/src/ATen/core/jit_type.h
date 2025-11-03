@@ -2371,7 +2371,7 @@ private:
 };
 
 template<>
-inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
+inline detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<NamedType>(static_cast<NamedType *>(this)->shared_from_this());
@@ -2380,7 +2380,7 @@ inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() 
 }
 
 template<>
-inline typename detail::CastConstReturnType<NamedType>::type Type::cast<NamedType>() const {
+inline detail::CastConstReturnType<NamedType>::type Type::cast<NamedType>() const {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<const NamedType>(static_cast<const NamedType *>(this)->shared_from_this());
