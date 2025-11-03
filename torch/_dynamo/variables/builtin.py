@@ -1070,6 +1070,7 @@ class BuiltinVariable(VariableTracker):
                 def call_binop_handlers(
                     tx: "InstructionTranslator", args: Any, _: Any
                 ) -> Any:
+                    # pyrefly: ignore [not-iterable]
                     for fn in binop_handlers:
                         rv = fn(tx, *args)
                         if rv:
@@ -2136,6 +2137,7 @@ class BuiltinVariable(VariableTracker):
                 "2 args",
                 f"{len(args)} args",
             )
+        # pyrefly: ignore [bad-unpacking]
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2320,6 +2322,7 @@ class BuiltinVariable(VariableTracker):
                             return issubclass(arg.python_type(), ty)
 
                     dtypes = tensortype_to_dtype[ty]
+                    # pyrefly: ignore [missing-attribute]
                     return arg.dtype in dtypes
 
                 if type(tensor_type) is tuple:
