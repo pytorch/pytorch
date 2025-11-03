@@ -64,7 +64,7 @@ void setSamplerDescriptor(
   for (const auto i : c10::irange(tensor.dim())) {
     inputSize[i] = static_cast<int>(tensor.size(i));
   }
-  desc.set(dataType, 4, inputSize);
+  desc.set(dataType, 4, inputSize.data());
 }
 
 void checkGridSize(CheckedFrom c, TensorArg grid, TensorArg input) {
