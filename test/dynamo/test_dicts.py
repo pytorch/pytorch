@@ -341,7 +341,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, d):
             y = 0
-            for idx, (key, value) in enumerate(d.items()):
+            for idx, value in enumerate(d.values()):
                 if idx == 0:
                     y += torch.sin(x * value)
                 else:
@@ -366,7 +366,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, d):
             y = 0
-            for idx, (key, value) in enumerate(d.items()):
+            for idx, value in enumerate(d.values()):
                 if idx == 0:
                     y += torch.sin(x * value)
                 else:
@@ -847,7 +847,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             d = {"a": 2, "b": 3, "c": 5 * x}
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():  # noqa: PERF102
+            for v in mp.values():
                 y += torch.cos(x * v)
             return mp
 
@@ -864,7 +864,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():  # noqa: PERF102
+            for v in mp.values():
                 y += torch.cos(x * v)
             d["d"] = 4
             return mp
@@ -885,7 +885,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, mp):
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():  # noqa: PERF102
+            for v in mp.values():
                 y += torch.cos(x * v)
             if isinstance(mp, types.MappingProxyType):
                 y *= 2
@@ -1092,6 +1092,20 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def f(x):
             d = defaultdict(dict, {2: {"a": 1}})
             d[0] = {"b": 2}
+            return x + 1, d
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+
+    def test_iter_default_dict(self):
+        def f(x):
+            d = defaultdict(list)
+            d[0] = 42
+            for k in d:
+                d[k] += 1
             return x + 1, d
 
         x = torch.ones(2)
@@ -1622,6 +1636,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
                 continue
             self.assertNotEqual(self.thetype, other)
             self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
+
+    @make_dynamo_test
+    def test_dict___iter__(self):
+        d = self.thetype({1: 2})
+        it = d.__iter__()
+        self.assertEqual(next(it), 1)
 
 
 class DictSubclassMethodsTests(DictMethodsTests):

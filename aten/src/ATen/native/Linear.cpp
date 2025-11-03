@@ -201,7 +201,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   out_size.reserve(out_num_dim);
   for (auto& d : lro) out_size.push_back(left.sym_size(d));
   for (auto& d : lo) out_size.push_back(left.sym_size(d));
-  for (auto& d : sum_dims_) { out_size.emplace_back(1); (void)(d); }; // avoid warning about not using d
+  for (auto& d : sum_dims_) { out_size.emplace_back(1); (void)d; }; // avoid warning about not using d
   for (auto& d : ro) out_size.push_back(right.sym_size(d));
 
   std::vector<int64_t> lpermutation(lro);
@@ -640,7 +640,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
     }
   }
 
-  return ops[0];
+  return std::move(ops[0]);
 }
 
 // _trilinear computes a trilinear einstein sum with an unrolled dimension
@@ -805,7 +805,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   std::vector<SymInt> rsizes;  // rsizes: sizes of the result
   p1.reserve(input1.dim());
   p2.reserve(input2.dim());
-  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
+  rsizes.reserve(input1.dim() + input2.dim() - static_cast<int64_t>(dims1.size()));
   SymInt size1 = 1; // number of non-contracted elements in input1
   SymInt size2 = 1; // number of non-contracted elements in input2
 
