@@ -124,45 +124,6 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
       get_onednn_strides(t)};
 }
 
-bool onednn_strides_check(const Tensor& src) {
-  auto adims = get_onednn_dims(src);
-  int ndims = (int)adims.size();
-  auto dims = adims.data();
-  auto data_type = static_cast<dnnl_data_type_t>(
-      get_onednn_dtype_include_double(src, /*allow_undef*/ false));
-  auto strides_info = get_onednn_strides(src);
-  auto strides = strides_info.empty() ? nullptr : &strides_info[0];
-
-  dnnl_memory_desc_t md;
-  dnnl_memory_desc_create_with_strides(&md, ndims, dims, data_type, strides);
-  dnnl_format_kind_t md_fmt_kind;
-  int md_ndims = 0;
-  int md_inner_nblks = 0;
-  dnnl_dims_t* md_padded_dims = nullptr;
-
-  dnnl_memory_desc_query(md, dnnl_query_inner_nblks_s32, &md_inner_nblks);
-  dnnl_memory_desc_query(md, dnnl_query_format_kind, &md_fmt_kind);
-  dnnl_memory_desc_query(md, dnnl_query_ndims_s32, &md_ndims);
-  dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
-  auto block_size = 1;
-  // const auto& blk = md->format_desc.blocking;
-  dnnl_dims_t md_inner_blks;
-  dnnl_dims_t md_blk_inner_idxs;
-  dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
-  dnnl_memory_desc_query(md, dnnl_query_inner_blks, &md_inner_blks);
-  dnnl_memory_desc_destroy(md);
-
-  if (strides == nullptr || md_ndims == 0 ||
-      md_fmt_kind != dnnl_format_kind_t::dnnl_blocked)
-    return true;
-
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "XPU backend does not support block format, this code path should be unreachable.");
-
-  return true;
-}
-
 bool is_broadcast(const at::Tensor& t) {
   for (int i = 0; i < t.dim(); i++) {
     if (t.stride(i) == 0)
@@ -276,8 +237,6 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   if (strides[tensor_dim - 1] != 1 && strides[tensor_dim - 2] != 1)
     return false;
 
-  if (!onednn_strides_check(tensor))
-    return false;
   return true;
 }
 
