@@ -13,8 +13,9 @@
 namespace torch::utils {
 namespace {
 
-std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_initialized{};
-std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_in_bad_fork{};
+bool is_initialized_flag = false;
+bool is_in_bad_fork_flag = false;
+
 c10::once_flag at_fork_global_once_flag;
 at::DeviceType at_fork_device_type_global;
 
@@ -22,7 +23,10 @@ at::DeviceType at_fork_device_type_global;
 
 bool is_device_initialized(at::DeviceType device_type) {
   pybind11::gil_scoped_acquire g;
-  return is_initialized[static_cast<int>(device_type)];
+  if (device_type != at_fork_device_type_global) {
+    return false;
+  }
+  return is_initialized_flag;
 }
 
 void device_lazy_init(at::DeviceType device_type) {
@@ -60,19 +64,26 @@ void device_lazy_init(at::DeviceType device_type) {
     throw python_error();
   }
 
-  is_initialized[static_cast<int>(device_type)] = true;
+  is_initialized_flag = true;
 }
 
 void set_requires_device_init(at::DeviceType device_type, bool value) {
-  is_initialized[static_cast<int>(device_type)] = !value;
+  if (device_type == at_fork_device_type_global) {
+    is_initialized_flag = !value;
+  }
 }
 
 bool is_device_in_bad_fork(at::DeviceType device_type) {
-  return is_in_bad_fork[static_cast<int>(device_type)];
+  if (device_type != at_fork_device_type_global) {
+    return false;
+  }
+  return is_in_bad_fork_flag;
 }
 
 void set_device_in_bad_fork(at::DeviceType device_type, bool value) {
-  is_in_bad_fork[static_cast<int>(device_type)] = value;
+  if (device_type == at_fork_device_type_global) {
+    is_in_bad_fork_flag = value;
+  }
 }
 
 // Should be called before the first device runtime call.

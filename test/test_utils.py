@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import multiprocessing
 import os
 import random
 import shutil
@@ -12,7 +13,7 @@ import traceback
 import unittest
 import warnings
 from typing import Any
-import multiprocessing
+
 import torch
 import torch.cuda
 import torch.nn as nn
@@ -22,7 +23,6 @@ from torch._utils import try_import
 from torch._utils_internal import deprecated
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
-    DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyCPU,
     ops,
@@ -54,10 +54,7 @@ from torch.utils.data import DataLoader
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-TEST_GPU = torch.xpu.is_available() or torch.cuda.is_available()
+HAS_CUDA = torch.cuda.is_available()
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -1020,67 +1017,31 @@ class TestDeprecate(TestCase):
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)
 
-class TestDeviceLazyInit(DeviceTypeTestBase, TestCase):
-    def _get_device_module(self, device_type: str):
-        try:
-            return getattr(torch, device_type)
-        except AttributeError:
-            return None
 
+class TestDeviceLazyInit(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
     def test_fork_poison_on_lazy_init(self, device):
-        device_type = device.split(":", 1)[0]
-        dev_module = self._get_device_module(device_type)
-        if dev_module is None or not dev_module.is_available():
-            self.skipTest(f"{device_type} device not available")
-        if not hasattr(dev_module, "init"):
-            self.skipTest(f"{device_type} has no init() method")
-        dev_module.init()
+        torch.empty(1, device=device)
 
         def child(q):
             try:
-                dev_module.init()
+                torch.empty(1, device=device)
             except Exception as e:
                 q.put(e)
 
-        if sys.platform == "win32":
-            self.skipTest("Fork not available on Windows")
-        if device_type == "mps" and sys.platform == "darwin":
-            self.skipTest("MPS does not support fork on macOS")
         ctx = multiprocessing.get_context("fork")
         q = ctx.Queue()
         p = ctx.Process(target=child, args=(q,))
         p.start()
         p.join()
-        self.assertFalse(q.empty())
+        self.assertTrue(not q.empty())
         exc = q.get()
         self.assertIsInstance(exc, RuntimeError)
 
-    def test_registration_idempotent(self, device):
-        device_type = device.split(":", 1)[0]
-        dev_module = self._get_device_module(device_type)
-        if dev_module is None or not dev_module.is_available():
-            self.skipTest(f"{device_type} device not available")
-        if not hasattr(dev_module, "device_count"):
-            self.skipTest(f"{device_type} has no device_count()")
 
-        def child(q):
-            try:
-                dev_module.device_count()
-                dev_module.device_count()
-            except Exception as e:
-                q.put(e)
-
-        if sys.platform == "win32":
-            self.skipTest("Fork not available on Windows")
-        ctx = multiprocessing.get_context("fork")
-        q = ctx.Queue()
-        p = ctx.Process(target=child, args=(q,))
-        p.start()
-        p.join()
-        self.assertTrue(q.empty())
-
-
-instantiate_device_type_tests(TestDeviceLazyInit, globals())
+instantiate_device_type_tests(
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_mps=True, allow_xpu=True
+)
 
 
 if __name__ == "__main__":
