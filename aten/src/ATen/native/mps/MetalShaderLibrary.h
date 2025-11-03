@@ -147,6 +147,19 @@ class MetalShaderLibrary {
       const std::optional<c10::Scalar> alpha = std::nullopt,
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
 
+  template <typename T>
+  void exec_unary_kernel_with_params(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      T params,
+      const std::string& params_type_name);
+  template <typename T>
+  void exec_binary_kernel_with_params(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      T params,
+      const std::string& params_type_name);
+
  protected:
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
