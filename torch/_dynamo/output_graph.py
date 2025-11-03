@@ -101,7 +101,7 @@ from .exc import (
     unimplemented_v2,
     unimplemented_v2_with_warning,
 )
-from .graph_bytecode_inputs import has_user_objects, index_to_source
+from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
@@ -1303,6 +1303,7 @@ class OutputGraph(OutputGraphCommon):
 
                 # A small codegen optimization because we might have different
                 # VariableTrackers that share the same source.
+                assert x.source is not None
                 list_idx = x.source.index  # type: ignore[attr-defined]
                 if list_idx not in visited:
                     alias_name = self.new_var(
@@ -1321,6 +1322,7 @@ class OutputGraph(OutputGraphCommon):
                     )
 
                 # operate on alias, handled by suffix codegen
+                assert x.source is not None
                 old_source = x.source
                 overridden_sources[old_source] = LocalSource(visited[list_idx])
 
@@ -1539,9 +1541,19 @@ class OutputGraph(OutputGraphCommon):
                     "store_user_object_weakrefs",
                 )
             )
-            for source in reversed(index_to_source.values()):
-                codegen(source)
-            codegen.call_function(len(index_to_source), False)
+            tmp_vars = []
+            for constructor in reversed(index_to_bytecode_constructor.values()):
+                constructor(codegen)
+                var_name = (
+                    self.new_var()
+                )  # keep alive any temp objects for the rest of the frame
+                codegen.store(var_name)
+                tmp_vars.append(var_name)
+
+            for var_name in tmp_vars:
+                codegen.append_output(codegen.create_load(var_name))
+
+            codegen.call_function(len(index_to_bytecode_constructor), False)
             codegen.pop_top()
             self.add_output_instructions(codegen.get_instructions())
 
@@ -1864,7 +1876,6 @@ class OutputGraph(OutputGraphCommon):
                             and isinstance(var.value, _ExportModuleSpecTrackerDict)
                         ):
                             potential_side_effects.append(var)
-
             side_effect_refs = [
                 _get_source_debug_name(var.source) for var in potential_side_effects
             ]
