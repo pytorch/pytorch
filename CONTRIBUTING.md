@@ -281,7 +281,7 @@ dependencies as well as the nightly binaries into the repo directory.
 **Prerequisites**:
 The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
-- `pyrefly` - recommended for type checking
+- `pyrefly` - recommended for type checking. [Pyrefly](https://pyrefly.org/)
 - `pytest` - recommended to run tests more selectively
 Running
 ```
@@ -352,12 +352,30 @@ Learn more about the linter on the [lintrunner wiki page](https://github.com/pyt
 
 #### Running `pyrefly`
 
-`pyrefly` is an static type checker for Python. It is configured in `pyrefly.toml`
+[Pyrefly](https://pyrefly.org/) is a high-performance static type checker for Python. It provides fast type checking along with IDE features like autocomplete and instant error feedback.
+
+PyTorch uses Pyrefly for type checking across the codebase. The configuration is managed in `pyrefly.toml` at the root of the repository.
+
+**Getting Started with Pyrefly:**
+
+To run type checking on the PyTorch codebase:
+```bash
+pyrefly check
+```
+
+For more detailed error information with summaries:
+```bash
+pyrefly check --summarize-errors
+```
+
+**Learn More:**
+- [Pyrefly Configuration](https://pyrefly.org/en/docs/configuration/) - Detailed configuration options
+- [Pyrefly IDE Features](https://pyrefly.org/en/docs/IDE-features/) - Set up Pyrefly in your editor for real-time type checking
+- [Python Typing Tutorial](https://pyrefly.org/en/docs/typing-for-python-developers/) - Learn about Python type annotations
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for more information on how to set up `pyrefly` and tackle type annotation
-tasks.
+for PyTorch-specific guidance on how to set up `pyrefly` and tackle type annotation tasks in this codebase.
 
 ### C++ Unit Testing
 
