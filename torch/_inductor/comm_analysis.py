@@ -7,7 +7,8 @@ from typing import Any, Optional
 import sympy
 
 import torch
-from torch._C._distributed_c10d import _resolve_process_group
+import torch.utils._pytree as pytree
+from torch.distributed.distributed_c10d import _resolve_process_group
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -358,6 +359,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
     use_nccl_estimator: bool = True,
+    nccl_estimator_fallback: bool = True,
 ) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
@@ -395,8 +397,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     def _nccl_estimate() -> Optional[float]:
         # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
-        import torch.utils._pytree as pytree
-        from torch.distributed.distributed_c10d import _resolve_process_group
 
         flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
@@ -436,7 +436,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     if use_nccl_estimator:
         est_time_ms = _nccl_estimate()
-        if est_time_ms is not None:
+        if est_time_ms is not None or not nccl_estimator_fallback:
             return est_time_ms
 
     return estimate_nccl_collective_runtime_impl(

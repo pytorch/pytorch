@@ -1060,10 +1060,10 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     )
 
     # initialize the local tensor
-    if init_op == torch.full:
+    if init_op is torch.full:
         fill_value = kwargs.pop("fill_value", 0)
         local_tensor = init_op(local_shape, fill_value, **kwargs)
-    elif init_op == torch.rand or init_op == torch.randn:
+    elif init_op is torch.rand or init_op is torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 

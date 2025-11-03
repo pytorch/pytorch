@@ -130,7 +130,7 @@ class MpsMemoryLeakCheck:
 
         discrepancy_detected = True
         # Query memory multiple items to ensure leak was not transient
-        for n in range(3):
+        for _ in range(3):
             caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
             driver_mem_allocated = torch.mps.driver_allocated_memory()
 
@@ -4984,7 +4984,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.all(x)
                 ref_y = torch.all(cpu_x)
@@ -9601,7 +9601,7 @@ class TestSDPA(TestCaseMPS):
         key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         memory_footprints = []
-        for i in range(100):
+        for _ in range(100):
             output = F.scaled_dot_product_attention(query, key, value)
             current_mem, driver_mem = get_mps_memory_usage()
             memory_footprints.append((current_mem, driver_mem))

@@ -753,8 +753,8 @@ static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy
       handle, params, uplo, n, datatype,
       self_working_copy_ptr + i * matrix_stride,
       lda, datatype,
-      (char*)workdata_device_ptr + i * worksize_device, worksize_device,
-      (char*)workdata_host_ptr + i * worksize_host, worksize_host,
+      static_cast<char*>(workdata_device_ptr) + i * worksize_device, worksize_device,
+      static_cast<char*>(workdata_host_ptr) + i * worksize_host, worksize_host,
       infos_ptr + i
     );
   }
