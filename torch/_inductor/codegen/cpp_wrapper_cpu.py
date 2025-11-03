@@ -2947,6 +2947,7 @@ if (!custom_op_wrapper) {
                 return functools.reduce(
                     lambda a, b: a | b,
                     [
+                        # pyrefly: ignore [missing-attribute]
                         node.node.get_stack_traces()
                         for node in node_schedule
                         if hasattr(node, "node") and node.node
