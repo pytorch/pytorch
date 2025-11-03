@@ -353,6 +353,7 @@ inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
 template <typename Func>
 inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
   auto deviceTypeToDispatchKey = [](c10::DeviceType t) {
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
     switch (t) {
       // This list is synchronized with the k-constants in c10/core/DeviceType.h
       case c10::DeviceType::CPU:
@@ -389,6 +390,7 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
             " cannot be overloaded at dispatch time, "
             "please file a bug report explaining what you were trying to do.");
     }
+    C10_DIAGNOSTIC_POP()
   };
   return dispatch(deviceTypeToDispatchKey(type), std::forward<Func>(raw_f));
 }

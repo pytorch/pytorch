@@ -131,7 +131,7 @@ def auto_quantize(func, qtype, quant_loss=None):
             ):
                 tensors[i] = t
 
-        elif func == dist.all_to_all_single:
+        elif func is dist.all_to_all_single:
             tensors = args[0]
             out_splits = kwargs.get("out_splits")
             in_splits = kwargs.get("in_splits")
