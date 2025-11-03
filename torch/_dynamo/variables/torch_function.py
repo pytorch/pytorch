@@ -137,6 +137,101 @@ def get_prev_stack_var_name() -> str:
     return unique_id("___prev_torch_function_mode_stack")
 
 
+class TorchFunctionModeVariable(GenericContextWrappingVariable):
+    @staticmethod
+    def is_supported_torch_function_mode(ty: type[TorchFunctionMode]) -> bool:
+        # Supported in this sense means we can support graph breaks under the
+        # context.
+        # We are able to trace custom modes but if there are graph breaks under them
+        # and they have a custom __enter__/__exit__ we don't handle this for the
+        # same reason we don't handle generic context managers: there may be side effects
+        # that are now affected by executing the function across two frames instead of one
+        # Today we support the enter/exit of the default TorchFunctionMode as well as
+        # DeviceContext (which is used for set_default_device)
+        return issubclass(ty, (NoEnterTorchFunctionMode, DeviceContext)) or (
+            not class_has_getattribute(ty)
+            and inspect.getattr_static(ty, "__enter__") is TorchFunctionMode.__enter__
+            and inspect.getattr_static(ty, "__exit__") is TorchFunctionMode.__exit__
+        )
+
+    def __init__(
+        self,
+        value: Optional[TorchFunctionMode],
+        source: Optional[Source] = None,
+        **kwargs: Any,
+    ):
+        if value is not None:
+            super().__init__(value, **kwargs)
+        self.value = value
+        self.cm_obj = value  # needed for BC with calling enter from CM code
+        self.source = source  # type: ignore[assignment]
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # This shouldn't be called unless we have a source
+        assert self.source
+        self.source.reconstruct(codegen)
+
+    def module_name(self) -> str:
+        return self.value.__module__
+
+    def fn_name(self) -> str:
+        return type(self.value).__name__
+
+    def python_type(self) -> type:
+        return type(self.value)
+
+    def call_torch_function(
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        types: TupleVariable,
+        args: Iterable[Any],
+        kwargs: dict[str, Any],
+    ) -> VariableTracker:
+        return call_torch_function(
+            tx,
+            get_torch_function_fn(tx, self),  # type: ignore[arg-type]
+            fn,
+            types,
+            args,
+            kwargs,
+        )
+
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        from .torch import TorchInGraphFunctionVariable
+
+        if isinstance(self.value, NoEnterTorchFunctionMode):
+            return constant_none
+
+        TorchInGraphFunctionVariable(
+            torch._C._push_on_torch_function_stack
+        ).call_function(tx, [self], {})
+        return constant_none
+
+    def exit(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
+        from .torch import TorchInGraphFunctionVariable
+
+        TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
+            tx, [], {}
+        )
+        return constant_none
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        ty = NoEnterTorchFunctionMode
+        codegen(
+            AttrSource(
+                codegen.tx.import_source(ty.__module__),
+                ty.__name__,
+            )
+        )
+
+    def supports_graph_breaks(self) -> bool:
+        return True
+
+    def exit_on_graph_break(self) -> bool:
+        return False
+
+
 # Used to clear/restore the python torch function mode stack and temporarily restore it as needed
 class TorchFunctionModeStackStateManager:
     def __init__(self) -> None:
@@ -307,89 +402,6 @@ class TorchFunctionModeStackVariable(VariableTracker):
     @classmethod
     def get_mode_index(cls, ind: int) -> int:
         return ind + cls.offset
-
-
-class TorchFunctionModeVariable(GenericContextWrappingVariable):
-    @staticmethod
-    def is_supported_torch_function_mode(ty):
-        # Supported in this sense means we can support graph breaks under the
-        # context.
-        # We are able to trace custom modes but if there are graph breaks under them
-        # and they have a custom __enter__/__exit__ we don't handle this for the
-        # same reason we don't handle generic context managers: there may be side effects
-        # that are now affected by executing the function across two frames instead of one
-        # Today we support the enter/exit of the default TorchFunctionMode as well as
-        # DeviceContext (which is used for set_default_device)
-        return issubclass(ty, (NoEnterTorchFunctionMode, DeviceContext)) or (
-            not class_has_getattribute(ty)
-            and inspect.getattr_static(ty, "__enter__") == TorchFunctionMode.__enter__
-            and inspect.getattr_static(ty, "__exit__") == TorchFunctionMode.__exit__
-        )
-
-    def __init__(self, value, source=None, **kwargs):
-        if value is not None:
-            super().__init__(value, **kwargs)
-        self.value = value
-        self.cm_obj = value  # needed for BC with calling enter from CM code
-        self.source = source
-
-    def reconstruct(self, codegen: "PyCodegen"):
-        # This shouldn't be called unless we have a source
-        assert self.source
-        self.source.reconstruct(codegen)
-
-    def module_name(self):
-        return self.value.__module__
-
-    def fn_name(self):
-        return type(self.value).__name__
-
-    def python_type(self):
-        return type(self.value)
-
-    def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
-        return call_torch_function(
-            tx,
-            get_torch_function_fn(tx, self),
-            fn,
-            types,
-            args,
-            kwargs,
-        )
-
-    def enter(self, tx):
-        from .torch import TorchInGraphFunctionVariable
-
-        if isinstance(self.value, NoEnterTorchFunctionMode):
-            return constant_none
-
-        TorchInGraphFunctionVariable(
-            torch._C._push_on_torch_function_stack
-        ).call_function(tx, [self], {})
-        return constant_none
-
-    def exit(self, tx: "InstructionTranslator", *args):
-        from .torch import TorchInGraphFunctionVariable
-
-        TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
-            tx, [], {}
-        )
-        return constant_none
-
-    def reconstruct_type(self, codegen: "PyCodegen"):
-        ty = NoEnterTorchFunctionMode
-        codegen(
-            AttrSource(
-                codegen.tx.import_source(ty.__module__),
-                ty.__name__,
-            )
-        )
-
-    def supports_graph_breaks(self):
-        return True
-
-    def exit_on_graph_break(self):
-        return False
 
 
 def _get_all_args(
