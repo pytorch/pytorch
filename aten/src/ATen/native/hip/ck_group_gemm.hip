@@ -207,7 +207,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
                 static_cast<ck::index_t>(K),
                 static_cast<ck::index_t>(lda),
                 static_cast<ck::index_t>(ldb),
-                static_cast<ck::index_t>(ldc)
+                static_cast<ck::index_t>(ldc),
+                {} // --> stride_Ds_
             });
             p_a_ptrs.push_back(group_a_ptr);
             p_b_ptrs.push_back(group_b_ptr);
@@ -283,7 +284,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
                 static_cast<ck::index_t>(K),
                 static_cast<ck::index_t>(lda),
                 static_cast<ck::index_t>(ldb),
-                static_cast<ck::index_t>(ldc)
+                static_cast<ck::index_t>(ldc),
+                {} // --> stride_Ds_
             });
             p_a_ptrs.push_back(group_a_ptr);
             p_b_ptrs.push_back(group_b_ptr);
@@ -347,7 +349,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
                 static_cast<ck::index_t>(K),
                 static_cast<ck::index_t>(lda),
                 static_cast<ck::index_t>(ldb),
-                static_cast<ck::index_t>(ldc)
+                static_cast<ck::index_t>(ldc),
+                {} // --> stride_Ds_
             });
             p_a_ptrs.push_back(group_a_ptr);
             p_b_ptrs.push_back(group_b_ptr);
