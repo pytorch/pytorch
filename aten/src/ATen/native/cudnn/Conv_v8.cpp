@@ -46,7 +46,7 @@ namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
 constexpr int64_t operator"" _TiB(unsigned long long n) {
-  return size_t(n) << 40;
+  return static_cast<size_t>(n) << 40;
 }
 
 uint8_t getAlignment(const Tensor& t) {
@@ -93,7 +93,10 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
 
   std::vector<int64_t> strides_copy(std::begin(strides), std::end(strides));
   fixSizeOneDimStride<int64_t>(
-      sizes.size(), &sizes[0], (int64_t*)&strides_copy[0], channels_last);
+      sizes.size(),
+      &sizes[0],
+      static_cast<int64_t*>(&strides_copy[0]),
+      channels_last);
   auto r = cudnn_frontend::TensorBuilder()
                .setDim(sizes.size(), sizes.data())
                .setStrides(strides_copy.size(), strides_copy.data())

@@ -103,7 +103,17 @@ class SuperVariable(VariableTracker):
             codegen.extend_output(create_call_function(1, False))
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
-        assert self.objvar, "1-arg super not implemented"
+        if not self.objvar:
+            unimplemented_v2(
+                gb_type="1-arg super not implemented",
+                context="",
+                explanation=f"Dynamo failed to trace attribute `{name}` accessed "
+                f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
+                "because one-argument of super() is not supported.",
+                hints=[
+                    "Use two-argument super(type, object_or_type).",
+                ],
+            )
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
@@ -201,9 +211,10 @@ class SuperVariable(VariableTracker):
                 and not (args or kwargs)
             ):
                 with do_not_convert_to_tracable_parameter():
-                    return variables.UserFunctionVariable(
-                        unpatched_nn_module_init, source=source
-                    ).call_function(tx, [self.objvar] + args, kwargs)
+                    fn_vt = VariableTracker.build(
+                        tx, unpatched_nn_module_init, source=source
+                    )
+                    return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented_v2(
                     gb_type="Unsupported super().__init__() call",
@@ -231,9 +242,8 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
-            return variables.UserFunctionVariable(
-                inner_fn.__func__, source=source
-            ).call_function(tx, args, kwargs)
+            fn_vt = VariableTracker.build(tx, inner_fn.__func__, source=source)
+            return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
@@ -256,13 +266,13 @@ class SuperVariable(VariableTracker):
                     tx, self.objvar.value_type, cls_source
                 )
 
-            return variables.UserFunctionVariable(
-                inner_fn.__func__, source=AttrSource(source, "__func__")
-            ).call_function(tx, [cls_variable, *args], kwargs)
+            fn_vt = VariableTracker.build(
+                tx, inner_fn.__func__, source=AttrSource(source, "__func__")
+            )
+            return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
-            return variables.UserFunctionVariable(
-                inner_fn, source=source
-            ).call_function(tx, [self.objvar] + args, kwargs)
+            fn_vt = VariableTracker.build(tx, inner_fn, source=source)
+            return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, source=source
@@ -575,10 +585,8 @@ class ComptimeVariable(VariableTracker):
         from ..comptime import comptime
 
         # To support the comptime.print_graph convenience accessors
-        from .functions import UserFunctionVariable
-
-        return UserFunctionVariable(
-            getattr(comptime, name), source=AttrSource(self.source, name)
+        return VariableTracker.build(
+            tx, getattr(comptime, name), source=AttrSource(self.source, name)
         )
 
     def call_function(
@@ -758,10 +766,10 @@ class AutogradFunctionVariable(VariableTracker):
             # functions, so we have to add guards manually.
             if self.source:
                 fwd_src = AttrSource(self.source, "forward")
-                install_guard(fwd_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                install_guard(fwd_src.make_guard(GuardBuilder.CLOSURE_MATCH))
                 if is_setup_ctx_defined:
                     setup_ctx_src = AttrSource(self.source, "setup_context")
-                    install_guard(setup_ctx_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                    install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
 
@@ -777,9 +785,8 @@ class AutogradFunctionVariable(VariableTracker):
             sig = inspect.signature(fn)
             if len(args) - 1 == len(sig._parameters):
                 args = args[1:]  # Don't use context
-            return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, args, kwargs
-            )
+            fn_vt = VariableTracker.build(tx, fn, source=source)
+            return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
                 fn.__func__,
@@ -805,9 +812,8 @@ class AutogradFunctionVariable(VariableTracker):
         assert isinstance(fn, types.FunctionType)
 
         fn_source = AttrSource(self.source, "backward")
-        return variables.UserFunctionVariable(fn, source=fn_source).call_function(
-            tx, args, kwargs
-        )
+        fn_vt = VariableTracker.build(tx, fn, source=fn_source)
+        return fn_vt.call_function(tx, args, kwargs)
 
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
         return AutogradFunctionVariable(self.fn_cls)
@@ -1036,10 +1042,12 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                 assert tx.one_graph or tx.error_on_graph_break, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
-                return variables.UserFunctionVariable(
+                # queue_callback is a method-wrapper, no need to insert a guard.
+                fn_vt = VariableTracker.build(
+                    tx,
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
-                    source=self.source,
-                ).call_function(
+                )
+                return fn_vt.call_function(
                     tx,
                     (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
                     kwargs,
@@ -1338,7 +1346,7 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
-        unimplemented("unsupported method call on typing variablel")
+        unimplemented("unsupported method call on typing variable")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1360,6 +1368,8 @@ class TypingVariable(VariableTracker):
         return self.value
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if not isinstance(self.value, types.GenericAlias):
+            return super().reconstruct(codegen)
         # We're just trying to load the type here. Reconstructing the type from
         # scratch is tricky - for a type like `typing.List[int]` we'd need to
         # deconstruct the origin and args.  The origin for `List[int]` is `list`

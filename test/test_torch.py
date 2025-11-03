@@ -138,7 +138,7 @@ class TestTorchDeviceType(TestCase):
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
-        for i in range(dim):
+        for _ in range(dim):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
 
@@ -172,7 +172,7 @@ class TestTorchDeviceType(TestCase):
 
         element_size = torch._utils._element_size(dtype)
 
-        for i in range(10):
+        for _ in range(10):
             bytes_list = [rand_byte() for _ in range(element_size)]
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
@@ -2012,7 +2012,7 @@ class TestTorchDeviceType(TestCase):
             res = x.scatter_add(dim, idx, src)
 
             # Checking if scatter_add is deterministic
-            for i in range(5):
+            for _ in range(5):
                 res_next = x.scatter_add(dim, idx, src)
                 self.assertEqual(res, res_next, atol=0, rtol=0)
                 res = res_next
@@ -2264,7 +2264,7 @@ class TestTorchDeviceType(TestCase):
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
                 aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
-                    check(x, correction, fweights, aweights)
+                    check(x, correction, fw, aw)
 
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
@@ -2479,7 +2479,8 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -2598,7 +2599,7 @@ class TestTorchDeviceType(TestCase):
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
             x.requires_grad = True
-            d = torch.cdist(x, y)
+            d = torch.cdist(x, y, p=p)
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
@@ -5151,7 +5152,7 @@ class TestTorchDeviceType(TestCase):
         prob_dist = torch.rand(10000, 1000, device=device, dtype=dtype)
         n_sample = 1
 
-        for i in range(trials):
+        for _ in range(trials):
             gen.manual_seed(seed)
             samples_1 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
 
@@ -5229,7 +5230,7 @@ class TestTorchDeviceType(TestCase):
         # TODO copy _like constructors to stride permutation instead of just layout
         if not TEST_WITH_TORCHINDUCTOR:
             x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
-            for i in range(10):
+            for _ in range(10):
                 permutation = list(range(len(x.shape)))
                 random.shuffle(permutation)
                 x = x.permute(permutation)
