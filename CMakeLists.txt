@@ -731,7 +731,7 @@ if(USE_PRIORITIZED_TEXT_FOR_LD)
 
   set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
   set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
-  
+
   execute_process(
     COMMAND ${Python_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
