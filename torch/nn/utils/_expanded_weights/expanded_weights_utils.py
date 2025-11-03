@@ -32,7 +32,7 @@ def standard_kwargs(kwarg_names, expanded_args):
     expanded_args_without_kwargs = expanded_args[
         : len(expanded_args) - len(kwarg_names)
     ]
-    expanded_kwargs = dict(zip(kwarg_names, kwarg_values))
+    expanded_kwargs = dict(zip(kwarg_names, kwarg_values, strict=True))
     return expanded_args_without_kwargs, expanded_kwargs
 
 

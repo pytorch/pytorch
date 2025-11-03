@@ -1838,6 +1838,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_xpu(self):
+        return set()
+
+    @property
     def skip_models_for_cpu(self):
         return set()
 
@@ -3927,6 +3931,8 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(runner.skip_models_for_cpu_aarch64)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
+    elif args.devices == ["xpu"]:
+        runner.skip_models.update(runner.skip_models_for_xpu)
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
