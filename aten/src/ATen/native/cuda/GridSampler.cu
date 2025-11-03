@@ -357,7 +357,11 @@ namespace {
       gInp_sW = grad_input.strides[3];
     }
 
+    // grad_grid is [N, H, W, 2]
+    const index_t gGrid_sN = grad_grid.strides[0];
+    const index_t gGrid_sH = grad_grid.strides[1];
     const index_t gGrid_sW = grad_grid.strides[2];
+    const index_t gGrid_sCoor = grad_grid.strides[3];
 
     CUDA_KERNEL_LOOP_TYPE(linear_idx, nthreads, index_t) {
       // Flatten (n, c, h, w) to decompose N*C*H*W
@@ -445,7 +449,10 @@ namespace {
             }
           }
 
-          scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          //scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          // Write grad_grid[n, h, w, *] — no channel dim.
+          // Using standard stride-based index calculation for better robustness than the packed form.
+          scalar_t* gGrid_ptr = grad_grid.data + n * gGrid_sN + h * gGrid_sH + w * gGrid_sW;
           gGrid_ptr[0] = gix_mult * gix;
           gGrid_ptr[1] = giy_mult * giy;
         }
@@ -457,7 +464,10 @@ namespace {
           safe_add_2d(grad_input.data, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, gOut, NC_offset, grad_input_memory_span);
         }
         if (c == 0) {
-          scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          //scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          // Write grad_grid[n, h, w, *] — no channel dim.
+          // Using standard stride-based index calculation for better robustness than the packed form.
+          scalar_t* gGrid_ptr = grad_grid.data + n * gGrid_sN + h * gGrid_sH + w * gGrid_sW;
           gGrid_ptr[0] = static_cast<scalar_t>(0);
           gGrid_ptr[1] = static_cast<scalar_t>(0);
         }
@@ -499,13 +509,16 @@ namespace {
             for (index_t i = 0; i < 4; ++i) {
               #pragma unroll 4
               for (index_t j = 0; j < 4; ++j) {
-                const scalar_t val = get_value_bounded<scalar_t, index_t>(inp_ptr_all, ix_nw - 1 + i, iy_nw - 1 + j, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
+                const scalar_t val = get_value_bounded<scalar_t>(inp_ptr_all, static_cast<scalar_t>(ix_nw - 1 + i), static_cast<scalar_t>(iy_nw - 1 + j), inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
                 gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut_c2;
                 giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut_c2;
               }
             }
           }
-          scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          //scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          // Write grad_grid[n, h, w, *] — no channel dim.
+          // Using standard stride-based index calculation for better robustness than the packed form.
+          scalar_t* gGrid_ptr = grad_grid.data + n * gGrid_sN + h * gGrid_sH + w * gGrid_sW;
           gGrid_ptr[0] = gix_mult * gix;
           gGrid_ptr[1] = giy_mult * giy;
         }
