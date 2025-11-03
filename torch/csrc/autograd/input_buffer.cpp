@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 
 #include <ATen/CachedTensorUtils.h>
@@ -11,6 +12,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/util/Logging.h>
 #include <optional>
 
 #include <cstddef>
@@ -191,7 +193,8 @@ void InputBuffer::add(
     size_t pos,
     Variable&& var,
     const std::optional<c10::Stream>& opt_producer_stream_,
-    const std::optional<c10::Stream>& opt_consumer_stream_) {
+    const std::optional<c10::Stream>& opt_consumer_stream_,
+    Node* fn) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
 
   if (!var.defined()) {
@@ -231,6 +234,21 @@ void InputBuffer::add(
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
+  if (*opt_consumer_stream != *opt_producer_stream &&
+      dynamic_cast<AccumulateGrad*>(fn) &&
+      at::globalContext().warnOnAccumulateGradStreamMismatch()) {
+    TORCH_WARN_ONCE(
+        "The AccumulateGrad node's stream does not match the stream of the node that produced "
+        "the incoming gradient. This may incur unnecessary synchronization and break CUDA graph "
+        "capture if the AccumulateGrad node's stream is the default stream. This mismatch is "
+        "caused by an AccumulateGrad node created prior to the current iteration being kept alive. "
+        "This can happen if the autograd graph is still being kept alive by tensors such as the "
+        "loss, or if you are using DDP, which will stash a reference to the node. To resolve the "
+        "mismatch, delete all references to the autograd graph or ensure that DDP initialization is "
+        "performed under the same stream as subsequent forwards. If the mismatch is intentional, "
+        "you can use torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False) to suppress this "
+        "warning.");
+  }
   // See Note: [Autograd Producer-Consumer Stream Syncs]
   if (!opt_accum_streams[pos].has_value()) {
     // [ First producer ]

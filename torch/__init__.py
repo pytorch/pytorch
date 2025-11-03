@@ -1810,7 +1810,7 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
     _check_with(
         NotImplementedError,
         cond,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         message,
     )
 
@@ -2644,7 +2644,16 @@ def compile(
     from torch._inductor.compiler_bisector import CompilerBisector
 
     if bisect_backend := CompilerBisector.get_backend():
-        backend = bisect_backend
+        import torch._inductor.config as inductor_config
+
+        # don't override the backend for use cases like vllm
+        # which leverages their custom backend.
+        if not (
+            inductor_config.test_configs.bisect_keep_custom_backend_for_inductor
+            and bisect_backend == "inductor"
+            and not isinstance(backend, str)
+        ):
+            backend = bisect_backend
 
     guard_filter_fn = None
     if options and isinstance(options, dict):
@@ -2669,7 +2678,7 @@ def compile(
                     dynamic=dynamic,
                     disable=disable,
                     guard_filter_fn=guard_filter_fn,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                 )(model)(*args, **kwargs)
 
         return export_wrapped_fn
