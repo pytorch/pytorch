@@ -730,7 +730,7 @@ def process_collective_bucket(
             is_all_gather_into_tensor(n)
             and isinstance(node_in, torch.fx.Node)  # Add type check
             and node_in.op == "call_function"
-            and node_in.target == torch.ops.prims.convert_element_type.default
+            and node_in.target is torch.ops.prims.convert_element_type.default
             and len(node_in.users) == 1
         ):
             ag_node_to_pre_nodes[n].append(node_in)
