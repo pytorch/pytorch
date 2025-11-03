@@ -8,7 +8,6 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.distributed.distributed_c10d import _resolve_process_group
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -182,6 +181,8 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
     assert kernel is not None
     py_kernel_name = getattr(kernel, "python_kernel_name", "")
     pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
     pg = _resolve_process_group(pg_name)
     rank: int = torch.distributed.get_rank(pg)
     # TODO(ivankobzarev): Figure out how we can use time estimations,
@@ -419,6 +420,8 @@ def estimate_nccl_collective_runtime_from_fx_node(
         flat_args = [to_real_tensor(a) for a in flat_args]
         real_args, real_kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
 
+        from torch.distributed.distributed_c10d import _resolve_process_group
+
         pg = _resolve_process_group(group_name)
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
@@ -433,7 +436,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
         est_time_ms = est_time_us / 1e3
         return est_time_ms
 
-    if use_nccl_estimator:
+    if torch.distributed.is_nccl_available() and use_nccl_estimator:
         est_time_ms = _nccl_estimate()
         if est_time_ms is not None:
             return est_time_ms
