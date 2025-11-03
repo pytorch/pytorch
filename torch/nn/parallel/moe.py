@@ -5,7 +5,7 @@ import torch.distributed._symmetric_memory as symm_mem
 
 # Helper function to determine the position of a token in an expert chunk from a
 # source rank to a destination rank
-def _get_occurrence_numbers(topk_indices: torch.Tensor) -> torch.Tensor:
+def _get_occurrence_numbers(topk_indices: torch.Tensor, n_experts: int) -> torch.Tensor:
     """
     Transform topk_indices to show which occurrence each element is, occurrence number starts from 0.
 
@@ -16,7 +16,7 @@ def _get_occurrence_numbers(topk_indices: torch.Tensor) -> torch.Tensor:
     unique_vals, inverse = torch.unique(topk_indices, return_inverse=True)
 
     # Create a tensor to count occurrences for each unique value
-    n_unique = len(unique_vals)
+    n_unique = n_experts
     n_elements = len(topk_indices)
 
     # Create a matrix where each row corresponds to a unique value
@@ -240,7 +240,9 @@ def dedup_dispatch(
         )
 
     # Figure out rank of each token in its expert chunk
-    occurrences = _get_occurrence_numbers(topk_indices_intranode_out.view(-1))
+    occurrences = _get_occurrence_numbers(
+        topk_indices_intranode_out.view(-1), n_experts
+    )
 
     # Wait for completion of intra-node exchange plan
     current_stream = torch.accelerator.current_stream(device)
