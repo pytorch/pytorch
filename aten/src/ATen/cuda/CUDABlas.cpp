@@ -388,7 +388,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
-  uint32_t mask = 999;
+  uint32_t mask = -1;
 #endif
   void * alpha_ptr = &alpha;
   void * beta_ptr = &beta;
@@ -512,7 +512,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  if (mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major == 10) {
+  // on Blackwell+, we fake a n > 1 matmul when queruying heuristics
+  // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
+  if (mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10) {
      CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, ldb, opb == CUBLAS_OP_T);
      CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, ldc);
 
