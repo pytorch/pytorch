@@ -416,15 +416,14 @@ class ComposabilityTest(MultiProcessTestCase):
                 param_dtype=MixedPrecisionParam,
                 reduce_dtype=torch.float32,
             )
-            replicate_config = {"mp_policy": mp_policy}
+            replicate_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
-                    device_mesh=dp_mesh,
                     **replicate_config,
                     reshard_after_forward=False,
                 )
-            dp_model = replicate(partial_model, device_mesh=dp_mesh, **replicate_config)
+            dp_model = replicate(partial_model, **replicate_config)
             return dp_model
 
         # Apply same precision to reference model (without replicate)
@@ -648,10 +647,10 @@ class ComposabilityTest(MultiProcessTestCase):
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
-                    device_mesh=dp_mesh,
+                    mesh=dp_mesh,
                     reshard_after_forward=False,
                 )
-            dp_model = replicate(partial_model, device_mesh=dp_mesh)
+            dp_model = replicate(partial_model, mesh=dp_mesh)
             return dp_model
 
         def pipelined_models_parameters(start_layer, model):
