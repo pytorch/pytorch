@@ -587,8 +587,12 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
-       (tensor._is_zerotensor() && tensor.unsafeGetTensorImpl()->is_wrapped_number() && tensor.dim() == 0)) {
-      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu() || (tensor._is_zerotensor() && tensor.dim() == 0));
+        (tensor._is_zerotensor() &&
+         tensor.unsafeGetTensorImpl()->is_wrapped_number() &&
+         tensor.dim() == 0)) {
+      TORCH_INTERNAL_ASSERT(
+          tensor.device().is_cpu() ||
+          (tensor._is_zerotensor() && tensor.dim() == 0));
       auto py_tensor = py::cast(tensor);
       if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
         return py_tensor.attr("_wrapped_number");
@@ -598,11 +602,17 @@ py::object toPyObject(IValue ivalue) {
         case at::ScalarType::Bool:
           return py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
-          return (tensor._is_zerotensor()) ? py::cast(int64_t(0)) : py::cast(*tensor.const_data_ptr<int64_t>());
+          return (tensor._is_zerotensor())
+              ? py::cast(int64_t(0))
+              : py::cast(*tensor.const_data_ptr<int64_t>());
         case at::ScalarType::UInt64:
-          return (tensor._is_zerotensor()) ? py::cast(u_int64_t(0)) : py::cast(*tensor.const_data_ptr<uint64_t>());
+          return (tensor._is_zerotensor())
+              ? py::cast(u_int64_t(0))
+              : py::cast(*tensor.const_data_ptr<uint64_t>());
         case at::ScalarType::Double:
-          return (tensor._is_zerotensor()) ? py::cast(0.0) : py::cast(*tensor.const_data_ptr<double>());
+          return (tensor._is_zerotensor())
+              ? py::cast(0.0)
+              : py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
           return py::cast(static_cast<std::complex<double>>(
