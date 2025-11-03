@@ -98,6 +98,15 @@ if [ "$is_main_doc" = true ]; then
   # be documented then removed from there.
   lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
   undocumented=$((lines - 2))
+
+  echo "======================================"
+  echo "Documentation Coverage Report"
+  echo "======================================"
+  echo "Total lines in python.txt: $lines"
+  echo "Header lines (to skip): 2"
+  echo "Undocumented count: $undocumented"
+  echo "======================================"
+
   if [ $undocumented -lt 0 ]; then
     echo coverage output not found
     exit 1
@@ -106,13 +115,24 @@ if [ "$is_main_doc" = true ]; then
     echo "ERROR: $undocumented undocumented objects found!"
     echo "======================================"
     echo ""
-    echo "Full coverage report:"
-    cat build/coverage/python.txt
+    echo "Full coverage report (first 50 lines):"
+    head -50 build/coverage/python.txt
     echo ""
     echo "======================================"
-    echo "Undocumented modules/objects (lines after TOTAL):"
-    tail -n +$((lines - undocumented + 1)) build/coverage/python.txt
+    echo "... (truncated, see full file for all entries)"
     echo "======================================"
+    echo ""
+    echo "Last 50 lines of coverage report:"
+    tail -50 build/coverage/python.txt
+    echo ""
+    echo "======================================"
+    echo ""
+    echo "Total lines in python.txt: $lines"
+    echo "Header lines (to skip): 2"
+    echo "Undocumented count: $undocumented"
+    echo ""
+    echo "To debug: check if coverage_ignore_functions and coverage_ignore_classes"
+    echo "in docs/source/conf.py match the actual function/class names as reported above."
     echo ""
     echo "Make sure you've updated relevant .rsts in docs/source!"
     echo "You can reproduce locally by running 'cd docs && make coverage && cat build/coverage/python.txt'"

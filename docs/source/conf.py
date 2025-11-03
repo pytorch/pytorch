@@ -207,6 +207,20 @@ templates_path = [
 ]
 # TODO: document these and remove them from here.
 
+# coverage_ignore_modules uses regex patterns to match module names
+# These modules will be completely ignored by the coverage checker
+coverage_ignore_modules = [
+    # Internal/private modules (anything starting with _)
+    r".*\._.*",
+    # Experimental modules that are not yet stable
+    r"torch\.fx\.experimental\..*",
+    r"torch\.distributed\.elastic\..*",
+    # Test and example modules
+    r".*\.test_.*",
+    r".*\.tests\..*",
+    r".*\.examples\..*",
+]
+
 # Fixes the duplicated
 autosummary_filename_map = {
     "torch.nn.utils.prune.identity": "torch.nn.utils.prune.identity_function",
