@@ -355,9 +355,16 @@ def redistribute_cost(
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    from torch.distributed.tensor._redistribute import _gen_transform_infos_non_cached
+    from torch.distributed.tensor._redistribute import (
+        _gen_transform_infos,
+        _gen_transform_infos_non_cached,
+    )
+    from torch.distributed._functional_collectives import _are_we_tracing
 
-    transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
+    if _are_we_tracing():
+        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
+    else:
+        transform_infos = _gen_transform_infos(current_spec, target_spec)
     for transform_info in transform_infos:
         assert current_spec.tensor_meta is not None, (
             "spec should have tensor meta defined!"
