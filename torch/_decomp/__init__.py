@@ -58,7 +58,7 @@ def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
         return False
     if torch.Tag.maybe_aliasing_or_mutating in op.tags:
         return True
-    return op == torch.ops.aten.native_batch_norm.default
+    return op is torch.ops.aten.native_batch_norm.default
 
 
 def _add_op_to_registry(registry, op, fn):
@@ -404,6 +404,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.max_unpool3d,
             aten.mish,
             aten.mish_,
+            aten.mish_backward,
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
@@ -419,6 +420,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.native_dropout_backward,
             aten.native_group_norm_backward,
             aten.native_layer_norm_backward,
+            aten._fused_rms_norm,
             aten._fused_rms_norm_backward,
             aten.new_empty,
             aten.new_full,
@@ -475,6 +477,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.silu,
             aten.silu_,
             aten.silu_backward.grad_input,
+            aten.silu_backward,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
