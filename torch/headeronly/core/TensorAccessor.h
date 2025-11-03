@@ -28,7 +28,7 @@ struct RestrictPtrTraits {
 namespace detail {
 
 template <
-    typename ArrayRef,
+    class ArrayRef,
     typename T,
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
@@ -72,7 +72,7 @@ class TensorAccessorBase {
 // For CUDA `Tensor`s, `GenericPackedTensorAccessor` is used on the host and
 // only indexing on the device uses `TensorAccessor`s.
 template <
-    typename ArrayRef,
+    class ArrayRef,
     typename T,
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
@@ -109,7 +109,7 @@ class TensorAccessor
 };
 
 template <
-    typename ArrayRef,
+    class ArrayRef,
     typename T,
     template <typename U> class PtrTraits,
     typename index_t>
@@ -201,7 +201,7 @@ class GenericPackedTensorAccessorBase {
 };
 
 template <
-    typename ArrayRef,
+    class ArrayRef,
     typename IndexBoundsCheck,
     typename T,
     size_t N,
@@ -287,7 +287,7 @@ class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<
 };
 
 template <
-    typename ArrayRef,
+    class ArrayRef,
     typename IndexBoundsCheck,
     typename T,
     template <typename U> class PtrTraits,

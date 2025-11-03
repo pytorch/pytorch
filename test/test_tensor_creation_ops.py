@@ -466,8 +466,8 @@ class TestTensorCreation(TestCase):
             b = torch.tensor([3, 4], device=device, dtype=dtype)
             error = r"Expected both inputs to be Half, Float or Double tensors but " \
                     r"got [A-Za-z]+ and [A-Za-z]+"
-        with self.assertRaisesRegex(RuntimeError, error):
-            op(a, b)
+            with self.assertRaisesRegex(RuntimeError, error):
+                op(a, b)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
