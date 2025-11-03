@@ -1336,7 +1336,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
             max_out_len_intra = seqlen * out_len_ratio
             intra_out_golden = symm_mem.empty(
                 max_out_len_intra, hid_dim, dtype=dtype, device=self.device
-            ).fill_(-1)
+            )
 
             torch.ops.symm_mem.all_to_all_vdev_2d(
                 expanded_inp_intra_symm,
@@ -1347,8 +1347,14 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
                 align,
             )
 
-            tot_recv_len = intra_out_splits_offsets[0].sum()
-            self.assertEqual(intra_out[:tot_recv_len], intra_out_golden[:tot_recv_len])
+            # tot_recv_len = intra_out_splits_offsets[0].sum()
+            for i in range(experts_per_node):
+                split = intra_out_splits_offsets[0][i]
+                offset = intra_out_splits_offsets[1][i]
+                self.assertEqual(
+                    intra_out[offset : offset + split],
+                    intra_out_golden[offset : offset + split],
+                )
 
         verify()
 

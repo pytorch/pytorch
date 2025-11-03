@@ -121,9 +121,7 @@ def dedup_dispatch(
     inp = symm_mem.empty((expanded_seqlen, hid_dim), dtype=dtype, device=device).copy_(
         expanded_inp
     )
-    inter_out = symm_mem.empty(
-        (max_out_len, hid_dim), dtype=dtype, device=device
-    ).fill_(-1)
+    inter_out = symm_mem.empty((max_out_len, hid_dim), dtype=dtype, device=device)
     in_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=device).copy_(splits)
     src_offsets = symm_mem.empty(nnodes, dtype=torch.int64, device=device)
     out_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=device)
@@ -209,14 +207,12 @@ def dedup_dispatch(
     )
     intra_out_splits = symm_mem.empty(
         experts_per_node, dtype=torch.int64, device=device
-    ).fill_(0)
+    )
     intra_dst_offsets = symm_mem.empty(
         experts_per_node, dtype=torch.int64, device=device
     )
     max_out_len_intra = seqlen * out_len_ratio
-    intra_out = symm_mem.empty(
-        max_out_len_intra, hid_dim, dtype=dtype, device=device
-    ).fill_(-1)
+    intra_out = symm_mem.empty(max_out_len_intra, hid_dim, dtype=dtype, device=device)
 
     # Create intra-node exchange plan on a side stream, to overlap with the
     # occurrence calculation
