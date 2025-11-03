@@ -93,7 +93,7 @@ static PyMethodDef methods[] = {
     {"_exchangeDevice", _exchangeDevice, METH_O, nullptr},
     {"_get_device_count", _getDeviceCount, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
-    
+
 // LITERALINCLUDE START: OPENREG MODULE METHODS
 /*
  * When ASAN is enabled, PyTorch modifies the dlopen flag during import,

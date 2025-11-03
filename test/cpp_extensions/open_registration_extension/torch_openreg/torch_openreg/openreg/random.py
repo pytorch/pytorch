@@ -69,6 +69,7 @@ def set_rng_state(new_state: ByteTensor, device: int | str | torch.device = "ope
 
     _lazy_call(cb)
 
+
 # LITERALINCLUDE END: OPENREG GENERATOR PY WRAPPER EXAMPLE
 
 
@@ -87,6 +88,7 @@ def seed() -> None:
         If you are working with a multi-devices model, this function will only initialize
         the seed on one device.  To initialize all devices, use :func:`seed_all`.
     """
+
     def cb():
         idx = current_device()
         default_generator = torch_openreg._C._get_default_generator(idx)
@@ -100,6 +102,7 @@ def seed_all() -> None:
 
     It's safe to call this function if OpenReg device is not available; in that case, it is silently ignored.
     """
+
     def cb():
         random_seed = 0
         seeded = False
@@ -112,8 +115,8 @@ def seed_all() -> None:
             else:
                 default_generator.manual_seed(random_seed)
 
-
     _lazy_call(cb)
+
 
 def initial_seed() -> int:
     r"""Returns the initial seed for generating random numbers for the current backend device.
@@ -135,13 +138,17 @@ def manual_seed(seed: int) -> None:
         seed (int): The desired seed.
     """
     seed = int(seed)
+
     def cb():
         idx = current_device()
         default_generator = torch_openreg._C._get_default_generator(idx)
         default_generator.manual_seed(seed)
 
     _lazy_call(cb, seed=True)
+
+
 # LITERALINCLUDE END: OPENREG MANUAL SEED
+
 
 def manual_seed_all(seed: int) -> None:
     r"""Set the seed for generating random numbers on all backend devices.
