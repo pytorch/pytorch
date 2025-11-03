@@ -333,10 +333,7 @@ class TestAnalysis(TestCase):
         ):
             main()
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not SM80OrLater, "Requires SM80")
     def test_augment_trace_helper_unit(self):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)
@@ -347,7 +344,7 @@ class TestAnalysis(TestCase):
         (not torch.xpu.is_available()) and (not SM80OrLater),
         "Requires XPU or CUDA SM80",
     )
-    @skipXPUIf(not TEST_WITH_SLOW, "Skip because test too slow on XPU")
+    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -521,7 +518,7 @@ class TestAnalysis(TestCase):
         (not torch.xpu.is_available()) and (not SM80OrLater),
         "Requires XPU or CUDA SM80",
     )
-    @skipXPUIf(not TEST_WITH_SLOW, "Skip because test too slow on XPU")
+    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
