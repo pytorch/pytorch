@@ -97,7 +97,10 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
 
 // Get TORCH_ABI_VERSION of the built libtorch.so
+// version.h is not included for C10_MOBILE builds
+#ifndef C10_MOBILE
 AOTI_TORCH_EXPORT uint64_t aoti_torch_abi_version();
+#endif // C10_MOBILE
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
