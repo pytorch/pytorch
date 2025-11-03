@@ -13774,6 +13774,28 @@ class TestUtils(TestCase):
         self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
 
+class TestMaskedConv2d(TestCase):
+    def test_masked_conv2d_equivalence(self):
+        x = torch.randn(2, 3, 8, 8, requires_grad=True)
+        weight = torch.randn(4, 3, 3, 3, requires_grad=True)
+        bias = torch.randn(4, requires_grad=True)
+        mask = (torch.rand(2, 1, 8, 8) > 0.3).to(x.device)
+        # Reference: manual masking
+        out_ref = F.conv2d(x, weight, bias, padding=1) * mask
+        loss_ref = out_ref.sum()
+        loss_ref.backward()
+        grad_w_ref = weight.grad.clone()
+        grad_b_ref = bias.grad.clone()
+        grad_x_ref = x.grad.clone()
+        weight.grad.zero_(); bias.grad.zero_(); x.grad.zero_()
+        # Test masked_conv2d
+        out_test = F.masked_conv2d(x, weight, bias, padding=1, mask=mask)
+        loss_test = out_test.sum()
+        loss_test.backward()
+        self.assertTrue(torch.allclose(out_ref, out_test, atol=1e-6))
+        self.assertTrue(torch.allclose(weight.grad, grad_w_ref, atol=1e-6))
+        self.assertTrue(torch.allclose(bias.grad, grad_b_ref, atol=1e-6))
+        self.assertTrue(torch.allclose(x.grad, grad_x_ref, atol=1e-6))
 
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)

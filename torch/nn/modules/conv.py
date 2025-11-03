@@ -19,6 +19,7 @@ __all__ = [
     "Conv1d",
     "Conv2d",
     "Conv3d",
+    "MaskedConv2d",
     "ConvTranspose1d",
     "ConvTranspose2d",
     "ConvTranspose3d",
@@ -1882,3 +1883,26 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
 
     def _get_num_spatial_dims(self) -> int:
         return 3
+
+
+
+
+class MaskedConv2d(Conv2d):
+    r"""
+    2D convolution layer that applies a binary spatial mask on the output.
+
+    This layer behaves like Conv2d, but an optional mask parameter can be passed to `forward`.
+    The mask zeroes out outputs and their gradients outside masked regions.
+    """
+
+    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        return F.masked_conv2d(
+            input,
+            self.weight,
+            self.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            mask=mask
+        )

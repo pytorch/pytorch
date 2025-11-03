@@ -5,7 +5,7 @@ import math
 import warnings
 from collections.abc import Callable
 from typing import Any as _Any, Optional, TYPE_CHECKING, Union
-
+from typing import Optional, Tuple, Union
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
@@ -6798,3 +6798,33 @@ def scaled_grouped_mm(
     )
 
     return out
+
+def masked_conv2d(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
+    stride: Union[int, Tuple[int,int]] = 1,
+    padding: Union[int, Tuple[int,int]] = 0,
+    dilation: Union[int, Tuple[int,int]] = 1,
+    groups: int = 1,
+    mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Masked 2D convolution: behaves like F.conv2d but multiplies the output
+    by a binary mask (mask==1 keeps, mask==0 zeroes). Gradients are
+    automatically zeroed outside the mask.
+
+    Args:
+        input: Input tensor (N, C_in, H_in, W_in)
+        weight: Convolution weight (C_out, C_in/groups, kH, kW)
+        bias: Optional bias
+        mask: Optional spatial mask of shape (N, 1, H_out, W_out) or broadcastable
+    """
+    out = conv2d(input, weight, bias, stride, padding, dilation, groups)
+    if mask is not None:
+        while mask.dim() < out.dim():
+            mask = mask.unsqueeze(0)
+        mask = mask.to(dtype=out.dtype, device=out.device)
+        out = out * mask
+    return out
+
