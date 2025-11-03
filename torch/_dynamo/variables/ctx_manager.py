@@ -1112,7 +1112,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     @staticmethod
     def _create_lambda_from_tensors(
         tx: "InstructionTranslator",
-        tensors: Union[variables.TensorVariable, variables.TupleVariable],
+        tensors: VariableTracker,
     ) -> "PreserveVersionContextVariable":
         if isinstance(tensors, variables.TensorVariable):
             versions = variables.TupleVariable(
@@ -1120,6 +1120,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             )
             tensors_tuple = variables.TupleVariable([tensors])
         else:
+            assert isinstance(tensors, variables.TupleVariable)
             versions = variables.TupleVariable(
                 [x.var_getattr(tx, "_version") for x in tensors.items]
             )
@@ -1136,8 +1137,8 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        tensors: variables.BaseListVariable,
-        prev_versions: variables.VariableTracker,
+        tensors: VariableTracker,
+        prev_versions: VariableTracker,
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("target_values", None)
