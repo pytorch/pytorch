@@ -29,7 +29,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
 #if IS_PYTHON_3_15_PLUS
-  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+  TORCH_CHECK(false, "Python 3.15+");
 #elif IS_PYTHON_3_14_PLUS
   if (!frame->stackpointer) {
     return;
