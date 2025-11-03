@@ -412,7 +412,7 @@ def _multi_tensor_nadam(
         if not all(
             p.device.type == mp.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, mp, step in zip(params, mu_products, state_steps)
+            for p, mp, step in zip(params, mu_products, state_steps, strict=True)
         ):
             raise AssertionError(
                 "If capturable=True, "
@@ -570,7 +570,7 @@ def _multi_tensor_nadam(
             step_size_grads = _stack_if_compiling(
                 [
                     (_get_value(lr) * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
-                    for mu_product, mu in zip(grouped_mu_products, mus)
+                    for mu_product, mu in zip(grouped_mu_products, mus, strict=True)
                 ]
             )
             step_size_expavg = _stack_if_compiling(
@@ -581,7 +581,9 @@ def _multi_tensor_nadam(
                         / (1.0 - _get_value(mu_product) * mu_next)
                     )
                     * -1
-                    for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)
+                    for mu_product, mu_next in zip(
+                        grouped_mu_products, mu_nexts, strict=True
+                    )
                 ]
             )
 

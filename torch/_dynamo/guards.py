@@ -132,6 +132,7 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
     DictGetItemSource,
@@ -181,6 +182,7 @@ from .utils import (
     common_constant_types,
     dataclass_fields,
     dict_keys,
+    get_current_stream,
     get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -759,6 +761,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___dataclass_fields": dataclass_fields,
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
+            "___get_current_stream": get_current_stream,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1444,6 +1447,13 @@ class GuardBuilder(GuardBuilderBase):
                 python_lambda=lambda _: get_torch_function_mode_stack_at(
                     source._get_index()
                 ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CurrentStreamSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: get_current_stream(source.device),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
