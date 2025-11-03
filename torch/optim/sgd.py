@@ -143,7 +143,9 @@ class SGD(Optimizer):  # noqa: D101
 
             if group["momentum"] != 0:
                 # update momentum_buffers in state
-                for p, momentum_buffer in zip(params, momentum_buffer_list):
+                for p, momentum_buffer in zip(
+                    params, momentum_buffer_list, strict=True
+                ):
                     state = self.state[p]
                     state["momentum_buffer"] = momentum_buffer
 
@@ -332,7 +334,8 @@ def _single_tensor_sgd(
     maximize: bool,
     has_sparse_grad: bool,
 ):
-    assert grad_scale is None and found_inf is None
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -347,7 +350,7 @@ def _single_tensor_sgd(
                     # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     grad = grad.add(param, alpha=weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -371,7 +374,7 @@ def _single_tensor_sgd(
             if lr.requires_grad:
                 param.addcmul_(grad, lr, value=-1)
             else:
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 param.add_(grad, alpha=-lr)
         else:
             param.add_(grad, alpha=-lr)
@@ -392,7 +395,8 @@ def _multi_tensor_sgd(
     maximize: bool,
     has_sparse_grad: bool,
 ):
-    assert grad_scale is None and found_inf is None
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if len(params) == 0:
         return

@@ -760,7 +760,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
-            mod = mod
             v = torch.randn(2, 10)
 
             def matcher_check_fn():

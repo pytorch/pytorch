@@ -219,7 +219,7 @@ def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int):
             if n in tensor_aliases:
                 if (
                     isinstance(n.target, torch._ops.OpOverload)
-                    or n.target == _operator.getitem
+                    or n.target is _operator.getitem
                 ):
                     continue
             nodes_used_after.add(n)
