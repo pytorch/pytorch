@@ -136,12 +136,12 @@ void normal_fill_AVX2(const TensorBase &self, const float mean, const float std,
 #endif
 
 template <typename scalar_t>
-void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std) {
+void normal_fill_16(scalar_t *data, const double mean, const double std) {
   for (const auto j : c10::irange(8)) {
-    const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
-    const scalar_t u2 = data[j + 8];
-    const scalar_t radius = std::sqrt(-2 * std::log(u1));
-    const scalar_t theta = 2.0f * c10::pi<double> * u2;
+    const double u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
+    const double u2 = data[j + 8];
+    const double radius = std::sqrt(-2 * std::log(u1));
+    const double theta = 2.0f * c10::pi<double> * u2;
     data[j] = radius * std::cos(theta) * std + mean;
     data[j + 8] = radius * std::sin(theta) * std + mean;
   }
@@ -204,7 +204,7 @@ void normal_fill_VSX(const TensorBase &self, const scalar_t mean, const scalar_t
 #endif //VSX
 
 template <typename scalar_t, typename RNG>
-void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
+void normal_fill(const TensorBase &self, const double mean, const double std, RNG generator) {
   scalar_t *data = self.data_ptr<scalar_t>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -236,12 +236,12 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
 #elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
     normal_fill_VSX(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
-    normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
+    normal_fill<float>(self, mean, std, generator);
 #endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
-        normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), generator);
+        normal_fill<scalar_t>(self, mean, std, generator);
       } else {
         auto iter = TensorIterator::borrowing_nullary_op(self);
         std::lock_guard<std::mutex> lock(generator->mutex_);
