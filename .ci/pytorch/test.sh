@@ -184,9 +184,6 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
-# Give full Dynamo stack traces on error in CI
-export TORCHDYNAMO_VERBOSE=1
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # regression in ROCm 6.0 on MI50 CI runners due to hipblaslt; remove in 6.1
   export VALGRIND=OFF
