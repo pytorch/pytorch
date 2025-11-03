@@ -648,6 +648,7 @@ class TestAnalysis(TestCase):
         # Verify device properties are present
         self.assertIn("deviceProperties", combined_profile)
         # XPU currently does not have the deviceProperties like CUDA.
+        # See https://github.com/intel/torch-xpu-ops/issues/2247
         if torch.cuda.is_available():
             self.assertGreater(len(combined_profile["deviceProperties"]), 0)
 
