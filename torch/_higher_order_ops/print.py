@@ -1,3 +1,5 @@
+import builtins
+
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
@@ -25,7 +27,7 @@ print = Print()
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore
-def print_cpu(format_str, **kwargs):
+def print_cpu(format_str, **kwargs) -> None:
     # Ensure all immutable_dict/list in kwargs are converted to regular dict/list
     map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
@@ -42,5 +44,5 @@ def print_cpu(format_str, **kwargs):
     else:
         print_str = format_str
     # Use built-in print to avoid recursion with the HOP print
-    __builtins__["print"](print_str)
+    builtins.print(print_str)
     return None
