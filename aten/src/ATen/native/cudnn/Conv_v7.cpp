@@ -64,7 +64,7 @@
 // fastest algorithm combination with a sub optimal mathType.
 
 constexpr size_t operator"" _TiB(unsigned long long n) {
-  return size_t(n) * 1024 * 1024 * 1024 * 1024;
+  return static_cast<size_t>(n) * 1024 * 1024 * 1024 * 1024;
 }
 
 namespace at {

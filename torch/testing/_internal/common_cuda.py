@@ -376,6 +376,20 @@ def xfailIfSM120OrLater(func):
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
 
+def _check_has_working_nvml() -> bool:
+    try:
+        if not torch.cuda.is_available():
+            return False
+        import pynvml
+        torch.cuda.device_memory_used()
+        return True
+    except ModuleNotFoundError:
+        return False
+    except pynvml.NVMLError_NotSupported:
+        return False
+
+HAS_WORKING_NVML = _check_has_working_nvml()
+
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
     assert not torch.cuda.is_initialized()

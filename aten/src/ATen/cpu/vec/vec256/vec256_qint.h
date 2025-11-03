@@ -514,7 +514,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
 
   using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
   using int_vec_return_type = std::array<Vectorized<c10::qint32>, kIntNumVecs>;
-  using value_type = typename c10::qint8::underlying;
+  using value_type = c10::qint8::underlying;
 
  public:
   using Vectorizedqi::Vectorizedqi;
@@ -727,7 +727,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
   using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
   using int_vec_return_type = std::array<Vectorized<c10::qint32>, kIntNumVecs>;
-  using value_type = typename c10::quint8::underlying;
+  using value_type = c10::quint8::underlying;
 
  public:
   using Vectorizedqi::Vectorizedqi;
