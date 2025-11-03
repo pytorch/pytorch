@@ -235,9 +235,10 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         from .utils import is_per_channel
 
         if is_per_channel(self.qscheme):
-            assert self.ch_axis is not None, (
-                "Must provide a valid ch_axis if qscheme is per channel"
-            )
+            if self.ch_axis is None:
+                raise AssertionError(
+                    "Must provide a valid ch_axis if qscheme is per channel"
+                )
 
     def forward(self, x: Tensor) -> Tensor:
         return x
