@@ -4347,6 +4347,33 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_tying_union_new_syntax(self):
+        def fn(x):
+            def inner1(y: torch.Tensor | None):
+                return y
+
+            def inner2(y: None | torch.Tensor):
+                return y
+
+            def inner3(y: torch.Tensor | list[int]):
+                return y
+
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+    @unittest.expectedFailure
+    def test_typing_union_new_syntax_reconstruct(self):
+        def fn(x):
+            return (
+                x + 1,
+                torch.Tensor | None,
+                None | torch.Tensor,
+                torch.Tensor | list[int],
+            )
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
     def test_optimize_on_module(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -9756,17 +9783,6 @@ def ___make_guard_fn():
             @torch.library.register_fake("mylib::foo")
             def foo_impl(x, y):
                 return torch.cat([x, y])
-
-            def setup_context(ctx, inputs, output):
-                (x, _) = inputs
-                ctx.xs = x.shape[0]
-
-            def foo_backward(ctx, grad):
-                return grad[: ctx.xs], grad[ctx.xs :]
-
-            torch.library.register_autograd(
-                "mylib::foo", foo_backward, setup_context=setup_context
-            )
 
             @torch.compile(backend="aot_eager", fullgraph=True)
             def f(x, i):

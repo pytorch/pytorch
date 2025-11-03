@@ -987,6 +987,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             return getattr(self, name)
         return getattr(self.vt, name)
 
+    def get_globals(self):
+        return self.vt.get_globals()
+
     def _build_inline_tracer(self, tx, args, kwargs):
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
