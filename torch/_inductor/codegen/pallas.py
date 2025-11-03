@@ -4,23 +4,17 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Optional, Sequence, TYPE_CHECKING
 
-import sympy
+import sympy  # noqa: TC002
 
-import torch
+import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..codecache import code_hash
 from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
-from .common import (
-    BackendFeature,
-    CSEVariable,
-    DeferredLine,
-    IndentedBuffer,
-    OpOverrides,
-)
-from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
+from .common import BackendFeature, CSEVariable, IndentedBuffer, OpOverrides
+from .simd import SIMDKernel, SIMDScheduling
+
 
 if TYPE_CHECKING:
     from ..ir import IRNode
@@ -29,8 +23,6 @@ if TYPE_CHECKING:
 
 class Unsupported(RuntimeError):
     """Exception raised when an operation is not supported by the Pallas backend."""
-
-    pass
 
 
 class PallasKernelOverrides(OpOverrides):
@@ -197,6 +189,20 @@ class PallasKernel(SIMDKernel):
         self.stores.writeline(f"{out}[...] = {value}")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
+        """
+        Generate the complete Pallas kernel code as a Python string.
+
+        This includes:
+        - Import statements for JAX/Pallas
+        - The kernel function that operates on refs
+        - The main wrapper function that handles PyTorch<->JAX conversions via DLPack
+
+        Args:
+            name: Optional kernel name (will use placeholder if not provided)
+
+        Returns:
+            str: Complete Python source code for the Pallas kernel
+        """
         # Ensure one (1) output for now
         live_outs = list(self.args.live_output_buffers())
         if len(live_outs) != 1:
@@ -236,9 +242,7 @@ class PallasKernel(SIMDKernel):
         with code.indent():
             # Identify inputs (in_ptr*) and output (out_ptr*)
             input_params = [
-                p
-                for p in kernel_params
-                if p.startswith("in_ptr") or p.startswith("in_out_ptr")
+                p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
             ]
             output_params = [p for p in kernel_params if p.startswith("out_ptr")]
 
@@ -259,15 +263,15 @@ class PallasKernel(SIMDKernel):
             # Get output spec from PyTorch tensor
             code.writeline("# Prepare output spec from PyTorch tensor")
             code.writeline("# Map PyTorch dtype to JAX dtype string")
-            code.writeline(f"_torch_dtype_to_jax = {{")
+            code.writeline("_torch_dtype_to_jax = {")
             code.writeline(
-                f"    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
+                "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
             )
             code.writeline(
-                f"    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
+                "    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
             )
-            code.writeline(f"    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
-            code.writeline(f"}}")
+            code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
+            code.writeline("}")
             code.writeline(
                 f"out_spec = jax.ShapeDtypeStruct({output_param}.shape, _torch_dtype_to_jax[{output_param}.dtype])"
             )
@@ -285,7 +289,7 @@ class PallasKernel(SIMDKernel):
             # Copy result back
             code.writeline("# Copy result back into the provided torch output tensor")
             code.writeline(
-                f"res_t = torch_dlpack.from_dlpack(jax.dlpack.to_dlpack(res))"
+                "res_t = torch_dlpack.from_dlpack(jax.dlpack.to_dlpack(res))"
             )
             code.writeline(f"{output_param}.copy_(res_t)")
 
@@ -309,7 +313,7 @@ class PallasScheduling(SIMDScheduling):
     @classmethod
     def get_backend_features(
         cls, device: torch.device
-    ) -> "Optional[set[BackendFeature]]":
+    ) -> Optional[OrderedSet[BackendFeature]]:
         # Start minimal: no special features advertised
         return OrderedSet()
 

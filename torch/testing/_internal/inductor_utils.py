@@ -28,6 +28,7 @@ from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
 from torch.utils._helion import has_helion
+from torch.utils._pallas import has_pallas
 from torch.utils._triton import has_triton
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
@@ -60,6 +61,8 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+
+HAS_PALLAS = has_pallas()
 
 HAS_HELION = has_helion()
 
