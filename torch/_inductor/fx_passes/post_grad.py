@@ -1513,7 +1513,7 @@ def _cublaslt_can_fuse_bias_epilogue(inp, mat1, mat2):
         return False
 
     # match the dispatch logic for cuBLASLT at aten/src/ATen/native/cuda/Blas.cpp
-    if not (inp.is_cuda and inp.dim() == 1 and inp.is_contiguous()):
+    if not (inp.is_cuda and (inp.dim() == 1 or inp.squeeze().dim == 1) and inp.is_contiguous()):
         return False
 
     if not (mat1.dim() == 2 and mat2.dim() == 2):
