@@ -773,7 +773,7 @@ def run_test_retries(
             # skip it and move on
             sc_command = f"--scs={stepcurrent_key}"
             print_to_file(
-                "Test succeeeded in new process, continuing with the rest of the tests"
+                "Test succeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
             # This is for log classifier so it can prioritize consistently
@@ -2098,7 +2098,7 @@ def main():
         if IS_CI:
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
-                print_to_stderr("Emiting td_test_failure_stats_v2")
+                print_to_stderr("Emitting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
