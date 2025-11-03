@@ -9,7 +9,7 @@
 #include <memory>
 
 #include <torch/csrc/stable/accelerator.h>
-#include <torch/csrc/stable/device_struct.h>
+#include <torch/csrc/stable/device.h>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
@@ -165,17 +165,8 @@ class Tensor {
   // defined in tensor-inl.h to avoid circular dependencies
   ScalarType scalar_type() const;
 
-  Device device() const {
-    int32_t device_type;
-    int32_t device_index;
-    TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_device_type(ath_.get(), &device_type));
-    TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_device_index(ath_.get(), &device_index));
-    return Device(
-        static_cast<DeviceType>(device_type),
-        static_cast<DeviceIndex>(device_index));
-  }
+  // defined in tensor-inl.h to avoid circular dependencies
+  Device device() const;
 
   // =============================================================================
   // END of C-shimified TensorBase APIs
