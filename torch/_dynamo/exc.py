@@ -273,7 +273,8 @@ class RecompileLimitExceeded(Unsupported):
 
 # debug exception thrown when tracing torch._dynamo.step_unsupported()
 class StepUnsupported(TorchDynamoException):
-    pass
+    def __init__(self) -> None:
+        self.real_stack = torch._guards.TracingContext.extract_stack()
 
 
 class UnsafeScriptObjectError(TorchDynamoException):
@@ -384,7 +385,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
-    # pyrefly: ignore  # index-error
+    # pyrefly: ignore [index-error]
     return observed_exception_map[exc_type]
 
 
