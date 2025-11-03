@@ -816,7 +816,7 @@ to debug real `torch.compile` issues.
 
 Below is a high-level overview of the stack:
 
-![Torch Dynamo Stack](_static/img/dynamo/td_stack.png)
+![Torch Dynamo Stack](../../_static/img/dynamo/td_stack.png)
 
 The stack comprises three main components: TorchDynamo, AOTAutograd, and Inductor.
 Our debugging strategy involves first identifying the component in which the error occurs
