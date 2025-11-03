@@ -89,51 +89,33 @@ if [ "$is_main_doc" = true ]; then
 
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.
-  # Count the number of lines in the file and turn that number into a variable
-  # $lines. The `cut -f1 ...` is to only parse the number, not the filename
-  # Skip the report header by subtracting 2: the header will be output even if
-  # there are no undocumented items.
+  # Sphinx 7.2.6+ format: python.txt contains a statistics table with a TOTAL row
+  # showing the undocumented count in the third column.
+  # Example: | TOTAL | 99.83% | 2 |
   #
   # Also: see docs/source/conf.py for "coverage_ignore*" items, which should
   # be documented then removed from there.
-  lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
-  undocumented=$((lines - 2))
 
-  echo "======================================"
-  echo "Documentation Coverage Report"
-  echo "======================================"
-  echo "Total lines in python.txt: $lines"
-  echo "Header lines (to skip): 2"
-  echo "Undocumented count: $undocumented"
-  echo "======================================"
+  # Extract undocumented count from TOTAL row in Sphinx 7.x statistics table
+  if grep -q "| TOTAL" build/coverage/python.txt 2>/dev/null; then
+    # Sphinx 7.x format - extract third column (undocumented count) from TOTAL row
+    undocumented=$(grep "| TOTAL" build/coverage/python.txt | awk -F'|' '{print $4}' | tr -d ' ')
+    if [ -z "$undocumented" ] || ! [[ "$undocumented" =~ ^[0-9]+$ ]]; then
+      echo "Warning: Could not parse undocumented count from TOTAL row"
+      undocumented=-1
+    fi
+  else
+    # Fallback for older Sphinx versions (count lines minus header)
+    lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
+    undocumented=$((lines - 2))
+  fi
 
   if [ $undocumented -lt 0 ]; then
     echo coverage output not found
     exit 1
   elif [ $undocumented -gt 0 ]; then
-    echo "======================================"
-    echo "ERROR: $undocumented undocumented objects found!"
-    echo "======================================"
-    echo ""
-    echo "Full coverage report (first 50 lines):"
-    head -50 build/coverage/python.txt
-    echo ""
-    echo "======================================"
-    echo "... (truncated, see full file for all entries)"
-    echo "======================================"
-    echo ""
-    echo "Last 50 lines of coverage report:"
-    tail -50 build/coverage/python.txt
-    echo ""
-    echo "======================================"
-    echo ""
-    echo "Total lines in python.txt: $lines"
-    echo "Header lines (to skip): 2"
-    echo "Undocumented count: $undocumented"
-    echo ""
-    echo "To debug: check if coverage_ignore_functions and coverage_ignore_classes"
-    echo "in docs/source/conf.py match the actual function/class names as reported above."
-    echo ""
+    echo "undocumented objects found:"
+    cat build/coverage/python.txt
     echo "Make sure you've updated relevant .rsts in docs/source!"
     echo "You can reproduce locally by running 'cd docs && make coverage && cat build/coverage/python.txt'"
     exit 1
