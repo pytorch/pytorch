@@ -73,7 +73,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
-            arg.expr, (SymT.FLOAT, SymT.UNBACKED_FLOAT)
+            arg.expr, (SymT.UNBACKED_FLOAT)
         ):
             return "fp32"
         elif isinstance(arg.expr, bool):
