@@ -3007,8 +3007,8 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     if (compute_eigenvectors) {
       if (vectors.is_complex()) {
         // We move to the CPU because linalg_eig_make_complex_eigenvectors requires it.
-		// Performance note: this function could be implemented via a TensorIterator,
-		// which would avoid an explicit host-device synchronization.
+        // Performance note: this function could be implemented via a TensorIterator,
+        // which would avoid an explicit host-device synchronization.
         auto vectors_cpu = vectors.cpu();
         auto values_cpu  = values.cpu();
         auto maybe_complex_vectors_cpu = maybe_complex_vectors.cpu();
