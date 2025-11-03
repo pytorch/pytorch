@@ -30,6 +30,7 @@ ReductionType = Literal[
     "min",
     "prod",
     "sum",
+    "dot",
     "xor_sum",
     "online_softmax_reduce",
 ]
@@ -285,6 +286,15 @@ class OpsHandler(Generic[T]):
         sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
+        raise NotImplementedError
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: T,
+        extra_meta: dict[str, Any],
+    ) -> None:
         raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -684,6 +694,10 @@ class OpsHandler(Generic[T]):
 
     # halide-only
     def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
+        raise NotImplementedError
+
+    # triton-only
+    def dot(self, x: T, y: T) -> T:
         raise NotImplementedError
 
     # triton-only
