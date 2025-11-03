@@ -25,8 +25,6 @@ struct THPVariable {
   // i.e., after the .grad has been set (corresponds to Python attr
   // '_post_accumulate_grad_hooks', set by 'register_post_accumulate_grad_hook')
   PyObject* post_accumulate_grad_hooks = nullptr;
-
-  int pls_debug;
 };
 
 TORCH_PYTHON_API void registerPythonTensorClass(

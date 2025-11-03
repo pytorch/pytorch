@@ -1035,23 +1035,6 @@ static PyObject* THPVariable_get_python_dispatch(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_get_pls_debug(THPVariable* self, void* unused) {
-  return PyBool_FromLong(self->pls_debug);
-}
-
-static int THPVariable_set_pls_debug(
-    THPVariable* self,
-    PyObject* obj,
-    void* unused) {
-  if (!obj || !PyBool_Check(obj)) {
-    PyErr_SetString(
-        PyExc_TypeError, "The 'pls_debug' attribute value must be a boolean.");
-    return -1;
-  }
-  self->pls_debug = PyObject_IsTrue(obj);
-  return 0;
-}
-
 // CRTP base class to implement the python bindings for a Tensor property in
 // PyTorch A class that implements a property is expected to have:
 // - static constexpr const char* name;
@@ -1847,15 +1830,11 @@ static PyObject* THPVariable__use_count(PyObject* self, PyObject* noargs) {
   return THPUtils_packUInt64(t.use_count());
   END_HANDLE_TH_ERRORS
 }
+
 // properties are registered here because we are currently only able to bind
 // them manually. TODO: make declarable in native_functions
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPVariable_properties[] = {
-    {"pls_debug",
-     (getter)THPVariable_get_pls_debug,
-     (setter)THPVariable_set_pls_debug,
-     nullptr,
-     nullptr},
     {"_python_dispatch",
      (getter)THPVariable_get_python_dispatch,
      nullptr,
@@ -2255,10 +2234,6 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
   Py_VISIT(var->post_accumulate_grad_hooks);
   const auto& tensor = THPVariable_Unpack(var);
   if (tensor.defined()) {
-    if (var->pls_debug) {
-      std::cerr << "tensor traverse: " << (void*)self << " with use_count "
-                << tensor.use_count() << "\n";
-    }
     // WARNING: The grad_fn traversal logic is very subtle, if you change
     // this, be very careful not to re-introduce this bug:
     // https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
@@ -2275,11 +2250,6 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
-        if (var->pls_debug && grad_fn) {
-          std::cerr << "  grad_fn with use_count " << grad_fn.use_count()
-                    << "\n";
-        }
-
         if (grad_fn && grad_fn.use_count() == 1) {
           // All Node can have a pyobj (stored in "pyobj_")
           Py_VISIT(grad_fn->pyobj());
@@ -2292,13 +2262,7 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
     }
     if (autograd_meta) {
       for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-        if (var->pls_debug) {
-          std::cerr << "hook " << typeid(hook).name() << "\n";
-        }
         if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-          Py_VISIT(pyhook->dict);
-        }
-        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
           Py_VISIT(pyhook->dict);
         }
       }

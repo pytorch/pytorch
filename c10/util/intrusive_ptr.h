@@ -115,7 +115,8 @@ inline void maybe_incref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
   if constexpr (TargetTraits<T>::can_have_pyobject) {
     // If the refcount transitioned from 1 to 2, we need to incref the PyObject.
     // In other words, we need to ensure that the PyObject stays alive now
-    // that we have a C++ reference to this object in addition to the PyObject itself.
+    // that we have a C++ reference to this object in addition to the PyObject
+    // itself.
     if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 2)) {
       TargetTraits<T>::incref_pyobject(self);
     }
