@@ -3196,7 +3196,7 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # TOS: resumes, frames (popped), frame 1 stack + locals
+        # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
         cg.extend_output(
             [
                 *create_rot_n(3),
@@ -3207,12 +3207,8 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # TOS: [resumes, frames, *(frame 1 stack + locals)]
-        cg.extend_output(
-            [
-                *create_call_function_ex(False, True),
-            ]
-        )
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
+        cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
         if sys.version_info >= (3, 11):
@@ -5226,7 +5222,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         ):
             if isinstance(val, ConstantVariable) and val.value is None:
                 try:
-                    val = tos.next_variable(self)
+                    val = tos.next_variable(self)  # type: ignore[arg-type]
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code

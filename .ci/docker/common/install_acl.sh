@@ -3,7 +3,7 @@
 
 set -eux
 
-ACL_VERSION=${ACL_VERSION:-"v25.02"}
+ACL_VERSION=${ACL_VERSION:-"v52.6.0"}
 ACL_INSTALL_DIR="/acl"
 
 # Clone ACL
