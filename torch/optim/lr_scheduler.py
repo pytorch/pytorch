@@ -267,6 +267,7 @@ class LRScheduler:
                     "`lr_scheduler.step()`. See more details at "
                     "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
                     UserWarning,
+                    stacklevel=2,
                 )
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
@@ -279,11 +280,12 @@ class LRScheduler:
                     "See more details at "
                     "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
                     UserWarning,
+                    stacklevel=2,
                 )
 
         self._step_count += 1
         if epoch is not None:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self._update_lr(epoch)
 
     def _update_lr(self, epoch: Optional[int] = None):
@@ -300,7 +302,7 @@ class LRScheduler:
                 else:
                     values = self.get_lr()
 
-        for param_group, lr in zip(self.optimizer.param_groups, values):
+        for param_group, lr in zip(self.optimizer.param_groups, values, strict=True):
             _update_param_group_val(param_group, "lr", lr)
 
         self._last_lr: list[float | Tensor] = _param_groups_val_list(
@@ -420,7 +422,7 @@ class LambdaLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -470,7 +472,7 @@ class LambdaLR(LRScheduler):
 
         return [
             base_lr * lmbda(self.last_epoch)
-            for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)
+            for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs, strict=True)
         ]
 
 
@@ -540,7 +542,7 @@ class MultiplicativeLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -590,7 +592,9 @@ class MultiplicativeLR(LRScheduler):
         if not self._is_initial:
             return [
                 group["lr"] * lmbda(self.last_epoch)
-                for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)
+                for lmbda, group in zip(
+                    self.lr_lambdas, self.optimizer.param_groups, strict=True
+                )
             ]
         else:
             return _param_groups_val_list(self.optimizer, "lr")
@@ -1217,7 +1221,7 @@ class SequentialLR(LRScheduler):
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
         for idx, s in enumerate(self._schedulers):
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             state_dict["_schedulers"][idx] = s.state_dict()
 
         return state_dict
@@ -1439,13 +1443,17 @@ class CosineAnnealingLR(LRScheduler):
                 + (base_lr - self.eta_min)
                 * (1 + math.cos((self.last_epoch) * math.pi / self.T_max))
                 / 2
-                for base_lr, group in zip(self.base_lrs, self.optimizer.param_groups)
+                for base_lr, group in zip(
+                    self.base_lrs, self.optimizer.param_groups, strict=True
+                )
             ]
         elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
             return [
                 group["lr"]
                 + (base_lr - self.eta_min) * (1 - math.cos(math.pi / self.T_max)) / 2
-                for base_lr, group in zip(self.base_lrs, self.optimizer.param_groups)
+                for base_lr, group in zip(
+                    self.base_lrs, self.optimizer.param_groups, strict=True
+                )
             ]
         return [
             (1 + math.cos(math.pi * self.last_epoch / self.T_max))
@@ -1560,7 +1568,7 @@ class ChainedScheduler(LRScheduler):
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
         for idx, s in enumerate(self._schedulers):
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             state_dict["_schedulers"][idx] = s.state_dict()
 
         return state_dict
@@ -1669,7 +1677,7 @@ class ReduceLROnPlateau(LRScheduler):
             self.default_min_lr = None
             self.min_lrs = list(min_lr)
         else:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.default_min_lr = min_lr
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
@@ -1696,7 +1704,7 @@ class ReduceLROnPlateau(LRScheduler):
         if epoch is None:
             epoch = self.last_epoch + 1
         else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self.last_epoch = epoch
 
         if self._is_better(current, self.best):
@@ -1729,7 +1737,7 @@ class ReduceLROnPlateau(LRScheduler):
                     "of the `optimizer` param groups."
                 )
             else:
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
 
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -1904,18 +1912,18 @@ class CyclicLR(LRScheduler):
 
         base_lrs = _format_param("base_lr", optimizer, base_lr)
         if last_epoch == -1:
-            for lr, group in zip(base_lrs, optimizer.param_groups):
+            for lr, group in zip(base_lrs, optimizer.param_groups, strict=True):
                 _update_param_group_val(group, "lr", lr)
 
         self.max_lrs = _format_param("max_lr", optimizer, max_lr)
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         step_size_up = float(step_size_up)
         step_size_down = (
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             float(step_size_down) if step_size_down is not None else step_size_up
         )
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         self.total_size = step_size_up + step_size_down
         self.step_ratio = step_size_up / self.total_size
 
@@ -1947,7 +1955,10 @@ class CyclicLR(LRScheduler):
             self.max_momentums = _format_param("max_momentum", optimizer, max_momentum)
             if last_epoch == -1:
                 for m_momentum, b_momentum, group in zip(
-                    self.max_momentums, self.base_momentums, optimizer.param_groups
+                    self.max_momentums,
+                    self.base_momentums,
+                    optimizer.param_groups,
+                    strict=True,
                 ):
                     if self.use_beta1:
                         group["betas"] = (m_momentum, *group["betas"][1:])
@@ -2031,7 +2042,7 @@ class CyclicLR(LRScheduler):
             scale_factor = (x - 1) / (self.step_ratio - 1)
 
         lrs = []
-        for base_lr, max_lr in zip(self.base_lrs, self.max_lrs):
+        for base_lr, max_lr in zip(self.base_lrs, self.max_lrs, strict=True):
             base_height = (max_lr - base_lr) * scale_factor
             if self.scale_mode == "cycle":
                 lr = base_lr + base_height * self.scale_fn(cycle)
@@ -2042,7 +2053,7 @@ class CyclicLR(LRScheduler):
         if self.cycle_momentum:
             momentums = []
             for base_momentum, max_momentum in zip(
-                self.base_momentums, self.max_momentums
+                self.base_momentums, self.max_momentums, strict=True
             ):
                 base_height = (max_momentum - base_momentum) * scale_factor
                 if self.scale_mode == "cycle":
@@ -2052,7 +2063,9 @@ class CyclicLR(LRScheduler):
                         self.last_epoch
                     )
                 momentums.append(momentum)
-            for param_group, momentum in zip(self.optimizer.param_groups, momentums):
+            for param_group, momentum in zip(
+                self.optimizer.param_groups, momentums, strict=True
+            ):
                 if self.use_beta1:
                     param_group["betas"] = (momentum, *param_group["betas"][1:])
                 else:
@@ -2258,7 +2271,9 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         self.last_epoch = math.floor(epoch)
 
         with _enable_get_lr_call(self):
-            for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            for param_group, lr in zip(
+                self.optimizer.param_groups, self.get_lr(), strict=True
+            ):
                 _update_param_group_val(param_group, "lr", lr)
 
         self._last_lr = _param_groups_val_list(self.optimizer, "lr")
@@ -2498,7 +2513,7 @@ class OneCycleLR(LRScheduler):
             base_momentums = _format_param("base_momentum", optimizer, base_momentum)
             if last_epoch == -1:
                 for m_momentum, b_momentum, group in zip(
-                    max_momentums, base_momentums, optimizer.param_groups
+                    max_momentums, base_momentums, optimizer.param_groups, strict=True
                 ):
                     if self.use_beta1:
                         group["betas"] = (m_momentum, *group["betas"][1:])

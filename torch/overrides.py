@@ -1657,7 +1657,8 @@ def _get_overloaded_args(
         if (
             arg_type not in overloaded_types
             and hasattr(arg_type, "__torch_function__")
-            and arg_type.__torch_function__ != torch._C._disabled_torch_function_impl
+            and arg_type.__torch_function__
+            is not torch._C._disabled_torch_function_impl
         ):
             # Create lists explicitly for the first type (usually the only one
             # done) to avoid setting up the iterator for overloaded_args.
@@ -1747,6 +1748,7 @@ def handle_torch_function(
                 "Defining your `__torch_function__ as a plain method is deprecated and "
                 "will be an error in future, please define it as a classmethod.",
                 DeprecationWarning,
+                stacklevel=2,
             )
 
         # Use `public_api` instead of `implementation` so __torch_function__
@@ -2057,7 +2059,8 @@ class TorchFunctionMode:
     @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn(
-            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`"
+            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`",
+            stacklevel=2,
         )
         instance = cls(*args, **kwargs)
         return instance
