@@ -59,7 +59,7 @@ class ConcaterIterDataPipe(IterDataPipe):
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return sum(len(dp) for dp in self.datapipes)
         else:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
@@ -159,6 +159,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 "Unlimited buffer size is set for `fork`, "
                 "please be aware of OOM at random places",
                 UserWarning,
+                stacklevel=2,
             )
         if copy is None:
             self.copy_fn = _no_op
@@ -180,7 +181,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def __len__(self):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return len(self.main_datapipe)
 
     def get_next_element_by_instance(self, instance_id: int):
@@ -240,7 +241,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         return self.end_ptr is not None and all(self._child_stop)
 
     def get_length_by_instance(self, instance_id: int) -> int:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return len(self.main_datapipe)
 
     def reset(self) -> None:
@@ -327,7 +328,7 @@ class _ChildDataPipe(IterDataPipe):
         if not isinstance(main_datapipe, _ContainerTemplate):
             raise AssertionError("main_datapipe must implement _ContainerTemplate")
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
@@ -359,6 +360,7 @@ class _ChildDataPipe(IterDataPipe):
                     "Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
                     "the buffer and each child DataPipe will read from the start again.",
                     UserWarning,
+                    stacklevel=2,
                 )
             self.main_datapipe.reset()
         # 3. Otherwise, the iterator is behind the others, so it will just need to catch up by setting
@@ -454,7 +456,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         drop_none: bool,
         buffer_size: int,
     ):
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
@@ -464,11 +466,12 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 "Unlimited buffer size is set for `demux`, "
                 "please be aware of OOM at random places",
                 UserWarning,
+                stacklevel=2,
             )
         self.current_buffer_usage = 0
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.child_buffers: list[deque[_T_co]] = [deque() for _ in range(num_instances)]
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
@@ -626,7 +629,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
-        while len(iterators):
+        while iterators:
             for it in iterators:
                 try:
                     value = next(it)
@@ -702,11 +705,11 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
 
     def __iter__(self) -> Iterator[tuple[_T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
-        yield from zip(*iterators)
+        yield from zip(*iterators, strict=False)
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return min(len(dp) for dp in self.datapipes)
         else:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

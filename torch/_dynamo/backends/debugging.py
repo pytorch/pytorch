@@ -26,9 +26,9 @@ These backends are primarily used for:
 import dataclasses
 import functools
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from importlib import import_module
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -369,7 +369,7 @@ def relu_compile_error_TESTING_ONLY(
     gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
 ) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
-        if node.target == torch.relu:
+        if node.target is torch.relu:
             raise ReluCompileError
     return gm
 
@@ -379,7 +379,7 @@ def relu_runtime_error_TESTING_ONLY(
     gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
 ) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
-        if node.target == torch.relu:
+        if node.target is torch.relu:
             node.target = torch._assert
             node.args = (False, "ReluRuntimeError")
     gm.recompile()
@@ -391,7 +391,7 @@ def relu_accuracy_error_TESTING_ONLY(
     gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
 ) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
-        if node.target == torch.relu:
+        if node.target is torch.relu:
             node.target = torch.add
             node.args = (node.args[0], 1)
     gm.recompile()
