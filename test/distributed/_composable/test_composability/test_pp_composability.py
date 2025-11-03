@@ -392,11 +392,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, pp_size),
-            mesh_dim_names=("replicate", "pp"),
+            mesh_shape=(replicate_size, 1, pp_size),
+            mesh_dim_names=("replicate", "shard", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate"]
+        dp_mesh = device_mesh["replicate", "shard"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
 
@@ -582,11 +582,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, pp_size),
-            mesh_dim_names=("replicate", "pp"),
+            mesh_shape=(replicate_size, 1, pp_size),
+            mesh_dim_names=("replicate", "shard", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate"]
+        dp_mesh = device_mesh["replicate", "shard"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
         dp_group = device_mesh["replicate"].get_group()
