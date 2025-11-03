@@ -232,6 +232,7 @@ class StreamVariable(StreamContextVariable):
                 return ConstantVariable.create(NotImplemented)
 
             if other.source:
+                assert self.source is not None
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             return ConstantVariable.create(
                 cmp_name_to_op_mapping[name](self.value, other.value)  # type: ignore[arg-type]
