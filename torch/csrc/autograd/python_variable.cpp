@@ -211,13 +211,6 @@ PyObject* ParameterClass = nullptr;
 // Does *not* set the PyObject slot on the TensorImpl.
 static PyObject* THPVariable_New(PyTypeObject* type, at::TensorBase&& _var);
 
-// Creates a new torch.Tensor object (or subclass) that wraps the c10::Tensor
-// and sets the PyObject slot on the TensorImpl. The c10::Tensor must be
-// freshly created.
-static PyObject* THPVariable_NewFresh(
-    PyTypeObject* type,
-    at::TensorBase&& _var);
-
 // clang-tidy gets confused by static const
 static constexpr const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
@@ -311,6 +304,11 @@ static PyObject* THPVariable_WrapWithType(
     }
     return Py_NewRef(wrapper);
   }
+
+  if (check_has_torch_dispatch(obj)) { // Boo!
+    tensor_impl->set_python_dispatch(true);
+  }
+
   return obj;
 }
 
@@ -482,7 +480,7 @@ static PyObject* THPVariable_as_subclass(
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
-  return THPVariable_NewFresh((PyTypeObject*)cls, self.alias());
+  return THPVariable_WrapWithType(self.alias(), (PyTypeObject*)cls);
   END_HANDLE_TH_ERRORS
 }
 
@@ -530,7 +528,7 @@ static PyObject* THPVariable_make_subclass(
     data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
   }
 
-  return THPVariable_NewFresh((PyTypeObject*)cls, std::move(data));
+  return THPVariable_WrapWithType(data, (PyTypeObject*)cls);
   END_HANDLE_TH_ERRORS
 }
 
@@ -682,7 +680,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
 
-  return THPVariable_NewFresh((PyTypeObject*)cls, std::move(tensor));
+  return THPVariable_WrapWithType(std::move(tensor), (PyTypeObject*)cls);
   END_HANDLE_TH_ERRORS
 }
 
@@ -700,11 +698,12 @@ static py::handle get_dtensor_spec_class() {
       })
       .get_stored();
 #else
-  static py::handle dtensor_spec_class = py::object(py::module::import("torch")
-                                                        .attr("distributed")
-                                                        .attr("tensor")
-                                                        .attr("_dtensor_spec")
-                                                        .attr("DTensorSpec"))
+  static py::handle dtensor_spec_class = py::object(
+                                             py::module::import("torch")
+                                                 .attr("distributed")
+                                                 .attr("tensor")
+                                                 .attr("_dtensor_spec")
+                                                 .attr("DTensorSpec"))
                                              .release();
   return dtensor_spec_class;
 #endif
@@ -860,7 +859,7 @@ static PyObject* THPVariable_dtensor_new(
   tensor.set_requires_grad(requires_grad);
   tensor.unsafeGetTensorImpl()->set_python_dispatch(true);
   py::object py_tensor = py::reinterpret_steal<py::object>(
-      THPVariable_NewFresh((PyTypeObject*)cls, std::move(tensor)));
+      THPVariable_WrapWithType(std::move(tensor), (PyTypeObject*)cls));
   py_tensor.attr(dtensor_interned_strings._spec) = spec;
   py_tensor.attr(dtensor_interned_strings._local_tensor) = local_tensor;
   return py_tensor.release().ptr();
@@ -2164,21 +2163,6 @@ static PyObject* THPVariable_New(PyTypeObject* type, at::TensorBase&& tensor) {
   TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
   auto v = reinterpret_cast<THPVariable*>(obj);
   new (&v->cdata) Tensor(std::move(tensor));
-  return obj;
-}
-
-static PyObject* THPVariable_NewFresh(
-    PyTypeObject* type,
-    at::TensorBase&& tensor) {
-  TORCH_INTERNAL_ASSERT(tensor.use_count() == 1);
-
-  c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-  PyObject* obj = THPVariable_New(type, std::move(tensor));
-  PyObjectPreservation::init_fresh_nonatomic(
-      tensor_impl, tensor_impl->pyobj_slot(), obj);
-  if (check_has_torch_dispatch(obj)) { // Boo!
-    tensor_impl->set_python_dispatch(true);
-  }
   return obj;
 }
 
