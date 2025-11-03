@@ -8667,7 +8667,7 @@ class MockFXGraphCache:
 FAILING_CACHE_TESTS = (
     # BypassAOTAutogradCache: unsupported nodes
     "test_backward_mutation_data",  # Custom Autograd Function
-    "test_backward_mutation_metadata",  # Custom Autograd Function
+    # "test_backward_mutation_metadata",  # Custom Autograd Function
     "test_input_output_aliase_custom_autograd_function",
 )
 
