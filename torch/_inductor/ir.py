@@ -6983,6 +6983,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
             configs = kernel.configs
             kernel = kernel.fn
+        # pyrefly: ignore  # bad-return
         return kernel, configs, restore_value_args, reset_to_zero_args
 
     @override
@@ -7138,6 +7139,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
+                # pyrefly: ignore  # bad-argument-type
                 kernel, {**kernel_args, **autotuned_kwargs}, tma_descriptor_metadata
             )
         ]
