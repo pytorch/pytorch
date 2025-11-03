@@ -915,7 +915,7 @@ void passEventsToKineto(
       // on-demand Kineto activity handling. Enabling this path
       // for Profiler API could cause side effects as much has changed since.
       // Make a surgical fix here until we holistically assess the on-demand
-      // vs API path framentation, which has been snowballing in complexity
+      // vs API path fragmentation, which has been snowballing in complexity
       // and thus flakiness.
       if (config.global()) {
         e->kineto_activity_ = activity;
