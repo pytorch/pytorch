@@ -955,8 +955,8 @@ class DefaultDictVariable(ConstDictVariable):
                 return self.getitem_const(tx, args[0])
             else:
                 if (
-                    self.default_factory.is_python_constant()
-                    and self.default_factory.as_python_constant() is None
+                    istype(self.default_factory, ConstantVariable)
+                    and self.default_factory.value is None
                 ):
                     raise_observed_exception(KeyError, tx, args=[args[0]])
                 else:
