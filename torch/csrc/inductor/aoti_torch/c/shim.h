@@ -41,6 +41,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
+#include <torch/headeronly/util/Exception.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -621,34 +622,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
 
-AOTI_TORCH_EXPORT void aoti_torch_check(
-    bool cond,
-    const char* func,
-    const char* file,
-    uint32_t line,
-    const char* msg);
-
-#ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)              \
-  if (!(cond)) {                                 \
-    aoti_torch_check(                            \
-        false,                                   \
-        __func__,                                \
-        __FILE__,                                \
-        static_cast<uint32_t>(__LINE__),         \
-        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
-  }
-#else
-#define AOTI_TORCH_CHECK(cond, ...)                \
-  if (!(cond)) {                                   \
-    aoti_torch_check(                              \
-        false,                                     \
-        __func__,                                  \
-        __FILE__,                                  \
-        static_cast<uint32_t>(__LINE__),           \
-        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
-  }
-#endif
+// Preserve for BC and will delete it later, using the STD_TORCH_CHECK directly
+#define AOTI_TORCH_CHECK(cond, ...) STD_TORCH_CHECK(cond, ##__VA_ARGS__)
 
 AOTI_TORCH_EXPORT void aoti_torch_warn(
     const char* func,

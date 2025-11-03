@@ -105,12 +105,12 @@ int main(int argc, char* argv[]) {
 
     srv_socket = std::make_unique<ManagerServerSocket>(tempfile);
     register_fd(srv_socket->socket_fd);
-    print_init_message(tempfile.c_str());
+    print_init_message(tempfile);
     DEBUG("opened socket %s", tempfile.c_str());
   } catch (const std::exception& e) {
     std::string message("ERROR: ");
     message += e.what();
-    print_init_message(message.c_str());
+    print_init_message(message);
     return 1;
   } catch (...) {
     print_init_message("ERROR: unhandled exception");
