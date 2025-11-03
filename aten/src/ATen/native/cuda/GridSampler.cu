@@ -303,6 +303,217 @@ namespace {
 
 // Note [Passing pointer and offset to fastAtomicAdd]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// ROCm-specific 2D backward kernel for grid_sample
+// - The default kernel launches N*H*W threads and loops over C.
+// - On MI300X / MI325X that "the loop over C + 4 atomics per C" is the bottleneck.
+// - Here we launch N*C*H*W threads, give each thread exactly 1 channel, and let channel-0 do the grid-gradient reduction, so we keep semantics and try to avoid precision issues.
+// - Signature is kept identical to the original kernel so the launcher can pick either one.
+// TODO (further optimization leveraging LDS privatization that really hurt me during my first attemp at optimization)
+#ifdef USE_ROCM
+  template <typename scalar_t, typename index_t>
+  C10_LAUNCH_BOUNDS_1(256)
+  __global__ void grid_sampler_2d_backward_kernel_rocm(
+      const index_t nthreads,
+      TensorInfo<const scalar_t, index_t> grad_output,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
+      TensorInfo<scalar_t, index_t> grad_input,
+      TensorInfo<scalar_t, index_t> grad_grid,
+      const GridSamplerInterpolation interpolation_mode,
+      const GridSamplerPadding padding_mode,
+      bool align_corners,
+      const index_t grad_input_memory_span,
+      const bool input_requires_grad) {
+    const index_t C = input.sizes[1];
+
+    const index_t inp_H = input.sizes[2];
+    const index_t inp_W = input.sizes[3];
+
+    const index_t out_H = grid.sizes[1];
+    const index_t out_W = grid.sizes[2];
+
+    const index_t inp_sN = input.strides[0];
+    const index_t inp_sC = input.strides[1];
+    const index_t inp_sH = input.strides[2];
+    const index_t inp_sW = input.strides[3];
+
+    const index_t grid_sN = grid.strides[0];
+    const index_t grid_sH = grid.strides[1];
+    const index_t grid_sW = grid.strides[2];
+    const index_t grid_sCoor = grid.strides[3];
+
+    const index_t gOut_sN = grad_output.strides[0];
+    const index_t gOut_sC = grad_output.strides[1];
+    const index_t gOut_sH = grad_output.strides[2];
+    const index_t gOut_sW = grad_output.strides[3];
+
+    // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
+    index_t gInp_sN = 0, gInp_sC = 0, gInp_sH = 0, gInp_sW = 0;
+    if (input_requires_grad) {
+      gInp_sN = grad_input.strides[0];
+      gInp_sC = grad_input.strides[1];
+      gInp_sH = grad_input.strides[2];
+      gInp_sW = grad_input.strides[3];
+    }
+
+    const index_t gGrid_sW = grad_grid.strides[2];
+
+    CUDA_KERNEL_LOOP_TYPE(linear_idx, nthreads, index_t) {
+      // Flatten (n, c, h, w) to decompose N*C*H*W
+      index_t temp = linear_idx;
+      const index_t w = temp % out_W;
+      temp /= out_W;
+      const index_t h = temp % out_H;
+      temp /= out_H;
+      const index_t c = temp % C;
+      const index_t n = temp / C;
+
+      const index_t grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
+
+      // Corresponding input coords (x, y) from grid
+      scalar_t x = grid.data[grid_offset];
+      scalar_t y = grid.data[grid_offset + grid_sCoor];
+
+      scalar_t gix_mult, giy_mult;
+      scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+      scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+
+      // No looping over channels at all
+      // grad_output is [N, C, H, W] - per-everything thread for computation
+      const scalar_t gOut = grad_output.data[n * gOut_sN + c * gOut_sC + h * gOut_sH + w * gOut_sW];
+      // input is [N, C, H, W] - per-everything thread for computation
+      const scalar_t* inp_ptr_NC = input.data + n * inp_sN + c * inp_sC;
+
+      if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+        // Neighbor pixels (NW, NE, SW, SE) from (x, y)
+        const index_t ix_nw = static_cast<index_t>(std::floor(ix));
+        const index_t iy_nw = static_cast<index_t>(std::floor(iy));
+        const index_t ix_ne = ix_nw + 1;
+        const index_t iy_ne = iy_nw;
+        const index_t ix_sw = ix_nw;
+        const index_t iy_sw = iy_nw + 1;
+        const index_t ix_se = ix_nw + 1;
+        const index_t iy_se = iy_nw + 1;
+
+        // Bilinear weights
+        // Surfaces to each neighbor:
+        const scalar_t nw = (ix_se - ix) * (iy_se - iy);
+        const scalar_t ne = (ix - ix_sw) * (iy_sw - iy);
+        const scalar_t sw = (ix_ne - ix) * (iy - iy_ne);
+        const scalar_t se = (ix - ix_nw) * (iy - iy_nw);
+
+        // 4 atomics (rather than the original 4xC) for this current channel only
+        if (input_requires_grad) {
+          const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+          safe_add_2d(grad_input.data, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut, NC_offset, grad_input_memory_span);
+          safe_add_2d(grad_input.data, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut, NC_offset, grad_input_memory_span);
+          safe_add_2d(grad_input.data, iy_sw, ix_sw, gInp_sH, gInp_sW, inp_H, inp_W, sw * gOut, NC_offset, grad_input_memory_span);
+          safe_add_2d(grad_input.data, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, se * gOut, NC_offset, grad_input_memory_span);
+        }
+
+        // Only one thread per (n, h, w) with channel 0 does the grid reduction,
+        // in the hope that there would be no precision isses.
+        if (c == 0) {
+          scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
+
+          const scalar_t* gOut_ptr_NHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+          const scalar_t* inp_ptr_all = input.data + n * inp_sN;
+
+          for (index_t c2 = 0; c2 < C; ++c2, gOut_ptr_NHW += gOut_sC, inp_ptr_all += inp_sC) {
+            const scalar_t gOut_c2 = *gOut_ptr_NHW;
+
+            if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+              const scalar_t nw_val = inp_ptr_all[iy_nw * inp_sH + ix_nw * inp_sW];
+              gix -= nw_val * (iy_se - iy) * gOut_c2;
+              giy -= nw_val * (ix_se - ix) * gOut_c2;
+            }
+            if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
+              const scalar_t ne_val = inp_ptr_all[iy_ne * inp_sH + ix_ne * inp_sW];
+              gix += ne_val * (iy_sw - iy) * gOut_c2;
+              giy -= ne_val * (ix - ix_sw) * gOut_c2;
+            }
+            if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
+              const scalar_t sw_val = inp_ptr_all[iy_sw * inp_sH + ix_sw * inp_sW];
+              gix -= sw_val * (iy - iy_ne) * gOut_c2;
+              giy += sw_val * (ix_ne - ix) * gOut_c2;
+            }
+            if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
+              const scalar_t se_val = inp_ptr_all[iy_se * inp_sH + ix_se * inp_sW];
+              gix += se_val * (iy - iy_nw) * gOut_c2;
+              giy += se_val * (ix - ix_nw) * gOut_c2;
+            }
+          }
+
+          scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          gGrid_ptr[0] = gix_mult * gix;
+          gGrid_ptr[1] = giy_mult * giy;
+        }
+      } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+        if (input_requires_grad) {
+          const index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
+          const index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
+          const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+          safe_add_2d(grad_input.data, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, gOut, NC_offset, grad_input_memory_span);
+        }
+        if (c == 0) {
+          scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          gGrid_ptr[0] = static_cast<scalar_t>(0);
+          gGrid_ptr[1] = static_cast<scalar_t>(0);
+        }
+      } else {  // Bicubic mode
+        scalar_t ix_unscaled = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
+        scalar_t iy_unscaled = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
+
+        const scalar_t ix_nw = std::floor(ix_unscaled);
+        const scalar_t iy_nw = std::floor(iy_unscaled);
+        const scalar_t tx = ix_unscaled - ix_nw;
+        const scalar_t ty = iy_unscaled - iy_nw;
+
+        scalar_t x_coeffs[4], y_coeffs[4];
+        scalar_t x_coeffs_grad[4], y_coeffs_grad[4];
+        get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, tx);
+        get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, ty);
+        get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
+        get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+
+        if (input_requires_grad) {
+          const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+          #pragma unroll 4
+          for (index_t i = 0; i < 4; ++i) {
+            #pragma unroll 4
+            for (index_t j = 0; j < 4; ++j) {
+              add_value_bounded<scalar_t, index_t>(grad_input.data, ix_nw - 1 + i, iy_nw - 1 + j, inp_W, inp_H, gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j], padding_mode, align_corners, NC_offset, grad_input_memory_span);
+            }
+          }
+        }
+
+        if (c == 0) {
+          scalar_t gix = static_cast<scalar_t>(0);
+          scalar_t giy = static_cast<scalar_t>(0);
+          const scalar_t* gOut_ptr_NHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+          const scalar_t* inp_ptr_all = input.data + n * inp_sN;
+          for (index_t c2 = 0; c2 < C; ++c2, gOut_ptr_NHW += gOut_sC, inp_ptr_all += inp_sC) {
+            const scalar_t gOut_c2 = *gOut_ptr_NHW;
+            #pragma unroll 4
+            for (index_t i = 0; i < 4; ++i) {
+              #pragma unroll 4
+              for (index_t j = 0; j < 4; ++j) {
+                const scalar_t val = get_value_bounded<scalar_t, index_t>(inp_ptr_all, ix_nw - 1 + i, iy_nw - 1 + j, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
+                gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut_c2;
+                giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut_c2;
+              }
+            }
+          }
+          scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
+          gGrid_ptr[0] = gix_mult * gix;
+          gGrid_ptr[1] = giy_mult * giy;
+        }
+      }
+    }
+  }
+#endif  // USE_ROCM
+
 // For its internal bounds checking, fastAtomicAdd needs to know where the destination address
 // lies relative to the entire tensor, so we pass the base grad_input.data and full offset information,
 // including batch * channel offset (NC_offset).
@@ -858,6 +1069,50 @@ void launch_grid_sampler_2d_backward_kernel(
   // is always computed.)
   auto input_requires_grad = output_mask[0];
 
+  // ROCm path: parallelize across channels as well.
+#ifdef USE_ROCM
+  const auto C = input.size(1);
+  const int64_t count = N * C * H * W;
+  if (count > 0) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half, ScalarType::BFloat16,
+        input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(grad_output)) {
+        grid_sampler_2d_backward_kernel_rocm<scalar_t, int>
+            <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+                static_cast<int>(count),
+                getTensorInfo<const scalar_t, int>(grad_output),
+                getTensorInfo<const scalar_t, int>(input),
+                getTensorInfo<const scalar_t, int>(grid),
+                input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
+                getTensorInfo<scalar_t, int>(grad_grid),
+                static_cast<GridSamplerInterpolation>(interpolation_mode),
+                static_cast<GridSamplerPadding>(padding_mode),
+                align_corners,
+                input_requires_grad ? static_cast<int>(grad_input.numel()) : 0,
+                input_requires_grad);
+      } else {
+        grid_sampler_2d_backward_kernel_rocm<scalar_t, int64_t>
+            <<<GET_BLOCKS(count, 256), 256, 0,
+               at::cuda::getCurrentCUDAStream()>>>(
+                count,
+                getTensorInfo<const scalar_t, int64_t>(grad_output),
+                getTensorInfo<const scalar_t, int64_t>(input),
+                getTensorInfo<const scalar_t, int64_t>(grid),
+                input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
+                getTensorInfo<scalar_t, int64_t>(grad_grid),
+                static_cast<GridSamplerInterpolation>(interpolation_mode),
+                static_cast<GridSamplerPadding>(padding_mode),
+                align_corners,
+                input_requires_grad ? grad_input.numel() : 0,
+                input_requires_grad);
+      }
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
+  }
+#else  // CUDA path
+
   int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -897,6 +1152,7 @@ void launch_grid_sampler_2d_backward_kernel(
       }
     });
   }
+#endif  // USE_ROCM
 }
 
 void launch_grid_sampler_3d_backward_kernel(
