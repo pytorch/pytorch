@@ -5230,7 +5230,9 @@ class ChoiceCaller:
         }
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)  # type: ignore[arg-type]
-        return benchmarker.benchmark(algo, args, {"out": out}, **benchmark_configs)
+        return benchmarker.benchmark(
+            algo, args, {"out": out}, device=None, **benchmark_configs
+        )
 
     def call_name(self) -> str:
         raise NotImplementedError
