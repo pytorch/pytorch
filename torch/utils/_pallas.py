@@ -18,7 +18,9 @@ def has_pallas_package() -> bool:
     if not has_jax_package():
         return False
     try:
-        from jax.experimental import pallas as pl  # noqa: F401  # type: ignore[import-not-found]
+        from jax.experimental import (  # noqa: F401  # type: ignore[import-not-found]
+            pallas as pl,
+        )
 
         return True
     except ImportError:

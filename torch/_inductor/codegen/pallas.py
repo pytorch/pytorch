@@ -311,9 +311,7 @@ class PallasScheduling(SIMDScheduling):
     kernel_type = PallasKernel  # type: ignore[assignment]
 
     @classmethod
-    def get_backend_features(
-        cls, device: torch.device
-    ) -> OrderedSet[BackendFeature]:
+    def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
         # Start minimal: no special features advertised
         return OrderedSet()
 
