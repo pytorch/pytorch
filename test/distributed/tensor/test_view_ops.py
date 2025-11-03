@@ -759,6 +759,16 @@ class TestViewOps(DTensorTestBase):
         expected = tensor[2:, :]
         self.assertEqual(sliced_dtensor.full_tensor(), expected)
 
+    @with_comms
+    def test_squeeze_sharded_dim(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_tensor = torch.arange(self.world_size * 8, device=self.device_type).reshape(self.world_size, 8).float()
+        dtensor = distribute_tensor(global_tensor, mesh, [Shard(0)])
+        squeezed = dtensor.squeeze()
+
+        self.assertEqual(squeezed.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(squeezed._local_tensor.shape, torch.Size([1, 8]))
+        self.assertEqual(squeezed.placements[0], Shard(0))
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     TestViewOps,
