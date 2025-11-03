@@ -1258,11 +1258,10 @@ class DecompOneOffTests(TestCase):
         )
 
         # check RMSNorm was fused with sinh
+        self.assertTrue("triton_per_fused__fused_rms_norm_sinh" in generated_codes[0])
         self.assertTrue(
-            "triton_per_fused_add_mean_mul_pow_rsqrt_sinh" in generated_codes[0]
-        )
-        self.assertTrue(
-            "triton_per_fused__fused_rms_norm_backward_cosh_mul" in generated_codes[1]
+            "triton_per_fused__fused_rms_norm__fused_rms_norm_backward_cosh_mul"
+            in generated_codes[1]
         )
 
 

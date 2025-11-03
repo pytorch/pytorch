@@ -149,7 +149,7 @@ FROM cpu_final as rocm_final
 ARG ROCM_VERSION=6.0
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=13
 ENV LDFLAGS="-Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64 -Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib"
 # Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
 # below workaround helps avoid error
