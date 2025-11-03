@@ -949,7 +949,7 @@ class CUDAGraphNode:
         self.recorded_liveness_before_graph: LevelList[OutputList[bool]] = []
         self.recorded_liveness_after_graph: LevelList[OutputList[bool]] = []
 
-        # List of Tuples of (depth, output_index) that index into node at depth
+        # List of tuples of (depth, output_index) that index into node at depth
         # number of nodes from root and output_index of outputs. Will index into
         # path_weakrefs.
         self.expected_dead_indices_before_graph: list[PathOutputIndex] = []
