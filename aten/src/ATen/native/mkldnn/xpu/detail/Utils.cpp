@@ -144,7 +144,6 @@ bool onednn_strides_check(const Tensor& src) {
   dnnl_memory_desc_query(md, dnnl_query_format_kind, &md_fmt_kind);
   dnnl_memory_desc_query(md, dnnl_query_ndims_s32, &md_ndims);
   dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
-  auto block_size = 1;
   // const auto& blk = md->format_desc.blocking;
   dnnl_dims_t md_inner_blks;
   dnnl_dims_t md_blk_inner_idxs;
@@ -156,53 +155,9 @@ bool onednn_strides_check(const Tensor& src) {
       md_fmt_kind != dnnl_format_kind_t::dnnl_blocked)
     return true;
 
-  dnnl_dims_t blocks = {0};
-  int perm[DNNL_MAX_NDIMS] = {0};
-  for (int d = 0; d < md_ndims; ++d) {
-    // no strides check needed for empty tensor
-    if ((*md_padded_dims)[d] == nullptr)
-      return true;
-
-    // no strides verification for runtime dims
-    if (strides[d] == DNNL_RUNTIME_DIM_VAL)
-      return true;
-
-    perm[d] = d;
-    blocks[d] = 1;
-  }
-
-  for (int iblk = 0; iblk < md_inner_nblks; ++iblk) {
-    blocks[md_blk_inner_idxs[iblk]] *= md_inner_blks[iblk];
-    block_size *= md_inner_blks[iblk];
-  }
-
-  // A custom comparator to yield linear order on perm
-  auto idx_sorter = [&](const int a, const int b) -> bool {
-    if (strides[a] == strides[b] &&
-        (*md_padded_dims)[a] == (*md_padded_dims)[b])
-      return a < b;
-    else if (strides[a] == strides[b])
-      return (*md_padded_dims)[a] < (*md_padded_dims)[b];
-    else
-      return strides[a] < strides[b];
-  };
-  std::sort(perm, perm + md_ndims, idx_sorter);
-
-  auto min_stride = block_size;
-  for (int idx = 0; idx < md_ndims; ++idx) {
-    const int d = perm[idx];
-
-    // Make an exception for strides[d] == 0 as it has broadcast semantics
-    // Note: owing to being sorted, these are the initial strides
-    if (strides[d] == 0)
-      continue;
-    else if (strides[d] < min_stride)
-      return false;
-
-    // update min_stride for next iteration
-    const auto padded_dim = (*md_padded_dims)[d];
-    min_stride = block_size * strides[d] * (padded_dim / blocks[d]);
-  }
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "XPU backend does not support block format, this code path should be unreachable.");
 
   return true;
 }
