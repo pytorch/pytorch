@@ -410,8 +410,8 @@ struct ConvParams {
       return false;
     }
     static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-    // broken on cuDNN 9.8
-    if (cudnn_version >= 90800) {
+    // broken on cuDNN 9.8 - 9.14
+    if (cudnn_version >= 90800 && cudnn_version < 91500) {
       if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
           (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) &&
           weight.dim() == 5) {
@@ -658,6 +658,7 @@ static void check_shape_forward(const at::Tensor& input,
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
   TORCH_CHECK(!params.is_dilation_neg(), "dilation should be greater than zero");
+  TORCH_CHECK(groups > 0, "expected groups to be greater than 0, but got groups=", groups);
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -688,6 +689,10 @@ static void check_shape_forward(const at::Tensor& input,
              ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
 
     for (const auto i : c10::irange(2, k)) {
+      // T could be int64_t or SymInt, Specialized numeric_limts<SymInt> in c10/core/SymInt.h
+      TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
+                  "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
+                  (std::numeric_limits<T>::max() / 2));
       input_shape.push_back(at::symint::size<T>(input, i) + 2 * padding[i-2]);
       // log new kernel size considering dilation
       kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
@@ -714,6 +719,11 @@ static void check_shape_forward(const at::Tensor& input,
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
+    for (const auto i : c10::irange(2, k)) {
+      TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
+                  "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
+                  (std::numeric_limits<T>::max() / 2));
+    }
     TORCH_CHECK(at::symint::size<T>(input, 1) == weight_sizes[0],
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],

@@ -7,6 +7,7 @@
 struct TORCH_API THPEvent {
   PyObject_HEAD
   c10::Event event;
+  PyObject* weakreflist;
 };
 TORCH_API extern PyTypeObject* THPEventClass;
 TORCH_API extern PyTypeObject THPEventType;
