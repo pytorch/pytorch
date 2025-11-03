@@ -590,9 +590,7 @@ def has_only_uses(
     select_output: bool = False,
 ) -> bool:
     return has_uses(
-        target,
-        use_selector_fn,
-        LogicalConnective.AND, select_output=select_output
+        target, use_selector_fn, LogicalConnective.AND, select_output=select_output
     )
 
 
