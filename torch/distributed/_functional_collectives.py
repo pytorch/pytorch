@@ -631,7 +631,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        if func == torch.ops.aten.view.default:
+        if func is torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
             # pyrefly: ignore [index-error]
@@ -1177,7 +1177,7 @@ def all_gather_inplace(
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated
+from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,

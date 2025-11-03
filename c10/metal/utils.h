@@ -322,6 +322,24 @@ inline float log1p(float x) {
   return rc;
 }
 
+// The function is ported from mlx
+inline float2 log1p(float2 in) {
+  float x = in.x;
+  float y = in.y;
+  float zabs = ::metal::precise::sqrt(x * x + y * y);
+  float theta = ::metal::atan2(y, x + 1);
+  if (zabs < 0.5f) {
+    float r = x * (2 + x) + y * y;
+    if (r == 0) { // handle underflow
+      return {x, theta};
+    }
+    return {0.5f * log1p(r), theta};
+  } else {
+    auto z0 = ::metal::sqrt((x + 1) * (x + 1) + y * y);
+    return {::metal::log(z0), theta};
+  }
+}
+
 template <typename T1, typename T2 = T1>
 struct pair {
   T1 first;

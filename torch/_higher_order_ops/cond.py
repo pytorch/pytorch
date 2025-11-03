@@ -102,8 +102,8 @@ def cond(
     Conditionally applies `true_fn` or `false_fn`.
 
     .. warning::
-        `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
-        doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+        `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types.
+        Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     `cond` is structured control flow operator. That is, it is like a Python if-statement,

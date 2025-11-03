@@ -92,6 +92,8 @@ if torch.backends.mps.is_available():
             "log1p",
             "log2",
             "log",
+            "logaddexp",
+            "logaddexp2",
             "mH",
             "mT",
             "masked_fill",
