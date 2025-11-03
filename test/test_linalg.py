@@ -2224,14 +2224,6 @@ class TestLinalg(TestCase):
             else:
                 a = make_tensor(shape, dtype=dtype, device=device)
 
-            actual = torch.linalg.eig(a)
-
-            complementary_device = 'cpu'
-
-            # compare eigenvalues with CPU
-            expected = torch.linalg.eig(a.to(complementary_device))
-            self.assertEqual(expected[0], actual[0])
-
 
             # set tolerance for correctness check
             if dtype in [torch.float32, torch.complex64]:
@@ -2239,16 +2231,37 @@ class TestLinalg(TestCase):
             else:
                 atol = 1e-13  # Same OOM for NumPy
 
-            # check correctness using eigendecomposition identity
-            w, v = actual
-            a = a.to(v.dtype)
+            complementary_device = 'cpu'
 
-            if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
-                pass
-            elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
-                raise RuntimeError("eig returned empty tensors unexpectedly")
+            #select available backends
+            backends = ["default"]
+            if torch.device(device).type == 'cuda':
+                if torch.cuda.has_magma:
+                    backends.append("magma")
+                if has_cusolver():
+                    backends.append("cusolver")
 
-            self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
+            for backend in backends:
+
+                torch.backends.cuda.preferred_linalg_library(backend)
+
+                # compare eigenvalues with CPU
+                expected = torch.linalg.eig(a.to(complementary_device))
+                actual = torch.linalg.eig(a)
+                self.assertEqual(expected[0], actual[0])
+
+                # check correctness using eigendecomposition identity
+                w, v = actual
+                a = a.to(v.dtype)
+
+                if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
+                    pass
+                elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
+                    raise RuntimeError("eig returned empty tensors unexpectedly")
+
+                self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
+            torch.backends.cuda.preferred_linalg_library('default')
+
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
@@ -2493,26 +2506,38 @@ class TestLinalg(TestCase):
 
             complementary_device = 'cpu'
 
-            # compare with CPU
-            expected = torch.linalg.eigvals(a.to(complementary_device))
-            self.assertEqual(expected, actual)
+            backends = ["default"]
+            if torch.device(device).type == 'cuda':
+                if torch.cuda.has_magma:
+                    backends.append("magma")
+                if has_cusolver():
+                    backends.append("cusolver")
 
-            # check out= variant
-            complex_dtype = dtype
-            if not dtype.is_complex:
-                complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
-            out = torch.empty(0, dtype=complex_dtype, device=device)
-            ans = torch.linalg.eigvals(a, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(expected.to(complex_dtype), out)
+            for backend in backends:
+                torch.backends.cuda.preferred_linalg_library(backend)
 
-            # check non-contiguous out
-            if a.numel() > 0:
-                out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
-                self.assertFalse(out.is_contiguous())
+                # compare with CPU
+                expected = torch.linalg.eigvals(a.to(complementary_device))
+                self.assertEqual(expected, actual)
+
+                # check out= variant
+                complex_dtype = dtype
+                if not dtype.is_complex:
+                    complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+                out = torch.empty(0, dtype=complex_dtype, device=device)
                 ans = torch.linalg.eigvals(a, out=out)
                 self.assertEqual(ans, out)
                 self.assertEqual(expected.to(complex_dtype), out)
+
+                # check non-contiguous out
+                if a.numel() > 0:
+                    out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                    self.assertFalse(out.is_contiguous())
+                    ans = torch.linalg.eigvals(a, out=out)
+                    self.assertEqual(ans, out)
+                    self.assertEqual(expected.to(complex_dtype), out)
+
+            torch.backends.cuda.preferred_linalg_library('default')
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
