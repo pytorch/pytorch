@@ -813,8 +813,25 @@ void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
 }
 
 void huber_kernel(TensorIterator& iter, double delta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.dtype(), "huber_cpu", [&]() {
+  // Special-case kHalf: compute in float for numerical stability
+  if (iter.dtype() == kHalf) {
+    cpu_kernel(
+      iter,
+      // scalar lambda: convert half -> float, compute in float, cast back to half
+      [&] (at::Half a, at::Half b) -> at::Half {
+        float af = static_cast<float>(a);
+        float bf = static_cast<float>(b);
+        float z = std::abs(af - bf);
+        float out = z < static_cast<float>(delta)
+          ? 0.5f * z * z
+          : static_cast<float>(delta) * (z - 0.5f * static_cast<float>(delta));
+        return static_cast<at::Half>(out);
+      }
+    );
+    return;
+  }
+  else {
+   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "huber_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
         const scalar_t delta_val(delta);
         const Vec delta_val_vec(delta_val);
@@ -835,6 +852,7 @@ void huber_kernel(TensorIterator& iter, double delta) {
                   z >= delta_val_vec);
             });
       });
+  }
 }
 
 void sigmoid_backward_kernel(TensorIteratorBase& iter) {
