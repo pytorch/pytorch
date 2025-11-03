@@ -962,7 +962,7 @@ class TestFP8Lowering(TestCase):
             ):
                 """Software-emulated scaled_mm for testing without CUDA 12.8"""
                 out_dtype = out_dtype or torch.bfloat16
-                result = (mat_a.to(torch.float32) + mat_b.to(torch.float32))
+                result = mat_a.to(torch.float32) + mat_b.to(torch.float32)
                 if bias is not None:
                     result = result + bias.to(torch.float32)
                 return result.to(out_dtype)
