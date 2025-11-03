@@ -145,6 +145,39 @@ def dedup_dispatch(
     inter_plan = symm_mem.make_a2a_exchange_plan(
         in_splits, src_offsets, out_splits, dst_offsets, inter_node_group.group_name
     )
+
+    # Number of CUDA blocks, 8 block per inter-node rank
+    n_blocks = nnodes * 8
+    # Start offset of each CUDA block
+    b_start = torch.full((n_blocks,), -1, dtype=torch.int64, device=device)
+    # Number of tokens for each CUDA block
+    b_len = torch.full((n_blocks,), -1, dtype=torch.int64, device=device)
+    # Ready signal for each CUDA block. In this test we set all tokens as ready in one shot
+    b_head = torch.full((n_blocks,), -1, dtype=torch.int64, device=device)
+
+    # Inter-node token exchange can start as soon as inter_plan is ready and signals are created
+    # Record an event to indicate the above
+    inter_plan_ready = torch.Event(device=device)
+    inter_plan_ready.record()
+
+    # Create side stream for inter-node data exchange
+    inter_node_stream = torch.Stream(device=device)
+    inter_node_stream.wait_event(inter_plan_ready)
+    with inter_node_stream:
+        # Fire up inter-node token exchange
+        # inp: (expanded_seqlen, hid_dim)
+        symm_mem.all_to_all_v(
+            inp,
+            inter_out,
+            inter_plan,
+            inter_node_group.group_name,
+            b_start,
+            b_len,
+            b_head,
+        )
+
+    # On default stream, we continue to prepare for intra-node exchange
+
     # Inter-node topk indices exchange, (expanded_seqlen, topk)
     symm_mem.all_to_all_v(
         topk_indices_intranode_in,
@@ -185,62 +218,47 @@ def dedup_dispatch(
         max_out_len_intra, hid_dim, dtype=dtype, device=device
     ).fill_(-1)
 
-    # Number of CUDA blocks, 8 block per inter-node rank
-    n_blocks = nnodes * 8
-    # Start offset of each CUDA block
-    b_start = torch.full((n_blocks,), -1, dtype=torch.int64, device=device)
-    # Number of tokens for each CUDA block
-    b_len = torch.full((n_blocks,), -1, dtype=torch.int64, device=device)
-    # Ready signal for each CUDA block. In this test we set all tokens as ready in one shot
-    b_head = torch.full((n_blocks,), -1, dtype=torch.int64, device=device)
+    # Create intra-node exchange plan on a side stream, to overlap with the
+    # occurrence calculation
+    intra_splits_received = torch.Event(device=device)
+    intra_splits_received.record()
+    intra_plan_stream = torch.Stream(device=device)
+    intra_plan_stream.wait_event(intra_splits_received)
+    with intra_plan_stream:
+        intra_plan = symm_mem.make_a2a_2d_exchange_plan(
+            intra_in_splits,
+            intra_src_offsets,
+            intra_out_splits,
+            intra_dst_offsets,
+            intra_node_group.group_name,
+            align,
+        )
 
     # Figure out rank of each token in its expert chunk
     occurrences = _get_occurrence_numbers(topk_indices_intranode_out.view(-1))
 
-    intra_plan = symm_mem.make_a2a_2d_exchange_plan(
-        intra_in_splits,
-        intra_src_offsets,
-        intra_out_splits,
-        intra_dst_offsets,
-        intra_node_group.group_name,
-        align,
-    )
+    # Wait for completion of intra-node exchange plan
+    current_stream = torch.accelerator.current_stream(device)
+    current_stream.wait_stream(intra_plan_stream)
 
-    # Record an event to indicate completion of the exchange plan
-    intra_plan_ready = torch.Event(device=device)
-    intra_plan_ready.record()
-    # Create side stream for intra-node data exchange
-    intra_node_stream = torch.Stream(device=device)
-
-    # Inter-node token exchange, (expanded_seqlen, hid_dim)
-    symm_mem.all_to_all_v(
-        inp,
+    # Now let's fire up intra-node exchange
+    torch.ops.symm_mem._all_to_all_v_2d_index_push(
         inter_out,
-        inter_plan,
-        inter_node_group.group_name,
+        intra_out,
+        topk_indices_intranode_out,
+        occurrences,
+        intra_plan.dst_offsets,
+        intra_node_group.group_name,
         b_start,
         b_len,
         b_head,
     )
 
-    with intra_node_stream:
-        intra_node_stream.wait_event(intra_plan_ready)
-        # Now let's fire up intra-node exchange
-        torch.ops.symm_mem._all_to_all_v_2d_index_push(
-            inter_out,
-            intra_out,
-            topk_indices_intranode_out,
-            occurrences,
-            intra_plan.dst_offsets,
-            intra_node_group.group_name,
-            b_start,
-            b_len,
-            b_head,
-        )
-
-    # Wait for the intra-node exchange to finish
-    current_stream = torch.accelerator.current_stream(device)
-    current_stream.wait_stream(intra_node_stream)
+    # Join inter-node exchange stream
+    # The completion of intra-node exchange would also indicate the completion
+    # of inter-node exchange, here we still join inter-node stream for
+    # completion of the stream graph
+    current_stream.wait_stream(inter_node_stream)
 
     return (
         intra_out,
