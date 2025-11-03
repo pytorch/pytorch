@@ -9,17 +9,11 @@ from torch._ops import HigherOrderOperator
 # through calling such as
 # torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
 class Print(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("print")
-        self._print_str = None
 
-    def __call__(self, format_str, **kwargs):
-        self._print_str = format_str
-        self._print_kwargs = kwargs
+    def __call__(self, format_str: str, **kwargs: object) -> object:
         return super().__call__(format_str, **kwargs)
-
-    def _get_print_str(self):
-        return self._print_str
 
 
 print = Print()
@@ -27,7 +21,7 @@ print = Print()
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore
-def print_cpu(format_str, **kwargs) -> None:
+def print_cpu(format_str: str, **kwargs: object) -> None:
     # Ensure all immutable_dict/list in kwargs are converted to regular dict/list
     map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
@@ -45,4 +39,3 @@ def print_cpu(format_str, **kwargs) -> None:
         print_str = format_str
     # Use built-in print to avoid recursion with the HOP print
     builtins.print(print_str)
-    return None
