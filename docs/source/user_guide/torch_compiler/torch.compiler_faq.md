@@ -621,7 +621,7 @@ might need even finer control. Suppose you want to disable the tracing on just
 the `a_fn` function, but want to continue the tracing back in `aa_fn` and
 `ab_fn`. The image below demonstrates this use case:
 
-:::{figure} _static/img/fine_grained_apis/call_stack_diagram.png
+:::{figure} ../../_static/img/fine_grained_apis/call_stack_diagram.png
 :alt: diagram of torch.compile + disable(a_fn, recursive=False)
 :::
 
