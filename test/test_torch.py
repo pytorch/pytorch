@@ -10402,6 +10402,31 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertTrue(called)
 
+    def test_storage_thread_safety(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        NUM_ITERS = 10
+        NUM_THREADS = 4
+
+        # Concurrent calls to tensor.untyped_storage()
+        def access_untyped_storage(tensor, barrier):
+            barrier.wait()
+            return id(tensor.untyped_storage())
+
+        for i in range(NUM_ITERS):
+            tensor = torch.tensor([1.0, 2.0, 3.0])
+            barrier = threading.Barrier(NUM_THREADS)
+            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+                futures = [
+                    executor.submit(access_untyped_storage, tensor, barrier)
+                    for _ in range(NUM_THREADS)
+                ]
+
+                # Check that all the storages returned were the same
+                for future in futures:
+                    self.assertEqual(future.result(), id(tensor.untyped_storage()))
+
     # FIXME: move to test_linalg
     @torch.inference_mode()
     def test_bmm_multithreaded(self):
