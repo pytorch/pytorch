@@ -26,7 +26,7 @@ class MemoryProfileDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):
         rs = func(*args, **kwargs)
-        if func == torch.ops.aten.detach.default:
+        if func is torch.ops.aten.detach.default:
             return rs
         func_name: str = (
             self.memory_tracker._cur_module_name
