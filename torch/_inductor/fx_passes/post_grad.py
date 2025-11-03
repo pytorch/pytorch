@@ -1513,7 +1513,11 @@ def _cublaslt_can_fuse_bias_epilogue(inp, mat1, mat2):
         return False
 
     # match the dispatch logic for cuBLASLT at aten/src/ATen/native/cuda/Blas.cpp
-    if not (inp.is_cuda and (inp.dim() == 1 or inp.squeeze().dim == 1) and inp.is_contiguous()):
+    if not (
+        inp.is_cuda
+        and (inp.dim() == 1 or inp.squeeze().dim == 1)
+        and inp.is_contiguous()
+    ):
         return False
 
     if not (mat1.dim() == 2 and mat2.dim() == 2):
@@ -1533,7 +1537,9 @@ def should_prefer_unfused_addmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    if has_uses_tagged_as(match.output_node(), (torch.Tag.pointwise, torch.Tag.reduction)):
+    if has_uses_tagged_as(
+        match.output_node(), (torch.Tag.pointwise, torch.Tag.reduction)
+    ):
         return True
     else:
         args_val = (arg.meta["val"] for arg in (inp, *match.args))
