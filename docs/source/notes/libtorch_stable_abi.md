@@ -2,9 +2,9 @@
 
 ## Overview
 
-The LibTorch Stable ABI (Application Binary Interface) provides an interface for extending PyTorch functionality without being tightly coupled to specific PyTorch versions. This enables the development of custom operators and extensions that remain compatible across PyTorch releases.
+The LibTorch Stable ABI (Application Binary Interface) provides a limited interface for extending PyTorch functionality without being tightly coupled to specific PyTorch versions. This enables the development of custom operators and extensions that remain compatible across PyTorch releases. This limited set of APIs is not intended to replace existing LibTorch, but rather to provide a stable foundation for a majority of custom extension use cases. If there is any API you would like to see added to the stable ABI, please file a request through a [new issue on the PyTorch repo](https://github.com/pytorch/pytorch/issues).
 
-The stable ABI consists of three main components:
+The limited stable ABI consists of three main components:
 
 1. **Stable C headers** - Low-level C API implemented by libtorch (primarily `torch/csrc/inductor/aoti_torch/c/shim.h`)
 2. **Header-only C++ library** - Standalone utilities implemented in only headers such that there is no dependence on libtorch (`torch/headeronly/*`)
@@ -14,8 +14,8 @@ We discuss each of these in detail
 
 ### `torch/headeronly`
 
-This is a set of inlined C++ headers are completely decoupled from libtorch. The headers consist of certain utilities that might be familiar to custom extension writers. For example, the
-`c10::ScalarType` enum lives here as `torch::headeronly::ScalarType`.
+The inlined C++ headers living in [`torch/headeronly`](https://github.com/pytorch/pytorch/tree/main/torch/headeronly) are completely decoupled from LibTorch. The headers consist of certain utilities that might be familiar to custom extension writers. For example, the
+`c10::ScalarType` enum lives here as `torch::headeronly::ScalarType`, as well as a libtorch-independent version of `TORCH_CHECK` that is `STD_TORCH_CHECK`. You can trust all APIs in the `torch::headeronly` namespace to not depend on `libtorch.so`. These APIs are also globally listed in [torch/header_only_apis.txt](https://github.com/pytorch/pytorch/blob/main/torch/header_only_apis.txt).
 
 ### `torch/csrc/stable`
 
@@ -34,8 +34,14 @@ We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please fi
 
 ### Stable C headers
 
-The stable C headers used by AOTInductor form the foundation of the stable ABI. However, this is **use at your own risk**. For example, users must handle the memory lifecycle of objects returned by certain APIs.
- Further, the stack-based APIs discussed below which allow the user to call the PyTorch dispatcher don't provide strong guarantees on forward and backward compatibility.
+The stable C headers started by AOTInductor form the foundation of the stable ABI. Presently, the available C headers include:
+
+- [torch/csrc/inductor/aoti_torch/c/shim.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/c/shim.h): Includes C-style shim APIs for commonly used regarding Tensors, dtypes, CUDA, and the like.
+- [torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h): Includes C-style shim APIs for ATen ops from `native_functions.yaml` (e.g. `aoti_torch_aten_new_empty`).
+- [torch/csrc/inductor/aoti_torch/generated/c_shim_*.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/generated): Includes C-style shim APIs for specific backend kernels dispatched from `native_functions.yaml` (e.g. `aoti_torch_cuda_pad`). These APIs should only be used for the specific backend they are named after (e.g. `aoti_torch_cuda_pad` should only be used within CUDA kernels), as they opt out of the dispatcher.
+- [torch/csrc/stable/c/shim.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/stable/c/shim.h): We are building out more ABIs to logically live in `torch/csrc/stable/c` instead of continuing the AOTI naming that no longer makes sense for our general use case.
+
+These headers are promised to be ABI stable across releases and adhere to a stronger backwards compatibility policy than LibTorch. Specifically, we promise not to modify them for at least 2 years after they are released. However, this is **use at your own risk**. For example, users must handle the memory lifecycle of objects returned by certain APIs. Further, the stack-based APIs discussed below which allow the user to call into the PyTorch dispatcher do not provide strong guarantees on forward and backward compatibility of the underlying op that is called.
 
 Unless absolutely necessary, we recommend the high-level C++ API in `torch/csrc/stable`
 which will handle all the rough edges of the C API for the user.
@@ -122,12 +128,38 @@ The above is relevant in two places:
     }
     ```
 
-2. `aoti_torch_call_dispatcher`
+2. `torch_call_dispatcher`
     This API allows you to call the PyTorch dispatcher from C/C++ code. It has the following signature:
+
     ```cpp
-    aoti_torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack);
+    torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack, uint64_t extension_build_version);
     ```
 
-    `aoti_torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, and a stack of
-    StableIValues. This call will populate any return values of the op into the stack in their StableIValue form,
-    with `ret0` at index 0, `ret1` at index 1, and so on.
+    `torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
+    StableIValues and the `TORCH_ABI_VERSION` of the user extension. This call will populate any return values of the
+    op into the stack in their StableIValue form, with `ret0` at index 0, `ret1` at index 1, and so on.
+
+    We caution against using this API to call functions that have been registered to the dispatcher by other extensions
+    unless the caller can guarantee that the signature they expect matches that which the custom extension has
+    registered.
+
+### Versioning and Forward/Backward compatibility guarantees
+
+We provide a `TORCH_ABI_VERSION` macro in `torch/headeronly/version.h` of the form
+
+```
+[ byte ][ byte ][ byte ][ byte ][ byte ][ byte ][ byte ][ byte ]
+[MAJ   ][ MIN  ][PATCH ][                 ABI TAG              ]
+```
+
+In the present phase of development, APIs in the C-shim will be versioned based on major.minor.patch release that they are first introduced in, with 2.10 being the first release where this will be enforced. The ABI tag is reserved for future use.
+
+Extensions can select the minimum abi version to be compatible with using:
+
+```
+#define TORCH_TARGET_VERSION (((0ULL + major) << 56) | ((0ULL + minor) << 48))
+```
+
+before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
+
+The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.

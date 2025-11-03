@@ -1338,9 +1338,11 @@ def make_fast_binary_impl(
                 continue
             if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
-            # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:
-                common_dtype = op.dtype
+                if type_promotion_kind != ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+                    has_different_input_dtypes = True
+                else:
+                    common_dtype = op.dtype
             elif common_dtype != op.dtype:
                 has_different_input_dtypes = True
 
