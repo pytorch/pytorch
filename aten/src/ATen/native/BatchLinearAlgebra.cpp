@@ -3015,7 +3015,7 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
 
         vectors = linalg_eig_make_complex_eigenvectors(vectors_cpu, values_cpu, maybe_complex_vectors_cpu);
 
-        vectors.copy_(vectors_cpu.to(vectors.device()));
+        vectors.copy_(vectors_cpu);
 
 
       } else {
