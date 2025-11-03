@@ -13326,6 +13326,50 @@ if __name__ == '__main__':
         with torch.no_grad():
             model(src, src_mask=src_mask, src_key_padding_mask=src_key_padding_mask)
 
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.half)
+    def test_transformer_encoder_fastpath_mask_check(self, device, dtype):
+        """
+        Test that TransformerEncoder fastpath handles attn_mask correctly.
+        Regression test for issue #166166 where attn_mask caused crashes
+        on GPU when fastpath was enabled.
+        """
+        # Skip CPU since fastpath is a GPU-only optimization
+        if device == 'cpu':
+            return
+
+        # Set up the model and inputs
+        model = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=256, nhead=4, dim_feedforward=512, batch_first=True,
+                device=device, dtype=dtype
+            ),
+            num_layers=6
+        ).eval()
+
+        batch_size = 32
+        seq_len = 1200
+        src = torch.randn(batch_size, seq_len, 256, device=device, dtype=dtype)
+        src_key_padding_mask = torch.zeros(batch_size, seq_len, device=device, dtype=torch.bool)
+
+        # This is the mask that was causing the problem
+        attn_mask = torch.zeros(seq_len, seq_len, device=device, dtype=torch.bool)
+        expected_shape = src.shape
+
+        # Run the test with the fastpath enabled
+        torch.backends.mha.set_fastpath_enabled(True)
+
+        try:
+            with torch.no_grad():
+                output = model(src, mask=attn_mask, src_key_padding_mask=src_key_padding_mask)
+
+            # Assert success (no crash) and correct shape
+            self.assertEqual(output.shape, expected_shape)
+
+        finally:
+            # CRITICAL: Reset the global flag so we don't break other tests
+            torch.backends.mha.set_fastpath_enabled(False)
+
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
@@ -13792,7 +13836,6 @@ class TestUtils(TestCase):
         # Check they are the same preserving order
         self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
-
 
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
