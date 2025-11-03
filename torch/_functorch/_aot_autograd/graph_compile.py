@@ -96,6 +96,30 @@ from .utils import (
     unlift_tokens,
 )
 
+import threading
+from typing import Any, Dict
+from contextlib import contextmanager
+
+_thread_local = threading.local()
+
+@contextmanager
+def saved_tensor_hook_context(state: Dict[str, Any]):
+    previous_state = getattr(_thread_local, 'state', None)
+    try:
+        _thread_local.state = state
+        yield
+    finally:
+        # Clean up: restore previous state or remove attribute
+        if previous_state is not None:
+            _thread_local.state = previous_state
+        else:
+            if hasattr(_thread_local, 'state'):
+                delattr(_thread_local, 'state')
+
+
+def get_saved_tensor_hook_context() -> Dict[str, Any] | None:
+    return getattr(_thread_local, 'state', None)
+
 
 zip = strict_zip
 
@@ -1097,7 +1121,11 @@ def maybe_inline_graph_saved_tensors_hooks(
         if not isinstance(val, torch.Tensor):
             continue
 
-        pack_out_val = pack_hook_gm(val)
+        def _get_extra_info() -> dict[str, Any]:
+            return {"fw_graph": fw_g, "bw_graph": bw_g, "node": saved}
+
+        with saved_tensor_hook_context(_get_extra_info()):
+            pack_out_val = pack_hook_gm(val)
 
         requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
@@ -1118,7 +1146,8 @@ def maybe_inline_graph_saved_tensors_hooks(
             lambda: f"aot_saved_tensors_hooks_pack {saved.name}",
             structured_logs,
         )
-        pack_out_val = pack_gm(val)
+        with saved_tensor_hook_context(_get_extra_info()):
+            pack_out_val = pack_gm(val)
 
         # Install pack hook graph as eiplogue of fw_module.
         # Saved tensor output becomes input of pack hook graph.
