@@ -569,7 +569,7 @@ class FSDPParamGroup:
                 (
                     self._reduce_scatter_process_group
                     if isinstance(self.mesh_info, FSDPMeshInfo)
-                    else None
+                    else None  # pyre-fixme[6]
                 ),
                 self.comm_ctx.reduce_scatter_stream,
                 self._reduce_scatter_comm,
