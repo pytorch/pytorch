@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, overload, TYPE_CHECKING, Union
+from typing import Optional, overload, Union
 
 import torch
 import torch.distributed as dist
@@ -36,12 +36,6 @@ from torch.distributed.tensor import DeviceMesh, init_device_mesh
 from torch.distributed.utils import _get_root_modules
 
 from .contract import _get_registry, contract
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from torch.distributed.tensor import Shard
 
 
 cls_to_replicate_cls: dict[type, type] = {}
@@ -94,7 +88,7 @@ class _ReplicateState(FSDPState):
         modules: tuple[nn.Module, ...],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
-        auto_reshard_after_forward: bool,
+        auto_reshard_after_forward: bool = False,
     ) -> None:
         for module in modules:
             _insert_module_state(module, self)
@@ -170,8 +164,6 @@ def replicate_impl(
     mesh: DeviceMesh,
     *,
     device_id: Optional[Union[int, torch.device]] = None,
-    reshard_after_forward: Optional[Union[bool, int]] = None,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: Optional[set[nn.Parameter]] = None,
@@ -193,7 +185,6 @@ def replicate_impl(
             )
         mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
-    auto_reshard_after_forward = reshard_after_forward is None
 
     post_forward_mesh_info = None
 
@@ -202,7 +193,7 @@ def replicate_impl(
         (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
     )
     state = replicate.state(modules[0])  # type: ignore[attr-defined] # see [1]
-    state.init(modules, device, mp_policy, auto_reshard_after_forward)
+    state.init(modules, device, mp_policy)
 
     managed_modules = _get_managed_modules(modules, ignored_params)
     params, buffers = _get_managed_states(managed_modules, ignored_params)
@@ -215,7 +206,7 @@ def replicate_impl(
             mesh_info,  # type: ignore[arg-type]
             post_forward_mesh_info,
             device,
-            shard_placement_fn,
+            None,
             mp_policy,
             offload_policy,
         )
@@ -238,9 +229,6 @@ def replicate(
     module: nn.Module,
     *,
     mesh: Optional[DeviceMesh] = ...,
-    device_id: Optional[Union[int, torch.device]] = ...,
-    reshard_after_forward: Optional[Union[bool, int]] = ...,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: Optional[set[nn.Parameter]] = ...,
@@ -253,8 +241,6 @@ def replicate(
     module: list[nn.Module],
     *,
     mesh: Optional[DeviceMesh] = ...,
-    reshard_after_forward: Union[bool, int] = ...,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: Optional[set[nn.Parameter]] = ...,
@@ -266,8 +252,6 @@ def replicate(
     module: nn.Module,
     *,
     mesh: Optional[DeviceMesh] = None,
-    reshard_after_forward: Optional[Union[bool, int]] = None,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: Optional[set[nn.Parameter]] = None,
@@ -294,8 +278,6 @@ def replicate(
     return replicate_impl(
         module,
         mesh,
-        reshard_after_forward=reshard_after_forward,
-        shard_placement_fn=shard_placement_fn,
         mp_policy=mp_policy,
         offload_policy=offload_policy,
         ignored_params=ignored_params,
