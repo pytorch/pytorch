@@ -59,6 +59,7 @@
 // forward declare
 class cublasCommonArgs;
 
+#ifndef _WIN32
 namespace fbgemm_gpu {
 
 // NOTE(slayton58): FBGemm_GPU kernels come from <fbgemm_gpu/torch_ops.h> within the FBGemm repo.
@@ -74,6 +75,7 @@ at::Tensor f4f4bf16(
     bool use_mx);
 
 } // namespace fbgemm_gpu
+#endif
 
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
@@ -967,9 +969,9 @@ _scaled_mxfp4_mxfp4(
           const std::optional<Tensor>& bias,
           const c10::ScalarType out_dtype,
           Tensor& out) {
-#if !defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI)
+#if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI))
   TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM and CUDA+FBGEMM_GENAI only");
-#endif
+#else
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",
@@ -1044,6 +1046,7 @@ _scaled_mxfp4_mxfp4(
   );
 
   return out;
+#endif
 #endif
 }
 
