@@ -43,7 +43,11 @@ def as_strided_handler(
     args, kwargs = fill_defaults(op_call._schema, args, kwargs)
     assert not kwargs
     tensor, size, stride, storage_offset = args
-    if tensor.size() == tuple(size) and tensor.stride() == tuple(stride) and (storage_offset is None or tensor.storage_offset() == storage_offset):
+    if (
+        tensor.size() == tuple(size)
+        and tensor.stride() == tuple(stride)
+        and (storage_offset is None or tensor.storage_offset() == storage_offset)
+    ):
         return torch.ops.aten.alias.default(tensor)
     raise RuntimeError("as_strided not supported with DTensor")
 
