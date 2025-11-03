@@ -178,7 +178,7 @@ class MetaTracer(torch.fx.Tracer):
             kwargs,
             name,
             type_expr,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             proxy_factory_fn,
         )
 
@@ -201,7 +201,7 @@ class MetaTracer(torch.fx.Tracer):
 
             if kind == "call_function":
                 meta_target = manual_meta_overrides.get(target, target)
-                # pyrefly: ignore  # not-callable
+                # pyrefly: ignore [not-callable]
                 meta_out = meta_target(*args_metas, **kwargs_metas)
             elif kind == "call_method":
                 meta_target = getattr(args_metas[0], target)  # type: ignore[index]
