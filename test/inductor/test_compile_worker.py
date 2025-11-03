@@ -104,7 +104,7 @@ class TestTimer(TestCase):
 
         t = Timer(0.1, doit)
         t.sleep_time = 0.1
-        for i in range(10):
+        for _ in range(10):
             t.record_call()
             self.assertTrue(done.wait(4))
             done.clear()
@@ -130,7 +130,7 @@ class TestTimer(TestCase):
 
         t = Timer(1, doit)
         t.sleep_time = 0.1
-        for i in range(400):
+        for _ in range(400):
             t.record_call()
         self.assertTrue(done.wait(4))
         t.quit()
