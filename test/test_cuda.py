@@ -98,7 +98,7 @@ requiresCppContext = unittest.skipUnless(
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 try:
     import torchvision.models  # noqa: F401
@@ -1168,7 +1168,7 @@ print(t.is_pinned())
 
         stream_record = torch.cuda.Stream()
         with torch.cuda.stream(stream_record):
-            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+            torch.cuda._busy_wait_for_flag()
 
         view.record_stream(stream_record)
 
@@ -1181,6 +1181,7 @@ print(t.is_pinned())
 
         with torch.cuda.stream(stream_alloc):
             try_realloc = torch.cuda.FloatTensor([10, 10])
+        torch.cuda._clear_flag()
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
@@ -4222,6 +4223,7 @@ class TestCudaMallocAsync(TestCase):
                 ss = torch.cuda.memory._snapshot()
 
                 trace_plot(ss)
+                trace_plot(ss, filter_freed=True)
                 segment_plot(ss)
                 text = json.dumps(ss)
 
@@ -4388,7 +4390,7 @@ class TestCudaMallocAsync(TestCase):
                 torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._set_memory_metadata("metadata test")
-                torch.cuda.memory._record_memory_history(context="all")
+                torch.cuda.memory._record_memory_history(context=context)
                 x = torch.rand(3, 4, device="cuda")
                 del x
                 torch.cuda.memory.empty_cache()
@@ -4782,7 +4784,7 @@ print(torch.cuda.get_allocator_backend())
                 total -= x.numel()
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
-            for i in range(N):
+            for _ in range(N):
                 while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
@@ -6965,7 +6967,8 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication

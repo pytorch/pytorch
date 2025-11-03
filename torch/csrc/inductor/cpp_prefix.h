@@ -14,7 +14,7 @@
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
 // the CPU backend, we have to make sure the used headers are implemented
 // in a header-only way, i.e. all the function and class definitions are
-// in .h files instead of .cpp files, to avoid ABI backward-compatiblity
+// in .h files instead of .cpp files, to avoid ABI backward-compatibility
 // breakage.
 
 #include <ATen/NumericUtils.h>
