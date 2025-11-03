@@ -16745,6 +16745,74 @@ def forward(self, q, k, v):
 
         self.assertEqual(result_non_strict, result_strict)
 
+    def test_tril_dynamic_diagonal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                x_len = x.shape[0]
+                y_len = y.shape[0]
+                mask = torch.ones(x_len, y_len, dtype=torch.bool, device=x.device)
+                mask = mask.tril(diagonal=y_len - x_len)
+                return mask
+
+        x = torch.randn(3, 4)
+        y = torch.randn(5, 4)
+        x_len = Dim("x_len", min=1, max=64)
+        y_len = Dim("y_len", min=1, max=64)
+        ep = export(
+            Module(),
+            (x, y),
+            dynamic_shapes={
+                "x": {0: x_len},
+                "y": {0: y_len},
+            },
+        )
+        eager_out = Module()(x, y)
+        exported_out = ep.module()(x, y)
+        self.assertEqual(eager_out, exported_out)
+        self.assertEqual(exported_out.shape, (3, 5))
+        x2 = torch.randn(4, 4)
+        y2 = torch.randn(7, 4)
+        eager_out2 = Module()(x2, y2)
+        exported_out2 = ep.module()(x2, y2)
+        self.assertEqual(eager_out2, exported_out2)
+        self.assertEqual(exported_out2.shape, (4, 7))
+        expected_mask = torch.ones(3, 5, dtype=torch.bool).tril(diagonal=2)
+        self.assertEqual(eager_out, expected_mask)
+
+    def test_triu_dynamic_diagonal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                x_len = x.shape[0]
+                y_len = y.shape[0]
+                mask = torch.ones(x_len, y_len, dtype=torch.bool, device=x.device)
+                mask = mask.triu(diagonal=y_len - x_len)
+                return mask
+
+        x = torch.randn(3, 4)
+        y = torch.randn(5, 4)
+        x_len = Dim("x_len", min=1, max=64)
+        y_len = Dim("y_len", min=1, max=64)
+        ep = export(
+            Module(),
+            (x, y),
+            dynamic_shapes={
+                "x": {0: x_len},
+                "y": {0: y_len},
+            },
+        )
+        eager_out = Module()(x, y)
+        exported_out = ep.module()(x, y)
+        self.assertEqual(eager_out, exported_out)
+        self.assertEqual(exported_out.shape, (3, 5))
+        x2 = torch.randn(4, 4)
+        y2 = torch.randn(7, 4)
+        eager_out2 = Module()(x2, y2)
+        exported_out2 = ep.module()(x2, y2)
+        self.assertEqual(eager_out2, exported_out2)
+        self.assertEqual(exported_out2.shape, (4, 7))
+        expected_mask = torch.ones(3, 5, dtype=torch.bool).triu(diagonal=2)
+        self.assertEqual(eager_out, expected_mask)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
