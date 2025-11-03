@@ -576,6 +576,7 @@ class HalideOverrides(OpOverrides):
         name: str,
         reduction_type: str,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
