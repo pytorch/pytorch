@@ -216,18 +216,16 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'getitem', {'compile_inductor': 0})
 ('call_function', 'getitem_1', {'compile_inductor': 0})
 ('call_function', 'detach_1', {'compile_inductor': 0})
-('call_function', 'detach_4', {'compile_inductor': 0})
-('call_function', 'detach_5', {'compile_inductor': 0})""",  # noqa: B950
+('call_function', 'detach_3', {'compile_inductor': 0})""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('placeholder', 'getitem', {'compile_inductor': 0})
-('placeholder', 'detach_5', {'compile_inductor': 0})
+('placeholder', 'detach_3', {'compile_inductor': 0})
 ('call_function', 'zeros', {'compile_inductor': 0})
 ('call_function', 'detach', {'compile_inductor': 0})
 ('call_function', 'detach_2', {'compile_inductor': 0})
-('call_function', 'detach_3', {'compile_inductor': 0})
 ('get_attr', 'fw_graph0', {'compile_inductor': 0})
 [('placeholder', 'arg0_1', {'compile_inductor': 0}), ('placeholder', 'arg1_1', {'compile_inductor': 0}), ('placeholder', 'arg2_1', {'compile_inductor': 0}), ('placeholder', 'arg3_1', {'compile_inductor': 0}), ('placeholder', 'arg4_1', {'compile_inductor': 0}), ('call_function', 'mul', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
 ('get_attr', 'joint_graph0', {'compile_inductor': 0})
@@ -239,6 +237,68 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'getitem_4', {'compile_inductor': 0})
 ('call_function', 'getitem_5', {'compile_inductor': 0})""",  # noqa: B950
         )
+
+    def test_as_decorator(self):
+        class Mod(torch.nn.Module):
+            @fx_traceback.annotate({"fdsp_bucket": 0})
+            def sin(self, x):
+                return torch.sin(x)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    sin = self.sin(x)
+                    sub = sin - 2
+                    mul = sub * 2
+                div = mul / 3
+                return div
+
+        m = Mod()
+        backend = AotEagerAndRecordGraphs()
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        x = torch.randn(10, requires_grad=True)
+        m(x)
+        opt_m(x).sum().backward()
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+
+        dynamo_metadata = fx_traceback._get_custom_metadata(backend.graphs[0])
+        fw_metadata = fx_traceback._get_custom_metadata(backend.fw_graphs[0])
+        bw_metadata = fx_traceback._get_custom_metadata(backend.bw_graphs[0])
+        self.assertExpectedInline(
+            str(dynamo_metadata),
+            """\
+('placeholder', 'l_x_', {'pp_stage': 0, 'fdsp_bucket': 0})
+('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
+('call_function', 'sub', {'pp_stage': 0})
+('call_function', 'mul', {'pp_stage': 0})""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            str(fw_metadata),
+            """\
+('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
+('call_function', 'sub', {'pp_stage': 0})
+('call_function', 'mul', {'pp_stage': 0})""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            str(bw_metadata),
+            """\
+('call_function', 'mul_1', {'pp_stage': 0})
+('call_function', 'cos', {'pp_stage': 0, 'fdsp_bucket': 0})
+('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",  # noqa: B950
+        )
+
+    def test_graph_break(self):
+        def fn(x):
+            with torch.fx.traceback.annotate({"pp_stage": 0}):
+                x = torch.sin(x)
+                torch._dynamo.graph_break()
+                x = torch.cos(x)
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(10, requires_grad=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":

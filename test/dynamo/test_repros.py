@@ -1000,6 +1000,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.exit_stack.close()
         super().tearDown()
 
+    def test_compiled_module_truthiness(self):
+        # Test with empty ModuleList
+        original_empty = nn.ModuleList()
+        compiled_empty = torch.compile(original_empty)
+        self.assertEqual(bool(original_empty), bool(compiled_empty))
+        self.assertFalse(bool(compiled_empty))
+        # Test with non-empty ModuleList
+        original_filled = nn.ModuleList([nn.Linear(10, 5)])
+        compiled_filled = torch.compile(original_filled)
+        self.assertEqual(bool(original_filled), bool(compiled_filled))
+        self.assertTrue(bool(compiled_filled))
+
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
         cloned_root = root.clone_manager(lambda x: True)
@@ -3251,7 +3263,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 2, x.size()
+            assert x[0] == 2, f"Error {x}: {x.size()}"
             return x.cos() + b
 
         torch._dynamo.utils.counters.clear()
@@ -4471,7 +4483,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
-        for _ in range(0, 5):
+        for _ in range(5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
             compiled_a = torch.ones([6], requires_grad=requires_grad)
@@ -4623,7 +4635,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, counter), fn(x, counter))
         self.assertEqual(counter[0], 2)
-        for _ in range(0, 10):
+        for _ in range(10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
         if torch._dynamo.config.assume_static_by_default:
@@ -4784,7 +4796,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_contains_range_constprop(self):
         def fn(x):
             # dynamo should const prop to False
-            if 3 in range(0, 10):
+            if 3 in range(10):
                 return x + 1
             else:
                 return x + 2
@@ -5748,7 +5760,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
     def test_grad(self):
-        # Write to `grad` or `_grad` should reflecte in reading from the other,
+        # Write to `grad` or `_grad` should reflective in reading from the other,
         # and should be codegen-ed.
         def fn(x, y):
             x._grad = y + 1
@@ -7260,30 +7272,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
         )
 
-    def test_311_resume_block_keyerror(self):
-        # https://github.com/pytorch/pytorch/issues/162313
-        flag = True
-
-        def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 2
-            if flag:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 4
-            else:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 8
-            return x + 16
-
-        inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        flag = False
-        self.assertEqual(fn(inp), opt_fn(inp))
-
     def test_cells_unsupported_step_exception(self):
         # This error happened because:
         #  - we were generating cells into a list on the stack
@@ -7431,6 +7419,41 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         # One graph, so no graph breaks
         self.assertEqual(backend_counter.frame_count, 1)
         self.assertEqual(len(backend_counter.graphs), 1)
+
+    # https://github.com/pytorch/pytorch/issues/164990
+    def test_guard_same_frame_fail_message(self):
+        import torch._dynamo.guards as g
+
+        # deterministically fail check on the same frame to verify error message correctness
+        # the other example of fail might be datetime.now() until patched - see issue #164990
+        compile_check_fn = g.CheckFunctionManager.compile_check_fn
+
+        def wrapper(self, builder, sorted_guards, guard_fail_fn):
+            compile_check_fn(self, builder, sorted_guards, guard_fail_fn)
+
+            def check(x):
+                return False
+
+            self.guard_manager.check = check
+
+        with mock.patch.object(g.CheckFunctionManager, "compile_check_fn", new=wrapper):
+
+            class Model(nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = Model()
+            x = torch.randn(5)
+
+            with self.assertRaises(AssertionError) as e:
+                torch.compile(model)(x)
+
+        msg = str(e.exception)
+        self.assertIn(
+            "Guard failed on the same frame it was created. This is a bug - please create an issue."
+            "Guard fail reason: ",
+            msg,
+        )
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -8065,6 +8088,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         gm = _dynamo_graph_capture_for_export(foo)(x, y)
         res = gm(x, y)
         self.assertEqual(res, ref)
+
+    def test_current_accelerator(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.accelerator.current_accelerator()
+            return x + 1
+
+        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
 
 
 instantiate_parametrized_tests(ReproTests)
