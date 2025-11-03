@@ -1052,6 +1052,34 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         w.wait()
 
     @with_comms
+    def test_concatenate_2d(self):
+        mesh_shape = (2, 4)
+        mesh_dim_names = ("dp", "tp")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        concatenated_mesh = DeviceMesh._concatenate([mesh_2d["dp"], mesh_2d["tp"]])
+        self.assertEqual(concatenated_mesh.mesh, mesh_2d.mesh)
+        self.assertEqual(concatenated_mesh.get_group("dp"), mesh_2d.get_group("dp"))
+        self.assertEqual(concatenated_mesh.get_group("tp"), mesh_2d.get_group("tp"))
+
+    @with_comms
+    def test_concatenate_3d(self):
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("pp", "dp", "tp")
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        concatenated_mesh = DeviceMesh._concatenate([mesh_3d["dp"], mesh_3d["tp"]])
+        dp_tp_mesh = mesh_3d["dp", "tp"]
+        self.assertEqual(concatenated_mesh.mesh, dp_tp_mesh.mesh)
+        self.assertEqual(concatenated_mesh.get_group("dp"), dp_tp_mesh.get_group("dp"))
+        self.assertEqual(concatenated_mesh.get_group("tp"), dp_tp_mesh.get_group("tp"))
+        self.assertEqual(
+            mesh_3d, DeviceMesh._concatenate([mesh_3d["pp", "dp"], mesh_3d["tp"]])
+        )
+
+    @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):
         mesh_3d = init_device_mesh(
             self.device_type, (2, 2, 2), mesh_dim_names=("replicate", "shard", "cp")

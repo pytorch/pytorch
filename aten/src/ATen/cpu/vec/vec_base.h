@@ -634,7 +634,7 @@ struct Vectorized {
   }
   Vectorized<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
-    // return value back to T in the case of unary operator- incuring a
+    // return value back to T in the case of unary operator- incurring a
     // promotion
     return map([](T x) -> T { return -x; });
   }
@@ -672,7 +672,7 @@ struct Vectorized {
     return map(std::sqrt);
   }
   Vectorized<T> reciprocal() const {
-    return map([](T x) { return (T)(1) / x; });
+    return map([](T x) { return (T)1 / x; });
   }
   Vectorized<T> rsqrt() const {
     return map([](T x) { return (T)1 / std::sqrt(x); });

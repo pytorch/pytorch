@@ -909,7 +909,7 @@ if _enabled:
             self_method = self.__dir__
             if (
                 self_method.__func__  # type: ignore[attr-defined]
-                == _get_function_from_type(RecursiveScriptModule, "__dir__")
+                is _get_function_from_type(RecursiveScriptModule, "__dir__")
             ):
                 return super().__dir__()
             return self_method()
@@ -921,7 +921,7 @@ if _enabled:
             self_method = self.__bool__
             if (
                 self_method.__func__  # type: ignore[attr-defined]
-                == _get_function_from_type(RecursiveScriptModule, "__bool__")
+                is _get_function_from_type(RecursiveScriptModule, "__bool__")
             ):
                 return True
             return self_method()
@@ -1066,7 +1066,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
         else:
             new_obj_dict[name] = sub_module
 
-    for k, v in new_obj_dict.items():
+    for v in new_obj_dict.values():
         obj.__dict__[name] = v
 
     return obj
