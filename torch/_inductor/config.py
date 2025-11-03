@@ -8,6 +8,9 @@ from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
+if TYPE_CHECKING:
+    from torch._inductor.choices import InductorChoices
+
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
 
@@ -92,6 +95,7 @@ precompilation_timeout_seconds: int = 60 * 60
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
+    env_name_default="TORCHINDUCTOR_FX_GRAPH_CACHE_DEFAULT",
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
@@ -205,6 +209,9 @@ static_weight_shapes = True
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
+runtime_triton_nan_asserts = (
+    os.environ.get("TORCHINDUCTOR_RUNTIME_TRITON_NAN_ASSERTS") == "1"
+)
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
 # Disable by default in fbcode
@@ -487,6 +494,11 @@ graph_partition: bool = (
     == "1"
 )
 
+# register ops upon which inductor should partition the graph. name format should be
+# "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
+# "namespace::kernel_name.overload" (e.g., aten::mm.default).
+custom_should_partition_ops: list[str] = []
+
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
@@ -652,6 +664,9 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
+# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+inductor_choices_class: Optional[Callable[[], "InductorChoices"]] = None
+
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -692,6 +707,10 @@ max_fusion_size = 64
 # how many nodes to attempt pairwise fusion with in a buffer group
 max_fusion_buffer_group_pairwise_attempts = 64
 
+# maximum number of unique input/output buffers allowed in fused kernels.
+# The check is disabled if set to None.
+max_fusion_unique_io_buffers: Optional[int] = None
+
 # max number of inputs to generate cat as a pointwise op with masked loads
 max_pointwise_cat_inputs = 8
 
@@ -713,7 +732,7 @@ conv_1x1_as_mm = False
 #   split_reductions: uses multiple kernels to gain more parallelism
 #   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
 # enabling both of these will implicitly disable split_reductions
-split_reductions = True
+split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
@@ -753,6 +772,8 @@ combo_kernels_autotune = 1
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
 combo_kernel_foreach_dynamic_shapes = True
+# Maximum number of arguments (read/write buffers) allowed in a combo kernel
+combo_kernel_max_num_args = 250
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1538,6 +1559,13 @@ class triton:
     # If set to false, will never generate PDL code.
     enable_pdl = False
 
+    mix_order_reduction = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
+    )
+
+    mix_order_reduction_split_size: Optional[int] = None
+    mix_order_reduction_autotune_split_size = True
+
 
 class aot_inductor:
     """
@@ -1928,6 +1956,9 @@ cpu_backend: Literal["cpp", "triton", "halide"] = "cpp"
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
 cuda_backend: Literal["triton", "halide"] = "triton"
 
+# Backend to use for XPU codegen either "triton"
+xpu_backend: Literal["triton"] = "triton"
+
 
 class halide:
     # Base halide target to use for CPU devices
@@ -2081,6 +2112,17 @@ write_are_deterministic_algorithms_enabled = (
 )
 
 
+class lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False, no
+    # hash checking is performed.
+    check_src_hash: bool = True
+
+
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
@@ -2118,6 +2160,9 @@ class test_configs:
     distort_benchmarking_result = os.getenv(
         "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
+
+    bisect_pre_grad_graph = False
+    bisect_keep_custom_backend_for_inductor = False
 
 
 if TYPE_CHECKING:

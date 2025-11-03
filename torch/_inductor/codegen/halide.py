@@ -570,6 +570,16 @@ class HalideOverrides(OpOverrides):
     def device_assert_async(cond, msg):
         raise NotImplementedError("device_assert_async")
 
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+        extra_meta: dict[str, Any],
+    ) -> None:
+        raise NotImplementedError
+
 
 HalideOverrides._initialize_pointwise_overrides("halide")
 
@@ -1650,7 +1660,7 @@ class HalideKernel(SIMDKernel):
             n = max(2, n)
         return n
 
-    def call_kernel(self, name: str, node=None):
+    def call_kernel(self, name: str, node=None, deallocate_ws: bool = True):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]
