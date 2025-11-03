@@ -113,6 +113,7 @@ case "$tag" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
+    INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
     CUDA_VERSION=13.0.0
@@ -194,13 +195,16 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-jammy-xpu-n-py3)
+  pytorch-linux-jammy-xpu-n-py3 | pytorch-linux-jammy-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
     XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
     TRITON=yes
+    if [[ $tag =~ "benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
@@ -361,6 +365,7 @@ docker build \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
+       --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

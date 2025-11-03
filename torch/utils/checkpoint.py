@@ -83,7 +83,7 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
 def check_backward_validity(inputs: Iterable[Any]) -> None:
     if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn(
-            "None of the inputs have requires_grad=True. Gradients will be None"
+            "None of the inputs have requires_grad=True. Gradients will be None", stacklevel=2
         )
 
 
@@ -144,7 +144,7 @@ def _infer_device_type(*args):
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
             "detected, it will be prioritized; otherwise, the first device encountered will be selected.)"
-            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}"
+            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}", stacklevel=2
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
@@ -196,7 +196,7 @@ def set_device_states(devices, states, *, device_type=None) -> None:
     if device_type == "meta":
         return
     device_module = _get_device_module(device_type)
-    for device, state in zip(devices, states):
+    for device, state in zip(devices, states, strict=False):
         with device_module.device(device):
             device_module.set_rng_state(state)
 
@@ -222,7 +222,7 @@ def _get_autocast_kwargs(device_type="cuda"):
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, run_function, preserve_rng_state, *args):
         check_backward_validity(args)
         ctx.run_function = run_function
@@ -565,7 +565,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
-            "details on the differences between the two variants."
+            "details on the differences between the two variants.", stacklevel=2
         )
         use_reentrant = True
 
@@ -785,7 +785,7 @@ class _Holder:
 
 class _NoopSaveInputs(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(*args):
         return torch.empty((0,))
 
@@ -794,7 +794,7 @@ class _NoopSaveInputs(torch.autograd.Function):
         # Only tensors can be saved with ctx.save_for_backward, everything else
         # is captured by get_args, which is saved directly on ctx
         tensor_indices, tensors = zip(
-            *[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)]
+            *[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)], strict=False
         )
         idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
         # args but with tensors replaced with None as placeholders
@@ -1008,7 +1008,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             def logging_mode():
                 with LoggingTensorMode(), \
                      capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
-                    # pyrefly: ignore  # bad-assignment
+                    # pyrefly: ignore [bad-assignment]
                     self.logs, self.tbs = logs_and_tb
                     yield logs_and_tb
             return logging_mode()
@@ -1020,7 +1020,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
         def get_str_tb(label, capture_logs):
             out = ""
             total_len = len(capture_logs.logs)
-            for i, (log, tb) in enumerate(zip(capture_logs.logs, capture_logs.tbs)):
+            for i, (log, tb) in enumerate(zip(capture_logs.logs, capture_logs.tbs, strict=False)):
                 out += f"{log}   ({i + 1} of {total_len} in {label})\n\n"
                 found_torch_dispatch = False
                 for line in tb:
@@ -1034,8 +1034,10 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
                     out += f"{line['filename']}:{line['line']}:{line['name']}\n"
                 out += "\n\n"
             return out
-        assert capture_logs_fwd.logs is not None
-        assert capture_logs_recompute.logs is not None
+        if capture_logs_fwd.logs is None:
+            raise AssertionError("capture_logs_fwd.logs is None")
+        if capture_logs_recompute.logs is None:
+            raise AssertionError("capture_logs_recompute.logs is None")
         raise CheckpointError(
             _checkpoint_error_template.format(
                 forward_traces=get_str_tb("original", capture_logs_fwd),
@@ -1073,12 +1075,14 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
-            assert target_frame is not None  # appease mypy
+            if target_frame is None:
+                raise AssertionError("Internal error: target_frame reference is None")
             recomp_idx = target_frame.recomp_counter[gid]
             target_frame.recomp_counter[gid] += 1
 
             if recomp_idx >= len(target_frame.weak_holders):
-                assert not target_frame.early_stop
+                if target_frame.early_stop:
+                    raise AssertionError("Unexpected state: target_frame.early_stop is set")
                 if not target_frame.forward_completed:
                     # We run into this case when early stop is not enabled and do
                     # grad within checkpoint.
@@ -1187,7 +1191,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # Checking that a functional mode is active should always do what we want
-    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
 
 class _VersionWrapper:
@@ -1497,7 +1501,7 @@ def _checkpoint_without_reentrant_generator(
     unpack_error_cb = None
 
     if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
-        if context_fn != noop_context_fn:
+        if context_fn is not noop_context_fn:
             raise ValueError(
                 "debug=True is incompatible with non-default context_fn"
             )
@@ -1514,13 +1518,15 @@ def _checkpoint_without_reentrant_generator(
     device_type = _infer_device_type(*args)
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
-    if _is_compiling(fn, args, kwargs) and context_fn != noop_context_fn:
-        assert (
-            isinstance(forward_context, TorchDispatchMode) and
-            isinstance(recompute_context, TorchDispatchMode)
-        ), \
-            "In torch.compile mode, `context_fn` arg passed to `torch.utils.checkpoint` " + \
-            "must generate a tuple of two `TorchDispatchMode`s."
+    if _is_compiling(fn, args, kwargs) and context_fn is not noop_context_fn:
+        if (
+            not isinstance(forward_context, TorchDispatchMode)
+            or not isinstance(recompute_context, TorchDispatchMode)
+        ):
+            raise AssertionError(
+                "In torch.compile mode, `context_fn` arg passed to `torch.utils.checkpoint` "
+                "must generate a tuple of two `TorchDispatchMode`s."
+            )
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     device_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs(device_type=device_type)
 

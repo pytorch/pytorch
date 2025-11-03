@@ -742,7 +742,7 @@ def forward(self, pred_1, x_1):
 
     def test_cond_in_forloop(self):
         def for_loop_fake(x):
-            for i in range(3):
+            for _ in range(3):
                 x = x * x + 1
             return x
 
@@ -1236,7 +1236,7 @@ def forward(self, pred_1, x_1):
         from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
         # This is a helper function that extracts the metadata from the tensor and
-        # sets the requries_grad flag to false. This is needed as we compare the
+        # sets the requires_grad flag to false. This is needed as we compare the
         # metadata of the operands and the gradients
         def _extract_tensor_metadata_except_requires_grad(arg):
             metadata = _extract_tensor_metadata(arg)
@@ -2932,9 +2932,7 @@ class GraphModule(torch.nn.Module):
             if autograd:
                 result_flat = pytree.tree_leaves(result)
                 result_exp_flat = pytree.tree_leaves(result_exp)
-                exp_grad_mask = [
-                    True if r.requires_grad else False for r in result_exp_flat
-                ]
+                exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
                 self.check_autograd(
                     [r for r, m in zip(result_flat, exp_grad_mask) if m],
                     [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
@@ -3090,9 +3088,7 @@ class GraphModule(torch.nn.Module):
             )
 
             # Compare gradients for each layer
-            for i, (uncompiled_grad, compiled_grad) in enumerate(
-                zip(uncompiled_grads, compiled_grads)
-            ):
+            for uncompiled_grad, compiled_grad in zip(uncompiled_grads, compiled_grads):
                 self.assertEqual(
                     uncompiled_grad,
                     compiled_grad,
@@ -3741,9 +3737,7 @@ class AssociativeScanTests(TestCase):
         ):
             result_flat = pytree.tree_leaves(result)
             result_exp_flat = pytree.tree_leaves(result_exp)
-            exp_grad_mask = [
-                True if r.requires_grad else False for r in result_exp_flat
-            ]
+            exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
 
             self._check_autograd(
                 [r for r, m in zip(result_flat, exp_grad_mask) if m],
@@ -5710,10 +5704,9 @@ def forward(self, arg0_1):
     )
     def test_while_loop_tracing(self, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
-        allow_non_fake_inputs = (
-            False
-            if while_loop_test not in ("simple_with_linear", "nested_with_linear")
-            else True
+        allow_non_fake_inputs = while_loop_test in (
+            "simple_with_linear",
+            "nested_with_linear",
         )
         self._check_tracing(fn, inp, allow_non_fake_inputs)
 
@@ -8092,6 +8085,260 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_simple(self):
+        x = torch.randn(3, 4, 4)
+        y = torch.randn(4, 2)
+        zeros = torch.zeros(2, 3)
+
+        def combine_fn(init, xs):
+            return init.clone(), xs @ y
+
+        def fn(scan_op, x, y):
+            def inner_fn(zeros, x, y):
+                x = x.view(2, 2, 4)
+
+                return scan_op(
+                    combine_fn,
+                    zeros,
+                    x,
+                )
+
+            return torch.vmap(inner_fn, in_dims=(1, 0, None))(zeros, x, y)
+
+        out = fn(scan, x, y)
+        compile_out = torch.compile(fn)(scan, x, y)
+        exp = fn(_fake_scan, x, y)
+        self.assertEqual(out, exp)
+        self.assertEqual(out, compile_out)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_complex_ops(self):
+        # Test with various operations requiring shape reasoning
+        x = torch.randn(4, 5, 3, 2)
+        init = torch.randn(4, 3, 2)
+        weight = torch.randn(3, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (3, 2), xs: (3, 2)
+            intermediate = torch.nn.functional.relu(carry)
+            xs_t = xs.transpose(0, 1)  # (2, 3)
+            result = xs_t @ weight  # (2, 3)
+            new_carry = intermediate + result.transpose(0, 1)  # Back to (3, 2)
+            output = torch.sin(carry).sum() + torch.cos(xs).mean()
+            return new_carry, output
+
+        def fn(scan_op, x, init):
+            def inner_fn(x, init):
+                return scan_op(combine_fn, init, x)
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(x, init)
+
+        out = fn(scan, x, init)
+        compile_out = torch.compile(fn)(scan, x, init)
+        exp = fn(_fake_scan, x, init)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_unbatched_x(self):
+        # Test with various operations requiring shape reasoning
+        x = torch.randn(5, 3, 2)
+        init = torch.randn(4, 3, 2)
+        weight = torch.randn(3, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (3, 2), xs: (3, 2)
+            intermediate = torch.nn.functional.relu(carry)
+            xs_t = xs.transpose(0, 1)  # (2, 3)
+            result = xs_t @ weight  # (2, 3)
+            new_carry = intermediate + result.transpose(0, 1)  # Back to (3, 2)
+            output = torch.sin(carry).sum() + torch.cos(xs).mean()
+            return new_carry, output
+
+        def fn(scan_op, x, init):
+            def inner_fn(x, init):
+                return scan_op(combine_fn, init, x)
+
+            return torch.vmap(inner_fn, in_dims=(None, 0))(x, init)
+
+        out = fn(scan, x, init)
+        compile_out = torch.compile(fn)(scan, x, init)
+        exp = fn(_fake_scan, x, init)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_scan_in_vmap_unbatched_init_error(self):
+        # Test with various operations requiring shape reasoning
+        x = torch.randn(4, 5, 3, 2)
+        init = torch.randn(4, 3, 2)
+        weight = torch.randn(3, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (3, 2), xs: (3, 2)
+            intermediate = torch.nn.functional.relu(carry)
+            xs_t = xs.transpose(0, 1)  # (2, 3)
+            result = xs_t @ weight  # (2, 3)
+            new_carry = intermediate + result.transpose(0, 1)  # Back to (3, 2)
+            output = torch.sin(carry).sum() + torch.cos(xs).mean()
+            return new_carry, output
+
+        def vmap_fn(x, init):
+            def fn(x, init):
+                return scan(combine_fn, init, x)
+
+            return torch.vmap(fn, in_dims=(0, None))(x, init)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            """The size of tensor a \\(4\\) must match the size of tensor b \\(2\\) at non-singleton dimension 4""",
+        ):
+            vmap_fn(x, init)
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    def test_vmap_closure_weight_error(self):
+        init_batched = torch.randn(7, 2, 3)
+        xs_batched = torch.randn(7, 5, 4)
+        weight = torch.randn(7, 4, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (2, 3), xs: (4,), weight: (4, 3)
+            new_carry = carry + xs @ weight
+            output = carry.sum()
+            return new_carry, output
+
+        def expected_fn(init, xs, weight):
+            def fn(init, xs, weight):
+                return _fake_scan(combine_fn, init, xs)
+
+            return torch.vmap(fn, in_dims=(0, 0, 0))(init, xs, weight)
+
+        # Note that even though weight is vampped but combine_fn is accessing
+        # the closure weight instead of the wrapped out weight thus causing
+        # a shape mismatch.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            """The size of tensor a \\(2\\) must match the size of tensor b \\(7\\) at non-singleton dimension 1""",
+        ):
+            expected_fn(init_batched, xs_batched, weight)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_mixed_batch_dims(self):
+        init = torch.randn(8, 5, 6)
+        xs_batched = torch.randn(3, 6, 5, 8)
+        scale = torch.randn([])
+
+        def combine_fn(carry, xs):
+            # carry: 8, 5
+            # xs: 5, 8
+            # new_carry: 8, 5
+            new_carry = carry + (xs * scale).sum()
+            output = xs @ carry
+            return new_carry, output
+
+        def fn(scan_op, init, xs):
+            def inner_fn(init, xs):
+                return scan_op(combine_fn, init, xs)
+
+            return torch.vmap(inner_fn, in_dims=(2, 1))(init, xs)
+
+        out = fn(scan, init, xs_batched)
+        compile_out = torch.compile(fn)(scan, init, xs_batched)
+        exp = fn(_fake_scan, init, xs_batched)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_vmap_scan_vmap_scan_nested(self):
+        # Outer batch: 3, inner batch: 4, outer scan: 5, inner scan: 6
+        init = torch.randn(3, 4, 2, 8)
+        xs_outer = torch.randn(3, 5, 4, 6, 2)
+
+        def fn(scan_op, init, xs):
+            def inner_combine(carry, xs):
+                # carry: (2, 8), xs: (2,)
+                new_carry = carry + xs.unsqueeze(-1)
+                output = carry.sum(dim=0)  # (8,)
+                return new_carry, output
+
+            def outer_combine(init, xs):
+                # carry: (4, 2, 8,), xs: (4, 6, 2)
+                # xs has batch dimension 4 from outer vmap
+
+                def inner_fn(init, xs):
+                    # init: (2, 8)
+                    # xs: (6, 2)
+                    # final_carry: (2, 8)
+                    # outputs: (6, 8)
+                    final_carry, outputs = scan_op(inner_combine, init, xs)
+                    return (final_carry.sum(0, keepdim=True) + outputs).sum(
+                        dim=0
+                    )  # (8,)
+
+                inner_results = torch.vmap(inner_fn)(init, xs)  # (4, 8)
+                new_carry = init + inner_results.mean(dim=0)  # (8,)
+                output = inner_results.sum(dim=0)  # (8,)
+                return new_carry.expand(*init.size()), output
+
+            def vmap_inner_fn(init, xs):
+                # init: (4, 2, 8)
+                # xs: (5, 4, 6, 2)
+                return scan_op(outer_combine, init, xs)
+
+            return torch.vmap(vmap_inner_fn)(init, xs)
+
+        out = fn(scan, init, xs_outer)
+        compile_out = torch.compile(fn)(scan, init, xs_outer)
+        exp = fn(_fake_scan, init, xs_outer)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_vmap_scan_nested(self):
+        xs_outer = torch.randn(5, 3, 4, 2)
+        init_outer = torch.randn(3, 8)
+
+        def fn(scan_op, init, xs):
+            def inner_combine_fake(carry, xs):
+                # carry: 8
+                # xs: 2
+                new_carry = carry + xs.sum()
+                output = carry * 2
+                return new_carry, output
+
+            def outer_combine_fake(carry, xs):
+                # carry: 3, 8
+                # xs: 3, 4, 2
+                def inner_fn(carry_elem, xs_elem):
+                    # carry_elem: 8
+                    # xs: 4, 2
+                    # final_carry: 8
+                    # outputs.sum(0): 8
+                    final_carry, outputs = _fake_scan(
+                        inner_combine_fake, carry_elem, xs_elem
+                    )
+                    return outputs.sum(0), final_carry
+
+                # result: (8,)
+                # next_carry, (3, 8))
+                result, next_carry = torch.vmap(inner_fn, in_dims=(0, 0))(carry, xs)
+                output = result.sum(dim=0)
+                return next_carry, output
+
+            return scan_op(outer_combine_fake, init, xs)
+
+        out = fn(scan, init_outer, xs_outer)
+        compile_out = torch.compile(fn)(scan, init_outer, xs_outer)
+        exp = fn(_fake_scan, init_outer, xs_outer)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
@@ -8109,7 +8356,6 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
-
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -8208,10 +8454,10 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
-            size = child.size();  child = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u0 < s77)" = unbacked_symint < getitem;  unbacked_symint = getitem = None
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child, 0)
+
+            size = child.size();  child = size = None
+            lt: "Sym(u0 < s77)" = unbacked_symint < sym_size_int;  unbacked_symint = sym_size_int = None
             return lt
 
     class body_fn_0(torch.nn.Module):
@@ -8219,15 +8465,15 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child_1, 0)
+
             x_clone: "f32[s77, s27]" = child_1.clone()
 
             ge: "Sym(u1 >= 0)" = unbacked_symint_0 >= 0
             _check = torch._check(ge);  ge = _check = None
 
-            size = child_1.size();  child_1 = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u1 < s77)" = unbacked_symint_0 < getitem;  getitem = None
+            size = child_1.size();  child_1 = size = None
+            lt: "Sym(u1 < s77)" = unbacked_symint_0 < sym_size_int;  sym_size_int = None
             _check_1 = torch._check(lt);  lt = _check_1 = None
 
             select: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
@@ -8409,7 +8655,6 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
-
         sym_size_int_1: "Sym(s6)" = torch.ops.aten.sym_size.int(x, 0)
 
         sin: "f32[s6, 3]" = torch.ops.aten.sin.default(x);  x = None
@@ -8696,10 +8941,8 @@ class GraphModule(torch.nn.Module):
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
             mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
             mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-
             add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
             add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
-
             add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
             add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
@@ -8914,7 +9157,6 @@ class GraphModule(torch.nn.Module):
 
         x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
         _guards_fn = self._guards_fn(x, y, z);  _guards_fn = None
-
         sym_size_int_4: "Sym(s17)" = torch.ops.aten.sym_size.int(y, 0);  y = None
         sym_size_int_5: "Sym(s68)" = torch.ops.aten.sym_size.int(z, 0)
 

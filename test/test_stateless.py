@@ -186,7 +186,7 @@ class TestStatelessFunctionalAPI(TestCase):
         cur_rm = module.running_mean
         self.assertEqual(cur_rm, prev_rm)
         self.assertEqual(rm, torch.full((10,), 12.8))
-        # Now run functional without reparametrization and check that the module has
+        # Now run functional without reparameterization and check that the module has
         # been updated
         functional_call(module, {}, x)
         self.assertEqual(module.running_mean, torch.full((10,), 12.8))
