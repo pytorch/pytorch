@@ -31,10 +31,8 @@ template <typename T>
 struct FromImpl {
   static StableIValue call(
       T val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
