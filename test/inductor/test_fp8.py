@@ -962,6 +962,8 @@ class TestFP8Lowering(TestCase):
             ):
                 """Software-emulated scaled_mm for testing without CUDA 12.8"""
                 out_dtype = out_dtype or torch.bfloat16
+                # just using add, because without real dtypes,
+                # was seeing overflow/instability
                 result = mat_a.to(torch.float32) + mat_b.to(torch.float32)
                 if bias is not None:
                     result = result + bias.to(torch.float32)
@@ -1143,8 +1145,6 @@ class TestFP8Lowering(TestCase):
 
         out, code = run_and_get_code(f_c, A, B)
         eager = forward(A, B)
-        print(out)
-        print(eager)
         self.assertEqual(out, eager)
         # Check that we have fusion - expect 2 triton kernels + 1 fake_scaled_mm fallback
         FileCheck().check(".run(").check(".run(").check("fake_scaled_mm").run(code[0])
