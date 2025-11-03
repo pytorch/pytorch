@@ -2970,6 +2970,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
         }}
+        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
+            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+            if(unlikely(result == -1.0 && PyErr_Occurred()))
+                throw std::runtime_error("expected float arg");
+            return static_cast<float>(result);
+        }}
 
         {extra_parse_arg}
 
