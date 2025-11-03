@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -206,8 +205,8 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
       // and the leading stride is at least max(1, other dim length), so we might
       // end up with contiguous cols but not rows (i.e. holes between different rows)
       // and vice versa.
-      && mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
-      mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
+      && mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32
+      && mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32
       && (
         // filter by dtype
         (scalar_type != at::ScalarType::Half && scalar_type != at::ScalarType::BFloat16) ||
