@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated
+from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
     canonicalize_dims,
     check,
