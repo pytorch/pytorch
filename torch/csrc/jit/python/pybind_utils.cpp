@@ -586,8 +586,9 @@ py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+    if (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
+       (tensor._is_zerotensor() && tensor.unsafeGetTensorImpl()->is_wrapped_number() && tensor.dim() == 0)) {
+      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu() || (tensor._is_zerotensor() && tensor.dim() == 0));
       auto py_tensor = py::cast(tensor);
       if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
         return py_tensor.attr("_wrapped_number");
@@ -597,11 +598,11 @@ py::object toPyObject(IValue ivalue) {
         case at::ScalarType::Bool:
           return py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
-          return py::cast(*tensor.const_data_ptr<int64_t>());
+          return (tensor._is_zerotensor()) ? py::cast(int64_t(0)) : py::cast(*tensor.const_data_ptr<int64_t>());
         case at::ScalarType::UInt64:
-          return py::cast(*tensor.const_data_ptr<uint64_t>());
+          return (tensor._is_zerotensor()) ? py::cast(u_int64_t(0)) : py::cast(*tensor.const_data_ptr<uint64_t>());
         case at::ScalarType::Double:
-          return py::cast(*tensor.const_data_ptr<double>());
+          return (tensor._is_zerotensor()) ? py::cast(0.0) : py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
           return py::cast(static_cast<std::complex<double>>(
@@ -610,34 +611,6 @@ py::object toPyObject(IValue ivalue) {
           TORCH_CHECK(
               false,
               "Missing cases in 'toPyObject' wrapped number handling! Can't convert ",
-              scalar_type,
-              " to a Python object");
-      }
-    } else if (tensor._is_zerotensor() && tensor.dim() == 0) {
-      TORCH_INTERNAL_ASSERT(tensor._is_zerotensor() && tensor.dim() == 0);
-      auto scalar_type = tensor.scalar_type();
-      switch (scalar_type) {
-        case at::ScalarType::Long:
-          guardAgainstNamedTensor<at::Tensor>(tensor);
-          return py::cast(std::move(tensor));
-        case at::ScalarType::UInt64:
-          guardAgainstNamedTensor<at::Tensor>(tensor);
-          return py::cast(std::move(tensor));
-        case at::ScalarType::Float:
-          guardAgainstNamedTensor<at::Tensor>(tensor);
-          return py::cast(std::move(tensor));
-        case at::ScalarType::Double:
-          // Need to handle forward autograd ZeroTensors especially with the
-          // possibility of wrapped numbers. Just send 0 to python for dtype
-          // promotion purposes.
-          return py::cast(0.0);
-        case at::ScalarType::ComplexDouble:
-          guardAgainstNamedTensor<at::Tensor>(tensor);
-          return py::cast(std::move(tensor));
-        default:
-          TORCH_CHECK(
-              false,
-              "Missing case in 'toPyObject' ZeroTensor handling! Can't convert ",
               scalar_type,
               " to a Python object");
       }
