@@ -396,7 +396,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Nod
                         f"Found multiple bn nodes in match, previous: {bn_node}, new: {n}"
                     )
                 bn_node = n
-            if n.target == operator.getitem:
+            if n.target is operator.getitem:
                 if getitem_node is not None:
                     raise AssertionError(
                         f"Found multiple getitem nodes in match, previous: {getitem_node}, new: {n}"
