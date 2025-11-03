@@ -435,6 +435,9 @@ class CompiledFxGraph(OutputCode):
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
+    # Track if this graph was freshly compiled (True) or loaded from cache (False)
+    # Used to run custom op checks only at true cold start time, not on cache hits
+    _is_fresh_compilation: bool = dataclasses.field(default=False, init=False)
 
     def __init__(
         self,
@@ -607,15 +610,34 @@ class CompiledFxGraph(OutputCode):
                     "compile_id": compile_id,
                 }
             )
+
+        # Enable custom op input/output aliasing check on FIRST invocation of FRESHLY COMPILED graphs
+        # This ensures the check runs only at true cold start (compilation), not on cache hits (warm start)
+        # This needs real tensors, not fake tensors, so it runs here instead of during tracing
+        # See: https://github.com/pytorch/pytorch/issues/165349
+        from contextlib import nullcontext
+
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AnalyzeCustomOpInputOutputMode,
+        )
+
+        if self._is_fresh_compilation and torch._functorch.config.check_custom_op_mode:
+            custom_op_check_ctx = _AnalyzeCustomOpInputOutputMode()
+            # Reset the flag after first invocation so we don't check again
+            self._is_fresh_compilation = False
+        else:
+            custom_op_check_ctx = nullcontext()  # type: ignore[assignment]
+
         try:
-            # Checking the profiler directly is faster than nullcontext
-            if torch.autograd.profiler._is_profiler_enabled:
-                with record_function(
-                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
-                ):
+            with custom_op_check_ctx:
+                # Checking the profiler directly is faster than nullcontext
+                if torch.autograd.profiler._is_profiler_enabled:
+                    with record_function(
+                        f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+                    ):
+                        return self.current_callable(inputs)
+                else:
                     return self.current_callable(inputs)
-            else:
-                return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()

@@ -12897,12 +12897,14 @@ fn
                 return aliased + 1
 
             x = torch.randn(10, 10)
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
             with self.assertRaisesRegex(
                 RuntimeError,
                 "The output of this custom operator \(1\) must not also be an input",
             ):
                 _ = compiled_fn(x)
+            # Shouldn't error here because there was a cache hit
+            _ = compiled_fn(x)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
