@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Any, Optional
 
+from .effects import EffectType
 from .fake_impl import FakeImplHolder
 from .utils import RegistrationHandle
 
@@ -50,6 +51,7 @@ class SimpleOperatorEntry:
         self.torch_dispatch_rules: GenericTorchDispatchRuleHolder = (
             GenericTorchDispatchRuleHolder(qualname)
         )
+        self.effect: Optional[EffectType] = None
 
     # For compatibility reasons. We can delete this soon.
     @property

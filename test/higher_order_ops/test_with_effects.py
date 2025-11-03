@@ -19,9 +19,10 @@ from functorch.compile import (
 )
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.effects import (
+    _deregister_effectful_op,
     _EffectType,
+    _get_effect,
     _register_effectful_op,
-    SIDE_EFFECTS,
     with_effects,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
@@ -324,7 +325,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             record_scalar_tensor.register_effect(_EffectType.ORDERED)
 
-            self.assertTrue(SIDE_EFFECTS.contains(record_scalar_tensor))
+            self.assertEqual(_get_effect(record_scalar_tensor), _EffectType.ORDERED)
 
             my_config = {}
             my_config["MockModule"] = "mean"
@@ -455,7 +456,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 torch.ops._mylib.zoo.default, _EffectType.ORDERED
             )
             torch.library._register_effectful_op(
-                "_mylib::zoo2.default", _EffectType.ORDERED
+                torch.ops._mylib.zoo2.default, _EffectType.ORDERED
             )
 
             def fn(x, y):
@@ -675,7 +676,9 @@ def forward(self, arg0_1, arg1_1):
             handle = _register_effectful_op(
                 torch.ops._mylib.foo.default, _EffectType.ORDERED
             )
-            self.assertTrue(SIDE_EFFECTS.contains(torch.ops._mylib.foo.default))
+            self.assertEqual(
+                _get_effect(torch.ops._mylib.foo.default), _EffectType.ORDERED
+            )
 
             try:
 
@@ -762,9 +765,9 @@ def forward(self, tangents_1, tangents_2, tangents_token):
                     else:
                         raise NotImplementedError
             finally:
-                handle.destroy()
+                _deregister_effectful_op(torch.ops._mylib.foo.default)
 
-            self.assertTrue(not SIDE_EFFECTS.contains(torch.ops._mylib.foo.default))
+            self.assertEqual(_get_effect(torch.ops._mylib.foo.default), None)
 
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_only_in_backward(self):
@@ -831,7 +834,7 @@ def forward(self, primals_1, primals_2, tangents_1, tangents_2, tangents_token):
     return (mul, mul_1, getitem_2)""",
             )
         finally:
-            handle.destroy()
+            _deregister_effectful_op(torch.ops.aten.cos.default)
 
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_in_forward_and_backward(self):
@@ -870,7 +873,7 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
     return (mul_1, getitem_2)""",
             )
         finally:
-            handle.destroy()
+            _deregister_effectful_op(torch.ops.aten.cos.default)
 
 
 if __name__ == "__main__":
