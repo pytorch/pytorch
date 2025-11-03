@@ -16,7 +16,6 @@ from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
-    autograd_would_have_decomposed,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
@@ -413,13 +412,8 @@ class FunctionalTensorMode(TorchDispatchMode):
                     return False
                 return True
 
-            # in normal torch.compile IR, we only decompose an op if autograd
-            # would have decomposed it (NB: autograd may have been skipped if
-            # we are in inference mode)
-            # TODO: the flatten here can potentially be deduped with the
-            # unwrapping pytree_map later
-            flat_args_kwargs, _ = pytree.tree_flatten((args, kwargs))
-            return autograd_would_have_decomposed(func, flat_args_kwargs)
+            # in normal torch.compile IR, we decompose functional composite ops
+            return True
 
         if (
             func not in FunctionalTensor.metadata_fns
