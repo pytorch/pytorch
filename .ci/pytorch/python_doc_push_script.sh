@@ -96,21 +96,12 @@ if [ "$is_main_doc" = true ]; then
   # Also: see docs/source/conf.py for "coverage_ignore*" items, which should
   # be documented then removed from there.
 
-  # Extract undocumented count from TOTAL row in Sphinx 7.x statistics table
-  if grep -q "| TOTAL" build/coverage/python.txt 2>/dev/null; then
-    # Sphinx 7.x format - extract third column (undocumented count) from TOTAL row
-    undocumented=$(grep "| TOTAL" build/coverage/python.txt | awk -F'|' '{print $4}' | tr -d ' ')
-    if [ -z "$undocumented" ] || ! [[ "$undocumented" =~ ^[0-9]+$ ]]; then
-      echo "Warning: Could not parse undocumented count from TOTAL row"
-      undocumented=-1
-    fi
-  else
-    # Fallback for older Sphinx versions (count lines minus header)
-    lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
-    undocumented=$((lines - 2))
-  fi
+  # Extract undocumented count from TOTAL row in Sphinx 7.2.6 statistics table
+  # The table format is: | Module | Coverage | Undocumented |
+  # Extract the third column (undocumented count) from the TOTAL row
+  undocumented=$(grep "| TOTAL" build/coverage/python.txt | awk -F'|' '{print $4}' | tr -d ' ')
 
-  if [ $undocumented -lt 0 ]; then
+  if [ -z "$undocumented" ] || ! [[ "$undocumented" =~ ^[0-9]+$ ]]; then
     echo coverage output not found
     exit 1
   elif [ $undocumented -gt 0 ]; then
