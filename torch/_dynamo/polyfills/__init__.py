@@ -314,6 +314,8 @@ def mutable_mapping_update(self, data=(), /, **kwargs):
     #     for key in data.keys():
     #         self[key] = data[key]
     else:
+        if not isinstance(data, Iterable):
+            raise TypeError(f"{type(data).__name__!r} object is not iterable")
         # Likely a sequence of pairs
         for key, value in data:
             self[key] = value
