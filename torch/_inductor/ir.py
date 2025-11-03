@@ -7140,7 +7140,9 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel_args[key]
             for key in identify_mutated_tensors(
                 # pyrefly: ignore  # bad-argument-type
-                kernel, {**kernel_args, **autotuned_kwargs}, tma_descriptor_metadata
+                kernel,
+                {**kernel_args, **autotuned_kwargs},
+                tma_descriptor_metadata,
             )
         ]
 
