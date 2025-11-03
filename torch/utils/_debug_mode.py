@@ -1,16 +1,13 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import threading
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._dtype_abbrs import dtype_abbrs
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _get_current_dispatch_mode_stack,
-    TorchDispatchMode,
-)
+from torch.utils._python_dispatch import _get_current_dispatch_mode, TorchDispatchMode
 from torch.utils._pytree import tree_all, tree_map
 
 
@@ -23,6 +20,9 @@ __all__ = ["DebugMode", "get_active_debug_mode"]
 REDISTRIBUTE_FUNC = "redistribute_input"
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
+
+# Thread-local storage for active debug mode to avoid expensive stack traversal
+_active_debug_mode = threading.local()
 
 
 def _stringify_shape(shape) -> str:
@@ -383,8 +383,12 @@ class DebugMode(TorchDispatchMode):
         return result
 
     def __enter__(self):
+        global _active_debug_mode
         self.operators = []
         self.call_depth = 0
+
+        self._prev_debug_mode = getattr(_active_debug_mode, "mode", None)
+        _active_debug_mode.mode = self
 
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
@@ -396,11 +400,14 @@ class DebugMode(TorchDispatchMode):
 
     # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
+        global _active_debug_mode
         super().__exit__(*args)
         if self.record_nn_module:
             self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
+
+        _active_debug_mode.mode = self._prev_debug_mode
 
     def module_tracker_setup(self):
         from torch.distributed._tools.mod_tracker import ModTracker
@@ -536,9 +543,4 @@ class DebugMode(TorchDispatchMode):
 
 
 def get_active_debug_mode() -> Optional[DebugMode]:
-    debug_mode = None
-    for mode in _get_current_dispatch_mode_stack():
-        if isinstance(mode, DebugMode):
-            debug_mode = mode
-            break
-    return debug_mode
+    return getattr(_active_debug_mode, "mode", None)
