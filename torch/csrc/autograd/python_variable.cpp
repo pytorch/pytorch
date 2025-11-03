@@ -698,12 +698,11 @@ static py::handle get_dtensor_spec_class() {
       })
       .get_stored();
 #else
-  static py::handle dtensor_spec_class = py::object(
-                                             py::module::import("torch")
-                                                 .attr("distributed")
-                                                 .attr("tensor")
-                                                 .attr("_dtensor_spec")
-                                                 .attr("DTensorSpec"))
+  static py::handle dtensor_spec_class = py::object(py::module::import("torch")
+                                                        .attr("distributed")
+                                                        .attr("tensor")
+                                                        .attr("_dtensor_spec")
+                                                        .attr("DTensorSpec"))
                                              .release();
   return dtensor_spec_class;
 #endif

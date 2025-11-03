@@ -236,8 +236,7 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
-void ConcretePyInterpreterVTable::decref(PyObject* pyobj)
-    const {
+void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
   // PyObjects stored in them.

@@ -11,8 +11,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void incref(PyObject* pyobj) const override {} // do nothing
 
-  void decref(PyObject* pyobj) const override {
-  } // do nothing
+  void decref(PyObject* pyobj) const override {} // do nothing
 
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \
