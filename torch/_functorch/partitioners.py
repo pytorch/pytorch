@@ -1061,20 +1061,20 @@ def default_partition(
         if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
             saved_values.append(node)
             continue
-        if node.is_impure(impure_random=False) and node.op not in ("placeholder", "output"):
+        if node.is_impure(impure_random=False) and node.op not in (
+            "placeholder",
+            "output",
+        ):
             # See is_impure in torch/fx/node.py
             assert not graph_has_recomputable_ops, (
-                "Trying to apply AC on a graph with impure op", node, node.target
+                "Trying to apply AC on a graph with impure op",
+                node,
+                node.target,
             )
             saved_values.append(node)
             continue
-        backward_usages = [
-            n for n in node.users if n.name not in forward_node_names
-        ]
-        if (
-            "tensor_meta" in node.meta
-            and all(is_sym_node(n) for n in backward_usages)
-        ):
+        backward_usages = [n for n in node.users if n.name not in forward_node_names]
+        if "tensor_meta" in node.meta and all(is_sym_node(n) for n in backward_usages):
             # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
             # and not the actual tensor data,
             # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
