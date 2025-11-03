@@ -2915,5 +2915,15 @@
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
+  ],
+  "GB0287": [
+    {
+      "Gb_type": "Unsupported input type in backward graph of autograd.Function",
+      "Context": "Unsupported node type {type(example_value)}",
+      "Explanation": "Node {node} has example_value {example_value} which is not a Tensor/Symint/None",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

@@ -3416,6 +3416,25 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     raise e
         # if not isinstance(bwd_out, variables.TensorVariable):
+
+        for node in bwd_graph.find_nodes(op="placeholder"):
+            example_value = node.meta.get("example_value", None)
+            if not isinstance(
+                example_value,
+                (
+                    torch.Tensor,
+                    torch.SymInt,
+                    torch.autograd.function.Function,
+                    type(None),
+                ),
+            ):
+                unimplemented_v2(
+                    gb_type="Unsupported input type in backward graph of autograd.Function",
+                    context=f"Unsupported node type {type(example_value)}",
+                    explanation=f"Node {node} has example_value {example_value} which is not a Tensor/Symint/None",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
         self.rewire_bwd_graph_outputs(fwd_graph, fwd_freevars, bwd_graph, args, bwd_out)
         fwd_graph, bwd_graph = self.handle_saved_tensors_wiring(
             ctx, fwd_graph, fwd_freevars, bwd_graph, bwd_freevars, bwd_args
