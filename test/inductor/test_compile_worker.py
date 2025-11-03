@@ -4,6 +4,7 @@ import os
 import tempfile
 from threading import Event
 
+import torch._inductor.configs as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
@@ -11,7 +12,6 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
-import torch._inductor.configs as config
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
 
