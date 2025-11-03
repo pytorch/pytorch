@@ -1527,7 +1527,7 @@ class TestLinalg(TestCase):
                 if error is None:
                     torch.linalg.vector_norm(input, dim=dim)
                 else:
-                    with self.assertRaises(error):
+                    with self.assertRaises(error, msg=error_msg):
                         torch.linalg.vector_norm(input, dim=dim)
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
