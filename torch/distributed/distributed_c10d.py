@@ -2672,13 +2672,13 @@ def _coalescing_manager(
         # - coalesced `all_gather_into_tensor`
         # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
-        if op0 == all_reduce:
+        if op0 is all_reduce:
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             all_reduce_opts.asyncOp = async_ops
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
-        elif op0 == all_gather_into_tensor:
+        elif op0 is all_gather_into_tensor:
             inputs = []
             outputs = []
             for op in op_list:
@@ -2687,7 +2687,7 @@ def _coalescing_manager(
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
             work = group.allgather_into_tensor_coalesced(outputs, inputs)
-        elif op0 == reduce_scatter_tensor:
+        elif op0 is reduce_scatter_tensor:
             inputs = []
             outputs = []
             for op in op_list:
@@ -2816,7 +2816,7 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
     device = p2p_op_list[0].tensor.device
 
     def peer_kwarg(op: P2POp) -> dict[str, int]:
-        key = "group_dst" if op.op == isend else "group_src"
+        key = "group_dst" if op.op is isend else "group_src"
         return {key: op.group_peer}
 
     if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:

@@ -14,9 +14,9 @@ collection support for PyTorch APIs.
 
 import functools
 import types
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional, overload, TypeVar, Union
-from typing_extensions import deprecated, TypeIs
+from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
@@ -42,7 +42,7 @@ if not python_pytree._cxx_pytree_dynamo_traceable:
 
 
 import optree
-from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
+from optree import PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
@@ -53,6 +53,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -99,6 +100,8 @@ S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
 
+
+TreeSpec: TypeAlias = PyTreeSpec
 
 Context = Any
 PyTree = Any
@@ -265,6 +268,30 @@ def _private_register_pytree_node(
 
 def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
     return isinstance(obj, TreeSpec)
+
+
+def treespec_leaf() -> TreeSpec:
+    """Make a treespec representing a leaf node."""
+    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
+    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
+
+
+def treespec_dict(
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[tuple[Any, TreeSpec]]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
+    return optree.treespec_dict(
+        mapping,
+        **kwargs,
+        none_is_leaf=True,
+        namespace="torch",
+    )
 
 
 def tree_is_leaf(
@@ -985,9 +1012,14 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
         return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
+@deprecated(
+    "`isinstance(treespec, LeafSpec)` is deprecated, "
+    "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
+    category=FutureWarning,
+)
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):  # type: ignore[misc,final]
-    def __new__(cls) -> "LeafSpec":
-        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+    def __new__(cls) -> Self:
+        return treespec_leaf()  # type: ignore[return-value]
 
 
 def tree_flatten_with_path(
