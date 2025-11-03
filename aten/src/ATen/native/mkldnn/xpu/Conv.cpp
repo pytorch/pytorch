@@ -345,8 +345,7 @@ Tensor _convolution_out(
     weight = view4d(weight_r);
   }
   // get computation format for Conv/TransposedConv
-  bool is_channels_last_suggested =
-      use_channels_last_for_conv(input, weight);
+  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
 
   auto k = weight.ndimension();
   if (k == input.ndimension() + 1) {
@@ -380,7 +379,8 @@ Tensor _convolution_out(
         expand_param_if_needed(output_padding_, "output_padding", dim);
     params.groups = groups_;
   }
-  
+
+
   // ensure the input/weight/bias/output are congituous in desired format
   at::MemoryFormat mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input.ndimension())
