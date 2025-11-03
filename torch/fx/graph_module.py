@@ -562,12 +562,6 @@ class GraphModule(torch.nn.Module):
         else:
             raise RuntimeError("Unsupported type " + str(root) + " passed for root!")
 
-        # Control whether to enable FX metadata registration for profiler augmentation.
-        # When enabled, generates a hash-based filename and registers node metadata
-        # in the global registry for use by the memory profiler augmentation.
-        # Can be set on individual GraphModule instances to opt-in/out.
-        # This must be set before assigning self.graph.
-        self._enrich_profiler_metadata: bool = False
         self.graph = graph
 
         # Store the Tracer class responsible for creating a Graph separately as part of the
