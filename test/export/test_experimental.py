@@ -585,6 +585,16 @@ def forward(self, args_0):
         test_inputs = input_fn()
         self.assertEqual(gm(*test_inputs), model(*test_inputs))
 
+    def test_dynamo_graph_capture_default_args(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y=1):
+                return x + y
+
+        m = Module()
+        ep = dynamo_graph_capture_for_export(m)(torch.randn(2, 3))
+        test_inputs = (torch.randn(2, 3),)
+        self.assertEqual(ep(*test_inputs), m(*test_inputs))
+
 
 if __name__ == "__main__":
     run_tests()
