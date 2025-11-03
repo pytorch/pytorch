@@ -1,13 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
+from typing import TYPE_CHECKING
 
 import torch
 import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
+from torch._functorch._aot_autograd.autograd_cache import BundledCompiledForward
 from torch._guards import detect_fake_mode
+from torch._inductor.output_code import RegionalOutputCode
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.fx._graph_pickler import GraphPickler
@@ -19,6 +22,10 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+
+
+if TYPE_CHECKING:
+    from torch._inductor.compile_fx import _CompileFxKwargs
 
 
 # Open questions / follow-ups
@@ -460,6 +467,155 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         _, codes = run_fw_bw_and_get_code(lambda: compiled_module(x))
         # flex in forward and flex_backward in backward
         self.assertEqual(len(codes), 2)
+
+
+@skipIfTorchDynamo("Not a suitable dynamo wrapped test")
+class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
+    """Tests for RegionalOutputCode and BundledAOTAutogradResult."""
+
+    def test_regional_output_code_serialization(self):
+        """Test that RegionalOutputCode can be serialized and deserialized."""
+
+        def fn(x, y):
+            sin = torch.sin(x)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+            return torch.sin(add)
+
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        # Compile with regional inductor
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            from torch._subclasses.fake_tensor import FakeTensorMode
+            from torch.fx.experimental.proxy_tensor import make_fx
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                fake_x = fake_mode.from_tensor(x)
+                fake_y = fake_mode.from_tensor(y)
+                gm = make_fx(fn)(fake_x, fake_y)
+
+            # Run regional_inductor on the graph
+            result_gm = regional_inductor(gm, fake_x, fake_y)
+
+        # Create RegionalOutputCode
+        output_code = RegionalOutputCode(result_gm)
+
+        # Test that we can call it
+        self.assertIsNotNone(output_code._graph_module)
+
+        # Serialize
+        output_code.prepare_for_serialization()
+        self.assertIsNone(output_code._graph_module)
+        self.assertIsNotNone(output_code._serialized_graph_module)
+
+        # Deserialize via post_compile
+        from torch._inductor.output_code import CompiledFxGraphConstants
+
+        fx_config: _CompileFxKwargs = {"is_backward": False}
+        output_code.post_compile(
+            [fake_x, fake_y], CompiledFxGraphConstants(), fx_config
+        )
+        self.assertIsNotNone(output_code._graph_module)
+        self.assertIsInstance(output_code._graph_module, torch.fx.GraphModule)
+
+        # Test that deserialized graph works
+        with fake_mode:
+            result = output_code([fake_x, fake_y])
+            self.assertIsNotNone(result)
+
+    def test_regional_output_code_with_backward(self):
+        """Test RegionalOutputCode with both forward and backward compilation."""
+
+        def fn(x, y):
+            sin = torch.sin(x)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+            return torch.sin(add)
+
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        # Compile with regional inductor backend
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_y = fake_mode.from_tensor(y)
+
+            # Create forward graph
+            with torch.fx.traceback.preserve_node_meta(enable=False):
+                gm = make_fx(fn)(fake_x, fake_y)
+                forward_gm = regional_inductor(gm, fake_x, fake_y)
+
+        # Create forward output code
+        fw_code = RegionalOutputCode(forward_gm)
+
+        # Verify it can be called
+        with fake_mode:
+            result = fw_code([fake_x, fake_y])
+            self.assertIsNotNone(result)
+
+        # Test serialization round-trip
+        fw_code.prepare_for_serialization()
+
+        # Deserialize via post_compile
+
+        from torch._inductor.output_code import CompiledFxGraphConstants
+
+        fx_config: _CompileFxKwargs = {"is_backward": False}
+        fw_code.post_compile([fake_x, fake_y], CompiledFxGraphConstants(), fx_config)
+
+        with fake_mode:
+            result2 = fw_code([fake_x, fake_y])
+            self.assertIsNotNone(result2)
+
+    def test_regional_compiled_forward_backward(self):
+        """Test BundledCompiledForward and BundledCompiledBackward with RegionalOutputCode."""
+
+        def fn(x):
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                return torch.sin(x) * 2
+
+        x = torch.randn(5, requires_grad=True)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+
+            with torch.fx.traceback.preserve_node_meta(enable=False):
+                gm = make_fx(fn)(fake_x)
+                compiled_gm = regional_inductor(gm, fake_x)
+
+        # Create forward using the generic BundledCompiledForward
+        fw_code = RegionalOutputCode(compiled_gm)
+        fw_compiled = BundledCompiledForward[RegionalOutputCode](result=fw_code)
+
+        # Test pre_save
+        fw_compiled.pre_save()
+        # After pre_save, fw_compiled.result is a copy with serialized graph
+        self.assertIsNotNone(fw_compiled.result._serialized_graph_module)
+        self.assertIsNone(
+            fw_compiled.result._graph_module
+        )  # Should be cleared after serialization
+
+        # Test load (doesn't deserialize yet)
+        loaded_code = fw_compiled.load([fake_x])
+        self.assertIsNone(loaded_code._graph_module)  # Not yet deserialized
+        self.assertIsNotNone(loaded_code._serialized_graph_module)
+
+        fx_config: _CompileFxKwargs = {"is_backward": False}
+        post_compiled = fw_compiled.post_compile(loaded_code, fx_config)
+        self.assertIsNotNone(post_compiled)
+        self.assertIsNotNone(post_compiled._graph_module)  # Now deserialized
 
 
 if __name__ == "__main__":

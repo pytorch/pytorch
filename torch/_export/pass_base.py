@@ -214,7 +214,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         ) -> ProxyValue:
             meta = NodeMetadata(self.node.meta)
 
-            if target == operator.getitem:
+            if target is operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
             elif getattr(target, "__module__", None) in {
