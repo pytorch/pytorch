@@ -334,7 +334,7 @@ def _multi_tensor_adamax(
         if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
+            for p, step in zip(params, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
