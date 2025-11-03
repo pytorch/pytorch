@@ -1718,7 +1718,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     ) -> object:
         # Peephole optimize multiply by one
         # NB: be careful not to trigger guards here!
-        if func == operator.mul:
+        if func is operator.mul:
             if isinstance(args[1], int) and args[1] == 1:
                 return args[0]
             elif isinstance(args[0], int) and args[0] == 1:
