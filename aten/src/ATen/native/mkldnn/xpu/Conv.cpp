@@ -380,7 +380,6 @@ Tensor _convolution_out(
     params.groups = groups_;
   }
 
-
   // ensure the input/weight/bias/output are congituous in desired format
   at::MemoryFormat mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input.ndimension())
