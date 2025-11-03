@@ -2816,7 +2816,7 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
     device = p2p_op_list[0].tensor.device
 
     def peer_kwarg(op: P2POp) -> dict[str, int]:
-        key = "group_dst" if op.op == isend else "group_src"
+        key = "group_dst" if op.op is isend else "group_src"
         return {key: op.group_peer}
 
     if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:

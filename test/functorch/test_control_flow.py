@@ -742,7 +742,7 @@ def forward(self, pred_1, x_1):
 
     def test_cond_in_forloop(self):
         def for_loop_fake(x):
-            for i in range(3):
+            for _ in range(3):
                 x = x * x + 1
             return x
 
