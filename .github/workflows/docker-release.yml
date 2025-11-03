@@ -116,6 +116,13 @@ jobs:
           set -eou pipefail
           # To get QEMU binaries in our PATH
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+          # temporary fix for https://github.com/pytorch/pytorch/issues/166897
+          # todo: remove once Nvidia releases 13.0.2 docker image
+          if [[ ${CUDA_VERSION} == "13.0.2" ]]; then
+            {
+              echo "CUDA_VERSION=13.0.0"
+            } >> "${GITHUB_ENV}"
+          fi
           # Generate PyTorch version to use
           {
             echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)";
