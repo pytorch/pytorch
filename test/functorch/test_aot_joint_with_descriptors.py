@@ -675,7 +675,7 @@ class inner_f(torch.nn.Module):
 
             # Verify buffer handling
             buffer_count = 0
-            for desc, (node, grad_node) in input_grad_nodes.items():
+            for desc, (node, _grad_node) in input_grad_nodes.items():
                 if isinstance(desc, BufferAOTInput):
                     buffer_count += 1
                     self.assertIsNotNone(node)
@@ -764,13 +764,13 @@ class inner_f(torch.nn.Module):
                 self.assertIn(node, named_params.values())
 
             # Check that param_grads contains the same parameter nodes
-            for desc, (param_node, grad_node) in param_grads.items():
+            for desc, (param_node, _grad_node) in param_grads.items():
                 self.assertIn(param_node, param_nodes)
                 self.assertEqual(param_node, named_params[desc.target])
 
             # Check that all_input_grads contains the parameter nodes
             param_count = 0
-            for desc, (input_node, grad_node) in all_input_grads.items():
+            for desc, (input_node, _grad_node) in all_input_grads.items():
                 if isinstance(desc, ParamAOTInput):
                     param_count += 1
                     self.assertIn(input_node, param_nodes)
@@ -1068,6 +1068,31 @@ class inner_f(torch.nn.Module):
 ('call_function', 'slice_backward', {'pp_stage': 0})
 ('call_function', 'index', {'pp_stage': 0})""",
         )
+
+    def test_static_input_indices(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3),)
+        gm = _dynamo_graph_capture_for_export(model)(*inputs)
+        fake_mode = gm.meta.get("fake_mode", None)
+
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
+                joint = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    inputs,
+                )
+        self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
 
 if __name__ == "__main__":
