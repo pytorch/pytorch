@@ -881,7 +881,9 @@ class DynamoOutput:
             strict_error=strict_error,
         )
 
-    def graph_capture_output(self) -> GraphCaptureOutput:
+    def graph_capture_output(
+        self, argdefs: Optional[tuple[Any, ...]] = None
+    ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         assert output_graph is not None
         return GraphCaptureOutput(
@@ -895,6 +897,8 @@ class DynamoOutput:
             output_graph.import_sources,
             output_graph.traced_code,
             self.bytecode,
+            self.tracer_output.closure,
+            argdefs,
         )
 
 
@@ -926,6 +930,8 @@ class GraphCaptureOutput:
     import_sources: dict[str, str]
     traced_code: list[CodeType]
     bytecode: CodeType
+    closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
 
     def build_guards(
         self,
@@ -980,7 +986,8 @@ class CaptureOutput:
         return types.FunctionType(
             self.graph_capture_output.bytecode,
             f_globals,
-            closure=(),
+            closure=self.graph_capture_output.closure,
+            argdefs=self.graph_capture_output.argdefs,
         )
 
 
@@ -1041,6 +1048,7 @@ def _get_frame(
         f_locals,
         builtins.__dict__,
         closure=fn.__closure__ or (),  # type: ignore[arg-type]
+        argdefs=fn.__defaults__,
     )
 
 
@@ -1090,6 +1098,7 @@ class FrameInfo:
     locals: dict[str, object]
     builtins: dict[str, object]
     closure: tuple[CellType]
+    argdefs: Optional[tuple[Any, ...]]
 
 
 def _fullgraph_capture_frame(
@@ -1143,7 +1152,7 @@ def _fullgraph_capture_frame(
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
     return CaptureOutput(
-        dynamo_output.graph_capture_output(),
+        dynamo_output.graph_capture_output(frame.argdefs),
         backend_input,
     )
 
