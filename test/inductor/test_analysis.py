@@ -477,6 +477,7 @@ class TestAnalysis(TestCase):
                         "aten::cudnn_convolution",
                         "aten::convolution",
                         "aten::_convolution",
+                        "aten::convolution_overrideable",
                     )
                 )
                 or "conv" in name
