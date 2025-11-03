@@ -99,6 +99,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
+        # pyrefly: ignore [bad-override]
         self.value: torch.optim.Optimizer = value
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
