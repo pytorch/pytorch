@@ -517,6 +517,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "joint_custom_pre_pass": DEFAULT,  # Typing
         "pre_grad_custom_pass": DEFAULT,  # Typing
         "custom_partitioner_fn": DEFAULT,  # Typing
+        "inductor_choices_class": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing

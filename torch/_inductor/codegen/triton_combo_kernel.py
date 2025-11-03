@@ -717,7 +717,7 @@ class ComboKernel(Kernel):
         self, name: str, call_args: list[Any], arg_types: list[Any]
     ) -> None:
         for num, sub_kernel in enumerate(self.sub_kernels):
-            for i, tree in enumerate(sub_kernel.range_trees):
+            for tree in sub_kernel.range_trees:
                 numel_name = f"{tree.prefix}numel_{num}"
                 if numel_name not in self.dynamic_shape_args:
                     continue
@@ -735,7 +735,7 @@ class ComboKernel(Kernel):
     def kernel_benchmark_extra_args(self) -> list[str]:
         extra_args = []
         for num, sub_kernel in enumerate(self.sub_kernels):
-            for i, tree in enumerate(sub_kernel.range_trees):
+            for tree in sub_kernel.range_trees:
                 numel_name = f"{tree.prefix}numel_{num}"
                 if numel_name not in self.dynamic_shape_args:
                     continue
@@ -896,6 +896,7 @@ class ComboKernel(Kernel):
             result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
+        device = V.graph.get_current_device_or_throw()
         index = V.graph.get_current_device_or_throw().index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -930,7 +931,7 @@ class ComboKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
+                f"ms = benchmarker.benchmark(call, fn_args=(args,), device={device.type},rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -1018,7 +1019,7 @@ class ComboKernel(Kernel):
 
         for num, sub_kernel in enumerate(self.sub_kernels):
             meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
-            for i, tree in enumerate(sub_kernel.range_trees):
+            for tree in sub_kernel.range_trees:
                 # pyrefly: ignore [missing-argument]
                 if not tree.is_reduction:
                     numel_name = f"{tree.prefix}numel_{num}"

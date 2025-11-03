@@ -270,7 +270,7 @@ class TestFlopCounter(TestCase):
         model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
 
         with FlopCounterMode() as mode:
-            for i in range(50):
+            for _ in range(50):
                 out = model(x)
                 out.sum().backward()
         self.assertExpectedInline(str(mode.get_total_flops()), """1536000""")
