@@ -445,7 +445,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = True
 
 # Use C++ guard manager for symbolic shapes
-enable_cpp_symbolic_shape_guards = not is_fbcode()
+enable_cpp_symbolic_shape_guards = False
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -632,6 +632,14 @@ compiled_autograd = False
 # the function as opposed to trying to support the ctor with unclear semantics
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
+
+# Eager AC/SAC reapplies the mutations (like global dict mutations) in the
+# backward during the recomputation of forward. torch.compile has no easy way to
+# reapply python mutations in the backward. But many users might be ok to skip
+# reapplication of side effects in the backward. They can set this config flag
+# to accept this eager and compile divergence.
+skip_fwd_side_effects_in_bwd_under_checkpoint = False
+
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
