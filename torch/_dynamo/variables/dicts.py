@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-# [Adding a new supported class within the keys of ConstDictVarialble]
+# [Adding a new supported class within the keys of ConstDictVariable]
 # - Add its tracker type to is_hashable
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 

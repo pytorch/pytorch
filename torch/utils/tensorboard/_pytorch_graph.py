@@ -167,7 +167,7 @@ class GraphPy:
 
     def populate_namespace_from_OP_to_IO(self):
         for node in self.nodes_op:
-            for node_output, outputSize in zip(node.outputs, node.outputstensor_size):
+            for node_output, outputSize in zip(node.outputs, node.outputstensor_size, strict=True):
                 self.scope_name_appeared.append(node.scopeName)
                 self.nodes_io[node_output] = NodeBase(
                     node_output,

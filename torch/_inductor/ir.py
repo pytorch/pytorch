@@ -64,6 +64,7 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
+    IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
@@ -97,6 +98,7 @@ from .utils import (
     argsort,
     argsort_sym,
     cache_on_self,
+    cache_on_self_and_args,
     ceildiv,
     convert_shape_to_inductor,
     convert_shape_to_symint,
@@ -933,6 +935,7 @@ class Loops(IRNode):
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
 
+    @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -1228,6 +1231,7 @@ class Reduction(Loops):
 
     __repr__ = __str__
 
+    @cache_on_self_and_args("Reduction")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return super().get_free_symbol_uses(unbacked_only) | OrderedSet().union(
             *(get_free_symbols(e, unbacked_only) for e in self.reduction_ranges)
@@ -2372,6 +2376,7 @@ class Scan(Loops):
 
     # HACK we mimic reduction
 
+    @cache_on_self_and_args("Scan")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
         # need to explicitly represent the closure so we can pull out unbacked
@@ -2582,6 +2587,7 @@ class Sort(Loops):
 
     # HACK we mimic reduction
 
+    @cache_on_self_and_args("Sort")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return (
             super().get_free_symbol_uses(unbacked_only)
@@ -2830,6 +2836,7 @@ def is_unaligned(node: IRNode) -> bool:
 class BaseView(IRNode):
     data: IRNode
 
+    @cache_on_self_and_args("BaseView")
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return self.data.get_free_symbol_uses(unbacked_only)
 
@@ -3404,6 +3411,7 @@ class ReinterpretView(BaseView):
     def freeze_layout(self) -> None:
         pass
 
+    @cache_on_self_and_args("ReinterpretView")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -3688,12 +3696,36 @@ class Layout(OutputSpec):
         self.dtype = dtype
         assert len(size) == len(stride), f"size={size}, stride={stride}"
         assert all(isinstance(s, (Expr, int)) for s in size)
-        self.size = size
-        self.stride = stride
-        self.offset = offset
+        self._size = size
+        self._stride = stride
+        self._offset = offset
         self.is_pinned = is_pinned
         # is_pinned implies cpu
         assert (not self.is_pinned) or (self.device.type == "cpu")
+
+    @property
+    def size(self) -> Sequence[Expr]:
+        return self._size
+
+    @size.setter
+    def size(self, value: Sequence[Expr]) -> None:
+        self._size = value
+
+    @property
+    def stride(self) -> Sequence[Expr]:
+        return self._stride
+
+    @stride.setter
+    def stride(self, value: Sequence[Expr]) -> None:
+        self._stride = value
+
+    @property
+    def offset(self) -> Expr:
+        return self._offset
+
+    @offset.setter
+    def offset(self, value: Expr) -> None:
+        self._offset = value
 
     def __str__(self) -> str:
         offset = ""
@@ -3914,6 +3946,7 @@ class Layout(OutputSpec):
     def storage_size(self) -> Expr:
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
 
+    @cache_on_self_and_args("Layout")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -3933,7 +3966,11 @@ class FixedLayout(Layout):
 
 
 class FlexibleLayout(Layout):
-    """A Tensor layout that we are allowed to change"""
+    """
+    A Tensor layout that we are allowed to change
+
+    Assumption: layout change should NOT add or remove free symbols
+    """
 
     allow_indexing = False
 
@@ -4018,6 +4055,33 @@ class FlexibleLayout(Layout):
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
+    @property
+    def size(self) -> Sequence[Expr]:
+        return self._size
+
+    @size.setter
+    def size(self, value: Sequence[Expr]) -> None:
+        self.assert_free_symbol_uses_unchanged("size", value)
+        self._size = value
+
+    @property
+    def stride(self) -> Sequence[Expr]:
+        return self._stride
+
+    @stride.setter
+    def stride(self, value: Sequence[Expr]) -> None:
+        self.assert_free_symbol_uses_unchanged("stride", value)
+        self._stride = value
+
+    @property
+    def offset(self) -> Expr:
+        return self._offset
+
+    @offset.setter
+    def offset(self, value: Expr) -> None:
+        self.assert_free_symbol_uses_unchanged("offset", value)
+        self._offset = value
+
     def as_stride_order(
         self, order: Sequence[int], allow_padding: bool = False
     ) -> FixedLayout:
@@ -4076,6 +4140,25 @@ class FlexibleLayout(Layout):
             self.is_pinned,
         )
 
+    def get_initial_free_symbol_uses(self) -> dict[tuple[str, bool], sympy.Symbol]:
+        initial_free_symbols = {}
+        for name in ["size", "stride", "offset"]:
+            for unbacked_only in [True, False]:
+                key = (name, unbacked_only)
+                initial_free_symbols[key] = OrderedSet(
+                    get_free_symbols(getattr(self, name), unbacked_only)
+                )
+
+        return initial_free_symbols
+
+    def assert_free_symbol_uses_unchanged(self, name: str, value: IterateExprs) -> None:
+        for unbacked_only in [True, False]:
+            old_free_symbols = self.initial_free_symbols[(name, unbacked_only)]
+            new_free_symbols = OrderedSet(get_free_symbols(value, unbacked_only))
+            assert new_free_symbols == old_free_symbols, (
+                f"Expected free symbols unchanged, but got {new_free_symbols} vs {old_free_symbols}"
+            )
+
     def __init__(
         self,
         device: torch.device,
@@ -4089,6 +4172,10 @@ class FlexibleLayout(Layout):
         else:
             strides = FlexibleLayout.contiguous_strides(size)
         super().__init__(device, dtype, size, strides, is_pinned=is_pinned)
+
+        # record the initial free symbols to check that we do not add new free symbols
+        # later when modifying sizes, strides, and offsets.
+        self.initial_free_symbols = self.get_initial_free_symbol_uses()
 
 
 class NonOwningLayout(Layout):
@@ -4115,6 +4202,7 @@ class NonOwningLayout(Layout):
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
 
+    @cache_on_self_and_args("NonOwningLayout")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4403,6 +4491,7 @@ class Buffer(IRNode, CodegenSymbol):
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet([self.get_name()])
 
+    @cache_on_self_and_args("Buffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4475,6 +4564,7 @@ class NoneAsConstantBuffer(IRNode):
     def get_reads(self) -> OrderedSet[Dep]:
         return OrderedSet()
 
+    @cache_on_self_and_args("NoneAsConstantBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4494,6 +4584,7 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     expr: Expr
 
+    @cache_on_self_and_args("ShapeAsConstantBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -4607,6 +4698,7 @@ class ComputedBuffer(OperationBuffer):
                     self.data.get_size(),
                 )
 
+    @cache_on_self_and_args("ComputedBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -5063,6 +5155,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.subgraph_inps: Optional[list[Optional[Union[IRNode, sympy.Expr]]]] = None
         self.subgraph_outs: Optional[list[Optional[IRNode]]] = None
 
+    @cache_on_self_and_args("TritonTemplateBuffer")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -5429,6 +5522,7 @@ class InputsKernel(OperationBuffer):
     def num_reads(self) -> int:
         return 1
 
+    @cache_on_self_and_args("InputsKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -5603,6 +5697,7 @@ class ConcatKernel(NopKernel):
             and not isinstance(src.data, ExternKernelAlloc)
         )
 
+    @cache_on_self_and_args("ConcatKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -5938,7 +6033,7 @@ class ExternKernel(InputsKernel):
         if shape_env := V.fake_mode.shape_env:
             node_meta_val = V.current_node.meta.get("val")
             ctx: AbstractContextManager[None] = nullcontext()
-            if V.current_node.target == torch._higher_order_ops.effects.with_effects:
+            if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
@@ -6519,6 +6614,7 @@ class ExternKernel(InputsKernel):
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
+    @cache_on_self_and_args("ExternKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -6978,6 +7074,7 @@ class UserDefinedTritonKernel(ExternKernel):
             original_fxnode_name=self.fx_node.name,
         )
 
+    @cache_on_self_and_args("UserDefinedTritonKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -7416,6 +7513,7 @@ class DynamicSelectStorageOffset(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_offset_symbol])
 
+    @cache_on_self_and_args("DynamicSelectStorageOffset")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -7466,6 +7564,7 @@ class DynamicSliceSize(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_size_symbol])
 
+    @cache_on_self_and_args("DynamicSliceSize")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -7530,6 +7629,7 @@ class AssertScalar(ExternKernel):
     def has_side_effects(self) -> bool:
         return True
 
+    @cache_on_self_and_args("AssertScalar")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -8204,6 +8304,7 @@ class MultiOutput(ExternKernel):
         self.indices = indices
         self.skip_size_stride_alignment_checks = skip_size_stride_alignment_checks
 
+    @cache_on_self_and_args("MultiOutput")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -8326,6 +8427,7 @@ class MutableBox(IRNode):
     def realize(self) -> Optional[str]:
         return self.data.realize()
 
+    @cache_on_self_and_args("MutableBox")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
@@ -8859,9 +8961,7 @@ class WhileLoop(ExternKernel):
         seen_buffers: OrderedSet[int] = OrderedSet()
         result: list[Union[IRNode, TensorBox, ShapeAsConstantBuffer]] = []
 
-        for i, (original_input, unwrapped_buffer) in enumerate(
-            zip(carried_inputs, unwrapped_buffers)
-        ):
+        for original_input, unwrapped_buffer in zip(carried_inputs, unwrapped_buffers):
             if id(unwrapped_buffer) in seen_buffers:
                 result.append(ExternKernel.copy_input(original_input))
             else:
@@ -9164,6 +9264,7 @@ class EffectfulKernel(FallbackKernel):
 
 
 class NonTensorObj(IRNode):
+    @cache_on_self_and_args("NonTensorObj")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:

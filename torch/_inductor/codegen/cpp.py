@@ -165,6 +165,8 @@ MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
     torch.float16,
     torch.uint8,
     torch.int8,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
 ]
 
 
@@ -1186,7 +1188,7 @@ class CppVecOverrides(CppOverrides):
                     # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
                     if len(new_args) == 2:
                         new_args = promote_args(new_args)
-                    elif func == CppVecOverrides.where:
+                    elif func is CppVecOverrides.where:
                         new_args[1:] = promote_args(new_args[1:])
 
                 # Broadcast scalar args to vector
@@ -2542,7 +2544,7 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
-            return "AOTI_TORCH_CHECK"
+            return "STD_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
 
