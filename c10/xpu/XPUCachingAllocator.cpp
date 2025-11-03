@@ -402,12 +402,12 @@ class DeviceCachingAllocator {
   bool release_cached_blocks(MempoolId_t mempool_id) {
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
         captures_underway.empty()) {
-    synchronize_and_free_events();
-    // See Note [Safe to Free Blocks on BlockPool]
-    c10::xpu::syncStreamsOnDevice(device_index);
+      synchronize_and_free_events();
+      // See Note [Safe to Free Blocks on BlockPool]
+      c10::xpu::syncStreamsOnDevice(device_index);
 
-    release_blocks(large_blocks);
-    release_blocks(small_blocks);
+      release_blocks(large_blocks);
+      release_blocks(small_blocks);
     }
 
     for (auto it = graph_pools_freeable.begin();
@@ -549,7 +549,7 @@ class DeviceCachingAllocator {
   Block* malloc(DeviceIndex device, size_t orig_size, sycl::queue& queue) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     if (C10_LIKELY(captures_underway.empty())) {
-    process_events();
+      process_events();
     }
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, &queue);
