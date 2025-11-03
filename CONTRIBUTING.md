@@ -18,7 +18,7 @@ aspects of contributing to PyTorch.
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
   - [Local linting](#local-linting)
-    - [Running `mypy`](#running-mypy)
+    - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Merging your Change](#merging-your-change)
@@ -281,7 +281,7 @@ dependencies as well as the nightly binaries into the repo directory.
 **Prerequisites**:
 The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
-- `mypy` - recommended for linting
+- `pyrefly` - recommended for type checking
 - `pytest` - recommended to run tests more selectively
 Running
 ```
@@ -350,14 +350,13 @@ make lint
 
 Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
 
-#### Running `mypy`
+#### Running `pyrefly`
 
-`mypy` is an optional static type checker for Python. We have multiple `mypy`
-configs for the PyTorch codebase that are automatically validated against whenever the linter is run.
+`pyrefly` is an static type checker for Python. It is configured in `pyrefly.toml` 
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for more information on how to set up `mypy` and tackle type annotation
+for more information on how to set up `pyrefly` and tackle type annotation
 tasks.
 
 ### C++ Unit Testing
