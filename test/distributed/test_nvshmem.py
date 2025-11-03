@@ -7,6 +7,7 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -229,6 +230,36 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             # handle.wait_signal(src_rank=0)
             # TODO: remove after we have wait_signal
             dist.barrier()
+
+
+def get_occurrence_numbers(tensor):
+    """
+    Transform tensor to show which occurrence each element is.
+
+    Example: tensor([1, 2, 1, 3, 1, 2]) -> tensor([1, 1, 2, 1, 3, 2])
+    """
+    device = tensor.device
+    # Get unique values and their inverse mapping
+    unique_vals, inverse = torch.unique(tensor, return_inverse=True)
+
+    # Create a tensor to count occurrences for each unique value
+    n_unique = len(unique_vals)
+    n_elements = len(tensor)
+
+    # Create a matrix where each row corresponds to a unique value
+    # and columns correspond to positions in the original tensor
+    indicator_matrix = torch.zeros(
+        n_unique, n_elements, dtype=torch.float, device=device
+    )
+    indicator_matrix[inverse, torch.arange(n_elements)] = 1.0
+
+    # Cumulative sum along columns gives us occurrence numbers
+    occurrence_counts = torch.cumsum(indicator_matrix, dim=1) - indicator_matrix
+
+    # Extract the occurrence number for each position
+    result = occurrence_counts[inverse, torch.arange(n_elements, device=device)]
+
+    return result.long()
 
 
 @instantiate_parametrized_tests
@@ -557,6 +588,314 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Check data
         torch.testing.assert_close(out_expected, out[:out_numel])
 
+    @skipIfRocm
+    def test_make_a2a_exchange_plan(self) -> None:
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        # Number of elements for a peer is random between [0, k)
+        k = 10
+        orig_inp_splits = torch.randint(k, (self.world_size,), device=self.device)
+
+        # Create symm_mem tensors
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        src_offsets = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        dst_offsets = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+
+        in_splits.copy_(orig_inp_splits)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        symm_mem.make_a2a_exchange_plan(
+            in_splits, src_offsets, out_splits, dst_offsets, group_name
+        )
+
+        # Check input splits -- should not change
+        torch.testing.assert_close(in_splits, orig_inp_splits)
+
+        # Check output splits
+        # Exchange input splits to get output splits
+        expected_out_splits = torch.zeros_like(orig_inp_splits)
+        dist.all_to_all_single(expected_out_splits, orig_inp_splits)
+        torch.testing.assert_close(expected_out_splits, out_splits)
+
+        # Check src offsets
+        orig_src_offsets = torch.cumsum(orig_inp_splits, dim=0)  # inclusive scan
+        # Make it exclusive
+        orig_src_offsets = torch.cat(
+            [torch.zeros(1, device=self.device), orig_src_offsets[:-1]]
+        ).to(torch.int64)
+        expected_src_offsets = torch.empty_like(orig_src_offsets)
+        dist.all_to_all_single(expected_src_offsets, orig_src_offsets)
+        torch.testing.assert_close(src_offsets, expected_src_offsets)
+
+        # Check dst offsets
+        expected_dst_offsets = torch.cumsum(
+            expected_out_splits, dim=0
+        )  # inclusive scan
+        self.assertEqual(dst_offsets[0], 0)
+        torch.testing.assert_close(dst_offsets[1:], expected_dst_offsets[:-1])
+
+    @skipIfRocm
+    def test_a2a_with_exchange_plan(self) -> None:
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        # Number of elements for a peer is random between [0, k)
+        k = 10
+        orig_inp_splits = torch.randint(k, (self.world_size,), device=self.device)
+
+        # Create splits and offsets
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        src_offsets = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        dst_offsets = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+
+        # Create data
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * self.world_size
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+        dtype = torch.float
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+
+        in_splits.copy_(orig_inp_splits)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        # Create exchange plan
+        plan = symm_mem.make_a2a_exchange_plan(
+            in_splits, src_offsets, out_splits, dst_offsets, group_name
+        )
+
+        # Prepare expected output
+        inp_numel = in_splits.sum().item()
+        out_numel = out_splits.sum().item()
+        expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+        dist.all_to_all_single(
+            expected, inp[:inp_numel], out_splits.tolist(), in_splits.tolist()
+        )
+
+        # Exchange data with plan
+        # Loop a couple times to ensure the plan is reusable
+        for _ in range(3):
+            symm_mem.all_to_all_v(inp, out, plan, group_name)
+            torch.testing.assert_close(out[:out_numel], expected)
+
+    @skipIfRocm
+    @parametrize("align", [1, 8, 16])  # `major_align` of output
+    def test_make_a2a_2d_exchange_plan(self, align: int) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        orig_inp_splits = torch.randint(
+            k, (nsplits,), dtype=torch.int64, device=self.device
+        )
+
+        # Create symm_mem tensors
+        in_splits = symm_mem.empty(nsplits, dtype=torch.int64, device=self.device)
+        src_offsets = symm_mem.empty(nsplits, dtype=torch.int64, device=self.device)
+        out_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).fill_(0)
+        dst_offsets = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).fill_(0)
+
+        in_splits.copy_(orig_inp_splits)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        plan = symm_mem.make_a2a_2d_exchange_plan(
+            in_splits, src_offsets, out_splits, dst_offsets, group_name, align
+        )
+
+        # Exchange input splits to get output splits
+        expected_out_splits = torch.zeros_like(orig_inp_splits)
+        dist.all_to_all_single(expected_out_splits, orig_inp_splits)
+        # We do a .t() here because there is a rank-major to expert-major shuffle
+        expected_out_splits = expected_out_splits.reshape(self.world_size, ne).t()
+        torch.testing.assert_close(plan.out_splits, expected_out_splits.reshape(-1))
+
+        # Check dst offsets
+        out_split_list = expected_out_splits.tolist()
+        for i in range(ne):
+            expert_sum = 0
+            for j in range(self.world_size):
+                expert_sum += out_split_list[i][j]
+            # Align up expert_sum
+            expert_sum_aligned = (expert_sum + align - 1) // align * align
+            # If 0, make it at least `align` (bc cutlass currently does not support empty bins)
+            expert_sum_aligned = max(expert_sum_aligned, align)
+            # last element absorbs the padding
+            out_split_list[i][-1] += expert_sum_aligned - expert_sum
+
+        out_splits_padded = torch.tensor(out_split_list, device=self.device).reshape(-1)
+        out_offsets = torch.cumsum(out_splits_padded, dim=0)  # inclusive scan
+        # Make it exclusive scan because that's what `all_to_all_vdev_2d` returns
+        out_offsets = torch.cat(
+            [torch.zeros(1, device=self.device), out_offsets[:-1]]
+        ).to(torch.int64)
+        expected_dst_offsets = torch.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        )
+        dist.all_to_all_single(
+            expected_dst_offsets,
+            out_offsets.reshape(ne, self.world_size).t().contiguous(),
+        )
+        torch.testing.assert_close(
+            expected_dst_offsets,
+            plan.dst_offsets,
+            msg=f"""
+            Expecting
+            {expected_dst_offsets}
+            Got
+            {plan.dst_offsets}""",
+        )
+
+    @skipIfRocm
+    def test_all_to_all_v_2d_index_push(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        # Number of experts per rank
+        ne = 4
+        tot_experts = ne * self.world_size
+
+        # Create topk indices of shape (n_tokens, topk)
+        topk = 2
+        n_tokens = 128
+        topk_indices = torch.randint(
+            tot_experts, (n_tokens, topk), dtype=torch.int64, device=self.device
+        )
+
+        # Convert indices to splits
+        orig_inp_splits = torch.histc(
+            topk_indices,
+            bins=tot_experts,
+        )
+
+        # Create symm_mem tensors
+        in_splits = symm_mem.empty(
+            tot_experts, dtype=torch.int64, device=self.device
+        ).copy_(orig_inp_splits)
+        src_offsets = symm_mem.empty(tot_experts, dtype=torch.int64, device=self.device)
+        out_splits = symm_mem.empty(
+            tot_experts, dtype=torch.int64, device=self.device
+        ).fill_(0)
+        dst_offsets = symm_mem.empty(
+            tot_experts, dtype=torch.int64, device=self.device
+        ).fill_(0)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        plan = symm_mem.make_a2a_2d_exchange_plan(
+            in_splits, src_offsets, out_splits, dst_offsets, group_name
+        )
+
+        # Create data
+        max_out_tokens = n_tokens * self.world_size
+        dtype = torch.float
+        hid_dim = 1024
+        inp = symm_mem.empty(n_tokens, hid_dim, dtype=dtype, device=self.device).copy_(
+            torch.randn(n_tokens, hid_dim, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(
+            max_out_tokens, hid_dim, dtype=dtype, device=self.device
+        ).fill_(-1)
+
+        # Figure out rank of each token in its expert chunk
+        occurrences = get_occurrence_numbers(topk_indices.view(-1))
+
+        # Number of CUDA blocks (random choice)
+        n_blocks = 2
+        # Evenly spread token to CUDA blocks
+        tokens_per_block = n_tokens // n_blocks
+        # Start offset of each CUDA block
+        b_start = torch.arange(
+            0, n_tokens, tokens_per_block, dtype=torch.int64, device=self.device
+        )
+        # Number of tokens for each CUDA block
+        b_len = torch.full(
+            (n_blocks,), tokens_per_block, dtype=torch.int64, device=self.device
+        )
+        # Ready signal for each CUDA block. In this test we set all tokens as ready in one shot
+        b_head = b_start + b_len
+
+        dist.barrier()
+
+        torch.ops.symm_mem._all_to_all_v_2d_index_push(
+            inp,
+            out,
+            topk_indices,
+            occurrences,
+            plan.dst_offsets,
+            group_name,
+            b_start,
+            b_len,
+            b_head,
+        )
+
+        # Check data using all_to_all_vdev_2d
+        # Token sequence is inflated topk times
+        expanded_seqlen = n_tokens * topk
+        sorted_indices = torch.argsort(topk_indices.view(-1))
+        expanded_inp = symm_mem.empty(
+            expanded_seqlen, hid_dim, dtype=dtype, device=self.device
+        ).copy_(inp[sorted_indices // topk])
+        overflow = 2
+        expected_out = symm_mem.empty(
+            expanded_seqlen * overflow, hid_dim, dtype=dtype, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, tot_experts), dtype=torch.int64, device=self.device
+        )
+        dist.barrier()
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            expanded_inp, expected_out, in_splits, out_splits_offsets, group_name
+        )
+
+        # Check data
+        out_len = out_splits_offsets[1][-1] + out_splits_offsets[0][-1]
+        torch.testing.assert_close(out[:out_len], expected_out[:out_len])
+
 
 # Help function used by multiple tests
 def dispatch_then_combine(device, align: int, group) -> None:
@@ -699,6 +1038,331 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         )
         subgroup = dm.get_group("ep")
         dispatch_then_combine(self.device, align=8, group=subgroup)
+
+
+class HierRouter(nn.Module):
+    def __init__(self, hid_dim, n_experts, topk_experts, n_groups, topk_groups):
+        super().__init__()
+        self.n_experts = n_experts
+        self.topk_experts = topk_experts
+        self.n_groups = n_groups
+        self.topk_groups = topk_groups
+        self.lin = nn.Linear(hid_dim, n_experts)
+
+    def forward(self, x):
+        seq_len = x.size(0)
+        scores = self.lin(x)
+        # scores = torch.rand(seq_len, self.n_experts, device=x.device)
+        group_scores = (
+            scores.view(seq_len, self.n_groups, -1)
+            .topk(self.topk_groups, dim=-1)[0]
+            .sum(dim=-1)
+        )  # [seqlen, n_group]
+        group_idx = torch.topk(group_scores, k=self.topk_groups, dim=-1, sorted=False)[
+            1
+        ]  # [seqlen, top_k_group]
+        group_mask = torch.zeros_like(group_scores)  # [seqlen, n_group]
+        group_mask.scatter_(1, group_idx, 1)  # [seqlen, n_group]
+        score_mask = (
+            group_mask.unsqueeze(-1)
+            .expand(seq_len, self.n_groups, self.n_experts // self.n_groups)
+            .reshape(seq_len, -1)
+        )  # [seqlen, e]
+        tmp_scores = scores.masked_fill(~score_mask.bool(), 0.0)  # [seqlen, e]
+        _, topk_idx = torch.topk(tmp_scores, k=self.topk_experts, dim=-1, sorted=False)
+        return group_idx, topk_idx
+
+
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class HierarchicalA2ATest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    def init_mesh(self) -> None:
+        # Arrange gpus into [nnodes, ranks_per_node] mesh
+        ranks_per_node = device_module.device_count()
+        # If there is only one node, virtually cut it into two nodes
+        if ranks_per_node == self.world_size:
+            ranks_per_node = ranks_per_node // 2
+
+        nnodes = self.world_size // ranks_per_node
+        self.dm = init_device_mesh(
+            device_type, (nnodes, ranks_per_node), mesh_dim_names=("inter", "intra")
+        )
+        self.inter_group = self.dm.get_group("inter")
+        self.intra_group = self.dm.get_group("intra")
+        symm_mem.enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        symm_mem.enable_symm_mem_for_group(self.inter_group.group_name)
+        symm_mem.enable_symm_mem_for_group(self.intra_group.group_name)
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def test_rail_dispatch(self) -> None:
+        """
+        Test rail-wise dispatch, this is a 1D all-to-all-v over "network"
+        """
+        self._init_device()
+        self.init_mesh()
+        torch.manual_seed(42)
+        dtype = torch.float
+
+        seqlen = 512
+        hid_dim = 1024
+        inp = torch.randn((seqlen, hid_dim), dtype=dtype, device=self.device)
+
+        nnodes = self.inter_group.size()
+        # Limit token routing to half of the nodes
+        topk_nodes = nnodes // 2
+        # Create some synthetic token choices for sending to which nodes
+        topk_node_idx = torch.randint(
+            nnodes, (seqlen, topk_nodes), dtype=torch.int64, device=self.device
+        )
+        # Convert indices to splits
+        splits = torch.histc(topk_node_idx, bins=nnodes, min=0, max=nnodes - 1)
+        sorted_indices = torch.argsort(topk_node_idx.view(-1))
+        expanded_inp = inp[sorted_indices // topk_nodes]
+        expanded_seqlen = seqlen * topk_nodes
+
+        # Max number of output tokens (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = nnodes  # worst case: one rank receives all data
+        max_out_len = expanded_seqlen * overflow_factor
+
+        inp = symm_mem.empty(
+            (expanded_seqlen, hid_dim), dtype=dtype, device=self.device
+        ).copy_(expanded_inp)
+        out = symm_mem.empty(
+            (max_out_len, hid_dim), dtype=dtype, device=self.device
+        ).fill_(-1)
+        in_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=self.device).copy_(
+            splits
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, nnodes), dtype=torch.int64, device=self.device
+        )
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        torch.ops.symm_mem.all_to_all_vdev(
+            inp, out, in_splits, out_splits_offsets, self.inter_group.group_name
+        )
+
+    def test_intranode_dispatch(self) -> None:
+        """
+        Test intra-node dispatch, this is a 2D all-to-all-v intra "node"
+        """
+        self._init_device()
+        self.init_mesh()
+        torch.manual_seed(42)
+        dtype = torch.float
+
+        ranks_per_node = self.intra_group.size()
+        ne = 4  # number of experts per rank
+        experts_per_node = ne * ranks_per_node
+
+        # within a node, send each token to topk_per_node experts
+        topk_per_node = 4
+
+        # Tokens received from the rail dispatch
+        rail_seqlen = 1024
+        hid_dim = 1024
+        inp = torch.randn((rail_seqlen, hid_dim), dtype=dtype, device=self.device)
+
+        # Range of my node's experts
+        node_id = self.inter_group.rank()
+        min_expert_id = node_id * experts_per_node
+        max_expert_id = (node_id + 1) * experts_per_node
+        # Create some synthetic token choices
+        topk_idx_intranode = torch.randint(
+            min_expert_id,
+            max_expert_id,
+            (rail_seqlen, topk_per_node),
+            dtype=torch.int64,
+            device=self.device,
+        )
+        # Convert indices to splits
+        splits = torch.histc(
+            topk_idx_intranode,
+            bins=experts_per_node,
+            min=min_expert_id,
+            max=max_expert_id,
+        )
+
+        # Token sequence is inflated topk_per_node times
+        sorted_indices = torch.argsort(topk_idx_intranode.view(-1))
+        expanded_inp = inp[sorted_indices // topk_per_node]
+        expanded_seqlen = rail_seqlen * topk_per_node
+
+        # SymmMem buffers
+        symm_inp = symm_mem.empty(
+            (expanded_seqlen, hid_dim), dtype=dtype, device=self.device
+        ).copy_(expanded_inp)
+        overflow_factor = ranks_per_node  # worst case: one rank receives all data
+        max_out_len = expanded_seqlen * overflow_factor
+        symm_out = symm_mem.empty(
+            (max_out_len, hid_dim), dtype=dtype, device=self.device
+        )
+        in_splits = symm_mem.empty(
+            experts_per_node, dtype=torch.int64, device=self.device
+        ).copy_(splits)
+        out_splits_offsets = symm_mem.empty(
+            (2, experts_per_node), dtype=torch.int64, device=self.device
+        )
+
+        # Intra-node dispatch
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            symm_inp,
+            symm_out,
+            in_splits,
+            out_splits_offsets,
+            self.intra_group.group_name,
+            major_align=8,
+        )
+
+    def test_router(self):
+        """
+        Test HierRouter for node-limited routing
+        """
+        torch.manual_seed(self.rank + 42)
+        hid_dim = 1024
+        n_experts = 256
+        topk_experts = 8
+        n_groups = 8
+        topk_groups = 4
+
+        with torch.device(self.device):
+            router = HierRouter(hid_dim, n_experts, topk_experts, n_groups, topk_groups)
+
+        seqlen = 128
+        x = torch.rand(seqlen, hid_dim, device=self.device)
+        topk_node_idx, topk_expert_idx = router(x)
+
+        node_in_range = topk_node_idx < n_groups
+        expert_in_range = topk_expert_idx < n_experts
+        self.assertTrue(torch.all(node_in_range))
+        self.assertTrue(torch.all(expert_in_range))
+
+    def test_dedup_a2a(self) -> None:
+        """
+        Test "Deduplicated All-To-All" aka "Hierachical All-To-All"
+        """
+        self._init_device()
+        self.init_mesh()
+        torch.manual_seed(self.rank + 42)
+        dtype = torch.float
+        # Alignment of output expert chunks, group GEMM requirement
+        align = 8
+
+        seqlen = 1024
+        hid_dim = 1024
+        inp = torch.randn((seqlen, hid_dim), dtype=dtype, device=self.device)
+
+        nnodes = self.inter_group.size()
+
+        # Total # of experts
+        n_experts = 32
+        # Number of experts per node
+        experts_per_node = n_experts // nnodes
+        # Global # topk experts
+        topk_experts = 8
+        # Limit token routing to half of the nodes
+        topk_nodes = nnodes // 2
+
+        # Router
+        with torch.device(self.device):
+            router = HierRouter(hid_dim, n_experts, topk_experts, nnodes, topk_nodes)
+
+        # Router tokens
+        # Decision includes topk nodes and topk experts.
+        # topk experts may not evenly distribute among topk nodes.
+        # topk expert indices are global expert indices.
+        topk_node_idx, topk_expert_idx = router(inp)
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        # Dedup dispatch
+        from torch.nn.parallel.moe import dedup_dispatch
+
+        # A ratio between worst-case output buffer size versus input seqlen
+        out_len_ratio = n_experts
+
+        with torch.cuda.use_mem_pool(mempool):
+            (
+                intra_out,
+                topk_indices_intranode_out,
+                inter_plan,
+                intra_plan,
+                _inter_out,
+                _recv_intra_inp_splits,
+            ) = dedup_dispatch(
+                inp,
+                topk_node_idx,
+                topk_expert_idx,
+                n_experts,
+                self.inter_group,
+                self.intra_group,
+                out_len_ratio,
+                align,
+            )
+
+        torch.cuda.synchronize(self.device)
+
+        # Numeric Verfication
+        def verify():
+            filler = torch.full_like(
+                topk_indices_intranode_out, fill_value=experts_per_node
+            )
+            topk_indices_intranode = torch.where(
+                topk_indices_intranode_out >= 0, topk_indices_intranode_out, filler
+            )
+            sorted_indices_intra = torch.argsort(topk_indices_intranode.view(-1))
+            expanded_inp_intra = _inter_out[sorted_indices_intra // topk_experts]
+            expanded_seqlen_intra = _inter_out.shape[0] * topk_experts
+            expanded_inp_intra_symm = symm_mem.empty(
+                expanded_seqlen_intra, hid_dim, dtype=dtype, device=self.device
+            ).copy_(expanded_inp_intra)
+            expanded_intra_in_splits = symm_mem.empty(
+                experts_per_node, dtype=torch.int64, device=self.device
+            ).copy_(_recv_intra_inp_splits)
+            intra_out_splits_offsets = symm_mem.empty(
+                (
+                    2,
+                    experts_per_node,
+                ),
+                dtype=torch.int64,
+                device=self.device,
+            )
+            max_out_len_intra = seqlen * out_len_ratio
+            intra_out_golden = symm_mem.empty(
+                max_out_len_intra, hid_dim, dtype=dtype, device=self.device
+            )
+
+            torch.ops.symm_mem.all_to_all_vdev_2d(
+                expanded_inp_intra_symm,
+                intra_out_golden,
+                expanded_intra_in_splits,
+                intra_out_splits_offsets,
+                self.intra_group.group_name,
+                align,
+            )
+
+            # tot_recv_len = intra_out_splits_offsets[0].sum()
+            for i in range(experts_per_node):
+                split = intra_out_splits_offsets[0][i]
+                offset = intra_out_splits_offsets[1][i]
+                self.assertEqual(
+                    intra_out[offset : offset + split],
+                    intra_out_golden[offset : offset + split],
+                )
+
+        verify()
 
 
 if __name__ == "__main__":
