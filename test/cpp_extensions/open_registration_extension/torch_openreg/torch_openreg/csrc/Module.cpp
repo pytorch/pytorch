@@ -83,7 +83,7 @@ PyObject* _getDeviceCount(PyObject* self, PyObject* noargs) {
   return THPUtils_packUInt64(c10::openreg::device_count());
   END_HANDLE_TH_ERRORS
 }
-
+// LITERALINCLUDE START: OPENREG MODULE METHODS
 static PyMethodDef methods[] = {
     {"_init", _initExtension, METH_NOARGS, nullptr},
     {"_get_default_generator", _getDefaultGenerator, METH_O, nullptr},
@@ -93,7 +93,8 @@ static PyMethodDef methods[] = {
     {"_exchangeDevice", _exchangeDevice, METH_O, nullptr},
     {"_get_device_count", _getDeviceCount, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
-
+    
+// LITERALINCLUDE START: OPENREG MODULE METHODS
 /*
  * When ASAN is enabled, PyTorch modifies the dlopen flag during import,
  * causing all global and weak symbols in _C.so and its dependent libraries
