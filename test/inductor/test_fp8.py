@@ -1125,7 +1125,7 @@ class TestFP8Lowering(TestCase):
             view_21 = torch.ops.aten.reshape.default(view_20, [2097152])
 
             _scaled_mm = torch.ops.test_fp8.fake_scaled_mm.default(
-                view_3, permute, view_16, view_21, None, None, torch.bfloat16
+                view_3, permute, view_16, view_21, None, None, torch.float32
             )
             return (_scaled_mm,)
 
