@@ -24,6 +24,8 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfRocmArch,
+    MI300_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -303,7 +305,7 @@ class TestTransformers(NNTestCase):
         encoder = nn.TransformerEncoder(layer, 2).to(device)
         optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
         encoder.train()
-        for i in range(iters):
+        for _ in range(iters):
             encoder.train()
             optimizer.zero_grad()
             inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
@@ -427,7 +429,8 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @tf32_on_and_off(0.0021 if TEST_WITH_ROCM else 0.001)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -537,7 +540,7 @@ class TestTransformers(NNTestCase):
 
         with torch.no_grad():
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -587,7 +590,7 @@ class TestTransformers(NNTestCase):
 
             with torch.no_grad():
                 # set constant weights of the model
-                for idx, p in enumerate(layer.parameters()):
+                for p in layer.parameters():
                     x = p.data
                     sz = x.view(-1).size(0)
                     shape = x.shape
