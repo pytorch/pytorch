@@ -984,17 +984,15 @@ class TestMPS(TestCaseMPS):
         # Test to detect issues in cdist gradient calculation
         # When the distances are 0
         sizex = (1, 27, 32)
-        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-            x = torch.randn(sizex, device=device, dtype=torch.float)
-            dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
-            y = x.clone()
-            eps = 1e-6
-            x.requires_grad = True
-            d = torch.cdist(x, y)
-            d.backward(dist_grad)
-            # Check that the backward pass does not contain invalid
-            # values such as nan or inf
-            assert torch.isfinite(x.grad).all()
+        x = torch.randn(sizex, device=device, dtype=torch.float)
+        dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
+        y = x.clone()
+        x.requires_grad = True
+        d = torch.cdist(x, y)
+        d.backward(dist_grad)
+        # Check that the backward pass does not contain invalid
+        # values such as nan or inf
+        assert torch.isfinite(x.grad).all()
 
 
     def _brute_cdist(self, x, y, p=2):
