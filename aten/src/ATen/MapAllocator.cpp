@@ -539,7 +539,7 @@ void RefcountedMapAllocator::close() {
   }
 #else /* _WIN32 */
 
-  MapInfo *info = (MapInfo*)(data);
+  MapInfo *info = (MapInfo*)data;
   if (--info->refcount == 0) {
 #ifdef HAVE_SHM_UNLINK
     if (shm_unlink(filename_.c_str()) == -1) {

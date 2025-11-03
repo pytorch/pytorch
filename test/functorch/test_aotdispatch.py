@@ -7356,7 +7356,6 @@ metadata incorrectly.
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
-    @unittest.expectedFailure
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_rms_norm(self):
         # Only CUDA rms norm fails to be decomposed
@@ -7555,7 +7554,7 @@ metadata incorrectly.
             (_inp, _tg3),
         ]
 
-        for i, (inp_fn, tg_fn) in enumerate(TEST_CASES):
+        for inp_fn, tg_fn in TEST_CASES:
             ref_x = inp_fn()
             x = ref_x.detach().clone().requires_grad_()
 
