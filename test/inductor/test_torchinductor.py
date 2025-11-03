@@ -15280,7 +15280,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_native_layer_norm_relu",
+                    "triton_poi_fused_addmm_native_layer_norm",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -15293,7 +15293,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_LayerNorm_Linear_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -15571,6 +15571,9 @@ if RUN_GPU:
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
         @torch._functorch.config.patch("donated_buffer", True)
+        # The inplace updating does not happen after we fused the
+        # layernorm backward
+        @torch._inductor.config.patch("triton.mix_order_reduction", False)
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
