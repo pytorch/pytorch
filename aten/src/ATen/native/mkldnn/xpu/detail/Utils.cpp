@@ -178,7 +178,8 @@ bool onednn_strides_check(const Tensor& src) {
 
   // A custom comparator to yield linear order on perm
   auto idx_sorter = [&](const int a, const int b) -> bool {
-    if (strides[a] == strides[b] && (*md_padded_dims)[a] == (*md_padded_dims)[b])
+    if (strides[a] == strides[b] &&
+        (*md_padded_dims)[a] == (*md_padded_dims)[b])
       return a < b;
     else if (strides[a] == strides[b])
       return (*md_padded_dims)[a] < (*md_padded_dims)[b];
