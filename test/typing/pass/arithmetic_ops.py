@@ -19,7 +19,7 @@ assert_type(-TENSOR, Tensor)
 assert_type(~TENSOR, Tensor)
 
 #
-# Binary ops that return a bolean
+# Binary ops that return a boolean
 #
 
 # Operator ==

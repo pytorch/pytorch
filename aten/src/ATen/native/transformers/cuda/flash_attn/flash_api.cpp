@@ -22,6 +22,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sum.h>
@@ -41,7 +42,6 @@ C10_DIAGNOSTIC_POP()
 #include <namespace_config.h>
 #include <static_switch.h>
 #include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
-
 
 #include <c10/util/Exception.h>
 
@@ -155,7 +155,7 @@ void set_params_fprop(Flash_fwd_params &params,
     // [Minor] We want to round down since when we do the comparison we use <= instead of <
     // params.p_dropout_in_uint = uint32_t(std::floor(params.p_dropout * 4294967295.0));
     // params.p_dropout_in_uint16_t = uint16_t(std::floor(params.p_dropout * 65535.0));
-    params.p_dropout_in_uint8_t = uint8_t(std::floor(params.p_dropout * 255.0));
+    params.p_dropout_in_uint8_t = static_cast<uint8_t>(std::floor(params.p_dropout * 255.0));
     params.rp_dropout = 1.f / params.p_dropout;
     params.scale_softmax_rp_dropout = params.rp_dropout * params.scale_softmax;
     TORCH_CHECK(p_dropout < 1.f);
@@ -307,7 +307,7 @@ inline int num_splits_heuristic(int batch_nheads_mblocks, int num_SMs, int num_n
         if (!is_split_eligible(num_splits)) {
             efficiency.push_back(0.f);
         } else {
-            float n_waves = float(batch_nheads_mblocks * num_splits) / num_SMs;
+            float n_waves = static_cast<float>(batch_nheads_mblocks * num_splits) / num_SMs;
             float eff = n_waves / ceil(n_waves);
             // printf("num_splits = %d, eff = %f\n", num_splits, eff);
             if (eff > max_efficiency) { max_efficiency = eff; }
@@ -417,6 +417,26 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     const int head_size_og = sizes[3];
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
+
+    if (batch_size == 0) {
+        auto opts = q.options();
+        at::Tensor out = at::empty({0, seqlen_q, num_heads, head_size_og}, opts);
+        at::Tensor q_padded = at::empty({0, seqlen_q, num_heads, head_size_og}, opts);
+        at::Tensor k_padded = at::empty({0, seqlen_k, num_heads_k, head_size_og}, opts);
+        at::Tensor v_padded = at::empty({0, seqlen_k, num_heads_k, head_size_og}, opts);
+        at::Tensor softmax_lse = at::empty({0, num_heads, seqlen_q}, opts.dtype(at::kFloat));
+        at::Tensor rng_state = at::empty({2}, at::dtype(c10::kUInt64).device(at::kCUDA));
+        at::Tensor _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
+        at::Tensor p = at::empty({0}, opts);
+        if (return_softmax) {
+            auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
+            const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
+            const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
+            p = at::empty({0, num_heads, seqlen_q_rounded, seqlen_k_rounded}, opts);
+        }
+        return {std::move(out), std::move(q_padded), std::move(k_padded), std::move(v_padded), std::move(softmax_lse), std::move(rng_state), _unused, std::move(p)};
+    }
+
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
@@ -547,7 +567,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
+    return {std::move(out), std::move(q_padded), std::move(k_padded), std::move(v_padded), std::move(softmax_lse), std::move(rng_state), std::move(_unused), std::move(p)};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -852,7 +872,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
-    TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
 
     const auto sizes = q.sizes();
 
@@ -863,6 +882,20 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     const int head_size = sizes[3];
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
+
+    if (batch_size == 0) {
+        auto opts = q.options();
+        at::Tensor dq = at::empty_like(q);
+        at::Tensor dk = at::empty_like(k);
+        at::Tensor dv = at::empty_like(v);
+        auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
+        const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
+        at::Tensor softmax_d = at::empty({0, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
+        return {dq, dk, dv, softmax_d};
+    }
+
+    TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
     TORCH_CHECK(head_size_og % 8 == 0, "head_size_og should be a multiple of 8, this is ensured by padding!");

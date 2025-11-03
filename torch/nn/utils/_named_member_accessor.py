@@ -77,7 +77,7 @@ def swap_tensor(
             setattr(module, name, tensor)
         elif hasattr(module, name):
             delattr(module, name)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return orig_tensor
 
 
@@ -146,7 +146,7 @@ class NamedMemberAccessor:
                     f"{module._get_name()} has no attribute `{attr}`"
                 ) from ex
             if not isinstance(submodule, torch.nn.Module):
-                raise TypeError(  # noqa: B904
+                raise TypeError(
                     f"submodule `{name}`: {submodule} is not an instance of torch.nn.Module"
                 )
             self.memo[name] = submodule
@@ -250,7 +250,7 @@ class NamedMemberAccessor:
             values = list(values)
         assert len(names) == len(values), "names and values must have the same length"
 
-        for name, value in zip(names, values):
+        for name, value in zip(names, values, strict=True):
             self.set_tensor(name, value)
 
     def set_tensors_dict(self, named_tensors: dict[str, torch.Tensor]) -> None:
@@ -298,7 +298,7 @@ class NamedMemberAccessor:
 
         return [
             self.swap_tensor(name, value, allow_missing=allow_missing)
-            for name, value in zip(names, values)
+            for name, value in zip(names, values, strict=True)
         ]
 
     def swap_tensors_dict(

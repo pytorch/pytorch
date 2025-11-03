@@ -2605,6 +2605,170 @@ def forward(self, primals_1, primals_2):
         ]
         self.verify_aot_autograd(f, inp_grad, test_mutation=True)
 
+    def test_fw_bw_mutation_no_functionalization1(self):
+        class FwBwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                # input mutation
+                torch._foreach_mul_([b], [2])
+                x = b + 1
+                # intermediate mutation
+                torch._foreach_mul_([x], [3])
+                ctx.save_for_backward(x)
+                return x * a
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # bw mutation
+                torch._foreach_mul_([x], [4])
+                return grad_output * x, grad_output * x
+
+        def f(a, b):
+            return FwBwMutation.apply(a, b)
+
+        inps = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+        inps_ref = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        fw_graph = [None]
+        bw_graph = [None]
+
+        def fw_compiler(gm, example_inputs):
+            fw_graph[0] = gm
+            return gm
+
+        def bw_compiler(gm, example_inputs):
+            bw_graph[0] = gm
+            return gm
+
+        compiled_f = compiled_function(
+            f,
+            fw_compiler,
+            bw_compiler,
+            dynamic=False,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        out_ref = f(*inps_ref)
+        out = compiled_f(*inps)
+        self.assertEqual(out, out_ref)
+
+        out_ref.sum().backward()
+        out.sum().backward()
+        self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
+        # important bit: there are 2 mutations in the fw
+        self.assertExpectedInline(
+            fw_graph[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    return (mul, add)""",
+        )
+
+        # important bit: there is 1 mutation in the bw
+        self.assertExpectedInline(
+            bw_graph[0].code.strip(),
+            """\
+def forward(self, add, tangents_1):
+    _foreach_mul__2 = torch.ops.aten._foreach_mul_.ScalarList([add], [4]);  _foreach_mul__2 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
+    return (mul_1, None)""",
+        )
+
+    def test_fw_bw_mutation_no_functionalization2(self):
+        class FwBwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                # input mutation
+                torch._foreach_mul_([x], [2])
+                x = x + 1
+                # intermediate mutation
+                torch._foreach_mul_([x], [3])
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # bw mutation
+                torch._foreach_mul_([x], [4])
+                return grad_output * x
+
+        def f(a, b):
+            out = FwBwMutation.apply(b)
+            return out * a
+
+        inps = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+        inps_ref = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        fw_graph = [None]
+        bw_graph = [None]
+
+        def fw_compiler(gm, example_inputs):
+            fw_graph[0] = gm
+            return gm
+
+        def bw_compiler(gm, example_inputs):
+            bw_graph[0] = gm
+            return gm
+
+        compiled_f = compiled_function(
+            f,
+            fw_compiler,
+            bw_compiler,
+            dynamic=False,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        out_ref = f(*inps_ref)
+        out = compiled_f(*inps)
+        self.assertEqual(out, out_ref)
+
+        out_ref.sum().backward()
+        out.sum().backward()
+        self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
+        # important bit: there are 2 mutations in the fw
+        # (the mutation on an activation doesn't get moved to bw)
+        self.assertExpectedInline(
+            fw_graph[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    return (mul, add)""",
+        )
+
+        self.assertExpectedInline(
+            bw_graph[0].code.strip(),
+            """\
+def forward(self, add, tangents_1):
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
+    return (mul_1, None)""",
+        )
+
     def test_backward_mutation_metadata(self):
         class BwMutation(torch.autograd.Function):
             @staticmethod
@@ -3081,8 +3245,8 @@ def forward(self, primals_1):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_8 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_8, [4]);  as_strided_8 = None
+    as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_9, [4]);  as_strided_9 = None
     return (as_strided_scatter, view_1)""",
         )  # noqa: B950
 
@@ -3245,13 +3409,13 @@ def forward(self, primals_1, primals_2, primals_3):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_5, 0);  as_strided_5 = None
-    add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze_1);  add_1 = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(as_strided_5, 0);  as_strided_5 = None
+    add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze);  add_1 = None
     as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_2 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
-    return (as_strided_scatter, add_2, view_2, unsqueeze_1)""",
+    return (as_strided_scatter, add_2, view_2, unsqueeze)""",
         )  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -6235,7 +6399,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         # Important pieces of the graph:
         # - 4 total dense outputs.
-        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   This corresponds to the fact that each user fwd input (a, b)
         #   will get a gradient that is a TwoTensor subclass,
         #   so (mul_2, mul_3) will be wrapped into a.grad
         #   and (div_1, div_2) will be wrapped into b.grad
@@ -7390,7 +7554,7 @@ metadata incorrectly.
             (_inp, _tg3),
         ]
 
-        for i, (inp_fn, tg_fn) in enumerate(TEST_CASES):
+        for inp_fn, tg_fn in TEST_CASES:
             ref_x = inp_fn()
             x = ref_x.detach().clone().requires_grad_()
 
@@ -7978,7 +8142,9 @@ aot_autograd_failures = {
     decorate(
         "linalg.pinv",
         "singular",
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        # This delta is coming entirely from the clone() on tangents
+        # in AOTDispatcher to make them contiguous
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
     ),
     decorate(
         "nn.functional.interpolate",
@@ -8044,7 +8210,14 @@ symbolic_aot_autograd_failures = {
 }
 
 
-def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
+def _test_aot_autograd_helper(
+    self,
+    device,
+    dtype,
+    op,
+    dynamic=False,
+    disable_functionalization=False,
+):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -8075,6 +8248,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
                 skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
+                disable_functionalization=disable_functionalization,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -8175,6 +8349,36 @@ class TestEagerFusionOpInfo(AOTTestCase):
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
 
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_disable_functionalization_exhaustive",
+        aot_autograd_failures,
+    )
+    def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
+        _test_aot_autograd_helper(
+            self, device, dtype, op, disable_functionalization=True
+        )
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @patch("functorch.compile.config.debug_assert", True)
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
+        aot_autograd_failures | symbolic_aot_autograd_failures,
+    )
+    def test_aot_autograd_disable_functionalization_symbolic_exhaustive(
+        self, device, dtype, op
+    ):
+        _test_aot_autograd_helper(
+            self,
+            device,
+            dtype,
+            op,
+            dynamic=True,
+            disable_functionalization=True,
+        )
+
 
 aot_autograd_module_failures = set(
     {
@@ -8190,7 +8394,7 @@ aot_autograd_module_failures = set(
         # implementation not traceable or that there is a bug in AOTAutograd.
         torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
-        # for TrnasformerEncoder layers, MHA and sdp custom kernels
+        # for TransformerEncoder layers, MHA and sdp custom kernels
         torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
         # for TransformerEncoder layers, MHA and sdp custom kernels

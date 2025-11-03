@@ -405,7 +405,7 @@ main()
                 self.grad_acc_hooks = []
                 self.grad_acc = []
                 self.params = [self.fc1.weight, self.fc2.weight]
-                for i, param in enumerate(self.params):
+                for param in self.params:
 
                     def wrapper(param):
                         param_tmp = param.expand_as(param)
@@ -1558,7 +1558,7 @@ main()
             dtype=input_tensor.dtype, device=DEVICE
         )
 
-        for iteration in range(10):
+        for _ in range(10):
             for param in model_parameters:
                 param.grad = None
             output_tensor = model(
@@ -1599,7 +1599,7 @@ main()
 
         eager_check()
 
-        for i in range(0, 5):
+        for _ in range(5):
             with compiled_autograd._enable(compiler_fn):
                 eager_check()
 
@@ -3621,7 +3621,6 @@ class CompiledAutograd0(torch.nn.Module):
 
         aot0_mul_2 = torch.ops.aten.mul.Tensor(aot0_tangents_1, aot0_primals_1);  aot0_tangents_1 = aot0_primals_1 = None
         aot0_mul_3 = torch.ops.aten.mul.Tensor(aot0_tangents_2, aot0_primals_2);  aot0_tangents_2 = aot0_primals_2 = None
-
         aot0_add_2 = torch.ops.aten.add.Tensor(aot0_mul_2, aot0_mul_2);  aot0_mul_2 = None
         aot0_add_3 = torch.ops.aten.add.Tensor(aot0_mul_3, aot0_mul_3);  aot0_mul_3 = None
 

@@ -382,7 +382,7 @@ def to_real_dtype(dtype: torch.dtype):
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
-    # pyrefly: ignore  # unsupported-operation
+    # pyrefly: ignore [unsupported-operation]
     loss = (self - target) ** 2
     return apply_loss_reduction(loss, reduction)
 
@@ -416,7 +416,7 @@ def smooth_l1_loss(
     beta: float = 1.0,
 ):
     loss = (self - target).abs()
-    # pyrefly: ignore  # unsupported-operation
+    # pyrefly: ignore [unsupported-operation]
     loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
     return apply_loss_reduction(loss, reduction)
 
@@ -1783,7 +1783,10 @@ def _fused_rms_norm(
 
     rqrst_input = torch.rsqrt(
         # NB: don't inplace here, will violate functional IR invariant
-        torch.pow(upcasted_input, 2).mean(dim=dims_to_reduce, keepdim=True).add(eps_val)
+        # NB: carefully use the Scalar overload of add to ensure compatibility with the C++ decomp
+        torch.ops.aten.add.Scalar(
+            torch.pow(upcasted_input, 2).mean(dim=dims_to_reduce, keepdim=True), eps_val
+        )
     )
 
     upcasted_result = upcasted_input.mul(rqrst_input)
@@ -4131,7 +4134,7 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         w = w.expand(self.shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)
@@ -4948,9 +4951,9 @@ def _reflection_pad_backward(grad_output, x, padding):
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     amax = torch.amax(self, dim=dim, keepdim=keepdim)
     return amin, amax
 
@@ -5195,7 +5198,7 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
         alpha = int(alpha)
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         result = result * alpha
     if beta == 0:
         return result
