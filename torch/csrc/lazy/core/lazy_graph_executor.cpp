@@ -830,7 +830,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         const SyncTensorsConfig& config) {
   SyncTensorCollection coll = CollectSyncTensors(*tensors, config);
   if (coll.indices.empty()) {
-    /* Enure previous execution is complete before exiting this
+    /* Ensure previous execution is complete before exiting this
      * function */
     TensorCollectionBarrier(&coll);
     return nullptr;
