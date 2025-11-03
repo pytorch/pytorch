@@ -84,7 +84,7 @@ jobs:
         id: tag
         shell: bash
         run: |
-          DATE="$(date +"%Y-%m-%d")"
+          DATE="$(date +"%Y%m%d")"
           TAG="${DOWNSTREAM_BRANCH}_IFU_${DATE}"
           echo "TAG=${TAG}" >> $GITHUB_OUTPUT
           # Start from rocm branch
