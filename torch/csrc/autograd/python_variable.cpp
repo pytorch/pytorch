@@ -1230,14 +1230,6 @@ class NativeOpSchema {
  private:
   const c10::OperatorHandle& op_;
   std::size_t hash_;
-  // The core representation here is the comparison key, which is a
-  // list of objects (probably 8 or fewer in total) which are either
-  // 1) IValue-representable (i.e., boring Python objects) or 2)
-  // DTensorSpecs or 3) lists of DTensorSpec. We also compare (and
-  // therefore hash) on op_, of course. keyword arguments, if any,
-  // need to be distinguished from non-keyword arguments during
-  // comparison; rather than keeping them in an actual separate
-  // container, we can place a separator in the main list.
   c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key_;
 };
 
@@ -1253,12 +1245,12 @@ struct hash<NativeOpSchema> {
 // Map from OpSchema to pyobject sharding propagation config.
 class NativeShardingPropagatorCache {
  public:
-  // Returns an invalid (falsey) py::handle if the lookup fails.
-  py::handle find(const NativeOpSchema& op_schema) const {
+  // Returns an invalid (falsey) py::object if the lookup fails.
+  py::object find(const NativeOpSchema& op_schema) const {
     if (auto it = repr_.find(op_schema); it != repr_.end()) {
-      return py::handle(it->second);
+      return py::object(it->second);
     }
-    return py::handle();
+    return py::object();
   }
 
   void insert(const NativeOpSchema& op_schema, py::object output_sharding) {
@@ -1290,12 +1282,27 @@ get_thread_local_native_sharding_propagator_cache() {
     native_sharding_propagator_cache_DO_NOT_USE.emplace();
     std::lock_guard<std::mutex> lock(
         native_sharding_propagator_cache_cleanup_mutex);
-    all_thread_caches[std::this_thread::get_id()] =
+    const auto this_thread_id = std::this_thread::get_id();
+    all_thread_caches[this_thread_id] =
         &native_sharding_propagator_cache_DO_NOT_USE;
+    py::dict thread_dict =
+        py::reinterpret_borrow<py::dict>(PyThreadState_GetDict());
+    // We need to clean up before Python detaches from the thread if
+    // the thread is being destroyed. Note that optional::reset() is
+    // idempotent!
+    thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
+        py::capsule(&native_sharding_propagator_cache_DO_NOT_USE, [](void* p) {
+          auto* popt_cache =
+              reinterpret_cast<std::optional<NativeShardingPropagatorCache>*>(
+                  p);
+          popt_cache->reset();
+        });
   }
   return native_sharding_propagator_cache_DO_NOT_USE.value();
 }
 
+// We need to clean up all thread_locals if our module is getting
+// unloaded. Note that optional::reset() is idempotent!
 void cleanup_thread_local_native_sharding_propagator_caches() {
   std::lock_guard<std::mutex> lock(
       native_sharding_propagator_cache_cleanup_mutex);
@@ -1313,8 +1320,7 @@ void callDTensorOpDispatch(
   c10::impl::ExcludeDispatchKeyGuard exclude_guard(after_Python_keyset);
 
   const auto py_op = torch::detail::getTorchApiFunction(op);
-  auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
-  py::handle cached_sharding;
+  py::object cached_sharding;
   auto [args, kwargs] = parseIValuesToPyArgsKwargs(op, *stack);
 
   const auto op_dispatcher = get_dtensor_op_dispatcher();
@@ -1338,6 +1344,7 @@ void callDTensorOpDispatch(
   }
 
   NativeShardingPropagatorCache* native_sharding_propagator_cache = nullptr;
+  auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
   if (opt_native_op_schema.has_value()) {
     native_sharding_propagator_cache =
         &get_thread_local_native_sharding_propagator_cache();
@@ -1844,6 +1851,32 @@ static PyObject* get_runtime_schema_info_for_op(py::handle py_op) {
   return runtime_schema_info;
 }
 
+static bool contains_any_symint(const py::tuple& tup) {
+  for (const auto& s : tup) {
+    if (THPUtils_checkLong(s.ptr())) {
+      continue;
+    }
+    if (torch::is_symint(s)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool dtensor_spec_has_symints(py::handle spec) {
+  const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
+  if (tensor_meta.is_none()) {
+    return false;
+  }
+  py::object raw_shape = tensor_meta.attr(dtensor_interned_strings.shape);
+  if (!PyTuple_Check(raw_shape.ptr())) {
+    PyErr_SetString(PyExc_TypeError, "TensorMeta.shape must be a tuple!");
+    throw py::error_already_set();
+  }
+  const auto shape = py::reinterpret_steal<py::tuple>(raw_shape.release());
+  return contains_any_symint(shape);
+}
+
 static std::optional<NativeOpSchema> create_native_op_schema(
     const c10::OperatorHandle& op,
     py::handle py_op,
@@ -1909,7 +1942,13 @@ static std::optional<NativeOpSchema> create_native_op_schema(
     switch (tensor_flavor) {
       case TensorFlavor::EXACTLY_DTENSOR:
       case TensorFlavor::DTENSOR_SUBCLASS: {
-        handle_dtensor_arg(py_tensor.attr(dtensor_interned_strings._spec));
+        py::object spec = py_tensor.attr(dtensor_interned_strings._spec);
+        if (dtensor_spec_has_symints(spec)) {
+          // Symints are unhashable, so we can't use the cache for
+          // sharding propagation. bail out to slow path.
+          return std::nullopt;
+        }
+        handle_dtensor_arg(std::move(spec));
         if (compute_mesh.is_none()) {
           compute_mesh = py::reinterpret_borrow<py::object>(
               py_tensor.attr(dtensor_interned_strings.device_mesh));
