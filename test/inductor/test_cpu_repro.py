@@ -4682,6 +4682,22 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.randint(0, 100, (22, 22), dtype=torch.int32)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::Vectorized<int32_t>::loadu", 2, exactly=True
+            ).run(code)
+
     def test_int32_reduction_vec(self):
         def fn(x):
             return x.sum(dim=1)
@@ -4690,6 +4706,22 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
+
+        # Tail vectorization case
+        x = torch.randint(0, 100, (22, 22), dtype=torch.int32)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::Vectorized<int32_t>::loadu", 2, exactly=True
+            ).run(code)
 
     def test_uint32_pointwise_vec(self):
         def fn(x):
@@ -4720,6 +4752,22 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.randint(0, 100, (22, 22), dtype=torch.int64)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::VectorizedN<int64_t,2>::loadu", 2, exactly=True
+            ).run(code)
+
     def test_int64_reduction_vec(self):
         def fn(x):
             return x.sum(dim=1)
@@ -4728,6 +4776,22 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
+
+        # Tail vectorization case
+        x = torch.randint(0, 100, (22, 22), dtype=torch.int64)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::VectorizedN<int64_t,2>::loadu", 2, exactly=True
+            ).run(code)
 
     def test_uint64_pointwise_vec(self):
         def fn(x):
