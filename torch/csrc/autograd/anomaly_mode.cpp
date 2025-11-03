@@ -8,6 +8,7 @@ namespace torch::autograd {
 
 bool AnomalyMode::_enabled = false;
 bool AnomalyMode::_check_nan = true;
+bool AnomalyMode::_save_traceback = false;
 
 namespace {
 std::mutex& get_anomaly_guard_lock() {
