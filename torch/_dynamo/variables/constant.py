@@ -241,10 +241,12 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
+            # pyrefly: ignore [bad-argument-type]
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
+                    # pyrefly: ignore [no-matching-overload]
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
@@ -255,6 +257,7 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
+                # pyrefly: ignore [unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
