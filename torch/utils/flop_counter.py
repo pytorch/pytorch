@@ -586,6 +586,7 @@ flop_registry = {
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.cudnn_convolution: conv_flop,
+    aten.convolution_overrideable: conv_flop,
     aten._slow_conv2d_forward: conv_flop,
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
