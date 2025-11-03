@@ -313,7 +313,7 @@ class PallasScheduling(SIMDScheduling):
     @classmethod
     def get_backend_features(
         cls, device: torch.device
-    ) -> Optional[OrderedSet[BackendFeature]]:
+    ) -> OrderedSet[BackendFeature]:
         # Start minimal: no special features advertised
         return OrderedSet()
 

@@ -5,7 +5,7 @@ import functools
 def has_jax_package() -> bool:
     """Check if JAX is installed."""
     try:
-        import jax  # noqa: F401
+        import jax  # noqa: F401  # type: ignore[import-not-found]
 
         return True
     except ImportError:
@@ -18,7 +18,7 @@ def has_pallas_package() -> bool:
     if not has_jax_package():
         return False
     try:
-        from jax.experimental import pallas as pl  # noqa: F401
+        from jax.experimental import pallas as pl  # noqa: F401  # type: ignore[import-not-found]
 
         return True
     except ImportError:
@@ -29,7 +29,7 @@ def has_pallas_package() -> bool:
 def get_jax_version(fallback: tuple[int, int, int] = (0, 0, 0)) -> tuple[int, int, int]:
     """Get JAX version as (major, minor, patch) tuple."""
     try:
-        import jax
+        import jax  # type: ignore[import-not-found]
 
         version_parts = jax.__version__.split(".")
         major, minor, patch = (int(v) for v in version_parts[:3])
@@ -44,7 +44,7 @@ def has_jax_cuda_backend() -> bool:
     if not has_jax_package():
         return False
     try:
-        import jax
+        import jax  # type: ignore[import-not-found]
 
         # Check if CUDA backend is available
         devices = jax.devices("gpu")
