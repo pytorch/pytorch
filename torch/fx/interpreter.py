@@ -225,7 +225,11 @@ class Interpreter:
 
         # Check argument count
         if len(args_list) != len(placeholder_nodes):
-            detail = "extra arguments" if len(args_list) > len(placeholder_nodes) else "missing arguments"
+            detail = (
+                "extra arguments"
+                if len(args_list) > len(placeholder_nodes)
+                else "missing arguments"
+            )
             raise RuntimeError(
                 f"Interpreter.boxed_run expected {len(placeholder_nodes)} arguments for placeholders "
                 f"but received {len(args_list)} ({detail})"
