@@ -43,7 +43,10 @@ from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
@@ -248,6 +251,45 @@ def _should_disable_saved_tensors_hooks():
     return False
 
 
+blocklisted_ops = [
+    torch.ops._c10d_functional.wait_tensor.default,
+    torch.ops._c10d_functional.all_reduce_.default,
+]
+
+
+class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
+    """
+    Checks if inp/out of custom ops alias each other
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.supports_higher_order_operators = True
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        res = func(*args, **kwargs)
+        # Only check aliasing for custom ops (non-aten/prim)
+        if (
+            not isinstance(func, torch._ops.HigherOrderOperator)
+            and func.namespace not in ["aten", "prims"]
+            and func not in blocklisted_ops
+        ):
+            torch._library.utils._c_check_aliasing_constraint(
+                func.name,
+                args,
+                kwargs,
+                res,
+            )
+        return res
+
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -360,6 +402,7 @@ def _create_runtime_wrapper(
             finally:
                 if grad_enabled:
                     torch._C._set_grad_enabled(True)
+
         del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
