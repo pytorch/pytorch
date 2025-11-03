@@ -332,6 +332,8 @@ class SubprocPool:
             with self.write_lock:
                 if not self.running:
                     return
+                if self.timer:
+                    self.timer.quit()
                 self.running = False
                 self.running_waitcounter.__exit__()
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
