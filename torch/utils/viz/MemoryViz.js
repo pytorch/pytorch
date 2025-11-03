@@ -815,11 +815,11 @@ function format_frames(frames) {
         if (f.fx_node_name) fx_parts.push(`node=${f.fx_node_name}`);
         if (f.fx_node_op) fx_parts.push(`op=${f.fx_node_op}`);
         if (f.fx_node_target) fx_parts.push(`target=${f.fx_node_target}`);
-        frame_str += `\n    ⭐ FX: ${fx_parts.join(', ')}`;
+        frame_str += `\n    >> FX: ${fx_parts.join(', ')}`;
       }
 
       if (f.fx_original_trace) {
-        frame_str += `\n    📍 Original Model Code:`;
+        frame_str += `\n    >> Original Model Code:`;
         const original_lines = f.fx_original_trace.trim().split('\n');
         // Show all lines of the original trace
         for (const line of original_lines) {

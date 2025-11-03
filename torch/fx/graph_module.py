@@ -857,12 +857,6 @@ class {module_name}(torch.nn.Module):
             )
         return self._code
 
-    @compatibility(is_backward_compatible=False)
-    def enrich_profiler_metadata(self, enable=True):
-        if enable != self._enrich_profiler_metadata:
-            self.recompile()
-        self._enrich_profiler_metadata = enable
-
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
         """
@@ -880,8 +874,9 @@ class {module_name}(torch.nn.Module):
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
+        from torch._dynamo import config as dynamo_config
 
-        if self._enrich_profiler_metadata:
+        if dynamo_config.enrich_profiler_metadata:
             # Generate metadata and register for profiler augmentation
             node_metadata: dict[int, dict[str, Any]] = {}
             for i, node in enumerate(self._graph.nodes):
@@ -911,10 +906,10 @@ class {module_name}(torch.nn.Module):
                 "node_metadata": node_metadata,
             }
 
-            # Import and register metadata in the global registry
-            from torch.fx.traceback import register_fx_metadata
+            # Register metadata in the global registry
+            from torch.fx.traceback import _register_fx_metadata
 
-            register_fx_metadata(filename, metadata)
+            _register_fx_metadata(filename, metadata)
 
         cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
