@@ -34,13 +34,13 @@ case ${image} in
     manylinux2_28-builder:cpu)
         TARGET=cpu_final
         GPU_IMAGE=amd64/almalinux:8
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
+        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=14"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinux2_28_aarch64-builder:cpu-aarch64)
         TARGET=final
         GPU_IMAGE=arm64v8/almalinux:8
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13 --build-arg NINJA_VERSION=1.12.1"
+        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=14 --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinuxs390x-builder:cpu-s390x)
