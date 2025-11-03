@@ -42,7 +42,7 @@ if TEST_SCIPY:
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
 def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
-    exclude_zero = requires_grad and op_info.op == torch.special.i0e
+    exclude_zero = requires_grad and op_info.op is torch.special.i0e
     make_arg = partial(
         make_tensor,
         dtype=dtype,
