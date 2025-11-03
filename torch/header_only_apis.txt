@@ -136,3 +136,7 @@ AT_FORALL_COMPLEX_TYPES
 toString
 <<
 toUnderlying
+
+# torch/headeronly/core/TensorAccessor.h
+TensorAccessor
+GenericPackedTensorAccessor
