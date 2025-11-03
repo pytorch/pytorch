@@ -148,11 +148,11 @@ if [[ "${XPU_DRIVER_TYPE,,}" == "lts" ]]; then
     XPU_DRIVER_VERSION="/lts/2523"
 fi
 
-# Default use Intel® oneAPI Deep Learning Essentials 2025.1
-if [[ "$XPU_VERSION" == "2025.2" ]]; then
-    XPU_PACKAGES="intel-deep-learning-essentials-2025.2"
+# Default use Intel® oneAPI Deep Learning Essentials 2025.2
+if [[ "$XPU_VERSION" == "2025.3" ]]; then
+    XPU_PACKAGES="intel-deep-learning-essentials-2025.3"
 else
-    XPU_PACKAGES="intel-deep-learning-essentials-2025.1"
+    XPU_PACKAGES="intel-deep-learning-essentials-2025.2"
 fi
 
 # The installation depends on the base OS

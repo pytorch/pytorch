@@ -193,7 +193,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    XPU_VERSION=2025.1
+    XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
@@ -201,7 +201,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     VISION=yes
-    XPU_VERSION=2025.2
+    XPU_VERSION=2025.3
     NINJA_VERSION=1.9.0
     TRITON=yes
     if [[ $tag =~ "benchmarks" ]]; then
