@@ -3012,12 +3012,8 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
         auto vectors_cpu = vectors.cpu();
         auto values_cpu  = values.cpu();
         auto maybe_complex_vectors_cpu = maybe_complex_vectors.cpu();
-
         vectors = linalg_eig_make_complex_eigenvectors(vectors_cpu, values_cpu, maybe_complex_vectors_cpu);
-
         vectors.copy_(vectors_cpu);
-
-
       } else {
         TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
       }
