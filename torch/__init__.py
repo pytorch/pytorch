@@ -663,6 +663,9 @@ class SymFloat:
     def __float__(self):
         return self.node.guard_float("", 0)
 
+    def __int__(self):
+        return self.__trunc__().__int__()
+
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
     def __pow__(self, other):
