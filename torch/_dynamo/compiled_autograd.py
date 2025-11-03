@@ -147,7 +147,7 @@ class NaNChecker:
             # so Compiled Autograd will always lift the param and
             # this should always be true
             assert (
-                param_node.target == operator.getitem
+                param_node.target is operator.getitem
                 and param_node.args[0] is inputs_node  # type: ignore[possibly-undefined]
                 and isinstance(param_node.args[1], int)
             )
@@ -755,7 +755,6 @@ class AutogradCompilerInstance:
         self, fn: Callable[..., Any], args: Any, output_metadata: Sequence[Any]
     ) -> Sequence[torch.Tensor]:
         """Proxies a call to fn(*args) into the graph"""
-        flat_args, _ = pytree.tree_flatten(args)
         proxy_args = pytree.tree_map(lambda e: self.to_proxy(e), args)
         proxy_out = self.fx_tracer.create_proxy(
             "call_function", fn, args=proxy_args, kwargs={}
@@ -997,7 +996,7 @@ class AutogradCompilerInstance:
         assert sizes_node.name == "sizes"
 
         for getitem_node in sizes_node.users.keys():
-            assert getitem_node.target == operator.getitem
+            assert getitem_node.target is operator.getitem
             if getitem_node.users:
                 used_sizes.append(getitem_node)
             else:
@@ -1159,7 +1158,7 @@ class AutogradCompilerInstance:
     def is_placeholder(node: torch.fx.Node) -> bool:
         if node.op == "placeholder" or (
             node.op == "call_function"
-            and node.target == operator.getitem
+            and node.target is operator.getitem
             and node.args[0].op == "placeholder"  # type: ignore[union-attr, arg-type]
         ):
             return True
@@ -1176,7 +1175,7 @@ class AutogradCompilerInstance:
         ):
             param_node, grad_node = node.args[0], node.args[1]
             getitem_node = None
-            if grad_node.target == operator.getitem:
+            if grad_node.target is operator.getitem:
                 getitem_node = grad_node
                 grad_node = getitem_node.args[0]
 
@@ -1279,7 +1278,7 @@ class AutogradCompilerInstance:
 
             # users are all getitem ops and they are used by same registered node
             assert all(
-                user.op == "call_function" and user.target == operator.getitem
+                user.op == "call_function" and user.target is operator.getitem
                 for user in users
             )
             registered_node = next(iter(users[0].users.keys()))
@@ -1357,7 +1356,7 @@ class AutogradCompilerInstance:
                     for user in list(input_node.users.keys())
                     if not (
                         user.op == "call_function"
-                        and user.target == call_hook
+                        and user.target is call_hook
                         and node.kwargs.get("hook_type", None) == "post_hook"
                     )
                 )

@@ -442,7 +442,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
             # then skip over it
-            if src.target == operator.getitem and (
+            if src.target is operator.getitem and (
                 (
                     src.args[0].target == triton_kernel_wrapper_functional
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
@@ -643,7 +643,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         # output atindex size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
                         # if it was needed for inplaceable_triton_ops?
-                        if user.target == operator.getitem and user.args[1] == arg:
+                        if user.target is operator.getitem and user.args[1] == arg:
                             replace_dict[user] = mutated_arg
 
                 if isinstance(mutated_arg, (list, tuple)):

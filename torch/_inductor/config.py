@@ -1555,6 +1555,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
     )
 
+    mix_order_reduction_split_size: Optional[int] = None
+    mix_order_reduction_autotune_split_size = True
+
 
 class aot_inductor:
     """
@@ -2149,6 +2152,9 @@ class test_configs:
     distort_benchmarking_result = os.getenv(
         "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
+
+    bisect_pre_grad_graph = False
+    bisect_keep_custom_backend_for_inductor = False
 
 
 if TYPE_CHECKING:
