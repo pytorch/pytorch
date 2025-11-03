@@ -184,7 +184,23 @@ template <typename T>
 Welford<T> welford_combine(
     const Welford<T>& a,
     const Welford<T>& b,
-    bool use_index = false) {
+    bool use_index = false,
+    bool use_helper = true) {
+  if (!use_helper) {
+    Welford<T> out;
+    if (a.index == 0) {
+      out = b;
+    } else if (b.index == 0) {
+      out = a;
+    } else {
+      auto a_weight = use_index ? T(a.index) : a.weight;
+      auto b_weight = use_index ? T(b.index) : b.weight;
+      out = Welford<T>{
+          a.mean + b.mean, a.m2 + b.m2, a_weight + b_weight, a.index + b.index};
+    }
+    return out;
+  }
+
   if (a.index == 0) {
     return b;
   }
@@ -209,16 +225,30 @@ Welford<T> welford_combine(
   return result;
 }
 
+template <typename T>
+Welford<T> welford_combine_final_out(const Welford<T>& out) {
+  T mean = out.mean / out.weight;
+  T m2 = out.m2 - out.mean * out.mean / out.weight;
+  return Welford<T>{mean, m2, out.weight, out.index};
+}
+
 template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
     WelfordHelper<T, kChunkSize>* w = nullptr) {
+  if (w == nullptr) {
+    return Welford<T>{
+        acc.mean + data,
+        acc.m2 + data * data,
+        acc.weight + T(1),
+        acc.index + 1};
+  }
   // Combine welford reduction with cascade summation to improve numerical
   // stability.
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
   // https://en.wikipedia.org/wiki/Pairwise_summation
-  if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
+  if (w->depth > 0 && acc.index == kChunkSize) {
     w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
     w->num_chunks += 1;
     acc.mean = T(0);
@@ -699,7 +729,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
 
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(
-    Welford<at::vec::Vectorized<scalar_t>> acc) {
+    Welford<at::vec::Vectorized<scalar_t>> acc,
+    bool use_helper = true) {
   using Vec = at::vec::Vectorized<scalar_t>;
   Welford<scalar_t> result;
   if (acc.index == 0) {
@@ -715,7 +746,7 @@ Welford<scalar_t> welford_vec_reduce_all(
         vec_shuffle_down(acc.m2, n),
         use_index ? Vec(0) : vec_shuffle_down(acc.weight, n),
         acc.index};
-    acc = welford_combine(acc, shuffled, use_index);
+    acc = welford_combine(acc, shuffled, use_index, use_helper);
   }
 
   alignas(alignof(Vec)) scalar_t array[Vec::size()];
@@ -734,12 +765,14 @@ Welford<scalar_t> welford_vec_reduce_all(
 
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(
-    Welford<at::vec::VectorizedN<scalar_t, 2>> acc) {
+    Welford<at::vec::VectorizedN<scalar_t, 2>> acc,
+    bool use_helper = true) {
   auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
       acc.mean[0], acc.m2[0], acc.weight[0], acc.index};
   auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
       acc.mean[1], acc.m2[1], acc.weight[1], acc.index};
-  return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
+  return welford_vec_reduce_all(
+      welford_combine(Welford0, Welford1, false, use_helper), use_helper);
 }
 #endif
 
