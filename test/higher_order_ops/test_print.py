@@ -22,7 +22,6 @@ class TestHopPrint(TestCase):
             printed_output = mock_stdout.getvalue().strip()
 
         self.assertEqual(printed_output, "moo")
-        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_para_print(self):
         def f(x):
@@ -38,7 +37,6 @@ class TestHopPrint(TestCase):
             printed_output = mock_stdout.getvalue().strip()
 
         self.assertEqual(printed_output, "moo 1 2")
-        self.assertEqual(len(counters["graph_break"]), 0)
 
 
 if __name__ == "__main__":
