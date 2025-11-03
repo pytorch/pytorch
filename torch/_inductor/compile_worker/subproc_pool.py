@@ -317,9 +317,11 @@ class SubprocPool:
                 del self.pending_futures[job_id]
 
     def quiesce(self) -> None:
-        if self.timer is not None and len(self.pending_futures) > 0:
-            self.timer.record_call()
-            return
+        if self.timer is not None:
+            with self.threading_lock():
+                if len(self.pending_futures) > 0:
+                    self.timer.record_call()
+                    return
         self._send(MsgHeader.QUIESCE)
         assert self.quiesce_waitcounter is None
         self.quiesce_waitcounter = _WaitCounter(

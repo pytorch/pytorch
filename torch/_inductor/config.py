@@ -954,6 +954,7 @@ quiesce_async_compile_pool: bool = Config(
     default=False,
 )
 
+# Time in seconds to wait before quiescing
 quiesce_async_compile_time: int = Config(
     default=60,
 )
