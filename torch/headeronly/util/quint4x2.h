@@ -18,6 +18,6 @@ struct alignas(1) quint4x2 {
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::quint4x2;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
