@@ -1016,13 +1016,6 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    # In the min-cut partitioner, we run CSE, but we don't have non-pure aware CSE
-    # Maybe we could conditionally run if the graph is functional.
-    # fx_g = joint_module.graph
-    # if config.cse:
-    #     assert_functional_graph(joint_module.graph)
-    #     cse_graph = fx_graph_cse(fx_g)
-    #     joint_module.graph = cse_graph
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )

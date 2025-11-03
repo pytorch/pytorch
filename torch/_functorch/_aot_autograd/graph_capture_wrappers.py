@@ -564,10 +564,6 @@ def set_partitioner_tag_is_backward():
     return set_partitioner_tag("is_backward")
 
 
-def set_partitioner_tag_is_forward():
-    return set_partitioner_tag("is_forward")
-
-
 def set_partitioner_tag_must_be_in_backward():
     return set_partitioner_tag("must_be_in_backward")
 
