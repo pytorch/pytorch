@@ -957,12 +957,6 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 quiesce_async_compile_pool: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool",
     env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
-    default=False,
-)
-
-quiesce_async_compile_pool_v2: bool = Config(
-    justknob="pytorch/inductor:quiesce_async_compile_pool_v2",
-    env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
     default=True,
 )
 
