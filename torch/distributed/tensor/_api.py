@@ -11,6 +11,7 @@ import torch
 import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
+from torch._C import DispatchKey, DispatchKeySet
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
@@ -342,11 +343,15 @@ class DTensor(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        return DTensor._op_dispatcher.dispatch(
-            func,
-            args,
-            kwargs or {},
-        )
+        # Several parts of PyTorch (e.g., Tensor serialization in torch/_tensor.py,
+        # subclass handling in PythonArgsParser) assume torch_dispatch exists on
+        # subclasses and would have to special-case the DTensor dispatch key. We provide
+        # this implementation to maintain composability with these other parts of
+        # PyTorch.
+        #
+        # TODO: add RecordFunction to make it clearer in profiles when this slow path is
+        # being hit?
+        return func.redispatch(DispatchKeySet(DispatchKey.DTensor), *args, **kwargs)
 
     @staticmethod
     def from_local(

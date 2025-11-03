@@ -86,6 +86,14 @@ void pushPyOutToStack(
     py::object out,
     const char* msg);
 
+void callDTensorCustomOpHandler(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack);
+
+void callDTensorOpDispatch(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack);
+
 inline PyObject* THPVariable_WrapList(
     const torch::autograd::variable_list& inputs) {
   PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
