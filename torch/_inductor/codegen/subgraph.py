@@ -23,6 +23,76 @@ from torch._inductor.virtualized import V
 log = logging.getLogger(__name__)
 
 
+def inline_subgraph_to_ir_nodes(
+    gm: torch.fx.GraphModule, inputs: list[Any], name: str
+) -> Any:
+    """Inline a subgraph by converting its FX operations to individual IR nodes.
+
+    This converts a subgraph from a single ExternKernel (unfusable) to multiple ComputedBuffer
+    nodes (fusable), enabling epilogue fusion with subsequent operations.
+
+    This function is used by both custom_op.py and mm.py to enable inline fusion.
+
+    Args:
+        gm: GraphModule containing the operations to inline
+        inputs: Actual input nodes (IR TensorBox objects)
+        name: Subgraph name for debugging
+
+    Returns:
+        TensorBox containing the final operation result as individual IR nodes
+    """
+    from torch._inductor.lowering import lowerings
+
+    # Create mapping from placeholder nodes to actual inputs
+    node_to_value = {}
+    placeholder_idx = 0
+
+    # Process each node in the graph
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            # Map placeholder to actual input
+            if placeholder_idx < len(inputs):
+                node_to_value[node] = inputs[placeholder_idx]
+                placeholder_idx += 1
+            else:
+                raise RuntimeError(
+                    f"Not enough inputs for placeholder {node.name} in {name}"
+                )
+
+        elif node.op == "call_function":
+            # Convert FX operation to IR nodes using existing lowerings
+            target = node.target
+            args = [node_to_value.get(arg, arg) for arg in node.args]
+            kwargs = {k: node_to_value.get(v, v) for k, v in node.kwargs.items()}
+
+            # Call the appropriate lowering function
+            if target in lowerings:
+                result = lowerings[target](*args, **kwargs)
+                node_to_value[node] = result
+            else:
+                # Fallback: try calling the target directly
+                result = target(*args, **kwargs)
+                node_to_value[node] = result
+
+        elif node.op == "output":
+            # Return the final result
+            output_arg = node.args[0]
+            if isinstance(output_arg, (list, tuple)):
+                # Multi-output case (not yet supported)
+                raise RuntimeError(
+                    f"Multi-output subgraphs not yet supported for inlining in {name}"
+                )
+            else:
+                # Single output case
+                final_result = node_to_value[output_arg]
+                return final_result
+
+        else:
+            raise RuntimeError(f"Unsupported node type: {node.op} in {name}")
+
+    raise RuntimeError(f"No output node found in subgraph {name}")
+
+
 class SubgraphChoiceCaller(ir.ChoiceCaller):
     """
     Represents a Subgraph Autotuning choice, and the subgraph can be any arbitrary

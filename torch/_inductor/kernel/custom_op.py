@@ -391,57 +391,9 @@ def _inline_custom_op_choice(
     Returns:
         TensorBox containing the final operation result as individual IR nodes
     """
-    from torch._inductor.lowering import lowerings
+    from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
 
-    # Get the GraphModule containing the operations
-    gm = winning_choice.gm
-
-    # Create mapping from placeholder nodes to actual inputs
-    node_to_value = {}
-    placeholder_idx = 0
-
-    # Process each node in the winning choice's graph
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            # Map placeholder to actual input
-            if placeholder_idx < len(inputs):
-                node_to_value[node] = inputs[placeholder_idx]
-                placeholder_idx += 1
-            else:
-                raise RuntimeError(f"Not enough inputs for placeholder {node.name}")
-
-        elif node.op == "call_function":
-            # Convert FX operation to IR nodes using existing lowerings
-            target = node.target
-            args = [node_to_value.get(arg, arg) for arg in node.args]
-            kwargs = {k: node_to_value.get(v, v) for k, v in node.kwargs.items()}
-
-            # Call the appropriate lowering function
-            if target in lowerings:
-                result = lowerings[target](*args, **kwargs)
-                node_to_value[node] = result
-            else:
-                # Fallback: try calling the target directly
-                result = target(*args, **kwargs)
-                node_to_value[node] = result
-
-        elif node.op == "output":
-            # Return the final result
-            output_arg = node.args[0]
-            if isinstance(output_arg, (list, tuple)):
-                # Multi-output case (not yet supported)
-                raise RuntimeError(
-                    "Multi-output custom ops not yet supported for inlining"
-                )
-            else:
-                # Single output case
-                final_result = node_to_value[output_arg]
-                return final_result
-
-        else:
-            raise RuntimeError(f"Unsupported node type: {node.op}")
-
-    raise RuntimeError("No output node found in custom op graph")
+    return inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
 
 
 def register_custom_op_autotuning(

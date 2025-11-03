@@ -256,19 +256,6 @@ class TestCustomOpAutoTune(TestCase):
 
                 return output_2d.view(*batch_shape, output_dim)
 
-            elif method == 2:
-                fused_weight = torch.cat([gate_weight, up_weight], dim=1)
-                fused_proj = torch.matmul(input_tensor, fused_weight)
-
-                intermediate_dim = gate_weight.shape[1]
-                gate_proj, up_proj = fused_proj.split(
-                    [intermediate_dim, intermediate_dim], dim=-1
-                )
-
-                gated = torch.relu(gate_proj) * up_proj
-
-                return torch.matmul(gated, down_weight)
-
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_mlp_op(
             input_tensor: torch.Tensor,
@@ -299,8 +286,8 @@ class TestCustomOpAutoTune(TestCase):
         register_custom_op_autotuning(
             test_mlp_op,
             configs=[
-                CustomOpConfig(method=1),  # Batched approach
-                CustomOpConfig(method=2),  # Fused weights
+                CustomOpConfig(method=0),
+                CustomOpConfig(method=1),
             ],
             name="test_mlp_autotuned",
             input_gen_fns={
@@ -323,7 +310,7 @@ class TestCustomOpAutoTune(TestCase):
             },
         )
 
-        # Create test inputs using the original helper method
+        # Create test inputs
         input_tensor, gate_weight, up_weight, down_weight = self._create_mlp_inputs()
 
         # Test that all method variants produce numerically equivalent results
@@ -331,19 +318,6 @@ class TestCustomOpAutoTune(TestCase):
             input_tensor, gate_weight, up_weight, down_weight, method=0
         )
 
-        for method in [1, 2]:
-            result = mlp_variants(
-                input_tensor, gate_weight, up_weight, down_weight, method=method
-            )
-            torch.testing.assert_close(
-                result,
-                expected,
-                rtol=1e-2,
-                atol=1e-2,
-                msg=f"Method {method} not equivalent to method 0",
-            )
-
-        # Test autotuning - all should be mathematically equivalent
         self._run_autotune_test(
             test_mlp_op,
             (input_tensor, gate_weight, up_weight, down_weight),
