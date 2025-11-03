@@ -582,6 +582,23 @@ from user code:
         actual = compiled_fn(fn, *inputs)
         self.assertEqual(expected, actual)
 
+    def test_aot_compile_with_default_args(self):
+        def fn(x, y=1):
+            return x + x
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        inputs = (torch.randn(3, 4),)
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
