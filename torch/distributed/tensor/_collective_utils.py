@@ -355,11 +355,11 @@ def redistribute_cost(
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
+    from torch.distributed._functional_collectives import _are_we_tracing
     from torch.distributed.tensor._redistribute import (
         _gen_transform_infos,
         _gen_transform_infos_non_cached,
     )
-    from torch.distributed._functional_collectives import _are_we_tracing
 
     if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
