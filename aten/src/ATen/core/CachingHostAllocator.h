@@ -39,7 +39,7 @@ struct HostBlock {
 };
 
 template <typename B>
-struct alignas(64) FreeBlockList {
+struct alignas(hardware_destructive_interference_size) FreeBlockList {
   std::mutex mutex_;
   std::deque<B*> list_;
 };
@@ -94,11 +94,11 @@ struct PinnedReserveSegment {
 struct TORCH_API HostStats {
   // COUNT: total allocations (active)
   Stat active_requests;
-  // SUM: bytes allocated/reserved by this memory alocator. (active)
+  // SUM: bytes allocated/reserved by this memory allocator. (active)
   Stat active_bytes;
   // COUNT: total allocations (active + free)
   Stat allocations;
-  // SUM: bytes allocated/reserved by this memory alocator. This accounts
+  // SUM: bytes allocated/reserved by this memory allocator. This accounts
   // for both free and in-use blocks.
   Stat allocated_bytes;
 
@@ -122,12 +122,12 @@ struct TORCH_API HostStats {
 // Struct containing memory allocator summary statistics for host, as they
 // are staged for reporting. This is a temporary struct that is used to
 // avoid locking the allocator while collecting stats.
-struct alignas(64) HostStatsStaged {
+struct alignas(hardware_destructive_interference_size) HostStatsStaged {
   std::mutex timing_mutex_;
   // COUNT: total allocations (active + free)
   // LOCK: access to this stat is protected by the allocator's blocks_mutex_
   Stat allocations;
-  // SUM: bytes allocated/reserved by this memory alocator. This accounts
+  // SUM: bytes allocated/reserved by this memory allocator. This accounts
   // for both free and in-use blocks.
   Stat allocated_bytes;
   // COUNT: number of allocations per bucket (active)
@@ -455,7 +455,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetAccumulatedStats() {
-    // Reseting accumulated memory stats requires concurrently holding both the
+    // Resetting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < free_list_.size(); ++i) {
@@ -482,7 +482,7 @@ struct CachingHostAllocatorImpl {
   }
 
   void resetPeakStats() {
-    // Reseting peak memory stats requires concurrently holding both the
+    // Resetting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < free_list_.size(); ++i) {
@@ -669,7 +669,7 @@ struct CachingHostAllocatorImpl {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
   }
 
-  alignas(64) std::mutex blocks_mutex_;
+  alignas(hardware_destructive_interference_size) std::mutex blocks_mutex_;
   ska::flat_hash_set<B*> blocks_; // block list
   ska::flat_hash_map<void*, B*> ptr_to_block_;
 
@@ -677,17 +677,17 @@ struct CachingHostAllocatorImpl {
   // size. This allows us to quickly find a free block of the right size.
   // We use deque to store per size free list and guard the list with its own
   // mutex.
-  alignas(64) std::vector<FreeBlockList<B>> free_list_ =
-      std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
+  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>>
+      free_list_{MAX_SIZE_INDEX};
 
-  alignas(64) std::mutex events_mutex_;
+  alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
 
   // Indicates whether the object is active.
   // Set to false in the destructor to signal background threads to stop.
   std::atomic<bool> active_{true};
 protected:
-  alignas(64) HostStatsStaged stats_;
+  alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
 };
 
 struct TORCH_API HostAllocator : public at::Allocator {

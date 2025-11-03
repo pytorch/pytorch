@@ -88,7 +88,7 @@ def warn_if_has_hooks(tensor):
                 warnings.warn(f"backward hook {repr(hook)} on tensor will not be "
                               "serialized.  If this is expected, you can "
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
-                              "to suppress this warning")
+                              "to suppress this warning", stacklevel=2)
 
 class BackwardHook:
     """
@@ -114,7 +114,7 @@ class BackwardHook:
 
     def _pack_with_none(self, indices, values, size):
         res = [None] * size
-        for idx, val in zip(indices, values):
+        for idx, val in zip(indices, values, strict=True):
             res[idx] = val
 
         return tuple(res)
@@ -145,7 +145,7 @@ class BackwardHook:
 
                 res = out
 
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.grad_outputs = None
 
             return self._unpack_none(self.input_tensors_index, res)
@@ -180,7 +180,7 @@ class BackwardHook:
         fn(grad_fns[0])
 
         arg_list = list(args)
-        for idx, val in zip(tensors_idx, new_tensors):
+        for idx, val in zip(tensors_idx, new_tensors, strict=True):
             arg_list[idx] = val
 
         if type(args) is tuple:
