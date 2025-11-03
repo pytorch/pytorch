@@ -166,6 +166,7 @@ class FileWriter:
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
         """
+        # pyrefly: ignore [missing-attribute]
         self.event_writer.reopen()
 
 
@@ -280,6 +281,7 @@ class SummaryWriter:
                 self.file_writer.add_event(
                     Event(
                         step=most_recent_step,
+                        # pyrefly: ignore [missing-attribute]
                         session_log=SessionLog(status=SessionLog.START),
                     )
                 )
