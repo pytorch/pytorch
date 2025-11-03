@@ -1,0 +1,72 @@
+{
+    "cpu": {
+        "name": "cpu",
+        "index_url": "https://download.pytorch.org/whl/nightly/cpu",
+        "supported_platforms": [
+            "Linux",
+            "macOS",
+            "Windows"
+        ],
+        "accelerator": "cpu"
+    },
+    "cuda-12.6": {
+        "name": "cuda-12.6",
+        "index_url": "https://download.pytorch.org/whl/nightly/cu126",
+        "supported_platforms": [
+            "Linux",
+            "Windows"
+        ],
+        "accelerator": "cuda"
+    },
+    "cuda-12.8": {
+        "name": "cuda-12.8",
+        "index_url": "https://download.pytorch.org/whl/nightly/cu128",
+        "supported_platforms": [
+            "Linux",
+            "Windows"
+        ],
+        "accelerator": "cuda"
+    },
+    "cuda-12.9": {
+        "name": "cuda-12.9",
+        "index_url": "https://download.pytorch.org/whl/nightly/cu129",
+        "supported_platforms": [
+            "Linux",
+            "Windows"
+        ],
+        "accelerator": "cuda"
+    },
+    "cuda-13.0": {
+        "name": "cuda-13.0",
+        "index_url": "https://download.pytorch.org/whl/nightly/cu130",
+        "supported_platforms": [
+            "Linux",
+            "Windows"
+        ],
+        "accelerator": "cuda"
+    },
+    "rocm-7.0": {
+        "name": "rocm-7.0",
+        "index_url": "https://download.pytorch.org/whl/nightly/rocm7.0",
+        "supported_platforms": [
+            "Linux"
+        ],
+        "accelerator": "rocm"
+    },
+    "rocm-7.1": {
+        "name": "rocm-7.1",
+        "index_url": "https://download.pytorch.org/whl/nightly/rocm7.1",
+        "supported_platforms": [
+            "Linux"
+        ],
+        "accelerator": "rocm"
+    },
+    "xpu": {
+        "name": "xpu",
+        "index_url": "https://download.pytorch.org/whl/nightly/xpu",
+        "supported_platforms": [
+            "Linux"
+        ],
+        "accelerator": "xpu"
+    }
+}
