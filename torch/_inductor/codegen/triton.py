@@ -1929,6 +1929,7 @@ class TritonKernelOverrides(TritonOverrides):
         name: str,
         reduction_type: str,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
@@ -3114,7 +3115,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
-    def partial_accumulate(self, name: str, reduction_type, val):
+    def partial_accumulate(
+        self, name: str, reduction_type, val, extra_meta: dict[str, Any]
+    ):
         self.saved_partial_accumulate.append(
             PartialAccumulate(name, reduction_type, val)
         )
@@ -3368,6 +3371,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 indexing_str += f".broadcast_to({value_shape})"
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
+            self.atomic_add_found = True
             indexing_str = indexing.index_str
             if (
                 is_sympy_integer_like(index)
@@ -4567,14 +4571,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 accumname2var[name] = self.cse.namedvar(name, dtype=torch.float)
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
-            self.body.writeline("for suboff in range(0, split_size, XBLOCK):")
+            self.body.writeline("for _ in range(0, split_size, XBLOCK):")
             with self.body.indent(offset=1):
+                self.body.splice(self.indexing_code)
                 self.body.writelines(
                     [
-                        "x0 = xindex + suboff",
+                        "xindex += XBLOCK",
+                        # TODO we force XBLOCK==1 for now so there is
+                        # no need to update the xmask
                     ]
                 )
-                self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
                 self.body.splice(self.stores)
@@ -5059,6 +5065,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
             "no_x_dim": self.no_x_dim,
+            "atomic_add_found": self.atomic_add_found,
             "num_load": self.num_load,
             "num_store": self.num_store,
             "num_reduction": self.num_reduction,
@@ -5365,7 +5372,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
         line = f"{entry.name} = {self.kexpr(self.rename_indexing(entry.expr))}"
-        if entry.root.is_loop:
+
+        # mix order reduction introduces an extra loop across the x
+        # dimension
+        if entry.root.is_loop or (self.mix_order_reduction and entry.prefix == "x"):
             self.indexing_code.writeline(line)
         else:
             # lift non-reduction stores outside loop

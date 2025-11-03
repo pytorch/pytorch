@@ -32,7 +32,7 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, \
+    skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, \
     IS_PPC, \
@@ -8378,8 +8378,9 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.001)
+    @tf32_on_and_off(0.001)
     @reduced_f32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8526,8 +8527,9 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8579,7 +8581,8 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -9243,8 +9246,10 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
-        for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
-            transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, dtype=torch.double).to(device)
+        for batch_first, src_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
+                                                  (False, (10, 0, 512), (20, 0, 512))]:
+            transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, dtype=torch.double,
+                                               batch_first=batch_first).to(device)
             src = torch.rand(*src_shape, requires_grad=True, device=device, dtype=torch.double)
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device, dtype=torch.double)
             self._test_module_empty_inputs(transformer_model, [src, tgt])
@@ -9456,8 +9461,9 @@ class TestNNDeviceType(NNTestCase):
             unfold(inp)
 
     @onlyCUDA
+    @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
@@ -11936,10 +11942,11 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
             F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
 
+    @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):

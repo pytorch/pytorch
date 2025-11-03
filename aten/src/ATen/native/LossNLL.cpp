@@ -235,7 +235,7 @@ void nll_loss_out_frame(
 
   constexpr int64_t cascade_sum_num_levels = 8;
   const int64_t level_power =
-      std::max(int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
+      std::max(static_cast<int64_t>(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 

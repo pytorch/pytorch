@@ -1526,7 +1526,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
     # 'immutable_list' object does not support mutation. Create a new copy of it
     split_sections = list(split_sections)
     for cat_user in next_users:
-        if cat_user.target == torch.cat:
+        if cat_user.target is torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim")
             # check the all getitems in the cat_user from the same node
             # check the input of the cat has all getitem from the split
@@ -1631,7 +1631,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
     # Find the next users (i.e. users after the getitem)
     next_users = find_next_users(split_node)
     for cat_user in next_users:
-        if cat_user.target == torch.cat:
+        if cat_user.target is torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim") or 0
             # check that all getitems in the cat_user from the same node
             # check the input of the cat has all getitem from the split
@@ -2010,7 +2010,7 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(node, 1, "dim")
     # check the unsqueeze nodes come from the select nodes
     if not all(
-        get_arg_value(unsqueeze_node, 0, "input").target == torch.ops.aten.select
+        get_arg_value(unsqueeze_node, 0, "input").target is torch.ops.aten.select
         for unsqueeze_node in unsqueeze_nodes
     ):
         return
@@ -2319,7 +2319,7 @@ def construct_cat_args(
 def remove_split_unbind_children(graph: torch.fx.Graph, inputs: list[torch.fx.Node]):
     nodes = OrderedSet[Any]()
     for input in inputs:
-        if input.target == operator.getitem:
+        if input.target is operator.getitem:
             nodes.add(input.args[0])  # type: ignore[union-attr]
         if len(input.users.keys()) == 0:
             graph.erase_node(input)
@@ -2755,13 +2755,13 @@ def get_view_shape_list(cat_arg: torch.fx.Node, stack_dim: int) -> list[int]:
     # cat_arg must be the split input
     view_shape_list = []
     for user in cat_arg.users.keys():
-        if user.target == torch.split:
+        if user.target is torch.split:
             for getitem in user.users.keys():
-                if getitem.target == operator.getitem:
+                if getitem.target is operator.getitem:
                     reshape_user = [
                         user
                         for user in getitem.users.keys()
-                        if user.target == torch.reshape
+                        if user.target is torch.reshape
                     ]
                     if len(reshape_user) > 0:
                         view_shape_list = list(
@@ -2931,7 +2931,7 @@ def move_view_after_cat(match: Match, *args, **kwargs):
     split_input, split_section, split_dim = _get_split_args_default(split_node)
     split_users = list(split_node.users.keys())
     getitem_indices = [
-        getitem.args[1] for getitem in split_users if getitem.target == operator.getitem
+        getitem.args[1] for getitem in split_users if getitem.target is operator.getitem
     ]
     if not is_sorted_and_consecutive(getitem_indices):  # type: ignore[arg-type]
         return
@@ -2956,7 +2956,7 @@ def move_view_after_cat(match: Match, *args, **kwargs):
             continue
         # check if the view nodes are all from getitem nodes
         if not all(
-            view_node.args[0].target == operator.getitem for view_node in cat_inputs
+            view_node.args[0].target is operator.getitem for view_node in cat_inputs
         ):
             continue
         view_indices = [view.args[0].args[1] for view in cat_inputs]
@@ -3037,7 +3037,7 @@ def replace_einsum_to_pointwise(match: Match, *args, **kwargs):
             and is_node_meta_valid(input)
             and is_node_meta_valid(weights)
             and any(
-                user.target == "add" or user.target == operator.add for user in users
+                user.target == "add" or user.target is operator.add for user in users
             )
             and match_einsum_strings(equation)
         )
