@@ -1134,14 +1134,16 @@ class TestFP8Lowering(TestCase):
         device = "cuda"
 
         torch.manual_seed(42)
-        A = torch.randn(M, K, dtype=torch.float32, device=device)
-        B = torch.randn(K, N, dtype=torch.float32, device=device)
+        # without dividing, outputs get way too large
+        A = torch.randn(M, K, dtype=torch.float32, device=device) / 50
+        B = torch.randn(K, N, dtype=torch.float32, device=device) / 50
 
         # Uses fake_scaled_mm custom op (no CUDA 12.8 needed!)
         f_c = torch.compile(fullgraph=True)(forward)
 
         out, code = run_and_get_code(f_c, A, B)
-        self.assertEqual(out, forward(A, B))
+        eager = forward(A, B)
+        self.assertEqual(out, eager)
         # Check that we have fusion - expect 2 triton kernels + 1 fake_scaled_mm fallback
         FileCheck().check(".run(").check(".run(").check("fake_scaled_mm").run(code[0])
 
