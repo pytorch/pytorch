@@ -2769,7 +2769,6 @@ def forward(self, add, tangents_1):
     return (mul_1, None)""",
         )
 
-    @unittest.expectedFailure
     def test_backward_mutation_metadata(self):
         class BwMutation(torch.autograd.Function):
             @staticmethod

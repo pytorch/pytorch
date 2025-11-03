@@ -3148,9 +3148,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         #         if bwd_proxy in bwd_freevars:
         #             env[bwd_freevars[bwd_proxy].node] = new_node
 
+        unused_id = itertools.count()
         for node in symint_nodes_bwd + saved_tensor_nodes_bwd:
             if node is None:
-                new_graph.placeholder("unused")
+                new_graph.placeholder(f"unused_{next(unused_id)}")
             else:
                 new_node = new_graph.placeholder(node.name)
                 new_node.meta = copy.copy(node.meta)
