@@ -514,7 +514,12 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   int returnedResult = 0;
   // on Blackwell+, we fake a n > 1 matmul when queruying heuristics
   // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
-  if (mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10) {
+#ifndef USE_ROCM
+  const bool lie_to_cublaslt = mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10;
+#else
+  const bool lie_to_cublaslt = false;
+#endif
+  if (lie_to_cublaslt) {
      CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, ldb, opb == CUBLAS_OP_T);
      CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, ldc);
 
