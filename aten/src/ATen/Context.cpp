@@ -223,7 +223,7 @@ void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
     "setSDPPriority order expected ", sdp_priority_order.size() - 1, " but got ",
     at::num_sdp_backends, " unique backends specified in priority order.");
   for (uint32_t i = 0; i < order.size(); i++) {
-    sdp_priority_order[i] = (at::SDPBackend) order[i];
+    sdp_priority_order[i] = static_cast<at::SDPBackend>(order[i]);
   }
 }
 
@@ -823,6 +823,14 @@ bool Context::areVmapFallbackWarningsEnabled() const {
 
 void Context::setDisplayVmapFallbackWarnings(bool enabled) {
   display_vmap_fallback_warnings_ = enabled;
+}
+
+bool Context::warnOnAccumulateGradStreamMismatch() const {
+  return warn_on_accumulate_grad_stream_mismatch_;
+}
+
+void Context::setWarnOnAccumulateGradStreamMismatch(bool enabled) {
+  warn_on_accumulate_grad_stream_mismatch_ = enabled;
 }
 
 bool Context::isDefaultMobileCPUAllocatorSet() {
