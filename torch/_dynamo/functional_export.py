@@ -138,10 +138,10 @@ def clean_nn_module_stack_and_source_fn(
             node.meta["nn_module_stack"] = _process_nn_module_stack(
                 node.meta["nn_module_stack"].copy()
             )
-        if "source_fn_stack" in node.meta:
-            node.meta["source_fn_stack"] = _process_source_fn(
-                node.meta["source_fn_stack"].copy()
-            )
+
+        source_fn_stack = node.meta.get("source_fn_stack", None)
+        if source_fn_stack:
+            node.meta["source_fn_stack"] = _process_source_fn(source_fn_stack.copy())
 
     if "dynamo_flat_name_to_original_fqn" in graph_module.meta:
         # Clean up flat name to original fqn mapping

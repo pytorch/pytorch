@@ -24,6 +24,8 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfRocmArch,
+    MI300_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -427,7 +429,8 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @tf32_on_and_off(0.0021 if TEST_WITH_ROCM else 0.001)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -2845,6 +2848,30 @@ class TestSDPACudaOnly(NNTestCase):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
 
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_broken_166211(self):
+        # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
+        shape = (20, 4, 4, 32)
+        scale = 10
+        for i in range(100):
+            q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            q.requires_grad = True
+            k.requires_grad = True
+            v.requires_grad = True
+
+            grad_attn_output = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                dq, dk, dv = torch.autograd.grad(outputs=attn_output, inputs=(q, k, v), grad_outputs=grad_attn_output)
+
+            self.assertFalse(dq.isnan().any())
+            self.assertFalse(dk.isnan().any())
+            self.assertFalse(dv.isnan().any())
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attention_mask_variants(self, device, mask_dim: list[int]):
@@ -4384,7 +4411,7 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
-    @parametrize("fused_kernel", [SDPBackend.OVERRIDEABLE])
+    @parametrize("fused_kernel", [SDPBackend.MATH, SDPBackend.OVERRIDEABLE])
     @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
     @parametrize("batch_size,n_head,q_size,kv_size,head_dim", [
         (2, 5, 9216, 9216, 64),
@@ -4423,7 +4450,7 @@ class TestSDPAXpuOnly(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
-        mask_shape = [batch_size, 1, q_size, kv_size]
+        mask_shape = [batch_size, 1, 1, kv_size]
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
         q_shape = SdpaShape(batch_size, n_head, q_size, head_dim)
         kv_shape = SdpaShape(batch_size, n_head, kv_size, head_dim)
@@ -4431,6 +4458,14 @@ class TestSDPAXpuOnly(NNTestCase):
         k = make_tensor(kv_shape)
         v = make_tensor(kv_shape)
         q2, k2, v2 = q.clone(), k.clone(), v.clone()
+
+        if train:
+            q.requires_grad_(True)
+            k.requires_grad_(True)
+            v.requires_grad_(True)
+            q2.requires_grad_(True)
+            k2.requires_grad_(True)
+            v2.requires_grad_(True)
 
         # (B, nh, T, hs)
         q = q.view(batch_size, q_size, n_head, head_dim).transpose(1, 2)
@@ -4451,43 +4486,17 @@ class TestSDPAXpuOnly(NNTestCase):
         v2 = v2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
         attn_mask2 = attn_mask.float() if attn_mask is not None else None
 
-        if train:
-            q = q.detach().clone().requires_grad_(True)
-            k = k.detach().clone().requires_grad_(True)
-            v = v.detach().clone().requires_grad_(True)
-            q2 = q2.detach().clone().requires_grad_(True)
-            k2 = k2.detach().clone().requires_grad_(True)
-            v2 = v2.detach().clone().requires_grad_(True)
+        if fused_kernel == SDPBackend.MATH:
+            actual = torch.ops.aten._scaled_dot_product_attention_math(
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=is_causal)[0]
+        elif fused_kernel == SDPBackend.OVERRIDEABLE:
+            actual = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                q, k, v, attn_bias=attn_mask, dropout_p=0.0, is_causal=is_causal)[0]
 
-        with sdpa_kernel(backends=[fused_kernel]):
-            actual = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=is_causal)
+        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            q2, k2, v2, attn_mask=attn_mask2, dropout_p=0.0, is_causal=is_causal)[0]
 
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            math_ref = F.scaled_dot_product_attention(
-                q2, k2, v2, attn_mask=attn_mask2, dropout_p=0.0, is_causal=is_causal)
-
-        if dtype in [torch.float16, torch.bfloat16]:
-            math_ref = math_ref.to(dtype)
-
-        self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
-
-        if train:
-            loss = torch.mean(actual)
-            loss_ref = torch.mean(math_ref)
-            loss.backward()
-            loss_ref.backward()
-
-            grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
-            grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
-            if dtype in [torch.float16, torch.bfloat16]:
-                grad_q_ref = grad_q_ref.to(dtype)
-                grad_k_ref = grad_k_ref.to(dtype)
-                grad_v_ref = grad_v_ref.to(dtype)
-
-            self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
-            self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
-            self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+        self.assertEqual(actual.float(), math_ref, atol=tol.atol, rtol=tol.rtol)
 
 
 class TestAttnBias(NNTestCase):

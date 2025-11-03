@@ -528,7 +528,7 @@ def unpad_sequence(
     max_length = padded_sequences.shape[1]
     idx = torch.arange(max_length, device=lengths.device)
 
-    for seq, length in zip(padded_sequences, lengths):
+    for seq, length in zip(padded_sequences, lengths, strict=True):
         mask = idx < length
         unpacked_seq = seq[mask]
         unpadded_sequences.append(unpacked_seq)
