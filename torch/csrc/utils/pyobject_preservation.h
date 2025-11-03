@@ -7,7 +7,7 @@
 namespace c10 {
 class intrusive_ptr_target;
 namespace impl {
-class PyObjectSlot;
+struct PyObjectSlot;
 } // namespace impl
 } // namespace c10
 

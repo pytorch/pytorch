@@ -118,6 +118,11 @@ inline void maybe_incref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
     // that we have a C++ reference to this object in addition to the PyObject
     // itself.
     if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 2)) {
+      // intrusive_ptr increments only use relaxed semantics. We need at least
+      // acquire semantics so that observing the kHasPyObject bit also
+      // guarantees that the PyObjectSlot is fully initialized.
+      std::atomic_thread_fence(std::memory_order_acquire);
+
       TargetTraits<T>::incref_pyobject(self);
     }
   } else {

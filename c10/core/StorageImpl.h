@@ -106,7 +106,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void incref_pyobject() const override final {
-    std::atomic_thread_fence(std::memory_order_acquire);
     PyObject* obj = pyobj_slot_.load_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->incref(obj);
   }
