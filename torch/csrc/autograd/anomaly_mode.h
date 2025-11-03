@@ -16,6 +16,11 @@ struct TORCH_API AnomalyMode {
   static bool should_check_nan() {
     return _check_nan;
   }
+  static void set_enabled(bool enabled, bool check_nan = true) {
+    _enabled = enabled;
+    _check_nan = check_nan;
+    _save_traceback = enabled;
+  }
 
   // Autograd traceback saving - can be enabled independent from anomaly mode.
   static bool should_save_traceback() {
@@ -24,8 +29,6 @@ struct TORCH_API AnomalyMode {
   static void set_save_traceback(bool save_traceback) {
     _save_traceback = save_traceback;
   }
-
-  static void set_enabled(bool enabled, bool check_nan = true);
 
  private:
   static bool _enabled;

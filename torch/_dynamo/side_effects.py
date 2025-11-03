@@ -258,6 +258,7 @@ class SideEffects:
                 "Dynamo needs to fully exhaust the generator, which may cause "
                 "unintended variable modifications."
             )
+        assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
             # TODO plumb HOP information here
             unimplemented_v2(
@@ -373,7 +374,7 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-
+        assert item.mutation_type is not None
         return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(

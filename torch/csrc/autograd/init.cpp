@@ -1265,7 +1265,7 @@ static PyObject* is_anomaly_check_nan_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_autograd_traceback_enabled(
+static PyObject* _set_autograd_traceback_enabled(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -1279,7 +1279,7 @@ static PyObject* set_autograd_traceback_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* is_autograd_traceback_enabled(
+static PyObject* _is_autograd_traceback_enabled(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -1611,12 +1611,12 @@ static PyMethodDef methods[] = {
      is_anomaly_check_nan_enabled,
      METH_NOARGS,
      nullptr},
-    {"set_autograd_traceback_enabled",
-     set_autograd_traceback_enabled,
+    {"_set_autograd_traceback_enabled",
+     _set_autograd_traceback_enabled,
      METH_O,
      nullptr},
-    {"is_autograd_traceback_enabled",
-     is_autograd_traceback_enabled,
+    {"_is_autograd_traceback_enabled",
+     _is_autograd_traceback_enabled,
      METH_NOARGS,
      nullptr},
     {"_is_multithreading_enabled",

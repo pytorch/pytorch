@@ -68,6 +68,34 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue(hasattr(debug_mode.operators[0], "args_str"))
         self.assertFalse(hasattr(debug_mode.operators[0], "args"))
 
+        # check recording hook
+        def mm(x, y):
+            return (x @ y).sum()
+
+        eager_out = mm(x_dtensor, y_dtensor)
+
+        # check recording hook for compiled variant
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.record_outputs(),
+            DebugMode.log_tensor_hashes(),
+        ):
+            compiled_out = torch.compile(mm, backend="aot_eager")(x_dtensor, y_dtensor)
+
+        # check numerical equivalence
+        self.assertTrue(torch.equal(eager_out, compiled_out))
+        sum_op = next(
+            iter(
+                op
+                for op in debug_mode.operators
+                if isinstance(op, _OpCall) and str(op.op) == "aten.sum.default"
+            )
+        )
+        self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
+        self.assertTrue(
+            "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
+        )
+
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -90,7 +118,9 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_stack_trace=True
+        ) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
@@ -122,6 +152,9 @@ class TestDTensorDebugMode(TestCase):
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
         )
+
+        # check stack trace
+        self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
@@ -381,6 +414,15 @@ class TestDTensorDebugMode(TestCase):
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
+
+        with DebugMode(record_stack_trace=True) as debug_mode:
+            out = mod(inp).sum()
+            out.backward()
+
+        sum_op = [
+            op for op in debug_mode.operators if str(op) == "aten.sum.dim_IntList"
+        ][-1]
+        self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
