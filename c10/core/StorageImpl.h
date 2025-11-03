@@ -112,7 +112,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void decref_pyobject() const override final {
     PyObject* obj = pyobj_slot_.load_pyobj();
-    (*pyobj_slot_.pyobj_interpreter())->decref(obj, false);
+    (*pyobj_slot_.pyobj_interpreter())->decref(obj);
   }
 
   size_t nbytes() const {

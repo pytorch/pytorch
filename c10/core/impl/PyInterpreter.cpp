@@ -11,7 +11,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void incref(PyObject* pyobj) const override {} // do nothing
 
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
+  void decref(PyObject* pyobj) const override {
   } // do nothing
 
 #define PANIC(m)              \

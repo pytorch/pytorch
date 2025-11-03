@@ -45,7 +45,7 @@ struct ConcretePyInterpreterVTable final
   std::string name() const override;
 
   void incref(PyObject* pyobj) const override;
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
+  void decref(PyObject* pyobj) const override;
   size_t refcnt(PyObject* pyobj) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
@@ -236,22 +236,13 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
-// NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
-// Before calling PyInterpreter::decref, we must statically know if the
-// pyobj has a PyObjectSlot or not.
-// - If it has a PyObjectSlot, we need to be careful about PyObject resurrection
-// - If it does not have a PyObjectSlot, we can freely decref
-// One alternative to this is using PyObject_IsInstance
-// to get at this information. However, we don't want to risk an incorrect
-// `__instancecheck__` changing the semantics here.
-void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
+void ConcretePyInterpreterVTable::decref(PyObject* pyobj)
     const {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
   // PyObjects stored in them.
   if (!Py_IsInitialized())
     return;
-
   pybind11::gil_scoped_acquire gil;
   Py_DECREF(pyobj);
 }

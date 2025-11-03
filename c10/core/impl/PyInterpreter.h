@@ -126,9 +126,8 @@ struct C10_API PyInterpreterVTable {
 
   // Run Py_INCREF on a PyObject.
   virtual void incref(PyObject* pyobj) const = 0;
-  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
-  virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
+  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call.
+  virtual void decref(PyObject* pyobj) const = 0;
   // Run Py_REFCNT on a PyObject.
   virtual size_t refcnt(PyObject* pyobj) const = 0;
 
