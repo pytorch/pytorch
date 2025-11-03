@@ -2236,7 +2236,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 )
                 assert est_ms > 0
                 est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
-                    n, use_nccl_estimator=True, nccl_estimator_fallback=False
+                    n, use_nccl_estimator=True
                 )
                 assert est_ms_nccl > 0
 

@@ -359,7 +359,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
     use_nccl_estimator: bool = True,
-    nccl_estimator_fallback: bool = True,
 ) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
@@ -436,7 +435,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     if use_nccl_estimator:
         est_time_ms = _nccl_estimate()
-        if est_time_ms is not None or not nccl_estimator_fallback:
+        if est_time_ms is not None:
             return est_time_ms
 
     return estimate_nccl_collective_runtime_impl(
