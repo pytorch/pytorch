@@ -144,7 +144,6 @@ bool onednn_strides_check(const Tensor& src) {
   dnnl_memory_desc_query(md, dnnl_query_format_kind, &md_fmt_kind);
   dnnl_memory_desc_query(md, dnnl_query_ndims_s32, &md_ndims);
   dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
-  auto block_size = 1;
   // const auto& blk = md->format_desc.blocking;
   dnnl_dims_t md_inner_blks;
   dnnl_dims_t md_blk_inner_idxs;
