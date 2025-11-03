@@ -83,7 +83,7 @@ class TestOpaqueObject(TestCase):
         def pop_impl_fake(q: OpaqueQueue) -> torch.Tensor:
             # This is not accurate since the queue could have tensors that are
             # not rank 1
-            ctx = torch._custom_op.impl.get_ctx()
+            ctx = torch.library.get_ctx()
             u0 = ctx.new_dynamic_size()
             return torch.empty(u0)
 
