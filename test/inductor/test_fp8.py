@@ -30,7 +30,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
 )
-from torch.testing._internal.jit_utils import FileCheck
 from torch.utils._triton import has_triton_tma_device
 
 

@@ -4360,15 +4360,6 @@ class Scheduler:
         ):
             return -1
 
-        # inverse not set up well to deal with offsets
-        bufs = (V.graph.get_buffer(buf) for buf in (node2_read.name, node2_write.name))
-        if not all(
-            isinstance(buf, ir.Buffer)
-            and V.graph.sizevars.statically_known_equals(buf.get_offset(), 0)
-            for buf in bufs
-        ):
-            return False
-
         node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
         if node2_read.name not in node1_writes:
             return -1
