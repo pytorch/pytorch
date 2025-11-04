@@ -162,6 +162,11 @@ class TempLocalSource(Source):
     def guard_source(self) -> GuardSource:
         return GuardSource.TEMP_LOCAL
 
+    def name(self) -> str:
+        raise NotImplementedError(
+            "Cannot create guard on TempLocalSource - this is an internal Dynamo bug. Please file an issue on GitHub."
+        )
+
 
 @dataclasses.dataclass(frozen=True)
 class SyntheticLocalSource(Source):
