@@ -28,6 +28,7 @@
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -129,6 +130,7 @@ class TORCH_API Tensor: public TensorBase {
       return *this;
     }
 
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
     switch (this->layout()) {
       case at::kSparse:
       case at::kSparseCsr:
@@ -139,6 +141,7 @@ class TORCH_API Tensor: public TensorBase {
       default:
         return this->_conj();
     }
+    C10_DIAGNOSTIC_POP()
   }
 
   // Aliased by Dimname overloads, so need explicit using
