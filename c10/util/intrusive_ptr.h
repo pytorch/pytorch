@@ -106,47 +106,7 @@ inline uint32_t atomic_weakcount_decrement(
 template <class T, class = void>
 struct TargetTraits {
   static constexpr bool can_have_pyobject = false;
-  static inline void incref_pyobject(T* self) = delete;
-  static inline void decref_pyobject(T* self) = delete;
 };
-
-template <class T>
-inline void maybe_incref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
-  if constexpr (TargetTraits<T>::can_have_pyobject) {
-    // If the refcount transitioned from 1 to 2, we need to incref the PyObject.
-    // In other words, we need to ensure that the PyObject stays alive now
-    // that we have a C++ reference to this object in addition to the PyObject
-    // itself.
-    if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 2)) {
-      // intrusive_ptr increments only use relaxed semantics. We need at least
-      // acquire semantics so that observing the kHasPyObject bit also
-      // guarantees that the PyObjectSlot is fully initialized.
-      std::atomic_thread_fence(std::memory_order_acquire);
-
-      TargetTraits<T>::incref_pyobject(self);
-    }
-  } else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        !has_pyobject(combined),
-        "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
-  }
-}
-
-template <class T>
-inline void maybe_decref_pyobject([[maybe_unused]] T* self, uint64_t combined) {
-  if constexpr (TargetTraits<T>::can_have_pyobject) {
-    // If the refcount transitioned from 2 to 1, we need to decref the PyObject.
-    // In other words, we don't want to keep the PyObject alive if there are
-    // no C++ references to this object other than the PyObject itself.
-    if (C10_UNLIKELY(has_pyobject(combined) && refcount(combined) == 1)) {
-      TargetTraits<T>::decref_pyobject(self);
-    }
-  } else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        !has_pyobject(combined),
-        "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
-  }
-}
 
 } // namespace detail
 
@@ -226,9 +186,6 @@ class C10_API intrusive_ptr_target {
 
   template <typename T>
   friend struct ExclusivelyOwnedTensorTraits;
-
-  template <class, class>
-  friend struct detail::TargetTraits;
 
   friend class torch::utils::PyObjectPreservation;
 
@@ -341,13 +298,6 @@ struct TargetTraits<c10::intrusive_ptr_target> {
   // A generic intrusive_ptr<intrusive_ptr_target> may actually be a TensorImpl
   // or StorageImpl, so we have to allow for PyObject support.
   static constexpr bool can_have_pyobject = true;
-
-  static inline void incref_pyobject(c10::intrusive_ptr_target* self) noexcept {
-    self->incref_pyobject();
-  }
-  static inline void decref_pyobject(c10::intrusive_ptr_target* self) noexcept {
-    self->decref_pyobject();
-  }
 };
 } // namespace detail
 
@@ -407,7 +357,21 @@ class intrusive_ptr final {
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
 
-      detail::maybe_incref_pyobject<TTarget>(target_, combined);
+      if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        // If the refcount transitioned from 1 to 2, we need to incref the
+        // PyObject. In other words, we need to ensure that the PyObject stays
+        // alive now that we have a C++ reference to this object in addition to
+        // the PyObject itself.
+        if (C10_UNLIKELY(
+                detail::has_pyobject(combined) &&
+                detail::refcount(combined) == 2)) {
+          target_->incref_pyobject();
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !detail::has_pyobject(combined),
+            "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
+      }
     }
   }
 
@@ -427,6 +391,7 @@ class intrusive_ptr final {
       auto combined_refcount = detail::atomic_combined_refcount_decrement(
           target_->combined_refcount_, detail::kReferenceCountOne);
       uint32_t new_refcount = detail::refcount(combined_refcount);
+      bool has_pyobject = detail::has_pyobject(combined_refcount);
       if (new_refcount == 0) {
         bool should_delete = detail::weakcount(combined_refcount) == 1;
         // See comment above about weakcount. As long as refcount>0,
@@ -445,8 +410,18 @@ class intrusive_ptr final {
         if (should_delete) {
           delete target_;
         }
+      } else if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        // If the refcount transitioned from 2 to 1, we need to decref the
+        // PyObject. In other words, we don't want to keep the PyObject alive if
+        // there are no C++ references to this object other than the PyObject
+        // itself.
+        if (C10_UNLIKELY(has_pyobject && new_refcount == 1)) {
+          target_->decref_pyobject();
+        }
       } else {
-        detail::maybe_decref_pyobject<TTarget>(target_, combined_refcount);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !has_pyobject,
+            "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
       }
     }
   }
@@ -1171,9 +1146,14 @@ namespace intrusive_ptr {
 // NullType::singleton to this function
 inline void incref(intrusive_ptr_target* self) {
   if (self) {
-    uint64_t new_refcount = detail::atomic_combined_refcount_increment(
+    uint64_t combined = detail::atomic_combined_refcount_increment(
         self->combined_refcount_, detail::kReferenceCountOne);
-    detail::maybe_incref_pyobject(self, new_refcount);
+
+    if (C10_UNLIKELY(
+            detail::has_pyobject(combined) &&
+            detail::refcount(combined) == 2)) {
+      self->incref_pyobject();
+    }
   }
 }
 

@@ -2177,6 +2177,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void incref_pyobject() const override final {
+    // Because intrusive_ptr incref uses relaxed memory order, we need to
+    // do an acquire fence to ensure that the kHasPyObject bit was
+    // observed before the load of the PyObject* below.
+    // NB: This is a no-op on x86/x86-64
+    std::atomic_thread_fence(std::memory_order_acquire);
+
     PyObject* obj = pyobj_slot_.load_pyobj();
     (*pyobj_slot_.pyobj_interpreter())->incref(obj);
   }
@@ -3102,13 +3108,6 @@ struct TargetTraits<
     T,
     std::enable_if_t<std::is_base_of_v<c10::TensorImpl, std::remove_cv_t<T>>>> {
   static constexpr bool can_have_pyobject = true;
-
-  static inline void incref_pyobject(c10::TensorImpl* self) noexcept {
-    self->incref_pyobject();
-  }
-  static inline void decref_pyobject(c10::TensorImpl* self) noexcept {
-    self->decref_pyobject();
-  }
 };
 
 } // namespace detail
