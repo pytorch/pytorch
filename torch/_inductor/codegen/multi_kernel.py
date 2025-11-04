@@ -381,7 +381,12 @@ class MultiKernelCall:
             return inner
 
         return [
-            benchmarker.benchmark_gpu(wrap_fn(kernel, index), rep=40)
+            benchmarker.benchmark(
+                wrap_fn(kernel, index),
+                # Currently the kernel type must be a CachingAutotuner
+                device=kernel.device_props.type,
+                rep=40,
+            )
             for index, kernel in enumerate(self.kernels)
         ]
 
