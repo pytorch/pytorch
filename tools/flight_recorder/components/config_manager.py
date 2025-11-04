@@ -74,6 +74,17 @@ class JobConfig:
             default=10,
             help="Maximum number of mismatches we print (from earliest).",
         )
+        self.parser.add_argument(
+            "--transform-ft",
+            action="store_true",
+            help="Transform PG config to use global ranks to analyze traces produced by torchft",
+        )
+        self.parser.add_argument(
+            "--group-world-size",
+            type=int,
+            default=None,
+            help="The number of ranks in 1 torchft replica group. Must be specified if --transform-ft is True",
+        )
 
     def parse_args(
         self: "JobConfig", args: Optional[Sequence[str]]

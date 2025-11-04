@@ -168,6 +168,14 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, p.__contains__)
         self.assertRaises(TypeError, p.__contains__, 1, 2)
 
+    @make_dynamo_test
+    def test___iter__(self):
+        p = self.thetype([1])
+        it = p.__iter__()
+        self.assertEqual(next(it), 1)
+        it = p.__iter__().__iter__()
+        self.assertEqual(next(it), 1)
+
 
 class ListTests(TupleTests):
     # List methods

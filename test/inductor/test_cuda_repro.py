@@ -38,8 +38,10 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     MI350_ARCH,
+    parametrize,
     skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -85,6 +87,7 @@ check_model_cuda = test_torchinductor.check_model_cuda
 aten = torch.ops.aten
 
 
+@instantiate_parametrized_tests
 class CudaReproTests(TestCase):
     device = "cuda"
     common = check_model_cuda
@@ -541,7 +544,7 @@ class CudaReproTests(TestCase):
 
         input = torch.randn(10, 10, device="cuda", requires_grad=True)
 
-        for i in range(2):
+        for _ in range(2):
             output_ref = model_ref(input)
             output_res = model_opt(input)
             output_ref.sum().backward()
@@ -2440,6 +2443,60 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     f"Results differ for input shape {(batch, channels, h, w)}. "
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
+
+    @parametrize(
+        "quantiles_shape,quantiles_strides,batch_size",
+        [
+            ((100, 10), (10, 1), 16),  # Contiguous C-order
+            ((100, 10), (1, 100), 16),  # Transposed/F-order
+            ((80, 12), (1, 80), 16),  # Transposed different size
+            ((50, 20), (1, 50), 16),  # Transposed medium
+            ((200, 8), (1, 200), 16),  # Transposed large x small
+            ((25, 40), (1, 25), 16),  # Transposed small x large
+            ((20, 5, 8), (40, 1, 5), 16),  # 3D case with mixed strides
+            ((20, 5, 8), (1, 20, 100), 16),  # 3D case different stride order
+        ],
+    )
+    def test_searchsorted_stride_permutations(
+        self, quantiles_shape, quantiles_strides, batch_size
+    ):
+        class Foo(torch.nn.Module):
+            def __init__(self, quantiles: torch.Tensor) -> None:
+                super().__init__()
+                assert quantiles.shape[0] > 0
+                quantiles = quantiles.T
+                self.q = torch.nn.Parameter(quantiles, requires_grad=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.searchsorted(self.q, x.T).T
+
+        torch.manual_seed(42)
+
+        # Create contiguous tensor first
+        numel = 1
+        for dim in quantiles_shape:
+            numel *= dim
+        data = torch.randn(numel, dtype=torch.float32, device="cuda")
+
+        # Create tensor with specified shape and strides
+        quantiles = torch.as_strided(
+            data, size=quantiles_shape, stride=quantiles_strides
+        )
+
+        quantiles = torch.sort(quantiles, dim=0)[0]
+
+        x_shape = (batch_size,) + quantiles_shape[1:]
+        x = torch.randn(*x_shape, dtype=torch.float32, device="cuda")
+
+        foo = Foo(quantiles)
+        foo_compiled = torch.compile(Foo(quantiles), fullgraph=True)
+
+        # Test eager vs compiled
+        with torch.no_grad():
+            eager = foo(x)
+            compiled = foo_compiled(x)
+
+        self.assertEqual(eager, compiled)
 
     def test_identity_load(self):
         device = "cuda"
