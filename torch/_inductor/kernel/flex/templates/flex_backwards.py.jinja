@@ -231,8 +231,6 @@
         start_n1 = pid * BLOCK_N1
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
-        desc_k = None
-        desc_v = None
         {%- if USE_TMA %}
         desc_k = tl.make_tensor_descriptor(
             base=K,
@@ -246,8 +244,6 @@
             strides=(stride_vn, stride_vd),
             block_shape=[BLOCK_N1, V_HEAD_DIM_ROUNDED],
         )
-        {%- endif %}
-        {%- if USE_TMA %}
         k = tl.load_tensor_descriptor(
             desc_k,
             [start_n1.to(tl.int32), 0],
