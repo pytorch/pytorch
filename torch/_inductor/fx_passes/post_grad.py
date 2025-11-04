@@ -51,8 +51,8 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
+    has_uses_tagged_as,
     is_gpu,
-    is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -454,7 +454,7 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
 
     graph_pass.apply(gm)
 
-    for node in gm.graph.find_nodes(
+    for _node in gm.graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.map_impl
     ):
         raise AssertionError("map is not lowered to while_loop")
@@ -585,7 +585,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             # NOTE [Pre-allocate scan's output buffer]
             # In order to pre-allocate the output buffer for ys, we rely on the meta of scan's fx_node.
             # However, the meta consists of concrete symints, we need to bind those symints with
-            # proxies in order to trace the torch.empyt_strided call correctly.
+            # proxies in order to trace the torch.empty_strided call correctly.
             #
             # Also note that basic free symbols of tensor's shapes are guaranteed to be lifted as subgraph inputs
             # in dynamo so we can always re-construct the sym expression from placeholders.
@@ -666,7 +666,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 
     graph_pass.apply(gm)
 
-    for node in gm.graph.find_nodes(
+    for _node in gm.graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.scan
     ):
         raise AssertionError("scan is not lowered to while_loop")
@@ -1265,7 +1265,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
 
     graph_pass.apply(graph)
 
-    for node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function",
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,
     ):
@@ -1510,8 +1510,10 @@ def should_prefer_unfused_addmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    output = match.output_node()
-    return all(is_pointwise_use(use) for use in output.users)
+    return has_uses_tagged_as(
+        match.output_node(),
+        (torch.Tag.pointwise, torch.Tag.reduction),
+    )
 
 
 @register_graph_pattern(
@@ -1867,7 +1869,7 @@ class ConstructorMoverPass:
                 noop_device_puts = [
                     user
                     for user in gpu_node.users
-                    if user.target == torch.ops.prims.device_put.default
+                    if user.target is torch.ops.prims.device_put.default
                     and user.args[1] == target_device
                 ]
                 for noop in noop_device_puts:

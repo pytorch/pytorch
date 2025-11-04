@@ -252,10 +252,11 @@ def get_static_quant_module_class(
         additional_static_quant_mapping,
     )
     static_quant_module_class = all_mappings.get(float_module_class, None)
-    assert static_quant_module_class is not None, (
-        f"Floating point module class {str(float_module_class)}"
-        + " does not have a corresponding quantized module class"
-    )
+    if static_quant_module_class is None:
+        raise AssertionError(
+            f"Floating point module class {str(float_module_class)}"
+            + " does not have a corresponding quantized module class"
+        )
     return copy.deepcopy(static_quant_module_class)
 
 
@@ -272,10 +273,11 @@ def get_dynamic_quant_module_class(
         DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS, additional_dynamic_quant_mapping
     )
     dynamic_quant_module_class = all_mappings.get(float_module_class, None)
-    assert dynamic_quant_module_class is not None, (
-        f"Floating point module class {str(float_module_class)}"
-        + " does not have a corresponding quantized module class"
-    )
+    if dynamic_quant_module_class is None:
+        raise AssertionError(
+            f"Floating point module class {str(float_module_class)}"
+            + " does not have a corresponding quantized module class"
+        )
     return copy.deepcopy(dynamic_quant_module_class)
 
 
@@ -344,9 +346,10 @@ def get_default_float_to_quantized_operator_mappings() -> dict[
 def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     """Get the quantized operator corresponding to the float operator"""
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op)
-    assert quantized_op is not None, (
-        f"Operator {str(float_op)} does not have corresponding quantized op"
-    )
+    if quantized_op is None:
+        raise AssertionError(
+            f"Operator {str(float_op)} does not have corresponding quantized op"
+        )
     return quantized_op
 
 
