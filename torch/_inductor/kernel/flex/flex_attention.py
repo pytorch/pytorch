@@ -793,7 +793,6 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", True if torch.xpu.is_available() else False)
         cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
         cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
