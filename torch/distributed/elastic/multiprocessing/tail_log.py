@@ -10,9 +10,10 @@
 import logging
 import os
 import time
+from collections.abc import Callable
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Callable, Optional, TextIO, TYPE_CHECKING, Union
+from typing import Optional, TextIO, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:

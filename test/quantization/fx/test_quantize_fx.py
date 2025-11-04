@@ -204,7 +204,8 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional
+from typing import Optional
+from collections.abc import Callable
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):

@@ -36,10 +36,11 @@ from typing import (
     Optional,
     overload,
     Protocol,
+    TypeAlias,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, NamedTuple, Self, TypeAlias
+from typing_extensions import deprecated, NamedTuple, Self
 
 from torch.torch_version import TorchVersion as _TorchVersion
 

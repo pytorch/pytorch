@@ -19,8 +19,8 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
-from collections.abc import Callable
-from typing import Any, Iterable, TYPE_CHECKING, TypeVar
+from collections.abc import Callable, Iterable
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch

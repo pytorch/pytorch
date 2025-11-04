@@ -3,7 +3,8 @@
 import itertools
 import random
 import unittest
-from typing import Any, Callable, ClassVar, Optional
+from collections.abc import Callable
+from typing import Any, ClassVar, Optional
 
 import torch
 import torch.distributed as dist

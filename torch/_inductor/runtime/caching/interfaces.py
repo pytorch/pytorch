@@ -12,8 +12,8 @@ from os import PathLike
 from pathlib import Path
 from threading import Lock
 from time import time
-from typing import Any, Callable, TYPE_CHECKING
-from typing_extensions import override, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
+from typing_extensions import override
 
 from filelock import FileLock
 
@@ -21,6 +21,8 @@ from . import config, context, exceptions, implementations as impls, locks
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .utils import P, R
 
 

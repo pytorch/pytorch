@@ -20,7 +20,8 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
-from typing import Any, Sequence, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState

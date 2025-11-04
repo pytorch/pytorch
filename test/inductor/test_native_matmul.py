@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._dynamo.testing import rand_strided

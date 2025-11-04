@@ -13,7 +13,7 @@ from random import Random
 from shutil import rmtree
 from threading import Lock
 from time import sleep, time
-from typing import Any, Generator, Sequence, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 from unittest.mock import patch
 
@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
     from pathlib import Path
 
 
