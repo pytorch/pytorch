@@ -89,8 +89,12 @@ def get_current_version() -> tuple[int, int] | None:
 
 def get_added_lines(filename: str) -> set[int]:
     """
-    Get the line numbers of added lines in the current uncommitted changes.
-    Uses hg/git to determine which lines are new in this commit.
+    Get the line numbers of added lines in:
+    1. Current uncommitted changes (git diff HEAD)
+    2. The most recent commit (git diff HEAD~1..HEAD)
+
+    This ensures that even if someone commits locally before running the linter,
+    we still catch version macro issues in their recent changes.
 
     Returns:
         Set of line numbers (1-indexed) that are new additions.
@@ -99,29 +103,9 @@ def get_added_lines(filename: str) -> set[int]:
 
     added_lines = set()
 
-    try:
-        # Try hg first (Meta's version control)
-        result = subprocess.run(
-            ["hg", "diff", filename],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            diff_output = result.stdout
-        else:
-            # Try git as fallback
-            result = subprocess.run(
-                ["git", "diff", "HEAD", filename],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                return added_lines
-            diff_output = result.stdout
-
-        # Parse diff output to find added lines
+    def parse_diff(diff_output: str) -> set[int]:
+        """Parse git diff output and return line numbers of added lines."""
+        lines = set()
         current_line = 0
         for line in diff_output.split("\n"):
             # Unified diff format: @@ -old_start,old_count +new_start,new_count @@
@@ -131,15 +115,39 @@ def get_added_lines(filename: str) -> set[int]:
                     current_line = int(match.group(1))
             elif line.startswith("+") and not line.startswith("+++"):
                 # This is an added line
-                added_lines.add(current_line)
+                lines.add(current_line)
                 current_line += 1
             elif not line.startswith("-"):
                 # Context line or unchanged line
                 current_line += 1
+        return lines
 
-    except Exception:
-        # If we can't get diff info, return empty set
-        pass
+    try:
+        # Check uncommitted changes (working directory vs HEAD)
+        result = subprocess.run(
+            ["git", "diff", "HEAD", filename],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            added_lines.update(parse_diff(result.stdout))
+
+        # Also check the most recent commit (HEAD vs HEAD~1)
+        # This catches cases where someone commits before running the linter
+        result = subprocess.run(
+            ["git", "diff", "HEAD~1..HEAD", filename],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            added_lines.update(parse_diff(result.stdout))
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to get git diff information for {filename}. Error: {e}"
+        ) from e
 
     return added_lines
 
@@ -155,26 +163,16 @@ def parse_shim_file(filename: str) -> list[LintMessage]:
     # Get current version
     current_version = get_current_version()
     if current_version is None:
-        lint_messages.append(
-            LintMessage(
-                path=filename,
-                line=None,
-                char=None,
-                code=LINTER_CODE,
-                severity=LintSeverity.WARNING,
-                name="version-detection-failed",
-                original=None,
-                replacement=None,
-                description="Could not determine current PyTorch version from version.txt",
-            )
+        raise RuntimeError(
+            "Could not determine current PyTorch version from version.txt. "
+            "This linter requires version.txt to exist in the repository root and contain a valid version number."
         )
-        return lint_messages
 
     major, minor = current_version
     expected_version_macro = f"TORCH_VERSION_{major}_{minor}_0"
     expected_version_check = f"#if TORCH_FEATURE_VERSION >= {expected_version_macro}"
 
-    # Get lines that are newly added in this commit
+    # Get lines that are uncommitted or added in the most recent commit
     added_lines = get_added_lines(filename)
 
     with open(filename) as f:
@@ -185,14 +183,13 @@ def parse_shim_file(filename: str) -> list[LintMessage]:
     current_version_macro = None
     inside_extern_c = False
 
+    # Track ALL preprocessor conditional blocks to properly match #if/#endif pairs
+    # Each element is (is_version_block, version_macro_or_none)
+    preprocessor_stack: list[tuple[bool, str | None]] = []
+
     # Patterns
     version_start_pattern = re.compile(
         r"#if\s+TORCH_FEATURE_VERSION\s*>=\s*(TORCH_VERSION_\d+_\d+_\d+)"
-    )
-    # Require comment to avoid matching unrelated #endif directives
-    # This ensures we only close TORCH_FEATURE_VERSION blocks, not other #if blocks
-    version_end_pattern = re.compile(
-        r"#endif\s*//\s*TORCH_FEATURE_VERSION\s*>=\s*(TORCH_VERSION_\d+_\d+_\d+)"
     )
     extern_c_pattern = re.compile(r'extern\s+"C"\s*{')
     extern_c_end_pattern = re.compile(r'}\s*//\s*extern\s+"C"')
@@ -207,35 +204,53 @@ def parse_shim_file(filename: str) -> list[LintMessage]:
     for line_num, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        # Skip empty lines, comments, and preprocessor directives (except version checks)
+        # Skip empty lines and comments
         if not stripped or stripped.startswith("//"):
             continue
-        if stripped.startswith("#") and not version_start_pattern.match(stripped):
-            if stripped.startswith("#endif"):
-                # Check if this is the end of a version block
-                match = version_end_pattern.match(stripped)
-                if match and inside_version_block:
+
+        # Check for TORCH_FEATURE_VERSION block start
+        version_match = version_start_pattern.match(stripped)
+        if version_match:
+            version_macro = version_match.group(1)
+            preprocessor_stack.append((True, version_macro))
+            inside_version_block = True
+            current_version_macro = version_macro
+            continue
+
+        # Track any other #if/#ifdef/#ifndef directives
+        if stripped.startswith(("#if", "#ifdef", "#ifndef")) and not version_match:
+            # Not a TORCH_FEATURE_VERSION block, just a regular conditional
+            preprocessor_stack.append((False, None))
+            continue
+
+        # Track #endif directives
+        if stripped.startswith("#endif"):
+            if preprocessor_stack:
+                is_version_block, _ = preprocessor_stack.pop()
+                # If we just closed a version block, check if we're still in one
+                if is_version_block:
+                    # Look for any remaining version blocks in the stack
                     inside_version_block = False
                     current_version_macro = None
-                elif inside_version_block and stripped == "#endif":
-                    # Warn about uncommented #endif that might close our version block
-                    lint_messages.append(
-                        LintMessage(
-                            path=filename,
-                            line=line_num,
-                            char=None,
-                            code=LINTER_CODE,
-                            severity=LintSeverity.WARNING,
-                            name="uncommented-endif-in-version-block",
-                            original=None,
-                            replacement=None,
-                            description=(
-                                f"Found uncommented #endif inside TORCH_FEATURE_VERSION block. "
-                                f"Please add a comment to clarify: "
-                                f"#endif // TORCH_FEATURE_VERSION >= {current_version_macro}"
-                            ),
-                        )
-                    )
+                    for is_ver, ver_macro in reversed(preprocessor_stack):
+                        if is_ver:
+                            inside_version_block = True
+                            current_version_macro = ver_macro
+                            break
+            continue
+
+        # Track #else and #elif (they don't change the stack depth, but exit version blocks)
+        if stripped.startswith(("#else", "#elif")):
+            # If we're in a version block, exit it (the #else branch is not versioned)
+            if inside_version_block and preprocessor_stack:
+                # Check if the topmost block is a version block
+                if preprocessor_stack[-1][0]:
+                    inside_version_block = False
+                    current_version_macro = None
+            continue
+
+        # Skip other preprocessor directives
+        if stripped.startswith("#"):
             continue
 
         # Track extern "C" blocks
@@ -244,17 +259,6 @@ def parse_shim_file(filename: str) -> list[LintMessage]:
             continue
         if extern_c_end_pattern.search(stripped):
             inside_extern_c = False
-            continue
-
-        # Check for version block start
-        match = version_start_pattern.match(stripped)
-        if match:
-            inside_version_block = True
-            current_version_macro = match.group(1)
-            # Note: We don't check which version macro is used here.
-            # Old code from previous versions should keep their original version guards.
-            # Only new code added in this commit should use the current version.
-            # Without git diff integration, we can't distinguish new vs old code.
             continue
 
         # Check for function declarations
