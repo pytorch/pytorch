@@ -85,7 +85,7 @@ class TestOpaqueObject(TestCase):
         def pop_impl_fake(q: OpaqueQueue) -> torch.Tensor:
             # This is not accurate since the queue could have tensors that are
             # not rank 1
-            ctx = torch._custom_op.impl.get_ctx()
+            ctx = torch.library.get_ctx()
             u0 = ctx.new_dynamic_size()
             return torch.empty(u0)
 
@@ -275,12 +275,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         # By default, ops with ScriptObjects as inputs are registered as being
         # effectful
-        _deregister_effectful_op("_TestOpaqueObject::noisy_inject.default")
+        _deregister_effectful_op("_TestOpaqueObject::noisy_inject")
 
         # If we register with None, this means the ops do not have effect
-        torch.library._register_effectful_op(
-            "_TestOpaqueObject::noisy_inject.default", None
-        )
+        torch.library._register_effectful_op("_TestOpaqueObject::noisy_inject", None)
         gm = aot_export_module(mod, (rng, fake_x), trace_joint=False)[0]
 
         # There is no longer a token input, and no longer with_effect HOO
@@ -295,7 +293,7 @@ def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
     return (add,)""",  # noqa: B950
         )
-        _deregister_effectful_op("_TestOpaqueObject::noisy_inject.default")
+        _deregister_effectful_op("_TestOpaqueObject::noisy_inject")
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
