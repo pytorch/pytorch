@@ -425,7 +425,7 @@ def apply_var_mapping(
         new_ranges, norm_pw_vars + norm_red_vars, strict=True
     ):
         range_vars = []
-        for i in range(len(new_range)):
+        for _ in range(len(new_range)):
             range_vars.append(flat_vars[count])
             count += 1
 

@@ -493,40 +493,33 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
     for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       // vectorized loop with negative stride for output
-      char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
-
-      char* C10_RESTRICT data[ntensors];
-      for (const auto arg : c10::irange(ntensors)) {
-        data[arg] = data_[arg];
-      }
-
       int64_t i = 0;
 
-      // data[0] unaligned pre-pass
+      // data_arr[0] unaligned pre-pass
       int64_t offset = (j * n + (n - i - Vec::size())) % 32;
       offset = (offset >= n) ? n : offset;
       for (; i < offset; i++) {
-        scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-        *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
+        scalar_t* out_ptr = (scalar_t*)(data_arr[0] - i * stride);
+        *out_ptr = c10::load((scalar_t *)(data_arr[1] + i * stride));
       }
       // Empirically found that it is faster to process 3 data items together vs 2 or 4
       for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
-        auto out1 = Vec::loadu(data[1] + i * stride);
-        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * stride);
-        auto out3 = Vec::loadu(data[1] + (i + 2 * Vec::size()) * stride);
+        auto out1 = Vec::loadu(data_arr[1] + i * stride);
+        auto out2 = Vec::loadu(data_arr[1] + (i + Vec::size()) * stride);
+        auto out3 = Vec::loadu(data_arr[1] + (i + 2 * Vec::size()) * stride);
         // flip the vector: 1234 -> 4321
         out1 = flip(out1);
         out2 = flip(out2);
         out3 = flip(out3);
-        out1.store(data[0] - (i + Vec::size() - 1) * stride);
-        out2.store(data[0] - (i + 2 * Vec::size() - 1) * stride);
-        out3.store(data[0] - (i + 3 * Vec::size() - 1) * stride);
+        out1.store(data_arr[0] - (i + Vec::size() - 1) * stride);
+        out2.store(data_arr[0] - (i + 2 * Vec::size() - 1) * stride);
+        out3.store(data_arr[0] - (i + 3 * Vec::size() - 1) * stride);
       }
       if (i < n) {
         for (; i < n; i++) {
-          scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-          *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
+          scalar_t* out_ptr = (scalar_t*)(data_arr[0] - i * stride);
+          *out_ptr = c10::load((scalar_t *)(data_arr[1] + i * stride));
         }
       }
 
@@ -560,15 +553,8 @@ void cpu_vflip_memcpy(at::TensorIterator& iter) {
     const int64_t stride = strides[0];
 
     for ([[maybe_unused]] const auto j : c10::irange(size1)) {
-      char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
-
-      char* C10_RESTRICT data[ntensors];
-      for (const auto arg : c10::irange(ntensors)) {
-        data[arg] = data_[arg];
-      }
-
-      memcpy(data[0], data[1], n * stride);
+      memcpy(data_arr[0], data_arr[1], n * stride);
 
       // advance:
       for (const auto arg : c10::irange(data_arr.size())) {
