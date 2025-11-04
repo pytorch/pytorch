@@ -2,7 +2,11 @@
 # implement matrix related ops for distributed tensor
 
 
-from typing import Optional
+from typing import Callable, Optional, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -17,7 +21,9 @@ from torch.distributed.tensor._op_schema import (
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
+    generate_decomposition_strategies,
     generate_redistribute_costs,
+    has_exotic_placement,
     infer_broadcast_dims_map,
     is_tensor_shardable,
     map_placements_after_broadcast,
@@ -231,6 +237,131 @@ def _scaled_mm_like_strategy(
     return mm_strategy
 
 
+def _make_einsum_output_spec_computer(
+    einsum_equation: str,
+    num_matmul_inputs: int = 2,
+):
+    """
+    Create output spec computer for einsum operations.
+
+    Returns a closure that computes output DTensorSpec using gen_einsum_strategies,
+    ensuring consistency with direct strategy generation.
+
+    Args:
+        einsum_equation: Einsum notation (e.g., "mk,kn->mn")
+        num_matmul_inputs: Number of matrix inputs (2 for mm/bmm/addmm/baddbmm)
+
+    Returns:
+        Function (list[DTensorSpec]) -> DTensorSpec
+    """
+
+    def compute_output_spec(input_specs: list[DTensorSpec]) -> DTensorSpec:
+        # Skip non-matmul inputs (e.g., bias in addmm)
+        matmul_start_idx = len(input_specs) - num_matmul_inputs
+        matmul_specs = input_specs[matmul_start_idx:]
+
+        if len(matmul_specs) != num_matmul_inputs:
+            raise ValueError(
+                f"Expected {num_matmul_inputs} matmul inputs for {einsum_equation}, "
+                f"got {len(matmul_specs)}"
+            )
+
+        mesh = matmul_specs[0].mesh
+        strategies = gen_einsum_strategies(einsum_equation, mesh)
+
+        # Find strategy matching input placements
+        for strategy in strategies.strategies:
+            if (
+                strategy.input_specs is None
+                or len(strategy.input_specs) < num_matmul_inputs
+            ):
+                continue
+
+            if all(
+                strategy.input_specs[i].placements == matmul_specs[i].placements
+                for i in range(num_matmul_inputs)
+            ):
+                return strategy.output_spec
+
+        # Fallback to Replicate (should rarely happen)
+        return DTensorSpec(
+            mesh=mesh, placements=tuple(Replicate() for _ in range(mesh.ndim))
+        )
+
+    return compute_output_spec
+
+
+def _matmul_strategy_with_decomposition(
+    op_schema: OpSchema,
+    einsum_equation: str,
+    direct_strategy_fn: Callable[[str, DeviceMesh, OpSchema], OpStrategy],
+) -> OpStrategy:
+    """
+    Strategy generator for matmul operations with exotic placement support.
+
+    Detects exotic placements (_StridedShard) and generates decomposition strategies
+    (redistribute → compute) when needed. For standard placements, uses direct einsum
+    strategies. Centralizes exotic handling across mm/bmm/addmm/baddbmm.
+
+    Note: POC redistributes to Replicate (conservative). Future: use Shard targets.
+
+    Args:
+        op_schema: Operation schema
+        einsum_equation: Einsum notation (e.g., "mk,kn->mn")
+        direct_strategy_fn: Strategy function for standard placements
+
+    Returns:
+        OpStrategy with direct or decomposition strategies
+    """
+    # Input validation
+    if not isinstance(einsum_equation, str) or not einsum_equation:
+        raise ValueError(
+            f"einsum_equation must be non-empty string, got {einsum_equation!r}"
+        )
+
+    if not callable(direct_strategy_fn):
+        raise TypeError(
+            f"direct_strategy_fn must be callable, got {type(direct_strategy_fn)}"
+        )
+
+    mesh = op_schema.get_mesh_from_args()
+
+    # Extract tensor input strategies
+    input_strategies = [
+        arg for arg in op_schema.args_schema if isinstance(arg, OpStrategy)
+    ]
+
+    if not input_strategies:
+        raise ValueError(
+            f"No tensor inputs found for {einsum_equation}. "
+            f"op_schema.args_schema: {op_schema.args_schema}. "
+            f"This usually indicates a problem with operation registration."
+        )
+
+    has_exotic = any(has_exotic_placement(strat) for strat in input_strategies)
+
+    if not has_exotic:
+        return direct_strategy_fn(einsum_equation, mesh, op_schema)
+
+    # Exotic placements: use decomposition (redistribute to Replicate → compute)
+    replicate_all = tuple(Replicate() for _ in range(mesh.ndim))
+    supported_targets: list[Sequence[tuple[Placement, ...]]] = [
+        [replicate_all for _ in input_strategies]
+    ]
+
+    compute_output_spec = _make_einsum_output_spec_computer(
+        einsum_equation, num_matmul_inputs=2
+    )
+
+    decomp_strategies = generate_decomposition_strategies(
+        op_schema,
+        supported_targets,
+        compute_output_spec,
+    )
+
+    return OpStrategy(strategies=decomp_strategies)
+
+
 @register_op_strategy(aten.dot.default)
 def dot_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
@@ -239,26 +370,42 @@ def dot_strategy(op_schema: OpSchema) -> OpStrategy:
 
 @register_op_strategy(aten.mm.default)
 def mm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
+    """Matrix multiply with exotic placement support (fixes #166598)."""
+    return _matmul_strategy_with_decomposition(
+        op_schema,
+        einsum_equation="mk,kn->mn",
+        direct_strategy_fn=_mm_like_strategy,
+    )
 
 
 @register_op_strategy(aten.addmm.default)
 def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
+    """Add + matmul with exotic placement support (fixes #166598)."""
+    return _matmul_strategy_with_decomposition(
+        op_schema,
+        einsum_equation="mk,kn->mn",
+        direct_strategy_fn=_addmm_like_strategy,
+    )
 
 
 @register_op_strategy(aten.bmm.default)
 def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
+    """Batch matmul with exotic placement support (fixes #166598)."""
+    return _matmul_strategy_with_decomposition(
+        op_schema,
+        einsum_equation="bmk,bkn->bmn",
+        direct_strategy_fn=_mm_like_strategy,
+    )
 
 
 @register_op_strategy(aten.baddbmm.default)
-def baddmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
+def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    """Batch add + matmul with exotic placement support (fixes #166598)."""
+    return _matmul_strategy_with_decomposition(
+        op_schema,
+        einsum_equation="bmk,bkn->bmn",
+        direct_strategy_fn=_addmm_like_strategy,
+    )
 
 
 @register_op_strategy(aten._scaled_mm.default)

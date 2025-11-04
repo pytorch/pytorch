@@ -411,3 +411,88 @@ def shift_shard_dims_after_remove(
         else:
             normalized_placements.append(placement)
     return normalized_placements
+
+
+def has_exotic_placement(op_strategy: OpStrategy) -> bool:
+    """Check if any strategy has exotic placements (_StridedShard, etc.)."""
+    # Import locally to avoid circular dependency
+    from torch.distributed.tensor.placement_types import _StridedShard
+
+    for strategy in op_strategy.strategies:
+        for placement in strategy.output_spec.placements:
+            if isinstance(placement, _StridedShard):
+                return True
+    return False
+
+
+def generate_decomposition_strategies(
+    op_schema: OpSchema,
+    supported_target_placements: list[Sequence[tuple[Placement, ...]]],
+    compute_output_spec: Callable[[list[DTensorSpec]], DTensorSpec],
+) -> list[OpSpec]:
+    """
+    Generate decomposition strategies (redistribute → compute) for exotic placements.
+
+    Creates OpSpecs modeling explicit redistribution from current to target placements,
+    with redistribution costs populated for the cost model.
+
+    Args:
+        op_schema: Operation schema
+        supported_target_placements: Valid placement combinations per input
+        compute_output_spec: Function (list[DTensorSpec]) -> DTensorSpec
+
+    Returns:
+        List of OpSpec with redistribute_cost populated for each target combination
+    """
+    strategies: list[OpSpec] = []
+    mesh = op_schema.get_mesh_from_args()
+
+    # Extract tensor input strategies
+    input_strategies = []
+    for arg in op_schema.args_schema:
+        if isinstance(arg, OpStrategy):
+            input_strategies.append(arg)
+
+    if not input_strategies:
+        return strategies
+
+    for target_placements in supported_target_placements:
+        if len(target_placements) != len(input_strategies):
+            raise ValueError(
+                f"Target placements length ({len(target_placements)}) must match "
+                f"number of tensor inputs ({len(input_strategies)})"
+            )
+
+        target_specs: list[DTensorSpec] = []
+        redistribute_costs: list[list[float]] = []
+
+        for input_strategy, target_placement in zip(
+            input_strategies, target_placements
+        ):
+            if not input_strategy.strategies:
+                raise ValueError(f"Input strategy has no strategies: {input_strategy}")
+
+            current_spec = input_strategy.strategies[0].output_spec
+
+            target_spec = DTensorSpec(
+                mesh=mesh,
+                placements=target_placement,
+                tensor_meta=current_spec.tensor_meta,
+            )
+            target_specs.append(target_spec)
+
+            costs_for_this_input = generate_redistribute_costs(
+                input_strategy, target_spec
+            )
+            redistribute_costs.append(costs_for_this_input)
+
+        output_spec = compute_output_spec(target_specs)
+
+        strategy = OpSpec(
+            output_specs=output_spec,
+            input_specs=target_specs,
+            redistribute_cost=redistribute_costs,
+        )
+        strategies.append(strategy)
+
+    return strategies

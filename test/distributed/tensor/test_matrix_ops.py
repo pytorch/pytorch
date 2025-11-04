@@ -17,6 +17,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_utils import (
@@ -51,6 +52,14 @@ def scale_for_fp8(
 
 
 class DistMatrixOpsTest(DTensorTestBase):
+    @staticmethod
+    def _arange_nd(*sizes):
+        """Helper to create N-dimensional test tensors with sequential values."""
+        total = 1
+        for s in sizes:
+            total *= s
+        return torch.arange(total, dtype=torch.float32).view(sizes)
+
     @with_comms
     def test_addmm(self):
         device_mesh = self.build_device_mesh()
@@ -611,6 +620,85 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(dist_inp.grad.full_tensor(), inp.grad)
         self.assertEqual(dist_w1.grad.full_tensor(), w1.grad)
         self.assertEqual(dist_w2.grad.full_tensor(), w2.grad)
+
+    @with_comms
+    def test_mm_with_strided_shard(self):
+        """Test mm with _StridedShard placement (fixes #166598)."""
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # Baseline: matmul with standard Shard placements
+        A = distribute_tensor(self._arange_nd(4, 4), device_mesh, [Shard(1), Shard(1)])
+        B = distribute_tensor(self._arange_nd(4, 4), device_mesh, [Shard(0), Shard(0)])
+        expected_result = (A @ B).full_tensor()
+
+        # Test: matmul with _StridedShard
+        B_strided = distribute_tensor(
+            self._arange_nd(4, 4),
+            device_mesh,
+            [_StridedShard(0, split_factor=2), Shard(0)],
+        )
+        actual_result = (A @ B_strided).full_tensor()
+
+        self.assertEqual(
+            actual_result,
+            expected_result,
+            msg="matmul with _StridedShard should produce same result as standard Shard",
+        )
+
+    @with_comms
+    def test_bmm_with_strided_shard(self):
+        """Test bmm with _StridedShard placement (fixes #166598)."""
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # Baseline: bmm with standard Shard placements
+        A = distribute_tensor(
+            self._arange_nd(2, 4, 4), device_mesh, [Shard(2), Shard(2)]
+        )
+        B = distribute_tensor(
+            self._arange_nd(2, 4, 4), device_mesh, [Shard(1), Shard(1)]
+        )
+        expected_result = torch.bmm(A, B).full_tensor()
+
+        # Test: bmm with _StridedShard
+        B_strided = distribute_tensor(
+            self._arange_nd(2, 4, 4),
+            device_mesh,
+            [_StridedShard(1, split_factor=2), Shard(1)],
+        )
+        actual_result = torch.bmm(A, B_strided).full_tensor()
+
+        self.assertEqual(
+            actual_result,
+            expected_result,
+            msg="bmm with _StridedShard should produce same result as standard Shard",
+        )
+
+    @with_comms
+    def test_addmm_with_strided_shard(self):
+        """Test addmm with _StridedShard placement (fixes #166598)."""
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # Baseline: addmm with standard Shard placements
+        bias = distribute_tensor(
+            self._arange_nd(4, 4), device_mesh, [Replicate(), Replicate()]
+        )
+        A = distribute_tensor(self._arange_nd(4, 4), device_mesh, [Shard(1), Shard(1)])
+        B = distribute_tensor(self._arange_nd(4, 4), device_mesh, [Shard(0), Shard(0)])
+        expected_result = torch.addmm(bias, A, B).full_tensor()
+
+        # Test: addmm with _StridedShard
+        B_strided = distribute_tensor(
+            self._arange_nd(4, 4),
+            device_mesh,
+            [_StridedShard(0, split_factor=2), Shard(0)],
+        )
+        actual_result = torch.addmm(bias, A, B_strided).full_tensor()
+
+        self.assertEqual(
+            actual_result,
+            expected_result,
+            msg="addmm with _StridedShard should produce same result as standard Shard",
+        )
 
 
 instantiate_parametrized_tests(DistMatrixOpsTest)

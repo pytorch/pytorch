@@ -22,6 +22,7 @@ from torch.distributed.tensor._dtensor_spec import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -764,6 +765,11 @@ def redistribute_local_tensor(
                     new_local_tensor = partial_spec._reduce_value(
                         local_tensor, device_mesh, i
                     )
+                elif isinstance(current, _StridedShard):
+                    # _StridedShard must be checked before is_shard() because it inherits from Shard
+                    new_local_tensor = current._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
                 elif current.is_shard():
                     current_placement = cast(Shard, current)
                     new_local_tensor = current_placement._to_replicate_tensor(
@@ -786,6 +792,16 @@ def redistribute_local_tensor(
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
                         local_tensor, device_mesh, i, my_coordinate[i]
+                    )
+                elif isinstance(current, _StridedShard):
+                    # _StridedShard → Shard: use two-hop via Replicate for correctness
+                    # Step 1: _StridedShard → Replicate
+                    replicate_tensor = current._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
+                    # Step 2: Replicate → Shard
+                    new_local_tensor = target_placement._replicate_to_shard(
+                        replicate_tensor, device_mesh, i, my_coordinate[i]
                     )
                 else:
                     assert current.is_shard(), (
