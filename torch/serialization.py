@@ -1393,7 +1393,7 @@ def load(
         # Load all tensors onto GPU 1
         >>> torch.load(
         ...     "tensors.pt",
-        ...     map_location=lambda storage, loc: storage.cuda(1),
+        ...     map_location=lambda storage, loc: storage.cuda(1),  # type: ignore[attr-defined]
         ...     weights_only=True,
         ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
