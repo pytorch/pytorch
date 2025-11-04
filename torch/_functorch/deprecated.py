@@ -63,6 +63,7 @@ def vmap(
     randomness: str = "error",
     *,
     chunk_size=None,
+    chunk_with_scan=False,
 ) -> Callable:
     warn_deprecated("vmap", "torch.vmap")
     return apis.vmap(func, in_dims, out_dims, randomness, chunk_size=chunk_size)

@@ -26,6 +26,7 @@ from torch._functorch.predispatch import (
 from torch.utils._pytree import (
     _broadcast_to_and_flatten,
     tree_flatten,
+    tree_map,
     tree_map_,
     tree_unflatten,
     TreeSpec,
@@ -258,7 +259,97 @@ def _get_name(func: Callable):
     return repr(func)
 
 
-def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
+def _flat_vmap_chunk_with_scan(
+    func,
+    batch_size,
+    flat_in_dims,
+    flat_args,
+    args_spec,
+    chunk_size,
+    randomness,
+    out_dims,
+    **kwargs,
+):
+    if batch_size % chunk_size != 0:
+        # TODO: support padding
+        raise NotImplementedError(
+            f"vmap(chunk_with_scan=True): batch_size ({batch_size}) must be divisible by chunk_size ({chunk_size})"
+        )
+    if out_dims != 0:
+        raise NotImplementedError(
+            f"vmap(chunk_with_scan=True): we only support out_dims=0 for now, got {out_dims}"
+        )
+
+    num_chunks = batch_size // chunk_size
+
+    # strategy: Overall, we're going to do a scan(vmap(f), ...).
+    #
+    # We're going to create a scan dimension by:
+    # - move all the in_dims to the front.
+    # - Then split B into (chunk_size, num_chunks, *).
+    # - Then scan over the chunk_size.
+    #
+    # We need to additionally split tensors into ones that have
+    # bdim and ones that don't. We're only going to scan
+    # over the tensors that do have bdim (that are being vmapped over)
+    # The other tensors we're going to implicitly capture in the function
+    # to be scanned over.
+
+    def reshape_for_scan(x, in_dim):
+        x = x.movedim(in_dim, 0)
+        x = x.reshape(chunk_size, num_chunks, *x.shape[1:])
+        return x
+
+    # Split into scanned vs unscanned args
+    flat_scanned_args = []
+    flat_unscanned_args = []
+
+    for in_dim, arg in zip(flat_in_dims, flat_args):
+        if in_dim is None:
+            flat_unscanned_args.append(arg)
+        else:
+            flat_scanned_args.append(reshape_for_scan(arg, in_dim))
+
+    def func_to_scan(dummy, flat_scanned_args):
+        flat_all_args = []
+
+        flat_scanned_args_it = iter(flat_scanned_args)
+        flat_unscanned_args_it = iter(flat_unscanned_args)
+
+        for in_dim in flat_in_dims:
+            if in_dim is None:
+                new_arg = next(flat_unscanned_args_it)
+            else:
+                new_arg = next(flat_scanned_args_it)
+            flat_all_args.append(new_arg)
+
+        return dummy.clone(), _flat_vmap(
+            func,
+            batch_size,
+            flat_in_dims,
+            flat_all_args,
+            args_spec,
+            out_dims,
+            randomness,
+            **kwargs,
+        )
+
+    from torch._higher_order_ops import scan
+    # scan requires a dummy tensor :/
+    _, result = scan(func_to_scan, torch.zeros(0), flat_scanned_args)
+
+    # We assume out_dims=0, so the result looks like:
+    # (scan_dim, bdim, *).
+    # Flatten the first two dimensions together.
+    #
+    # We can support other out_dims, (we're going to need to do the broadcast_to_and_dims thing)
+    # but the real annoying case is out_dims=None.
+    return tree_map(lambda x: x.flatten(0, 1), result)
+
+
+def vmap_impl(
+    func, in_dims, out_dims, randomness, chunk_size, chunk_with_scan, *args, **kwargs
+):
     lazy_load_decompositions()
     _check_out_dims_is_int_or_int_pytree(out_dims, func)
     batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(
@@ -266,6 +357,19 @@ def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
     )
 
     if chunk_size is not None:
+        if chunk_with_scan:
+            return _flat_vmap_chunk_with_scan(
+                func,
+                batch_size,
+                flat_in_dims,
+                flat_args,
+                args_spec,
+                chunk_size,
+                randomness,
+                out_dims,
+                **kwargs,
+            )
+
         chunks_flat_args = _get_chunked_inputs(
             flat_args, flat_in_dims, batch_size, chunk_size
         )

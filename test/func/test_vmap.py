@@ -3368,6 +3368,15 @@ class TestVmapOperators(Namespace.TestVmapBase):
     @parametrize("out_dim", [0, 1, 2])
     @parametrize("randomness", ["error", "same"])
     def test_vmap_chunksize(self, in_dim, out_dim, randomness):
+        self._test_vmap_chunksize(in_dim, out_dim, randomness, chunk_with_scan=False)
+
+    @parametrize("in_dim", [0, 1, 2])
+    @parametrize("out_dim", [0])
+    @parametrize("randomness", ["error", "same"])
+    def test_vmap_chunk_with_scan_basic(self, in_dim, out_dim, randomness):
+        self._test_vmap_chunksize(in_dim, out_dim, randomness, chunk_with_scan=True)
+
+    def _test_vmap_chunksize(self, in_dim, out_dim, randomness, chunk_with_scan):
         x = torch.randn(4, 5, 6)
         y = torch.randn_like(x)
 
@@ -3455,7 +3464,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
             expected_vmap = vmap(fn, **kwargs)(*args)
             for chunk_size in (1, 2, 3, 4, 7, 10, 16, 100):
                 torch.set_rng_state(rs)
-                output = vmap(fn, chunk_size=chunk_size, **kwargs)(*args)
+                output = vmap(fn, chunk_size=chunk_size, chunk_with_scan=chunk_with_scan, **kwargs)(*args)
                 self.assertEqual(output, expected_vmap)
 
     @parametrize("in_dim", [0, 1])
@@ -6045,8 +6054,7 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
     @parametrize("in_dim", [0, 1, 2])
-    @parametrize("out_dim", [0, 1, 2])
-    def test_vmap_chunksize(self, in_dim, out_dim):
+    def test_vmap_chunksize(self, in_dim):
         randomness = "different"
 
         x = torch.randn(4, 5, 6)
@@ -6059,11 +6067,58 @@ class TestRandomness(TestCase):
             output = vmap(
                 f,
                 in_dims=in_dim,
-                out_dims=out_dim,
                 randomness=randomness,
                 chunk_size=chunk_size,
             )(x)
             self._assert_all_slices_unique(output)
+
+    @parametrize("in_dim", [0, 1, 2])
+    def test_vmap_chunk_with_scan(self, in_dim):
+        randomness = "different"
+
+        x = torch.randn(4, 8, 16)
+
+        def f(x):
+            y = x.sin() + torch.rand_like(x)
+            return y
+
+        for chunk_size in [1, 2, 4]:
+            output = torch.vmap(
+                f,
+                in_dims=in_dim,
+                randomness=randomness,
+                chunk_size=chunk_size,
+                chunk_with_scan=True,
+            )(x)
+            self._assert_all_slices_unique(output)
+
+    @parametrize("in_dim1", [0, 1])
+    @parametrize("in_dim2", [0, 1])
+    def test_vmap_chunk_with_scan_nested(self, in_dim1, in_dim2):
+        randomness = "different"
+
+        x = torch.randn(4, 8, 16)
+
+        def f(x):
+            y = x.sin() + torch.rand_like(x)
+            return y
+
+        for chunk_size1 in [1, 2, 4]:
+            for chunk_size2 in [1, 2, 4]:
+                output = torch.vmap(
+                    lambda x: torch.vmap(
+                        f,
+                        in_dims=in_dim2,
+                        randomness=randomness,
+                        chunk_size=chunk_size2,
+                        chunk_with_scan=True,
+                    )(x),
+                    in_dims=in_dim1,
+                    randomness=randomness,
+                    chunk_size=chunk_size1,
+                    chunk_with_scan=True,
+                )(x)
+                self._assert_all_slices_unique(output)
 
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects

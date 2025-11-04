@@ -35,6 +35,7 @@ def vmap(
     randomness: str = "error",
     *,
     chunk_size=None,
+    chunk_with_scan=False,
 ) -> Callable:
     """
     vmap is the vectorizing map; ``vmap(func)`` returns a new function that
@@ -204,9 +205,14 @@ def vmap(
             f"vmap: chunk_size should be None or greater than 0. (got {chunk_size})"
         )
 
+    if chunk_size is None and chunk_with_scan:
+        raise ValueError(
+            "vmap: chunk_with_scan can only be used when chunk_size is specified."
+        )
+
     def wrapped(*args, **kwargs):
         return vmap_impl(
-            func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs
+            func, in_dims, out_dims, randomness, chunk_size, chunk_with_scan, *args, **kwargs
         )
 
     if not is_compiling():
