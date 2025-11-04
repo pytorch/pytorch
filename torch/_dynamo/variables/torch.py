@@ -1322,7 +1322,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             predicate_vt = None
             message_vt = None
 
-            if args and len(args) > 0:
+            if args:
                 predicate_vt = args[0]
                 rest_args = args[1:]
             else:
@@ -1349,7 +1349,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             message_eager = None
             message_graph_proxy = None
-            if len(args) >= 2:
+            if message_vt is not None:
                 if (
                     not isinstance(message_vt, NestedUserFunctionVariable)
                     or message_vt.has_closure()
