@@ -1818,8 +1818,9 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
         # ensure view() throws an error if extra positional arguments are given.
-        self.assertRaises(TypeError, lambda: tensor.view((tensor.numel(),), torch.float32))
-
+        self.assertRaises(
+            TypeError, lambda: tensor.view((tensor.numel(),), torch.float32)
+        )
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_reshape_view_semantics(self, device, dtype):
