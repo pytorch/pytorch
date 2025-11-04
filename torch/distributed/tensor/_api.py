@@ -11,7 +11,6 @@ import torch
 import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
-from torch._C import DispatchKey, DispatchKeySet
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
@@ -348,10 +347,11 @@ class DTensor(torch.Tensor):
         # subclasses and would have to special-case the DTensor dispatch key. We provide
         # this implementation to maintain composability with these other parts of
         # PyTorch.
-        #
-        # TODO: add RecordFunction to make it clearer in profiles when this slow path is
-        # being hit?
-        return func.redispatch(DispatchKeySet(DispatchKey.DTensor), *args, **kwargs)
+        return DTensor._op_dispatcher.dispatch(
+            func,
+            args,
+            kwargs or {},
+        )
 
     @staticmethod
     def from_local(

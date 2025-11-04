@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch._C import DispatchKey, DispatchKeySet
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
@@ -134,26 +135,20 @@ class OpDispatcher:
         # exception get raised if not.
         return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
-    def dispatch(
+    def _propagate_op_sharding_non_cached_dispatch_slow_path(
         self,
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+        op_info: OpInfo,
     ) -> object:
-        """
-        Main dispatching logic.  Follows precedence order:
-        (1) custom_op_handler
-        (2) registered sharding strategy, then rule
-        (3) composite implicit autograd decomposition
-        """
-        # extract local tensor and sharding infos to a OpInfo
-        op_info = self.unwrap_to_op_info(op_call, args, kwargs)
-
         try:
-            self.sharding_propagator.propagate(op_info)
+            return self.sharding_propagator.propagate_op_sharding_non_cached(
+                op_info.schema
+            )
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+                op_call.name(), DispatchKey.CompositeImplicitAutograd
             ):
                 # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
                 # so we manually decompose them, here
@@ -167,6 +162,32 @@ class OpDispatcher:
                 f"{e}\n\nSharding propagation failed for {op_info.schema}"
             ) from e
 
+    def dispatch(
+        self,
+        op_call: torch._ops.OpOverload,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> object:
+        # Leave a working implementation (this will hit the DTensor dispatch key) here
+        # so that any code that thinks it can use this will still work.
+        #
+        # TODO: add RecordFunction to make it clearer in profiles when this slow path is
+        # being hit?
+        return op_call.redispatch(DispatchKeySet(DispatchKey.DTensor), *args, **kwargs)
+
+    def _dispatch_fast_path_python_tail(
+        self,
+        op_call: torch._ops.OpOverload,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        op_info: OpInfo,
+    ) -> object:
+        """
+        Main dispatching logic, called from C++ fast path.  Follows precedence order:
+        (1) custom_op_handler
+        (2) registered sharding strategy, then rule
+        (3) composite implicit autograd decomposition
+        """
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
 
