@@ -512,9 +512,6 @@ def _is_valid_qlinear_lowering_pattern():
     def fn(match):
         if len(match.nodes) != 1:
             return False
-        # if match['binary_op_name'] == 'sum':
-        #     if match.kwargs['x_2'].users > 1:
-
         return match.nodes[0].target in (
             torch.ops.onednn.qlinear_pointwise.default,
             torch.ops.onednn.qlinear_pointwise.tensor,
@@ -628,8 +625,10 @@ def _register_quantized_linear_binary_lowering(
         unary_op_algorithm = kwargs["unary_op_algorithm"]
         if (
             binary_op_name == "sum"
-            # Support sum for a special case on VIT model when the output of previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
-            # is the x2 of current QLinearPointwiseBinaryPT2E even if x2 is a view of the output of previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
+            # Support sum for a special case on VIT model when the output of
+            # previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
+            # is the x2 of current QLinearPointwiseBinaryPT2E even if x2 is a view of
+            # the output of previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
             and (not _qlinear_binary_can_be_inplace(x2))
         ):
             binary_op_name = "add"

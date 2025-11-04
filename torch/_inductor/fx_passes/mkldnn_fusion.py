@@ -768,7 +768,8 @@ if torch._C._has_mkldnn:
     def _qlinear_binary_can_be_inplace(_other):
         if isinstance(_other.data, ir.BaseView):
             try:
-                # It can be inplaced when _other is the 2D to 3D view of a CppTemplateBuffer/QLinearPointwiseBinaryPT2E
+                # It can be inplaced when _other is the 2D to 3D view of
+                # a CppTemplateBuffer/QLinearPointwiseBinaryPT2E
                 # because if there is a view of CppTemplateBuffer/QLinearPointwiseBinaryPT2E,
                 # CppTemplateBuffer/QLinearPointwiseBinaryPT2E will not be used directly but the view.
                 if isinstance(
@@ -779,7 +780,8 @@ if torch._C._has_mkldnn:
                 else:
                     # This is a special case on VIT model:
                     # QLinearPointwiseBinaryPT2E(sum) -> QLinearPointwiseBinaryPT2E(sum) -> ...
-                    # That means the output of previous QLinearPointwiseBinaryPT2E is the input x2 of current QLinearPointwiseBinaryPT2E.
+                    # That means the output of previous QLinearPointwiseBinaryPT2E is
+                    # the input x2 of current QLinearPointwiseBinaryPT2E.
                     # Use V.graph.operations to check if _other is a view of the output
                     # of previous QLinearPointwiseBinaryPT2E (the inputs[6]).
                     for op in V.graph.operations:
