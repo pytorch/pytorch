@@ -10,6 +10,10 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/repeat_interleave_native.h>
+#include <ATen/ops/cumsum.h>
+#include <ATen/ops/_sparse_sparse_matmul_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/add_native.h>
@@ -886,6 +890,115 @@ static void sparse_mask_intersection_out_mps_kernel(
       /*accumulate_matches=*/false,
       /*require_same_sizes=*/false,
       /*coalesce_mask=*/false);
+}
+
+Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
+  TORCH_CHECK(mat1_.is_sparse() && mat2_.is_sparse(),
+              "sparse_sparse_matmul_mps: both inputs must be sparse COO tensors");
+  TORCH_CHECK(mat1_.is_mps() && mat2_.is_mps(),
+              "sparse_sparse_matmul_mps: both inputs must be on MPS device");
+  TORCH_CHECK(mat1_.dim() == 2 && mat2_.dim() == 2,
+              "sparse_sparse_matmul_mps: both inputs must be 2D matrices");
+  TORCH_CHECK(mat1_.dense_dim() == 0 && mat2_.dense_dim() == 0,
+              "sparse_sparse_matmul_mps: only scalar values supported (dense_dim == 0)");
+  TORCH_CHECK(mat1_.size(1) == mat2_.size(0),
+              "mat1 and mat2 shapes cannot be multiplied (", mat1_.size(0), "x", mat1_.size(1), " and ", mat2_.size(0), "x", mat2_.size(1), ")");
+  TORCH_CHECK(mat1_.scalar_type() == mat2_.scalar_type(),
+              "sparse_sparse_matmul_mps: mat1 dtype ", mat1_.scalar_type(),
+              " does not match mat2 dtype ", mat2_.scalar_type());
+
+  const auto device = mat1_.device();
+
+  auto A = mat1_.coalesce();
+  auto B = mat2_.coalesce();
+
+  const auto I = A.size(0);
+  const auto K = A.size(1);
+  const auto N = B.size(1);
+
+  const auto nnzA = A._nnz();
+  const auto nnzB = B._nnz();
+
+  // Early empty result, return an empty, coalesced tensor
+  if (I == 0 || N == 0 || K == 0 || nnzA == 0 || nnzB == 0) {
+    auto empty_idx = at::empty({2, 0}, at::device(device).dtype(at::kLong));
+    auto empty_val = at::empty({0}, at::device(device).dtype(mat1_.scalar_type()));
+    auto out = _sparse_coo_tensor_unsafe(empty_idx, empty_val, {I, N}, mat1_.options());
+    out._coalesced_(true);
+    return out;
+  }
+
+  const auto computeDtype = at::result_type(mat1_, mat2_);
+
+  auto A_idx = A._indices().contiguous();
+  auto A_val = A._values().to(computeDtype).contiguous();
+  auto A_i = A_idx.select(0, 0).contiguous();
+  auto A_k = A_idx.select(0, 1).contiguous();
+
+  auto B_idx = B._indices().contiguous();
+  auto B_val = B._values().to(computeDtype).contiguous();
+  auto B_k = B_idx.select(0, 0).contiguous();
+  auto B_j = B_idx.select(0, 1).contiguous();
+
+  // csr-style row pointers for B by k (the shared dimension)
+  Tensor row_ptr_B;
+  {
+    auto batch_ptr = at::tensor({0LL, nnzB}, at::device(device).dtype(at::kLong));
+    row_ptr_B = at::empty({K + 1}, at::device(device).dtype(at::kLong));
+    build_row_ptr_per_batch_mps(B_k, batch_ptr, /*B=*/1, /*I=*/K, row_ptr_B);
+  }
+
+  auto row_ptr_B_lo = row_ptr_B.narrow(0, 0, K);
+  auto row_ptr_B_hi = row_ptr_B.narrow(0, 1, K);
+  auto deg_B = row_ptr_B_hi.sub(row_ptr_B_lo);
+
+  auto counts = deg_B.index_select(0, A_k);
+
+  const int64_t P = counts.sum().item<int64_t>();
+  if (P == 0) {
+    auto empty_idx = at::empty({2, 0}, at::device(device).dtype(at::kLong));
+    auto empty_val = at::empty({0}, at::device(device).dtype(mat1_.scalar_type()));
+    auto out = _sparse_coo_tensor_unsafe(empty_idx, empty_val, {I, N}, mat1_.options());
+    out._coalesced_(true);
+    return out;
+  }
+
+  auto group_ids = repeat_interleave_mps(counts);
+
+  // exclusive cumsum of counts
+  auto offsets = cumsum(counts, /*dim=*/0).sub(counts);
+  auto offsets_gather = offsets.index_select(0, group_ids);
+  auto within = at::arange(P, at::device(device).dtype(at::kLong)).sub(offsets_gather);
+
+  // Map each output element to its source B row and position
+  auto k_per_out = A_k.index_select(0, group_ids);
+  auto start_in_B = row_ptr_B.index_select(0, k_per_out);
+  auto seg_index = start_in_B.add(within);
+
+  // Assemble candidate coo pairs and values
+  auto i_out = A_i.index_select(0, group_ids).contiguous();
+  auto j_out = B_j.index_select(0, seg_index).contiguous();
+  auto vA_out = A_val.index_select(0, group_ids).contiguous();
+  auto vB_out = B_val.index_select(0, seg_index).contiguous();
+  auto v_out = vA_out.mul(vB_out);
+
+  // build (2, P) indices
+  auto out_indices = at::empty({2, P}, at::device(device).dtype(at::kLong)).contiguous();
+  out_indices.select(0, 0).copy_(i_out);
+  out_indices.select(0, 1).copy_(j_out);
+
+  auto result = _sparse_coo_tensor_unsafe(
+      out_indices, v_out, {I, N}, mat1_.options().dtype(computeDtype));
+
+  result = result.coalesce();
+
+  if (result.scalar_type() != mat1_.scalar_type()) {
+    auto cast_vals = result._values().to(mat1_.scalar_type());
+    auto out = _sparse_coo_tensor_unsafe(result._indices(), cast_vals, {I, N}, mat1_.options());
+    out._coalesced_(true);
+    return out;
+  }
+  return result;
 }
 
 REGISTER_MPS_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_mps_kernel);
