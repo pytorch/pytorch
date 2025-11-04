@@ -434,12 +434,15 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index - 1)
 
-    def exit(self, tx: InstructionTranslatorBase, is_graph_break: bool) -> None:
+    def exit(
+        self, tx: InstructionTranslatorBase, is_graph_break: bool
+    ) -> VariableTracker | None:
         assert self.with_context is not None
         if (
             is_graph_break and self.with_context.exit_on_graph_break()
         ) or not is_graph_break:
             return self.with_context.exit(tx)  # type: ignore[arg-type]
+        return None
 
 
 class SpeculationLogDivergence(AssertionError):
@@ -3860,7 +3863,7 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        return ctx.enter(self)
+        return ctx.enter(self)  # type: ignore[arg-type]
 
     @staticmethod
     def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
