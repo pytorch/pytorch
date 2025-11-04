@@ -2346,10 +2346,13 @@ end
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            gpu_codecache: ROCmCodeCache | CUDACodeCache | XPUCodeCache = (
-                XPUCodeCache() if device_type == "xpu" else
-                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
-            )
+            cache_cls = {
+                "xpu": XPUCodeCache,
+                "rocm": ROCmCodeCache,
+                "cuda": CUDACodeCache,
+            }["rocm" if torch.version.hip else device_type]
+            gpu_codecache = cache_cls()
+
             gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
             # clear the list of aot kernels after each linking
             gpu_codecache.aot_kernels_o.clear()
@@ -2601,7 +2604,7 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
-        for i, r in enumerate(result):
+        for r in result:
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
 

@@ -507,7 +507,7 @@ class FSDPMemTracker(MemTracker):
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
         if (
-            func == torch.ops._c10d_functional.wait_tensor.default
+            func is torch.ops._c10d_functional.wait_tensor.default
             and active_fake_mode()
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
@@ -525,7 +525,7 @@ class FSDPMemTracker(MemTracker):
             reftype = _FSDPRefType.TEMP
         else:
             reftype = _FSDPRefType.ACT
-        if func == c10d._allgather_base_.default and self._fsdp_state in [
+        if func is c10d._allgather_base_.default and self._fsdp_state in [
             _FSDPState.PRE_FW,
             _FSDPState.PRE_BW,
         ]:
@@ -537,7 +537,7 @@ class FSDPMemTracker(MemTracker):
                 update_existing=True,
             )
         if (
-            func == c10d._reduce_scatter_base_.default
+            func is c10d._reduce_scatter_base_.default
             and self._fsdp_state == _FSDPState.POST_BW
         ):
             # pyrefly: ignore [unsupported-operation]

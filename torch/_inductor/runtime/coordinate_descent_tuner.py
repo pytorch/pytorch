@@ -331,3 +331,40 @@ class CoordescTuner:
         )
 
         return best_config
+
+    @staticmethod
+    def autotune_single_field(fn, init_val, min_val=None, max_val=None):
+        """
+        fn is a function that takes the field value and returns the benchmarking result
+        init_val is the starting point of autotuning.
+
+        Should work well for parabola like curve. Here is a real example
+        for split-size of mix-order-reduction: https://github.com/pytorch/pytorch/pull/166461
+        """
+        cache = {}
+
+        def _bench(val):
+            if val not in cache:
+                cache[val] = fn(val)
+                # print(f"split size {val} -> {cache[val]:.3f} ms")
+            return cache[val]
+
+        if min_val is None:
+            min_val = 1
+        if max_val is None:
+            max_val = 2**30  # some arbitrary large value
+
+        best_val = init_val
+        improved = True
+        while improved:
+            improved = False
+            candlist = [best_val // 2, best_val * 2]
+            for cand in candlist:
+                cand = max(cand, min_val)
+                cand = min(cand, max_val)
+
+                if _bench(cand) < _bench(best_val):
+                    best_val = cand
+                    improved = True
+
+        return best_val
