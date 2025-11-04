@@ -298,7 +298,7 @@ def mutable_mapping_update(self, data=(), /, **kwargs):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
             self[key] = value
-    # FIXME: Need too many `VariableClass.call_obj_hasattr` changes to support this case.
+    # FIXME: Enabling the `elif`-branch bellow needs too many `VariableClass.call_obj_hasattr` changes.
     #   >>> class Foo:
     #   ...     def __init__(self):
     #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
@@ -308,6 +308,8 @@ def mutable_mapping_update(self, data=(), /, **kwargs):
     #   ...
     #   >>> dict(Foo())
     #   {'a': 0, 'b': 0, 'c': 0}
+    #
+    # > This is a rare case, so we comment it out for now.
     #
     # elif hasattr(data, "keys"):
     #     # Merge mapping-like object with PyMapping_Keys + PyObject_GetItem

@@ -301,6 +301,10 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
+        fbobjc_compiler_flags = [
+            "-Wno-switch-enum",
+            "-Wno-switch-default",
+        ],
         labels = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",

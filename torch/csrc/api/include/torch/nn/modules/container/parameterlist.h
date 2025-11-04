@@ -8,9 +8,9 @@
 namespace torch::nn {
 class ParameterListImpl : public Cloneable<ParameterListImpl> {
  public:
-  using Iterator = typename std::vector<
-      OrderedDict<std::string, torch::Tensor>::Item>::iterator;
-  using ConstIterator = typename std::vector<
+  using Iterator =
+      std::vector<OrderedDict<std::string, torch::Tensor>::Item>::iterator;
+  using ConstIterator = std::vector<
       OrderedDict<std::string, torch::Tensor>::Item>::const_iterator;
 
   ParameterListImpl() = default;
