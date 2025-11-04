@@ -272,8 +272,19 @@ class MixOrderReduction:
             (node1, node2) if g1[1] == ncol else (node2, node1)
         )
 
+        # We previously only check the contiguous_node has contiguous
+        # access to common_reads. But that turns out to be not enough.
+        # The contiguous node may access a buffer that's node use by
+        # other_ndoe. If that ascess is non-contiugous, generating
+        # mix-order reduction can be inefficient especially when we
+        # force XBLOCK to be 1
+        # if not all(
+        #     cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+        # ):
+        #     return False
         if not all(
-            cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+            cls.is_contiguous_load(dep.name, contiguous_node)
+            for dep in contiguous_node.read_writes.reads
         ):
             return False
 
@@ -316,7 +327,6 @@ class MixOrderReduction:
     def is_contiguous_load(cls, buf: str, parent_node: BaseSchedulerNode) -> bool:
         from torch._inductor.loop_body import MemoryUsageType
 
-        n_congituous_read = 0
         for node in parent_node.get_nodes():
             assert isinstance(node, SchedulerNode)
             loop_body = node._body
@@ -338,10 +348,11 @@ class MixOrderReduction:
                     var_symbols,
                     var_symbols,
                 )
-                n_congituous_read += stride_vars[-1] == 1
-                if n_congituous_read > 0:
-                    return True
-        return False
+
+                # stride==0 means a broadcast
+                if not (stride_vars[-1] == 0 or stride_vars[-1] == 1):
+                    return False
+        return True
 
 
 @dataclasses.dataclass
