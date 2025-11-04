@@ -917,11 +917,15 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        if self.device_props.type == "cpu":
-            return benchmarker.benchmark_cpu(kernel_call)
-
-        return benchmarker.benchmark_gpu(
-            kernel_call, rep=40, is_vetted_benchmarking=True
+        benchmark_kwargs = (
+            {}
+            if self.device_props.type == "cpu"
+            else {"rep": 40, "is_vetted_benchmarking": True}
+        )
+        return benchmarker.benchmark(
+            fn=kernel_call,
+            device=self.device_props.type,
+            **benchmark_kwargs,  # type: ignore[arg-type]
         )
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
