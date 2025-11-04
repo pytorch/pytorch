@@ -56,17 +56,27 @@ def scatter(inputs, target_gpus, dim=0):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
         if _is_namedtuple(obj):
-            # pyrefly: ignore  # no-matching-overload
-            return [type(obj)(*args) for args in zip(*map(scatter_map, obj))]
+            # pyrefly: ignore [no-matching-overload]
+            return [
+                # pyrefly: ignore [no-matching-overload]
+                type(obj)(*args)
+                # pyrefly: ignore  # no-matching-overload
+                for args in zip(*map(scatter_map, obj), strict=False)
+            ]
         if isinstance(obj, tuple) and len(obj) > 0:
-            # pyrefly: ignore  # no-matching-overload
-            return list(zip(*map(scatter_map, obj)))
+            # pyrefly: ignore [no-matching-overload]
+            return list(zip(*map(scatter_map, obj), strict=False))
         if isinstance(obj, list) and len(obj) > 0:
-            # pyrefly: ignore  # no-matching-overload
-            return [list(i) for i in zip(*map(scatter_map, obj))]
+            # pyrefly: ignore [no-matching-overload]
+            return [list(i) for i in zip(*map(scatter_map, obj), strict=False)]
         if isinstance(obj, dict) and len(obj) > 0:
-            # pyrefly: ignore  # no-matching-overload
-            return [type(obj)(i) for i in zip(*map(scatter_map, obj.items()))]
+            # pyrefly: ignore [no-matching-overload]
+            return [
+                # pyrefly: ignore [no-matching-overload]
+                type(obj)(i)
+                # pyrefly: ignore  # no-matching-overload
+                for i in zip(*map(scatter_map, obj.items()), strict=False)
+            ]
         return [obj for _ in target_gpus]
 
     # After scatter_map is called, a scatter_map cell will exist. This cell
@@ -127,13 +137,13 @@ def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) 
         if isinstance(out, dict):
             if not all(len(out) == len(d) for d in outputs):
                 raise ValueError("All dicts must have the same number of keys")
-            # pyrefly: ignore  # not-callable
+            # pyrefly: ignore [not-callable]
             return type(out)((k, gather_map([d[k] for d in outputs])) for k in out)
         if _is_namedtuple(out):
-            # pyrefly: ignore  # no-matching-overload
-            return type(out)._make(map(gather_map, zip(*outputs)))
-        # pyrefly: ignore  # no-matching-overload
-        return type(out)(map(gather_map, zip(*outputs)))
+            # pyrefly: ignore [no-matching-overload]
+            return type(out)._make(map(gather_map, zip(*outputs, strict=True)))
+        # pyrefly: ignore [no-matching-overload]
+        return type(out)(map(gather_map, zip(*outputs, strict=True)))
 
     # Recursive function calls like this create reference cycles.
     # Setting the function to None clears the refcycle.

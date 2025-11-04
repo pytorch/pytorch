@@ -343,7 +343,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
     def test_fusion_acc_large_reads(self):
         def f(x, y, z):
             res = torch.zeros_like(x[0])
-            for i in range(4):
+            for _ in range(4):
                 temp = torch.matmul(x, y) + z
                 res = res + temp
             return res

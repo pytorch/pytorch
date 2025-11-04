@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -16,6 +16,8 @@ from torch.utils._ordered_set import OrderedSet
 
 # Prevent circular import
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._inductor.runtime.triton_compat import Config
     from torch._inductor.scheduler import BaseSchedulerNode
 
@@ -55,6 +57,8 @@ num_loop_reordering = 0
 # counter for parallel reduction.
 parallel_reduction_count = 0
 
+codegen_mix_order_reduction = 0
+
 
 # reset all counters
 def reset() -> None:
@@ -68,6 +72,7 @@ def reset() -> None:
     global num_matches_for_scatter_upon_const_tensor
     global num_loop_reordering
     global parallel_reduction_count
+    global codegen_mix_order_reduction
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -81,6 +86,7 @@ def reset() -> None:
     num_matches_for_scatter_upon_const_tensor = 0
     num_loop_reordering = 0
     parallel_reduction_count = 0
+    codegen_mix_order_reduction = 0
 
 
 @dataclass
