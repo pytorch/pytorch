@@ -291,7 +291,7 @@ class FunctionalTensor(torch.Tensor):
     def _wrap_maybe_functional_output(self, out):
         mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
         if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
-            return FunctionalTensor(out, mode) if mode is not None else torch._from_functional_tensor(out)
+            return FunctionalTensor(out, mode) if isinstance(mode, FunctionalTensorMode) else torch._from_functional_tensor(out)
         return out
 
     def to_dense(self):  # type: ignore[override]
