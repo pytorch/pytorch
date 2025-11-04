@@ -1662,7 +1662,7 @@ class _InProcessFxCompile(FxCompile):
                                 compile_id
                             )
 
-                    compiled_graph = CompiledFxGraph(
+                    return CompiledFxGraph(
                         # pyrefly: ignore [bad-argument-type]
                         compiled_fn,
                         graph,
@@ -1683,11 +1683,6 @@ class _InProcessFxCompile(FxCompile):
                         inductor_provenance_tracking_node_mappings,
                         inductor_kernel_stack_trace_str,
                     )
-                    # Mark this as a fresh compilation (not loaded from cache)
-                    # so that custom op checks run on first invocation
-                    # See: https://github.com/pytorch/pytorch/issues/165349
-                    compiled_graph._is_fresh_compilation = True
-                    return compiled_graph
 
 
 def fx_codegen_and_compile(

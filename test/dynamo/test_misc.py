@@ -12960,13 +12960,21 @@ fn
 
             x = torch.randn(10, 10)
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "The output of this custom operator \(1\) must not also be an input",
-            ):
+            with torch._functorch.config.patch(check_custom_op_mode=True):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
+                # Shouldn't error here because we already invoked once
                 _ = compiled_fn(x)
-            # Shouldn't error here because there was a cache hit
-            _ = compiled_fn(x)
+
+                compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

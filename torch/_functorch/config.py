@@ -76,7 +76,7 @@ bundled_autograd_cache: bool = False
 autograd_cache_normalize_inputs = not is_fbcode()
 
 # Enable debug mode at first invocation to check if custom ops are valid
-check_custom_op_mode = not is_fbcode()
+check_custom_op_mode = False
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
