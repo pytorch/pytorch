@@ -142,7 +142,7 @@ class TorchDispatchMode:
         if "__torch_dispatch__" in cls.__dict__:
             raw = inspect.getattr_static(cls, "__torch_dispatch__")
             # _disable doesn't work on classmethods. This later fails in runtime anyways
-            if not isinstance(raw, classmethod) and not cls.ignore_compile_internals():
+            if not isinstance(raw, classmethod):
                 wrapped = torch._disable_dynamo(raw, recursive=True)
                 cast(Any, cls).__torch_dispatch__ = wrapped
 
