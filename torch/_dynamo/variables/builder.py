@@ -44,6 +44,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._C._dynamo import VariableTrackerMeta
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
     get_external_object_by_index,
@@ -168,7 +169,6 @@ from .base import (
     ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
-    VariableTrackerMeta,
 )
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -3826,7 +3826,7 @@ class SourcelessBuilder:
         def passthrough(tx: "InstructionTranslator", value):
             return value
 
-        for cls in VariableTrackerMeta.all_subclasses:
+        for cls in VariableTrackerMeta.get_all_subclasses():
             handlers[cls] = passthrough
         return handlers
 

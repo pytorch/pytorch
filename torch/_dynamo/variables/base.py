@@ -18,6 +18,7 @@ from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
+from torch._C._dynamo import VariableTrackerMeta as C_VariableTrackerMeta
 from torch._guards import Guard
 from torch.fx.proxy import Node
 
@@ -235,7 +236,7 @@ class VariableTrackerMeta(type):
         VariableTrackerMeta.all_subclasses.append(cls)
 
 
-class VariableTracker(metaclass=VariableTrackerMeta):
+class VariableTracker(metaclass=C_VariableTrackerMeta):
     """
     Base class for tracked locals and stack values
 
