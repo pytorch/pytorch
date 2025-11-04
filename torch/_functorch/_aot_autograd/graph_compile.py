@@ -104,7 +104,7 @@ _thread_local = threading.local()
 
 
 @contextmanager
-def saved_tensor_hook_context(state: dict[str, Any]):
+def _saved_tensor_hook_context(state: dict[str, Any]):
     previous_state = getattr(_thread_local, "state", None)
     try:
         _thread_local.state = state
@@ -118,7 +118,7 @@ def saved_tensor_hook_context(state: dict[str, Any]):
                 delattr(_thread_local, "state")
 
 
-def get_saved_tensor_hook_context() -> dict[str, Any] | None:
+def _get_saved_tensor_hook_context() -> dict[str, Any] | None:
     return getattr(_thread_local, "state", None)
 
 
@@ -1123,9 +1123,9 @@ def maybe_inline_graph_saved_tensors_hooks(
             continue
 
         def _get_extra_info() -> dict[str, Any]:
-            return {"fw_graph": fw_g, "bw_graph": bw_g, "node": saved}
+            return {"_fw_graph": fw_g, "_bw_graph": bw_g, "_node": saved}
 
-        with saved_tensor_hook_context(_get_extra_info()):
+        with _saved_tensor_hook_context(_get_extra_info()):
             pack_out_val = pack_hook_gm(val)
 
         requires_sc_handling = any(
@@ -1138,7 +1138,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                 " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
 
-        with saved_tensor_hook_context(_get_extra_info()):
+        with _saved_tensor_hook_context(_get_extra_info()):
             pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
             pack_g = pack_gm.graph
             maybe_log_graph(
@@ -1218,7 +1218,7 @@ def maybe_inline_graph_saved_tensors_hooks(
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
         # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
-        with saved_tensor_hook_context(_get_extra_info()):
+        with _saved_tensor_hook_context(_get_extra_info()):
             unpack_gm = prepare_hook_gm(aot_config, unpack_hook_gm, (pack_out_val,))
             unpack_g = unpack_gm.graph
             maybe_log_graph(
