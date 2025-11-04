@@ -10,6 +10,7 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -17,7 +18,6 @@ from torch.testing._internal.inductor_utils import (
     IS_BIG_GPU,
 )
 
-from torch.testing._internal.common_utils import skipIfXpu
 
 @instantiate_parametrized_tests
 class DeterministicTest(TestCase):

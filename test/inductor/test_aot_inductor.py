@@ -1550,7 +1550,8 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     @unittest.skipIf(
-        not SM80OrLater and not HAS_XPU_AND_TRITON, "bfloat16 only supported in sm80+ or XPU"
+        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        "bfloat16 only supported in sm80+ or XPU",
     )
     def test_sdpa(self):
         class Model(torch.nn.Module):
@@ -1567,7 +1568,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(not SM80OrLater and not HAS_XPU_AND_TRITON, "bfloat16 only supported in sm80+ or XPU")
+    @unittest.skipIf(
+        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        "bfloat16 only supported in sm80+ or XPU",
+    )
     @unittest.skipIf(
         # for archs where this isn't lowered to flash attention, the math
         # backend will be used and it doesn't work for bfloat16

@@ -10139,6 +10139,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -10150,6 +10151,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([144, 144]),))
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin_with_duplicates(self):
         def fn(x):
             return (
@@ -10171,6 +10173,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1 = torch.randint(8, size=(1028, 1028))
         self.common(fn, (t1,))
 
+    @skipIfXpu(msg="# Incorrect XPU reference ")
     @xfail_if_mps  # eager nan is wrong, see https://github.com/pytorch/pytorch/issues/130295
     @skip_if_halide  # nan behavior
     def test_argmax_argmin_with_nan(self):
@@ -10271,6 +10274,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 [rank4_inps, rank3_inps, rank5_inps],
             )
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin3(self):
         def fn(x):
             return (
