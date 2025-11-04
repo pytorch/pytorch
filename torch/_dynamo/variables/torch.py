@@ -1319,13 +1319,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._check)
         def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
-            if not args or len(args) == 0:
+            predicate_vt = None
+            message_vt = None
+
+            if args and len(args) > 0:
+                predicate_vt = args[0]
+                rest_args = args[1:]
+            else:
+                rest_args = ()
+
+            if predicate_vt is None and "cond" in kwargs:
+                predicate_vt = kwargs.pop("cond")
+
+            if rest_args:
+                message_vt = rest_args[0]
+            elif "message" in kwargs:
+                message_vt = kwargs.pop("message")
+
+            if predicate_vt is None:
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
                         self.value,
-                        {},
+                        (),
                         {},
                     ),
                 )
@@ -1333,7 +1350,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             message_eager = None
             message_graph_proxy = None
             if len(args) >= 2:
-                message_vt = args[1]
                 if (
                     not isinstance(message_vt, NestedUserFunctionVariable)
                     or message_vt.has_closure()
@@ -1358,7 +1374,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
                     "_check_message", message_eager
                 )
-            predicate_vt = args[0]
 
             if predicate_vt.is_python_constant():
                 self.value(predicate_vt.as_python_constant(), message_eager)
