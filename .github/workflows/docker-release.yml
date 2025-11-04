@@ -8,6 +8,7 @@ on:
       - docker.Makefile
       - .github/workflows/docker-release.yml
       - .github/scripts/generate_docker_release_matrix.py
+      - .github/scripts/generate_binary_build_matrix.py
   push:
     branches:
       - nightly
