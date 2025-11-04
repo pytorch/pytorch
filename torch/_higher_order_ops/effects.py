@@ -7,8 +7,6 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
 from torch._library.effects import EffectType
-from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -29,79 +27,44 @@ OpType = Union["torch._ops.HigherOrderOperator", "torch._ops.OpOverload"]
 _EffectType = EffectType
 
 
-class SideEffectRegistry:
-    def __init__(self):
-        self._data = {}
-
-    def get_key(self, op: _op_identifier) -> str:
-        if isinstance(op, torch._ops.OpOverload):
-            op = op._name
-            if len(op.split(".")) == 1:
-                op = f"{op}.default"
-        elif isinstance(op, torch._ops.HigherOrderOperator):
-            op = f"{op.namespace}::{op.name()}.default"
-        elif isinstance(op, CustomOpDef):
-            op = op._qualname
-            if len(op.split(".")) == 1:
-                op = f"{op}.default"
-
-        assert isinstance(op, str), (
-            f"Expected op to be a string or an OpOverload, but got {op}"
-        )
-        assert len(op.split("::")) == 2, (
-            f'Expected op to be of the form "namespace::name.overload", but got {op}'
-        )
-        assert len(op.split(".")) == 2, (
-            'Expected op to be of the form "namespace::name.overload", '
-            f"but got {op}. If an overload is not specified, you can put "
-            '"default" as the overload'
-        )
-
+def _get_op_qualname(op: _op_identifier) -> str:
+    """Convert an op identifier to a qualified string key."""
+    if isinstance(op, torch._ops.OpOverload):
+        return op._name
+    elif isinstance(op, torch._ops.HigherOrderOperator):
+        return f"{op.namespace}::{op.name()}"
+    elif isinstance(op, CustomOpDef):
+        return op._qualname
+    elif isinstance(op, str):
         return op
 
-    def register(self, op: _op_identifier, effect: Optional[_EffectType]):
-        key = self.get_key(op)
-        if key in self._data:
-            raise RuntimeError(
-                f"Op {op} is already registered with effect {self._data[key]}"
-            )
-        self._data[key] = effect
-
-    def find(self, op: _op_identifier) -> Optional[_EffectType]:
-        key = self.get_key(op)
-        return self._data.get(key, None)
-
-    def contains(self, op: _op_identifier) -> bool:
-        key = self.get_key(op)
-        return key in self._data
-
-    def delete(self, op: _op_identifier):
-        key = self.get_key(op)
-        if key not in self._data:
-            raise RuntimeError(f"Op {op} is not registered as effectful")
-        del self._data[key]
+    raise ValueError(f"Invalid operator input {op}")
 
 
-SIDE_EFFECTS = SideEffectRegistry()
-
-SIDE_EFFECTS.register("aten::_print.default", _EffectType.ORDERED)
-SIDE_EFFECTS.register(call_torchbind, _EffectType.ORDERED)
-
-
-def _register_effectful_op(
-    op: _op_identifier, effect: Optional[EffectType]
-) -> RegistrationHandle:
-    SIDE_EFFECTS.register(op, effect)
-
-    def _deregister_effect():
-        _deregister_effectful_op(op)
-
-    return RegistrationHandle(_deregister_effect)
+def _register_effectful_op(op: _op_identifier, effect: Optional[EffectType]) -> None:
+    if isinstance(op, torch._ops.HigherOrderOperator):
+        qualname = _get_op_qualname(op)
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        entry.effect = effect
+    else:
+        torch.library._register_effectful_op(op, effect)
 
 
-def _deregister_effectful_op(op: _op_identifier):
-    if SIDE_EFFECTS.contains(op):
-        SIDE_EFFECTS.delete(op)
+def _deregister_effectful_op(op: _op_identifier) -> None:
+    qualname = _get_op_qualname(op)
+    entry = torch._library.simple_registry.singleton.find(qualname)
+    entry.effect = None
+
+
+def _get_effect(op: _op_identifier) -> Optional[_EffectType]:
+    qualname = _get_op_qualname(op)
+    entry = torch._library.simple_registry.singleton.find(qualname)
+    return entry.effect
+
+
+_register_effectful_op("aten::_print", _EffectType.ORDERED)
+_register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
+_register_effectful_op(call_torchbind, _EffectType.ORDERED)
 
 
 class WithEffects(HigherOrderOperator):
@@ -141,7 +104,7 @@ with_effects = WithEffects()
 def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
-        return not SIDE_EFFECTS.contains(op)
+        return not _get_effect(op)
 
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
@@ -161,29 +124,8 @@ def has_effects(op, args, kwargs) -> bool:
     return (
         isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         and not has_aliasing(op)
-        and get_effect_key(op, args, kwargs) is not None
+        and _get_effect(op) is not None
     )
-
-
-def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
-    if SIDE_EFFECTS.contains(op):
-        return SIDE_EFFECTS.find(op)
-
-    for arg in args:
-        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
-            # Add it to the table so that next time we see the same op we don't
-            # have to parse through the args again
-            SIDE_EFFECTS.register(op, _EffectType.ORDERED)
-            return _EffectType.ORDERED
-
-    for arg in kwargs.values():
-        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
-            # Add it to the table so that next time we see the same op we don't
-            # have to parse through the args again
-            SIDE_EFFECTS.register(op, _EffectType.ORDERED)
-            return _EffectType.ORDERED
-
-    return None
 
 
 def new_token_tensor() -> torch.Tensor:
@@ -290,7 +232,7 @@ def handle_effects(
     # Get a token. We can't do `tokens.get(op, torch.tensor([]))` because
     # this will create an empty tensor during proxy mode tracing if the token
     # doesn't exist. But the tokens should always exist during proxy mode tracing.
-    key = get_effect_key(op, args, kwargs)
+    key = _get_effect(op)
     assert key is not None
     if key not in tokens:
         assert allow_token_discovery, (

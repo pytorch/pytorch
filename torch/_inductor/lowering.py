@@ -7435,9 +7435,9 @@ def _sink_tokens(tokens):
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
-    from torch._higher_order_ops.effects import get_effect_key
+    from torch._higher_order_ops.effects import _get_effect
 
-    effect_type = get_effect_key(op, args, kwargs)
+    effect_type = _get_effect(op)
     assert effect_type is not None
     effectful_kernel = V.graph.effectful_ops[effect_type]
 
