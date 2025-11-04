@@ -1,14 +1,10 @@
 import builtins
-from typing import cast
+from typing import Any, cast
 
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
-from torch.fx.experimental.proxy_tensor import (
-    get_proxy_slot,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import get_proxy_slot, ProxyTorchDispatchMode
 
 
 class Print(HigherOrderOperator):
@@ -32,30 +28,31 @@ class Print(HigherOrderOperator):
 print = Print()
 
 
-def trace_print(proxy_mode, func_overload, format_str, **kwargs):
-    def _unwrap_proxy(e):
+@print.py_autograd_impl
+# pyre-ignore
+def print_autograd(format_str: str, **kwargs: object) -> None:
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+    ):
+        return None
+
+
+@print.py_impl(ProxyTorchDispatchMode)
+# pyre-ignore
+def print_proxy_torch_dispatch_mode(mode, format_str, **kwargs) -> None:
+    def _unwrap_proxy(e) -> Any:
         if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
             return e
         return get_proxy_slot(
             cast(torch.Tensor, e),
-            proxy_mode.tracer,
+            mode.tracer,
             e,
             lambda e: e.proxy,  # type: ignore[attr-defined]
         )
 
     node_args = (format_str, kwargs)
     proxy_args = pytree.tree_map(_unwrap_proxy, node_args)
-    print_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="print"
-    )
-    return track_tensor_tree(None, print_proxy, constant=None, tracer=proxy_mode.tracer)
-
-
-@print.py_impl(ProxyTorchDispatchMode)
-# pyre-ignore
-def print_proxy_torch_dispatch_mode(mode, format_str, **kwargs):
-    res = trace_print(mode, print, format_str, **kwargs)
-    return res
+    mode.tracer.create_proxy("call_function", print, proxy_args, {}, name="print")
 
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)

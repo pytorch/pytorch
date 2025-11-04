@@ -41,6 +41,22 @@ class TestHopPrint(TestCase):
 
         self.assertEqual(printed_output, "moo 1 2")
 
+    def test_tensor_print(self):
+        def f(x):
+            x = x + x
+            torch._higher_order_ops.print("moo {x}", x=x)
+            x = x * x
+            torch._higher_order_ops.print("yeehop {x}", x=x.shape[0])
+            return x
+
+        counters.clear()
+        x = torch.randn(3, 3)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(x)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(printed_output, f"moo {x * 2}\nyeehop 3")
+
     def test_print_with_proxy_graph(self):
         class M(torch.nn.Module):
             def forward(self, x):
