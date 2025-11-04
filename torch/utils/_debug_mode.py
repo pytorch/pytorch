@@ -23,6 +23,8 @@ __all__ = ["DebugMode", "get_active_debug_mode"]
 REDISTRIBUTE_FUNC = "redistribute_input"
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
+_RECORD_TRITON_OUTPUTS: bool = False
+_LOG_TRITON_HASHES: bool = False
 
 
 def _stringify_shape(shape) -> str:
@@ -263,6 +265,123 @@ class _NNModuleCall(_DebugCall):
         ]
 
 
+class _TritonKernelCall(_DebugCall):
+    """Triton kernel call from Inductor"""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        arg_names: list[str],
+        args: tuple,
+        kwargs: dict,
+        call_depth: int,
+    ):
+        super().__init__(call_depth)
+        self.kernel_name = kernel_name
+        self.arg_names = arg_names
+        self.args = args
+        self.kwargs = kwargs
+        self.args_str: Optional[str] = None
+        self.kwargs_str: Optional[str] = None
+
+    def record_triton_output(self) -> None:
+        """
+        Record triton kernel outputs/hashes after kernel execution.
+        Must be called after synchronization if accessing tensor data.
+        """
+        global _RECORD_TRITON_OUTPUTS, _LOG_TRITON_HASHES
+
+        # Only process if we still have original args (not stringified yet)
+        if not hasattr(self, "args") or self.args is None:
+            return
+
+        # Collect tensor args from args and kwargs
+        tensor_args = []
+        for arg in self.args:
+            if isinstance(arg, torch.Tensor):
+                tensor_args.append(arg)
+
+        for arg in self.kwargs.values():
+            if isinstance(arg, torch.Tensor):
+                tensor_args.append(arg)
+
+        if not tensor_args:
+            return
+
+        # Record outputs (clone tensors)
+        if _RECORD_TRITON_OUTPUTS:
+            if self.record is None:
+                self.record = {}
+            with torch._C._DisablePythonDispatcher():
+                self.record["output"] = [
+                    arg.clone() if isinstance(arg, torch.Tensor) else arg
+                    for arg in tensor_args
+                ]
+
+        # Log tensor hashes
+        if _LOG_TRITON_HASHES:
+            if self.log is None:
+                self.log = {}
+            with torch._C._DisablePythonDispatcher():
+                hashes = []
+                for arg in tensor_args:
+                    if isinstance(arg, torch.Tensor):
+                        try:
+                            hash_val = default_hash_fn(arg, use_scalar=True)
+                            hashes.append(hash_val)
+                        except Exception:
+                            hashes.append(None)
+                    else:
+                        hashes.append(None)
+                if any(h is not None for h in hashes):
+                    self.log["hash"] = hashes
+
+    def stringify_args(self, attributes: list[str]) -> None:
+        named_args: list[str] = []
+        for i, arg in enumerate(self.args):
+            arg_name = self.arg_names[i] if i < len(self.arg_names) else f"arg{i}"
+            arg_str = _arg_to_str(arg, attributes)
+            named_args.append(f"{arg_name}={arg_str}")
+        self.args_str = ", ".join(named_args)
+        del self.args
+
+        if self.kwargs:
+            self.kwargs_str = ", " + ", ".join(
+                f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
+            )
+        else:
+            self.kwargs_str = ""
+        del self.kwargs
+
+    def render(self, attributes: list[str]) -> str:
+        if self.args_str is not None:
+            args_kwargs_str = f"{self.args_str}{self.kwargs_str}"
+        else:
+            named_args: list[str] = []
+            for i, arg in enumerate(self.args):
+                arg_name = self.arg_names[i] if i < len(self.arg_names) else f"arg{i}"
+                arg_str = _arg_to_str(arg, attributes)
+                named_args.append(f"{arg_name}={arg_str}")
+            args_str = ", ".join(named_args)
+
+            if self.kwargs:
+                kwargs_str = ", " + ", ".join(
+                    f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
+                )
+            else:
+                kwargs_str = ""
+            args_kwargs_str = f"{args_str}{kwargs_str}"
+
+        base_str = f"[triton] {self.kernel_name}({args_kwargs_str})"
+        if self.log:
+            base_str += f"  # {self.log}"
+        return base_str
+
+    def __iter__(self):
+        # for BC; tuple(self) returns (kernel_name, args, kwargs, call_depth)
+        yield from [self.kernel_name, self.args_str, self.kwargs_str, self.call_depth]
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert out is None or isinstance(out, dict)
@@ -442,6 +561,18 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    @contextlib.contextmanager
+    def record_triton_call(
+        self,
+        kernel_name: str,
+        arg_names: list[str],
+        args: tuple[Any],
+        kwargs: dict[str, Any],
+    ):
+        call = _TritonKernelCall(kernel_name, arg_names, args, kwargs, self.call_depth)
+        self._record_call(call)
+        return call
+
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():
             result = ""
@@ -494,8 +625,14 @@ class DebugMode(TorchDispatchMode):
                 )
             return {"output": out}
 
-        with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
-            yield
+        global _RECORD_TRITON_OUTPUTS
+        try:
+            old_triton_record = _RECORD_TRITON_OUTPUTS
+            _RECORD_TRITON_OUTPUTS = True
+            with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
+                yield
+        finally:
+            _RECORD_TRITON_OUTPUTS = old_triton_record
 
     @staticmethod
     @contextlib.contextmanager
@@ -531,8 +668,14 @@ class DebugMode(TorchDispatchMode):
                 return None
             return out
 
-        with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
-            yield
+        global _LOG_TRITON_HASHES
+        try:
+            old_triton_hashes = _LOG_TRITON_HASHES
+            _LOG_TRITON_HASHES = True
+            with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
+                yield
+        finally:
+            _LOG_TRITON_HASHES = old_triton_hashes
 
 
 def get_active_debug_mode() -> Optional[DebugMode]:

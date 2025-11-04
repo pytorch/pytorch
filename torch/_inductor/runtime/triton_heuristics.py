@@ -25,6 +25,7 @@ from torch._dynamo.utils import counters, set_feature_use
 from torch._environment import is_fbcode
 from torch._inductor import metrics
 from torch._prims_common import compute_required_storage_length
+from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -1310,6 +1311,18 @@ class CachingAutotuner(KernelInterface):
         benchmark_run=False,
         **kwargs,
     ):  # type:ignore[override]
+        debug_mode = get_active_debug_mode()
+        debug_call = None
+        if debug_mode:
+            arg_names = list(self.triton_meta.get("signature", {}).keys())
+            debug_call = debug_mode.record_triton_call(
+                kernel_name=self.fn.__name__,
+                arg_names=arg_names,
+                args=args,
+                kwargs=kwargs,
+            )
+            debug_mode.call_depth += 1
+
         if hasattr(triton, "set_allocator"):
 
             def alloc_fn(size: int, align: int, stream: int | None):
@@ -1365,17 +1378,33 @@ class CachingAutotuner(KernelInterface):
                 args_without_constexprs,
                 profiler_kwargs,
             ):
-                return launcher(
+                result = launcher(
                     *args,
                     **kwargs,
                     stream=stream,
                 )
         else:
-            return launcher(
+            result = launcher(
                 *args,
                 **kwargs,
                 stream=stream,
             )
+
+        if debug_mode:
+            debug_mode.call_depth -= 1
+            # Synchronize before recording outputs/hashes, since launcher() is async
+            # Only sync if we actually need to access tensor data
+            from torch.utils._debug_mode import (
+                _RECORD_TRITON_OUTPUTS,
+                _LOG_TRITON_HASHES,
+            )
+
+            if _RECORD_TRITON_OUTPUTS or _LOG_TRITON_HASHES:
+                device_interface = self.get_device_interface()
+                device_interface.synchronize(device_interface.current_device())
+
+            debug_call.record_triton_output()
+        return result
 
     def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config
