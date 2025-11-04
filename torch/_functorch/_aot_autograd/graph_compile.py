@@ -179,6 +179,9 @@ def aot_stage1_graph_capture(
             )
         )
 
+    print(f"in aot_stage1_graph_capture. maybe_subclass_meta.fw_metadata.static_input_indices:{maybe_subclass_meta.fw_metadata.static_input_indices if maybe_subclass_meta is not None and maybe_subclass_meta.fw_metadata is not None else None}")
+    print(f"in aot_stage1_graph_capture. aot_state.fw_metadata.static_input_indices:{aot_state.fw_metadata.static_input_indices}")
+
     return AOTGraphCapture(
         wrappers=wrappers,
         graph_module=graph,

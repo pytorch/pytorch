@@ -2318,7 +2318,7 @@ def compile_fx_forward(
     # force the outputs of invoke_subgraph subgraph to follow the
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
-
+    print(f"in compile_fx_foward. static_input_idxs:{get_static_input_idxs(fixed)}")
     return inner_compile(
         gm,
         example_inputs,
