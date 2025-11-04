@@ -15,6 +15,7 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import sys
 import types
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional, overload, TypeVar, Union
@@ -266,9 +267,20 @@ def _private_register_pytree_node(
 
 
 def _is_pytreespec_instance(
-    obj: Any, /
-) -> TypeIs[Union[TreeSpec, python_pytree.TreeSpec]]:
-    return isinstance(obj, (TreeSpec, python_pytree.TreeSpec))
+    obj: Any,
+    /,
+) -> TypeIs[Union[TreeSpec, python_pytree.PyTreeSpec]]:
+    if isinstance(obj, (TreeSpec, python_pytree.PyTreeSpec)):
+        return True
+    if "torch._dynamo.polyfills.pytree" in sys.modules:
+        # The PyTorch Dynamo pytree module is not always available, so we check if it is loaded.
+        # If the PyTorch Dynamo pytree module is loaded, we can check if the treespec
+        # is an instance of the PyTorch Dynamo TreeSpec class.
+        import torch._dynamo.polyfills.pytree as dynamo_pytree
+
+        if isinstance(obj, dynamo_pytree.PyTreeSpec):
+            return True
+    return False
 
 
 def treespec_leaf() -> TreeSpec:
