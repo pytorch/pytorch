@@ -77,7 +77,7 @@
 
     RCP_LN2 = 1.44269504
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
-    offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)    
+    offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
     
     if pid >= NUM_KV_BLOCKS:
         off_pid = pid - NUM_KV_BLOCKS
@@ -112,7 +112,9 @@
         DQ2 = DQ + dq_adj2
         LSE2 = LSE + off_chz2
         DELTA2 = DELTA + off_chz2
-
+        
+        # dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM], dtype=tl.float32)
+        dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM_ROUNDED], dtype=tl.float32)
         desc_q = None
         desc_do = None
         desc_k = None
@@ -142,11 +144,6 @@
             strides=(stride_vn, stride_vd),
             block_shape=[BLOCK_N2, V_HEAD_DIM_ROUNDED],
         )
-        {%- endif %}    
-        # dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM], dtype=tl.float32)
-        dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM_ROUNDED], dtype=tl.float32)
-        
-        {%- if USE_TMA %}
         q = tl.load_tensor_descriptor(
             desc_q,
             [(start_m2_block * BLOCK_M2).to(tl.int32), 0],
@@ -155,8 +152,7 @@
             desc_do,
             [(start_m2_block * BLOCK_M2).to(tl.int32), 0],
         )
-        {%- else %}       
-
+        {%- else %}      
         # load Q and do: they stay in SRAM throughout the inner loop.
         q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
         do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
@@ -177,8 +173,8 @@
         # KV_IDX and KV_NUM_BLKS are always contiguous.
         kv_indices = KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-        sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)       
-
+        sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        
         #offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
         dq = bwd_dq_inner(
             {{gen_argdefs()}},
@@ -250,8 +246,6 @@
             strides=(stride_vn, stride_vd),
             block_shape=[BLOCK_N1, V_HEAD_DIM_ROUNDED],
         )
-        {%- endif %}    
-        {%- if USE_TMA %}
         k = tl.load_tensor_descriptor(
             desc_k,
             [start_n1.to(tl.int32), 0],
@@ -325,7 +319,6 @@
                 IS_FULL_BLOCKS=False,
             )
 
-
             if HAS_FULL_BLOCKS:
                 # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                 # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
@@ -381,7 +374,6 @@ def bwd_dq_inner(
     MATMUL_PRECISION,
     IS_FULL_BLOCKS,
 ):
-
     {{gen_defines() | indent_except_first(1) }}
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
     RCP_LN2: tl.constexpr = 1.44269504
