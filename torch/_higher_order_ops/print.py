@@ -39,7 +39,9 @@ def print_autograd(format_str: str, **kwargs: object) -> None:
 
 @print.py_impl(ProxyTorchDispatchMode)
 # pyre-ignore
-def print_proxy_torch_dispatch_mode(mode, format_str, **kwargs) -> None:
+def print_proxy_torch_dispatch_mode(
+    mode: ProxyTorchDispatchMode, format_str: str, **kwargs: object
+) -> None:
     def _unwrap_proxy(e) -> Any:
         if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
             return e
