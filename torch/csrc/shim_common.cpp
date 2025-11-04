@@ -13,11 +13,6 @@
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
   auto list_ptr = std::make_unique<std::vector<StableIValue>>();
   list_ptr->reserve(size);
-  TORCH_WARN(
-      "In torch_new_list_reserve_size! size is: ",
-      size,
-      " and list_ptr->size() is: ",
-      list_ptr->size());
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *ret = list_pointer_to_list_handle(list_ptr.release()); });
 }
@@ -33,7 +28,6 @@ AOTITorchError torch_new_list_handle(
 
 AOTI_TORCH_EXPORT AOTITorchError
 torch_list_size(StableListHandle list_handle, size_t* size) {
-  TORCH_WARN("in torch_list_size");
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
     *size = list->size();
@@ -44,7 +38,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_list_get(
     StableListHandle list_handle,
     size_t index,
     StableIValue* element) {
-  TORCH_WARN("in torch_list_get with index: ", index);
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
     *element = list->at(index);
@@ -54,7 +47,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_list_get(
 AOTITorchError torch_list_emplace_back(
     StableListHandle list_handle,
     StableIValue element) {
-  TORCH_WARN("in torch_list_emplace_back");
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
     list->emplace_back(element);
@@ -63,7 +55,6 @@ AOTITorchError torch_list_emplace_back(
 
 AOTI_TORCH_EXPORT AOTITorchError
 torch_delete_list_object(StableListHandle list_handle) {
-  TORCH_WARN("in torch_delete_list_object");
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<StableIValue>* list_ptr =
         list_handle_to_list_pointer(list_handle);
@@ -133,27 +124,14 @@ static StableIValue from_ivalue(
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
     case c10::TypeKind::ListType: {
-      TORCH_WARN("In from_ivalue LIST TYPE");
       auto inner_type = type->castRaw<c10::ListType>()->getElementType();
-      TORCH_WARN("inner_type is: ", inner_type->annotation_str());
       auto ivalue_list = ivalue.toList();
-      TORCH_WARN(
-          "Finished calling toList! ivalue_list size is: ", ivalue_list.size());
       auto stableivalue_list = std::make_unique<std::vector<StableIValue>>();
-      TORCH_WARN(
-          "WE ARE DONE MAKING LIST! stableivalue_list size is: ",
-          stableivalue_list->size());
       stableivalue_list->reserve(ivalue_list.size());
       for (const auto& elem : ivalue_list) {
-        TORCH_WARN("in loop! about to call from_ivalue again");
         stableivalue_list->emplace_back(
             from_ivalue(inner_type, elem, extension_build_version));
       }
-      TORCH_WARN(
-          "Done with filling up our stableivalue list! size is: ",
-          stableivalue_list->size(),
-          " and the first element is: ",
-          stableivalue_list->at(0));
       return torch::stable::detail::_from(
           list_pointer_to_list_handle(stableivalue_list.release()),
           extension_build_version);
@@ -233,7 +211,6 @@ static c10::IValue to_ivalue(
       return ival;
     }
     case c10::TypeKind::ListType: {
-      TORCH_WARN("IN TO_IVALUE LIST TYPE");
       auto inner_type = type->castRaw<c10::ListType>()->getElementType();
       auto list_handle = torch::stable::detail::_to<StableListHandle>(
           stable_ivalue, extension_build_version);

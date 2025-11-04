@@ -373,11 +373,6 @@ struct ToImpl<std::vector<T>> {
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
     auto list_handle = to<StableListHandle>(val);
-    // we need to construct a std::vector<T> from the list_handle
-    // meaning we need to recursively call to<T> on each element
-    // meaning we need to be able to get the size and access the
-    // elements of our list handle, meaning we need to add these
-    // functions to the shim.
     size_t size;
     TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
     std::vector<T> result;
