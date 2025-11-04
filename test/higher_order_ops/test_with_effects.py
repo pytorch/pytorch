@@ -105,6 +105,7 @@ class TestWithEffects(TestCase):
         FileCheck().check_count("torch.ops.aten._print.default", 2, exactly=True).run(
             gm.code
         )
+        breakpoint()
 
         # With functionalization, it should appear wrapped with with_effects()
         gm, gs = aot_export_module(M(), inputs, trace_joint=False)
