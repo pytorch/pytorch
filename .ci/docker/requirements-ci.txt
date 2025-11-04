@@ -136,10 +136,21 @@ numba==0.61.2 ; python_version > "3.9"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
+<<<<<<< HEAD
 numpy==2.0.2 ; python_version == "3.9"
 numpy==2.1.2 ; python_version > "3.9"
 
 pandas==2.2.3
+=======
+numpy==1.22.4; python_version == "3.10"
+numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
+numpy==2.3.4; python_version >= "3.14"
+
+pandas==2.0.3; python_version < "3.13"
+pandas==2.2.3; python_version >= "3.13" and python_version < "3.14"
+pandas==2.3.3; python_version >= "3.14"
+>>>>>>> upstream/main
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
@@ -151,7 +162,8 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.13.0
+optree==0.13.0 ; python_version < "3.14"
+optree==0.17.0 ; python_version >= "3.14"
 #Description: A library for tree manipulation
 #Pinned versions: 0.13.0
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
@@ -249,8 +261,14 @@ scikit-image==0.22.0
 #Pinned versions: 0.20.3
 #test that import:
 
+<<<<<<< HEAD
 scipy==1.13.1 ; python_version == "3.9"
 scipy==1.14.1 ; python_version > "3.9"
+=======
+scipy==1.10.1 ; python_version <= "3.11"
+scipy==1.14.1 ; python_version > "3.11" and python_version < "3.14"
+scipy==1.16.2 ; python_version >= "3.14"
+>>>>>>> upstream/main
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -321,7 +339,8 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.3.0
+lxml==5.3.0 ; python_version < "3.14"
+lxml==6.0.2 ; python_version >= "3.14"
 #Description: This is a requirement of unittest-xml-reporting
 
 PyGithub==2.3.0
@@ -331,7 +350,9 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.19.1
+onnx==1.19.1 ; python_version < "3.14"
+# Unpin once Python 3.14 is supported. See  onnxruntime issue 26309.
+onnx==1.18.0 ; python_version == "3.14"
 #Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
@@ -356,7 +377,7 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pyyaml==6.0.2
+pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
 packaging==23.1

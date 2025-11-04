@@ -24,6 +24,7 @@ import textwrap
 import time
 import unittest
 from collections.abc import (
+    Callable,
     Collection,
     Generator,
     Iterator,
@@ -35,25 +36,20 @@ from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
-    Callable,
     cast,
+    Concatenate,
     Generic,
     Literal,
     NamedTuple,
     Optional,
     Protocol,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    Concatenate,
-    dataclass_transform,
-    ParamSpec,
-    Self,
-    TypeAlias,
-    TypeGuard,
-)
+from typing_extensions import dataclass_transform, ParamSpec, Self
 from unittest import mock
 
 import sympy
@@ -348,7 +344,7 @@ def _do_bench_using_profiling(
         ]
     ) as p:
         # Benchmark
-        for i in range(n_repeat):
+        for _ in range(n_repeat):
             # we clear the L2 cache before each run
             cache.zero_()
             # record time of `fn`
@@ -662,6 +658,7 @@ def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
 
 P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
+FN_TYPE = Callable[Concatenate[Any, P], RV]
 
 
 class CachedMethod(Protocol, Generic[P, RV]):
@@ -707,6 +704,52 @@ def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
     """
     # pyrefly: ignore [bad-argument-type]
     return cache_on_self(fn)
+
+
+def cache_on_self_and_args(
+    class_name: str,
+) -> Callable[[FN_TYPE[P, RV]], FN_TYPE[P, RV]]:
+    # include both class_name and fn_name in the key to support `super().fn(self, **args, **kwargs)` calls.
+
+    def wrapper(
+        fn: FN_TYPE[P, RV],
+    ) -> FN_TYPE[P, RV]:
+        key = f"__{class_name}_{fn.__name__}_cache"
+
+        # wrapper is likely on the hot path, compile a specialized version of it
+        ctx = {"fn": fn}
+        exec(
+            f"""\
+            def inner(self: Any, *args: P.args, **kwargs: P.kwargs) -> RV:
+                args_kwargs = (args, tuple(sorted(kwargs.items())))
+
+                if not hasattr(self, "{key}"):
+                    object.__setattr__(self, "{key}", {{}})
+
+                cache = self.{key}
+
+                try:
+                    return cache[args_kwargs]
+                except KeyError:
+                    pass
+
+                rv = fn(self, *args, **kwargs)
+
+                cache[args_kwargs] = rv
+                return rv
+            """.lstrip(),
+            ctx,
+        )
+        inner = functools.wraps(fn)(ctx["inner"])
+
+        def clear_cache(self: Any) -> None:
+            if hasattr(self, key):
+                delattr(self, key)
+
+        inner.clear_cache = clear_cache  # type: ignore[attr-defined]
+        return inner
+
+    return wrapper
 
 
 def aggregate_origins(
@@ -1868,6 +1911,77 @@ def use_triton_blackwell_tma_template(
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
+@functools.lru_cache(maxsize=1)
+def ensure_cute_available() -> bool:
+    """Check if CuTeDSL is importable; cache the result for reuse.
+
+    Call ensure_cute_available.cache_clear() after installing CuTeDSL
+    in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("cutlass.cute") is not None
+    except ImportError:
+        return False
+
+
+def use_blackwell_cutedsl_grouped_mm(
+    mat_a: Any,
+    mat_b: Any,
+    layout: Layout,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    offs: Optional[Any],
+    bias: Optional[Any],
+    scale_result: Optional[Any],
+) -> bool:
+    """
+    Returns True if we can use the blackwell kernel for grouped mm.
+    Required conditions:
+        1. CuTeDSL is available
+        2. We are on a blackwell arch
+        3. The dtype is bf16
+        4. Max autotune or max autotune gemm is enabled
+        6. A, B, and the output are 16B aligned
+        7. We are not using dynamic shapes
+        8. A is 2d
+        9. B is 3d
+        10. Offsets are provided
+        11. Bias and Scale are not provided
+    """
+    if not ensure_cute_available():
+        return False
+
+    from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    if not is_gpu(layout.device.type) and is_datacenter_blackwell_arch():
+        return False
+
+    layout_dtypes = [torch.bfloat16]
+    if not _use_template_for_gpu(layout, layout_dtypes):
+        return False
+
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+
+    # Checks for 16B ptr and stride alignment
+    if not can_use_tma(mat_a, mat_b, output_layout=layout):
+        return False
+
+    if any(is_dynamic(x) for x in [mat_a, mat_b]):
+        return False
+
+    if not a_is_2d or b_is_2d:
+        return False
+
+    if offs is None:
+        return False
+
+    if bias is not None or scale_result is not None:
+        return False
+
+    return True
+
+
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 
@@ -2508,11 +2622,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(torch.float32)
         else:
+            # pyrefly: ignore  # missing-argument
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2526,6 +2643,7 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
+    # pyrefly: ignore  # missing-attribute
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
@@ -3315,14 +3433,17 @@ def register_op_requires_libdevice_fp64(name: str) -> None:
     op_requires_libdevice_fp64.add(name)
 
 
-def get_current_backend() -> str:
+def get_current_backend(device_type: Optional[str] = None) -> str:
     from torch._inductor.virtualized import V
 
-    device_str = V.graph.get_current_device_or_throw().type
-    if device_str == "cpu":
+    if not device_type:
+        device_type = V.graph.get_current_device_or_throw().type
+    if device_type == "cpu":
         return config.cpu_backend
-    elif device_str == "mps":
+    elif device_type == "mps":
         return "mps"
+    elif device_type == "xpu":
+        return config.xpu_backend
     else:
         return config.cuda_backend
 
