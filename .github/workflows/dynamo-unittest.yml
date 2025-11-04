@@ -40,7 +40,7 @@ jobs:
       opt_out_experiments: lf
 
   dynamo-build:
-    name: linux-jammy-py${{ matrix.python-version }}-gcc11
+    name: dynamo-build-py${{ matrix.python-version }}
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     strategy:
@@ -59,7 +59,7 @@ jobs:
     secrets: inherit
 
   dynamo-test:
-    name: dynamo-test
+    name: dynamo-test-py${{ matrix.python-version }}
     uses: ./.github/workflows/_linux-test.yml
     needs: dynamo-build
     strategy:
