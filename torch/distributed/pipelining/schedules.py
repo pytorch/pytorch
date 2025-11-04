@@ -1844,6 +1844,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
         self.unsharded_stages = set()
 
+        # to manage autograd graph lifetime
+        self.ownership_tokens = {}
+
     def register_custom_function(
         self,
         computation_type: _ComputationType,
@@ -2114,6 +2117,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     kwarg_mbs[mb_index],  # type: ignore[index]
                     save_forward_output=return_outputs,
                 )
+                key = f"{stage.stage_index}_{mb_index}"
+                assert key not in self.ownership_tokens
+                self.ownership_tokens[key] = output.view_as(output).grad_fn
                 self._maybe_compute_loss(stage, output, target_mbs, mb_index)
 
                 # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
@@ -2181,10 +2187,13 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 self._assert_unsharded(stage)
                 self.backward_counter[stage_idx] += 1
                 last_backward = self.backward_counter[stage_idx] == self._n_microbatches
+                key = f"{stage.stage_index}_{mb_index}"
+                assert key in self.ownership_tokens
                 stage.backward_weight_one_chunk(
                     mb_index,
                     last_backward=last_backward,
                 )
+                del self.ownership_tokens[key]
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
