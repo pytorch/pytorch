@@ -59,7 +59,12 @@ from torch.testing._internal.common_fsdp import (
     patch_reshard,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_ROCM,
+    TEST_XPU,
+    xfailIf,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     FeedForward,
     ModelArgs,
@@ -1659,7 +1664,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
 
-    if torch.cuda.nccl.version()[:2] >= (2, 27):
+    if TEST_WITH_ROCM and torch.cuda.nccl.version()[:2] >= (2, 27):
         COLLECTIVE_RE = (
             r"NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ acc \(nil\) "
             "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
