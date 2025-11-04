@@ -1181,9 +1181,11 @@ class PyTreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> list[Self]:
+        """Get all the child treespecs."""
         return self._children.copy()
 
     def child(self, index: int) -> Self:
+        """Get the child treespec at the given index."""
         return self._children[index]
 
     def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
