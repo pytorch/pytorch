@@ -105,4 +105,5 @@ def unflatten(treespec: PyTreeSpec, leaves: Iterable[_Any]) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
+    # pyrefly: ignore [bad-argument-type]
     return _tree_unflatten(leaves, treespec)
