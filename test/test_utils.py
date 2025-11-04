@@ -885,12 +885,16 @@ class TestDeviceUtils(TestCase):
 
             torch.set_default_device(f"{device_type}:1")
             with torch.device(f"{device_type}:0"):
-                self.assertEqual(torch.get_default_device(), torch.device(f"{device_type}", 0))
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{device_type}", 0)
+                )
 
             torch.set_default_device("cpu")
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
             with torch.device(f"{device_type}:0"):
-                self.assertEqual(torch.get_default_device(), torch.device(f"{device_type}", 0))
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{device_type}", 0)
+                )
 
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
         finally:
