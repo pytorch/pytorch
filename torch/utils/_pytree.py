@@ -961,6 +961,7 @@ def _structseq_flatten_with_keys(
     d: structseq[T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _structseq_flatten(d)
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 

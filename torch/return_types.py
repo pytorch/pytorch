@@ -1,6 +1,7 @@
 import warnings
 from typing_extensions import deprecated
 
+# pyrefly: ignore [missing-module-attribute]
 from torch._C import _return_types as return_types
 
 
