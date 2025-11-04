@@ -34,7 +34,6 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
-    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -1573,7 +1572,9 @@ op_db: list[OpInfo] = [
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-        dtypesIfXPU=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.int8, torch.uint8),
+        dtypesIfXPU=floating_and_complex_types_and(
+            torch.half, torch.bfloat16, torch.int8, torch.uint8
+        ),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,
@@ -2002,9 +2003,7 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_solve_triangular,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            skipCPUIfNoLapack,
-        ),
+        skips=(skipCPUIfNoLapack,),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
         supports_forward_ad=True,
     ),

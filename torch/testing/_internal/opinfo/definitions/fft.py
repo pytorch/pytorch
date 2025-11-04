@@ -13,7 +13,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
 )
-from torch.testing._internal.common_utils import skipIfXpu, TEST_SCIPY, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_ROCM
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     ErrorInput,
@@ -137,9 +137,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
-        # decorators=[
-        #     skipIfXpu,
-        # ],
     ),
     SpectralFuncInfo(
         "fft.fft2",
@@ -163,7 +160,6 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         decorators=[
             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
-            #skipIfXpu,
         ],
         skips=(
             DecorateInfo(
@@ -197,7 +193,6 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[
-            #skipIfXpu,
             precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
         ],
     ),
@@ -231,9 +226,6 @@ op_db: list[OpInfo] = [
                 dtypes=(torch.complex64, torch.complex128),
             ),
         ),
-        decorators=[
-            #skipIfXpu,
-        ],
     ),
     SpectralFuncInfo(
         "fft.hfft2",
@@ -257,7 +249,6 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[
-            skipIfXpu,
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                 "TestFFT",
@@ -302,7 +293,6 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[
-            #skipIfXpu,
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                 "TestFFT",
@@ -405,9 +395,6 @@ op_db: list[OpInfo] = [
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
-        # decorators=[
-        #     skipIfXpu,
-        # ],
     ),
     SpectralFuncInfo(
         "fft.ifft2",
@@ -430,12 +417,11 @@ op_db: list[OpInfo] = [
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         decorators=[
-            #skipIfXpu,
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
+            )
         ],
     ),
     SpectralFuncInfo(
@@ -459,12 +445,11 @@ op_db: list[OpInfo] = [
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         decorators=[
-            #skipIfXpu,
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
+            )
         ],
     ),
     SpectralFuncInfo(
@@ -486,9 +471,6 @@ op_db: list[OpInfo] = [
         ),
         skips=(),
         check_batched_grad=False,
-        # decorators=[
-        #     skipIfXpu,
-        # ],
     ),
     SpectralFuncInfo(
         "fft.ihfft2",
@@ -512,7 +494,6 @@ op_db: list[OpInfo] = [
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=(
-            #skipIfXpu,
             # The values for attribute 'shape' do not match: torch.Size([5, 6, 5]) != torch.Size([5, 6, 6]).
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
             DecorateInfo(
@@ -545,7 +526,6 @@ op_db: list[OpInfo] = [
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=[
-            #skipIfXpu,
             # The values for attribute 'shape' do not match: torch.Size([5, 6, 5]) != torch.Size([5, 6, 6]).
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
             # Mismatched elements!
@@ -576,9 +556,6 @@ op_db: list[OpInfo] = [
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         check_batched_gradgrad=False,
-        # decorators=[
-        #     skipIfXpu,
-        # ],
     ),
     SpectralFuncInfo(
         "fft.irfft2",
@@ -602,12 +579,11 @@ op_db: list[OpInfo] = [
         ),
         check_batched_gradgrad=False,
         decorators=[
-            #skipIfXpu,
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
+            )
         ],
     ),
     SpectralFuncInfo(
@@ -632,12 +608,11 @@ op_db: list[OpInfo] = [
         ),
         check_batched_gradgrad=False,
         decorators=[
-            #skipIfXpu,
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
+            )
         ],
     ),
     OpInfo(

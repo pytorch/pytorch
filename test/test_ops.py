@@ -7,7 +7,6 @@ import os
 import re
 import unittest
 import warnings
-from enum import Enum
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import partial
@@ -105,18 +104,20 @@ _ref_test_ops = tuple(
 ops_skips = defaultdict(dict)
 
 ops_skips["xpu"] = {
-    '_native_batch_norm_legit': {torch.float32},
-    'addmv' : {torch.float32},
-    'cholesky_inverse': {torch.float32},
-    'geqrf': {torch.float32},
-    'histc': {torch.float32},
-    'mean': {torch.float32},
-    'mv': {torch.float32},
-    'narrow_copy': {torch.float32},
-    'native_batch_norm': {torch.float32},
-    'nn.functional.avg_pool2d': {torch.float32},
-    'torch.ops.aten._flash_attention_forward': {torch.float16},
+    "_native_batch_norm_legit": {torch.float32},
+    "addmv": {torch.float32},
+    "cholesky_inverse": {torch.float32},
+    "geqrf": {torch.float32},
+    "histc": {torch.float32},
+    "mean": {torch.float32},
+    "mv": {torch.float32},
+    "narrow_copy": {torch.float32},
+    "native_batch_norm": {torch.float32},
+    "nn.functional.avg_pool2d": {torch.float32},
+    "torch.ops.aten._flash_attention_forward": {torch.float16},
+    "var": {torch.float32},
 }
+
 
 def reduction_dtype_filter(op):
     if (
@@ -530,7 +531,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -726,7 +726,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
-    #@skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -745,7 +744,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -781,7 +779,6 @@ class TestCommon(TestCase):
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
@@ -817,7 +814,6 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -844,7 +840,6 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
-    #@skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
@@ -937,7 +932,6 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
-    #@skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
@@ -1078,8 +1072,10 @@ class TestCommon(TestCase):
     #   - if device, dtype are passed, device and dtype should match
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
-        if dtype in ops_skips[device.split(':')[0]].get(op.name, set()):
-            raise unittest.SkipTest(f"Skipped! {op.name} does not support dtype {dtype} on {device}.")
+        if dtype in ops_skips[device.split(":")[0]].get(op.name, set()):
+            raise unittest.SkipTest(
+                f"Skipped! {op.name} does not support dtype {dtype} on {device}."
+            )
 
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
@@ -1282,7 +1278,6 @@ class TestCommon(TestCase):
                     with self.assertRaises(exc_type, msg=msg_fail):
                         op_out(out=out)
 
-    
     @ops(
         [
             op
@@ -1321,7 +1316,6 @@ class TestCommon(TestCase):
         with self.assertRaises(RuntimeError, msg=msg), maybe_skip_size_asserts(op):
             op(sample.input, *sample.args, **sample.kwargs, out=out)
 
-    @skipXPU
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
         def helper(with_out, expectFail, op_to_test, inputs, *args, **kwargs):
@@ -1365,7 +1359,6 @@ class TestCommon(TestCase):
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
-    @skipXPU
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         # Acquires variants (method variant, inplace variant, operator variant, inplace_operator variant, aliases)
@@ -1546,7 +1539,6 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
-    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
@@ -1582,7 +1574,6 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
-    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
@@ -1611,7 +1602,7 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
-    #@skipXPU
+    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
@@ -1818,7 +1809,6 @@ class TestCommon(TestCase):
         self.fail(msg)
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
