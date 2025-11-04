@@ -6328,7 +6328,7 @@ class TestMPS(TestCaseMPS):
                 elu_result.backward(gradient=grad)
                 elu_result_cpu.backward(gradient=cpu_grad)
 
-                self.assertEqual(elu_result, elu_result_cpu, atol=1e-5, rtol=1e-5)
+                self.assertEqual(elu_result, elu_result_cpu)
                 self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too

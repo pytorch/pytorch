@@ -108,7 +108,7 @@ struct elu_functor {
     auto scale = static_cast<op_T>(params.scale);
     auto input_scale = static_cast<op_T>(params.input_scale);
     auto self = static_cast<op_T>(self_);
-    auto neg_res = alpha * expm1(self * input_scale);
+    auto neg_res = alpha * (::metal::precise::exp(self * input_scale) - 1);
     return static_cast<T>(scale * (self < 0 ? neg_res : self));
   }
 };
