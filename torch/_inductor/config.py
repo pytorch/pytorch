@@ -1558,7 +1558,7 @@ class triton:
     mix_order_reduction_split_size: Optional[int] = None
     mix_order_reduction_autotune_split_size = True
 
-    # Map for storing the amount of kernel runs with dumped imput tensors
+    # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
     kernel_dump_occurency_map: dict[str, int] = {}
 
