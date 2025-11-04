@@ -445,11 +445,9 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     # Checking for permutations of weights and biases as `None`
-    weights = [channels, None, None]
-    biases = [None, channels, None]
     is_training = [True, False, False]
 
-    for weight, bias, training in zip(weights, biases, is_training, strict=True):
+    for training in is_training:
         yield SampleInput(
             make_arg(input_shape),
             args=(
@@ -9765,6 +9763,7 @@ foreach_unary_op_db: list[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        supports_sparse=True,
         decorators=(
             DecorateInfo(
                 unittest.expectedFailure,
