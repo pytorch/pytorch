@@ -13219,6 +13219,27 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
+    def test_pytree_register_constant_with_side_effect(self):
+        class Foo:
+            pass
+
+        class Bar:
+            def __eq__(self, other):
+                return super().__eq__(other)
+
+            def __hash__(self):
+                return 0
+
+        python_pytree.register_constant(Bar)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, obj):
+            obj.attr = {3: Bar()}
+            return x + 1
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp, Foo()), inp + 1)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
