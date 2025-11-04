@@ -37,10 +37,14 @@ class StaticallyLaunchedCudaKernel:
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
+        # pyrefly: ignore [missing-attribute]
         if "hsaco" in kernel.asm:
+            # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["hsaco"]
             self.is_rocm = True
+        # pyrefly: ignore [missing-attribute]
         elif "cubin" in kernel.asm:
+            # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["cubin"]
             self.is_rocm = False
         else:
@@ -48,6 +52,7 @@ class StaticallyLaunchedCudaKernel:
                 "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
             )
 
+        # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
@@ -289,6 +294,7 @@ class StaticallyLaunchedCudaKernel:
                 if has_scratch:
                     arg_tys = arg_tys + "O"
                     args = (*args, None)
+        # pyrefly: ignore [bad-argument-type]
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
