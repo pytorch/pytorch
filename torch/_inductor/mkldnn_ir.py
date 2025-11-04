@@ -603,7 +603,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv_pointwise.default,
+            op_overload=torch.ops.onednn.qconv_pointwise.tensor,
             cpp_kernel_name=f"aoti_torch_{self.device_type}__qconv_pointwise_tensor",
         )
 
