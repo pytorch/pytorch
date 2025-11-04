@@ -298,7 +298,7 @@ def mutable_mapping_update(self, data=(), /, **kwargs):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
             self[key] = value
-    # FIXME: Enabling the `elif`-branch bellow needs too many `VariableClass.call_obj_hasattr` changes.
+    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
     #   >>> class Foo:
     #   ...     def __init__(self):
     #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
