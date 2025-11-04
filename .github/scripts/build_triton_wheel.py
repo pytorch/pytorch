@@ -45,7 +45,7 @@ def patch_init_py(
         orig = f.read()
     # Replace version
     orig = check_and_replace(
-        orig, f'__version__ = "{expected_version}"', f'__version__ = "{version}"'
+        orig, f"__version__ = '{expected_version}'", f'__version__ = "{version}"'
     )
     with open(path, "w") as f:
         f.write(orig)
