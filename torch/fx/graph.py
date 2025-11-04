@@ -818,6 +818,7 @@ class CodeGen:
                 "call_module",
             )
             if do_record:
+                # The double hash ## convention is used by post-processing to find the fx markers
                 body.append(
                     f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {i} ##'); _rf_{node.name}.__enter__()\n"
                 )

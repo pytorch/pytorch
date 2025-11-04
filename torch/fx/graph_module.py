@@ -909,6 +909,7 @@ class {module_name}(torch.nn.Module):
             _register_fx_metadata(filename, metadata)
 
             # Replace the placeholder in generated code with actual filename
+            # The double hash ## convention is used by post-processing to find the fx markers
             self._code = self._code.replace(
                 "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
                 f"torch._C._profiler._RecordFunctionFast('## {filename} ##')",

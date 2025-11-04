@@ -78,7 +78,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 import json
 import tempfile
 from torch.profiler import profile, ProfilerActivity
-from torch.fx._utils import map_recorded_events_to_aten_ops_with_stack_trace
+from torch.profiler._utils import map_recorded_events_to_aten_ops_with_stack_trace
 from torch.autograd.profiler_util import _canonicalize_profiler_events
 
 try:
@@ -225,7 +225,7 @@ def _enrich_profiler_traces(prof):
             trace_data = json.load(f)
 
         map_recorded_events_to_aten_ops_with_stack_trace(
-            trace_data, remove_fx_events=False
+            trace_data
         )
 
         events = []
@@ -4268,17 +4268,14 @@ event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
 event=cudaLaunchKernel node=addmm stack_trace=x = self.linear1(x)
-event=ampere_sgemm_32x128_ node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
 event=cudaLaunchKernel node=relu stack_trace=x = self.relu(x)
-event=void at::native::vec node=relu stack_trace=x = self.relu(x)
 event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)
-event=ampere_sgemm_32x128_ node=addmm_1 stack_trace=x = self.linear2(x)"""
+event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
@@ -4320,10 +4317,8 @@ event=ampere_sgemm_32x128_ node=addmm_1 stack_trace=x = self.linear2(x)"""
         self.assertExpectedInline(actual_traces, """\
 event=aten::add node=add stack_trace=return x + 1
 event=cudaLaunchKernel node=add stack_trace=return x + 1
-event=void at::native::vec node=add stack_trace=return x + 1
 event=aten::sub node=sub stack_trace=return x - 1
-event=cudaLaunchKernel node=sub stack_trace=return x - 1
-event=void at::native::vec node=sub stack_trace=return x - 1"""
+event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
@@ -4364,15 +4359,12 @@ event=void at::native::vec node=sub stack_trace=return x - 1"""
 
         actual_traces = _enrich_profiler_traces(prof)
         self.assertExpectedInline(actual_traces, """\
-event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
-event=cudaLaunchKernel node=mul stack_trace=m = torch.mul(x, y)
-event=void at::native::vec node=mul stack_trace=m = torch.mul(x, y)
-event=aten::sin node=sin stack_trace=s = m.sin()
-event=cudaLaunchKernel node=sin stack_trace=s = m.sin()
-event=void at::native::vec node=sin stack_trace=s = m.sin()
-event=aten::add node=add stack_trace=a = s + self.c
-event=cudaLaunchKernel node=add stack_trace=a = s + self.c
-event=void at::native::vec node=add stack_trace=a = s + self.c"""
+event=aten::mul node=mul stack_trace=a = s + self.c
+event=cudaLaunchKernel node=mul stack_trace=a = s + self.c
+event=aten::sin node=sin stack_trace=return a
+event=cudaLaunchKernel node=sin stack_trace=return a
+event=aten::add node=add stack_trace=File "/data/users/shangdiy/pytorch/test/test_fx.py", line 4347, in forward
+event=cudaLaunchKernel node=add stack_trace=File "/data/users/shangdiy/pytorch/test/test_fx.py", line 4347, in forward"""
             )
 
 
