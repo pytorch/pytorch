@@ -24,7 +24,41 @@ namespace detail {
 // radix_sort_pairs doesn't interact with value_t other than to copy
 // the data, so we can save template instantiations by reinterpreting
 // it as an opaque type.
-template <int N> struct alignas(N) OpaqueType { char data[N]; };
+// We use native integer types instead of char arrays to reduce register usage
+// in CUDA kernels. char arrays cause the compiler to allocate one register per
+// byte, while native types use registers more efficiently.
+// For sizes > 8 or unsupported sizes, we fall back to char array.
+template <int N> struct alignas(N) OpaqueType { 
+  char data[N]; 
+};
+
+template <> struct alignas(1) OpaqueType<1> { 
+  uint8_t data;
+  OpaqueType() = default;
+  OpaqueType(const OpaqueType&) = default;
+  OpaqueType& operator=(const OpaqueType&) = default;
+};
+
+template <> struct alignas(2) OpaqueType<2> { 
+  uint16_t data;
+  OpaqueType() = default;
+  OpaqueType(const OpaqueType&) = default;
+  OpaqueType& operator=(const OpaqueType&) = default;
+};
+
+template <> struct alignas(4) OpaqueType<4> { 
+  uint32_t data;
+  OpaqueType() = default;
+  OpaqueType(const OpaqueType&) = default;
+  OpaqueType& operator=(const OpaqueType&) = default;
+};
+
+template <> struct alignas(8) OpaqueType<8> { 
+  uint64_t data;
+  OpaqueType() = default;
+  OpaqueType(const OpaqueType&) = default;
+  OpaqueType& operator=(const OpaqueType&) = default;
+};
 
 template<typename key_t, int value_size>
 void radix_sort_pairs_impl(
