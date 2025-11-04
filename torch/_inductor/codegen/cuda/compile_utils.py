@@ -137,7 +137,7 @@ def _nvcc_arch_as_compile_option() -> str:
 def _nvcc_compiler_options() -> list[str]:
     arch = _nvcc_arch_as_compile_option()
     code = [f"sm_{arch}", f"compute_{arch}"]
-    if config.cutlass.enable_cuda_lto:
+    if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]
     options = [
         "-t=0",
@@ -153,9 +153,9 @@ def _nvcc_compiler_options() -> list[str]:
     ]
     if config.is_fbcode():
         options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
-    if config.cutlass.enable_debug_info:
+    if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
-    if config.cutlass.enable_ptxas_info:
+    if config.cuda.enable_ptxas_info:
         options.extend(
             [
                 "--keep",  # Keep the intermediate files for debugging (including ptx, sass, cubin etc.)
