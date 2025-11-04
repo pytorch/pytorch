@@ -16,6 +16,7 @@ from tools.testing.target_determination.heuristics.historical_edited_files impor
 from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics as AggregatedHeuristics,
     TestPrioritizations as TestPrioritizations,
+    TestsToRun as TestsToRun,
 )
 from tools.testing.target_determination.heuristics.llm import LLM
 from tools.testing.target_determination.heuristics.mentioned_in_pr import MentionedInPR

@@ -71,9 +71,11 @@ jobs:
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          set -euox pipefail
           unzip -o .additional_ci_files/llm_results/mappings.zip -d .additional_ci_files/llm_results || true
           python3 -m pip install boto3==1.35.42
-          python3 tools/testing/do_target_determination_for_s3.py
+          python3 tools/testing/do_target_determination_for_s3.py \
+            --workflow-ref "${{ github.workflow_ref }}" \
 
       - name: Upload TD results to s3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0

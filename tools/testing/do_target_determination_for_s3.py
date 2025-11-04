@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import sys
@@ -19,28 +20,45 @@ from tools.stats.import_test_stats import (
 )
 from tools.stats.upload_metrics import emit_metric
 from tools.testing.discover_tests import TESTS
-from tools.testing.target_determination.determinator import get_test_prioritizations
-from tools.testing.target_determination.heuristics.interface import (
+from tools.testing.target_determination import (
     AggregatedHeuristics,
-    TestPrioritizations,
+    get_job_info_from_workflow_file,
+    get_test_prioritizations,
+    TestsToRun,
 )
 
 
 sys.path.remove(str(REPO_ROOT))
 
 
-def import_results() -> TestPrioritizations:
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run target determination with job info"
+    )
+    parser.add_argument(
+        "--workflow-ref",
+        type=str,
+        default="",
+        help="Path to the GitHub workflow file to parse, this should correspond to github.workflow_ref in the github context",
+    )
+    args = parser.parse_args()
+    return args
+
+
+def import_results(job_name: str) -> TestsToRun:
     if not (REPO_ROOT / ".additional_ci_files/td_results.json").exists():
         print("No TD results found")
-        return TestPrioritizations([], {})
+        return TestsToRun([], [])
     with open(REPO_ROOT / ".additional_ci_files/td_results.json") as f:
         td_results = json.load(f)
-        tp = TestPrioritizations.from_json(td_results)
-
-    return tp
+        res = {k: TestsToRun.from_json(v) for k, v in td_results.items()}
+        if job_name not in res:
+            print(f"Job name {job_name} not found in TD results, using default")
+        return res.get(job_name, res.get("default", TestsToRun([], [])))
 
 
 def main() -> None:
+    args = parse_args()
     selected_tests = TESTS
 
     aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(selected_tests)
@@ -54,9 +72,21 @@ def main() -> None:
     copy_pytest_cache()
     copy_additional_previous_failures()
 
+    job_info = get_job_info_from_workflow_file(args.workflow_ref)
+    print(f"Job info: {json.dumps(job_info, indent=2)}")
+
     aggregated_heuristics = get_test_prioritizations(selected_tests)
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+    recommended_cutoffs_per_job = test_prioritizations.get_recommended_cutoffs(job_info)
+
+    json_serialized_cutoffs = {
+        k: v.to_json() for k, v in recommended_cutoffs_per_job.items()
+    }
+
+    print("Recommended Cutoffs Per Job:")
+    print(json.dumps(json_serialized_cutoffs, indent=2))
 
     print("Aggregated Heuristics")
     print(test_prioritizations.get_info_str(verbose=False))
@@ -74,7 +104,7 @@ def main() -> None:
         )
 
     with open(REPO_ROOT / "td_results.json", "w") as f:
-        f.write(json.dumps(test_prioritizations.to_json()))
+        f.write(json.dumps(json_serialized_cutoffs, indent=2))
 
 
 if __name__ == "__main__":

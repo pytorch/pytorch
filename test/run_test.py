@@ -2052,10 +2052,12 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
-    test_prioritizations = import_results()
-    if len(test_prioritizations.get_all_tests()) == 0:
+    testsToRun = import_results(
+        f"{os.environ.get('JOB_NAME', '')}|{os.environ.get('TEST_CONFIG', '')}"
+    )
+    if len(testsToRun.included) == 0:
         options.enable_td = False
-    test_prioritizations.amend_tests(selected_tests)
+    testsToRun.amend_tests(selected_tests)
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
@@ -2099,13 +2101,10 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    percent_to_run = 25 if options.enable_td else 100
-    print_to_stderr(
-        f"Running {percent_to_run}% of tests based on TD"
-        if options.enable_td
-        else "Running all tests"
-    )
-    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    include, exclude = testsToRun.included, testsToRun.excluded
+    if not options.enable_td:
+        print("TD based test selection is disabled")
+        include = include + exclude
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
@@ -2156,14 +2155,12 @@ def main():
 
         if IS_CI:
             for test, _ in all_failures:
-                test_stats = test_prioritizations.get_test_stats(test)
                 print_to_stderr("Emiting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
                         "selected_tests": selected_tests,
                         "failure": str(test),
-                        **test_stats,
                     },
                 )
             gen_additional_test_failures_file(
