@@ -519,6 +519,31 @@ class DTensorExportTest(TestCase):
             _count_op(joint_gm, torch.ops.higher_order.flex_attention_backward),
             2,
         )
+    
+    def test_dtensor_unbacked_symint(self):
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                val = torch.clamp(x.max(), min=1).item()
+                torch._check(val >= 1)
+                return x[:val]
+        # class Foo(torch.nn.Module):
+        #     def forward(self, x, y):
+        #         return x[y]
+
+        model = Foo()
+        batch_size = 4
+        seq_len = 64
+        embed_dim = 16
+        num_heads = 8
+
+        # Input tensor replicated across all devices
+        input = torch.randint(1000, (batch_size, seq_len, embed_dim))
+        inputs = (distribute_tensor(input, device_mesh, placements=[Replicate()]),)
+        _dynamo_graph_capture_for_export(model)(*inputs)
+            
+
 
     def test_union_typed_annotation(self):
         def fn(leaf: torch.Tensor | DTensor):

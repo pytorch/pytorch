@@ -376,11 +376,12 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
     mesh = input_strategy.mesh
     input_shape = input_strategy.shape
     input_ndim = input_strategy.ndim
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
     if not isinstance(dim, int):
         raise AssertionError(f"Expected int, got {type(dim)}")
     if start is None:
         start = 0
-    if end is None or end > input_shape[dim]:
+    if end is None or guard_or_false(end > input_shape[dim]):
         end = input_shape[dim]
     if not isinstance(start, IntLike):
         raise AssertionError(f"Expected IntLike, got {type(start)}")
@@ -394,7 +395,7 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
     start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
     end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
 
-    redundant_slice = start == 0 and end == input_shape[dim] and step == 1
+    redundant_slice = guard_or_false(start == 0) and guard_or_false(end == input_shape[dim]) and step == 1
 
     slice_strategy = OpStrategy([])
 

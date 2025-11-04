@@ -1341,6 +1341,7 @@ def compute_unbacked_bindings(
             if isinstance(example_value, torch.Tensor)
             else ""
         )
+        #torch.distributed.breakpoint()
         raise PendingUnbackedSymbolNotFound(
             f"Pending unbacked symbols {pending} not in returned outputs {example_value} {extra}.\n"
             "Did you accidentally call new_dynamic_size() or item() more times "
@@ -4899,6 +4900,8 @@ class ShapeEnv:
         symbol: sympy.Symbol = make_symbol(
             SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
+
+        torch.distributed.breakpoint()
         self.unbacked_symint_counter += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)

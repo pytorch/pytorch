@@ -153,6 +153,8 @@ class OpDispatcher:
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
 
+        print("OP call: ", op_call)
+
         try:
             self.sharding_propagator.propagate(op_info)
         except NotImplementedError:
