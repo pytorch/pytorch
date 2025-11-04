@@ -211,7 +211,6 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*inl.h',
     'aten/src/ATen/cpu/FlushDenormal.cpp',
-    'aten/src/ATen/cpu/Utils.cpp',
     'aten/src/ATen/cpu/vml.h',
     'aten/src/ATen/CPUFixedAllocator.h',
     'aten/src/ATen/Parallel*.h',
@@ -230,8 +229,6 @@ exclude_patterns = [
     'c10/util/win32-headers.h',
     'c10/test/**/*.h',
     'third_party/**/*',
-    'torch/csrc/api/include/torch/nn/modules/common.h',
-    'torch/csrc/api/include/torch/linalg.h',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
@@ -243,7 +240,6 @@ exclude_patterns = [
     'torch/csrc/utils/generated_serialization_types.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
-    'aten/src/ATen/ExpandBase.h',
 ]
 init_command = [
     'python3',
