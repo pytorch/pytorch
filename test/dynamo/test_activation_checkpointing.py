@@ -18,7 +18,7 @@ from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu
+from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
@@ -275,7 +275,14 @@ class ActivationCheckpointingViaTagsTests(
 
             run(export_compiler)
 
-    def test_tags_function(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_function(self, device, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -284,28 +291,31 @@ class ActivationCheckpointingViaTagsTests(
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, device=device, requires_grad=True)
-            y = torch.randn(4, 4, device=device, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops, freq=1, op=torch.ops.aten.mm.default
-            )
-            bw_compiler = functools.partial(
-                count_ops, freq=3, op=torch.ops.aten.mm.default
-            )  # mm recomputed in the bwd
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
-    def test_tags_function_via_global_checkpoint(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_function_via_global_checkpoint(self, device, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -313,28 +323,31 @@ class ActivationCheckpointingViaTagsTests(
             # This goes through VariableBuilder
             return checkpoint(gn, torch.sin(x), y, use_reentrant=True)
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, device=device, requires_grad=True)
-            y = torch.randn(4, 4, device=device, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops, freq=1, op=torch.ops.aten.mm.default
-            )
-            bw_compiler = functools.partial(
-                count_ops, freq=3, op=torch.ops.aten.mm.default
-            )  # mm recomputed in the bwd
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
-    def test_tags_function_with_kwargs(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_function_with_kwargs(self, device, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -343,28 +356,31 @@ class ActivationCheckpointingViaTagsTests(
                 gn, torch.sin(x), y, use_reentrant=False
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, device=device, requires_grad=True)
-            y = torch.randn(4, 4, device=device, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops, freq=1, op=torch.ops.aten.mm.default
-            )
-            bw_compiler = functools.partial(
-                count_ops, freq=3, op=torch.ops.aten.mm.default
-            )  # mm recomputed in the bwd
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
-    def test_tags_sequential_layers(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_sequential_layers(self, device, partition_fn):
         def gn(x):
             x = x.cos()
             for _ in range(3):
@@ -377,29 +393,32 @@ class ActivationCheckpointingViaTagsTests(
             x = torch.utils.checkpoint.checkpoint(gn, x)
             return x
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, device=device, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops, freq=6, op=torch.ops.aten.mm.default
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                freqs=[2, 18],
-                ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
-            )  # mm recomputed in the bwd
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x)
+        fw_compiler = functools.partial(
+            count_ops, freq=6, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[2, 18],
+            ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x)
 
     @requires_cuda_and_triton
-    def test_tags_multiple_checkpoints(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_multiple_checkpoints(self, device, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -410,28 +429,31 @@ class ActivationCheckpointingViaTagsTests(
             z = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
             return z
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, device=device, requires_grad=True)
-            y = torch.randn(4, 4, device=device, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops, freq=2, op=torch.ops.aten.mm.default
-            )
-            bw_compiler = functools.partial(
-                count_ops, freq=6, op=torch.ops.aten.mm.default
-            )  # mm recomputed in the bwd
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
+        fw_compiler = functools.partial(
+            count_ops, freq=2, op=torch.ops.aten.mm.default
+        )
+        bw_compiler = functools.partial(
+            count_ops, freq=6, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
-    def test_tags_module(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_module(self, device, partition_fn):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -447,27 +469,30 @@ class ActivationCheckpointingViaTagsTests(
                 mod, torch.sin(x), use_reentrant=True
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(10, 10, device=device, requires_grad=True)
+        x = torch.randn(10, 10, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops, freq=1, op=torch.ops.aten.sigmoid.default
-            )
-            bw_compiler = functools.partial(
-                count_ops, freq=1, op=torch.ops.aten.sigmoid.default
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x)
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+        )
+        bw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x)
 
     @requires_cuda_and_triton
-    def test_tags_decomps(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_decomps(self, device, partition_fn):
         # Ensures that tags are passed on through decompositions as well
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -484,27 +509,23 @@ class ActivationCheckpointingViaTagsTests(
                 mod, torch.sin(x), use_reentrant=True
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(10, 10, device=device, requires_grad=True)
+        x = torch.randn(10, 10, device=device, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops, freq=1, op=torch.ops.aten.erf.default
-            )
-            bw_compiler = functools.partial(
-                count_ops, freq=1, op=torch.ops.aten.erf.default
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-                decompositions=lambda: import_module(
-                    "torch._inductor.compile_fx"
-                ).select_decomp_table(),
-            )
-            self._validate(fn, backend, x)
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.erf.default
+        )
+        bw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.erf.default
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+            decompositions=lambda: import_module(
+                "torch._inductor.compile_fx"
+            ).select_decomp_table(),
+        )
+        self._validate(fn, backend, x)
 
     @requires_cuda_and_triton
     @torch._inductor.config.patch(fallback_random=True)
@@ -759,7 +780,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_must_recompute(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_must_recompute(self, device, partition_fn):
         def context_fn_must_recompute_mm():
             must_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -780,7 +808,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 ),
             )
 
-        def _test(context_fn, bw_compiler, partitioner):
+        def _test(context_fn, bw_compiler, partition_fn):
             def gn(x):
                 return torch.cos(torch.sin(torch.matmul(x, x) @ x))
 
@@ -803,32 +831,28 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             backend = aot_autograd(
                 fw_compiler=fw_compiler,
                 bw_compiler=bw_compiler,
-                partition_fn=partitioner,
+                partition_fn=partition_fn,
             )
             self._validate(fn, backend, x)
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            _test(
-                context_fn=context_fn_must_recompute_mm,
-                bw_compiler=functools.partial(
-                    count_ops,
-                    freq=6,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 2 + 2 * 2 = 6)
-                    op=torch.ops.aten.mm.default,
-                ),
-                partitioner=partitioner,
-            )
-            _test(
-                context_fn=context_fn_no_recompute_mm,
-                bw_compiler=functools.partial(
-                    count_ops,
-                    freq=4,  # 2 bwd mm ops per fwd matmul
-                    op=torch.ops.aten.mm.default,
-                ),
-                partitioner=partitioner,
-            )
+        _test(
+            context_fn=context_fn_must_recompute_mm,
+            bw_compiler=functools.partial(
+                count_ops,
+                freq=6,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 2 + 2 * 2 = 6)
+                op=torch.ops.aten.mm.default,
+            ),
+            partition_fn=partition_fn,
+        )
+        _test(
+            context_fn=context_fn_no_recompute_mm,
+            bw_compiler=functools.partial(
+                count_ops,
+                freq=4,  # 2 bwd mm ops per fwd matmul
+                op=torch.ops.aten.mm.default,
+            ),
+            partition_fn=partition_fn,
+        )
 
     def test_sac_with_partial_context_fn(self):
         class CustomPolicy:
@@ -864,7 +888,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_must_not_recompute_gemm(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_must_not_recompute_gemm(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -885,38 +916,41 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=2,
-                op=torch.ops.aten.mm.default,
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                # We would've expected 6 here
-                # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
-                # if we didn't enable selective checkpointing.
-                freq=4,
-                op=torch.ops.aten.mm.default,
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=2,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # We would've expected 6 here
+            # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
+            # if we didn't enable selective checkpointing.
+            freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
     def test_compile_selective_checkpoint_must_not_recompute_gemm_no_functionalization(
-        self, device
+        self, device, partition_fn
     ):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -938,37 +972,40 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=1,
-                op=torch.ops.aten.sigmoid.default,
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                # Main check here is just that sigmoid is properly recomputed
-                # (we will see a sigmoid() and sigmoid_backward() in the bw graph)
-                freq=1,
-                op=torch.ops.aten.sigmoid.default,
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-                disable_functionalization=True,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=1,
+            op=torch.ops.aten.sigmoid.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # Main check here is just that sigmoid is properly recomputed
+            # (we will see a sigmoid() and sigmoid_backward() in the bw graph)
+            freq=1,
+            op=torch.ops.aten.sigmoid.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+            disable_functionalization=True,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_triton_kernel(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_triton_kernel(self, device, partition_fn):
         # Copy of the above test, but make sure that having a triton kernel in the
         # region does not error.
         def add_one(x):
@@ -1009,37 +1046,40 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=2,
-                op=torch.ops.aten.mm.default,
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                # We would've expected 6 here
-                # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
-                # if we didn't enable selective checkpointing.
-                freq=4,
-                op=torch.ops.aten.mm.default,
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=2,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # We would've expected 6 here
+            # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
+            # if we didn't enable selective checkpointing.
+            freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_tensor_subclass(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_tensor_subclass(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1062,38 +1102,41 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         rand_tensor = torch.randn(4, 4, requires_grad=True, device=device)
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            # tensor subclasses as inputs
-            x = TwoTensor(rand_tensor, rand_tensor.clone())
-            y = TwoTensor(rand_tensor.clone(), rand_tensor.clone())
+        # tensor subclasses as inputs
+        x = TwoTensor(rand_tensor, rand_tensor.clone())
+        y = TwoTensor(rand_tensor.clone(), rand_tensor.clone())
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=4,
-                op=torch.ops.aten.mm.default,
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                # We would've expected 12 here
-                # (4 matmul recompute and 4 mm ops per fwd matmul, so 4 + 2 * 4 = 12)
-                # if we didn't enable selective checkpointing.
-                freq=8,
-                op=torch.ops.aten.mm.default,
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # We would've expected 12 here
+            # (4 matmul recompute and 4 mm ops per fwd matmul, so 4 + 2 * 4 = 12)
+            # if we didn't enable selective checkpointing.
+            freq=8,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_custom_rule(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_custom_rule(self, device, partition_fn):
         def _get_custom_policy(meta):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1131,38 +1174,41 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=2,
-                op=torch.ops.aten.mm.default,
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                # Q: How do we come to this number 4?
-                # A: We have 2 matmuls in the forward pass, each matmul contributes 2 `mm` ops in the backward pass,
-                # so we have at least 4 `mm` ops in backward pass. It's "at least" because whether second matmul in
-                # the forward pass is recomputed in the backward pass is up to the partitioner to decide.
-                freq_ge=4,
-                op=torch.ops.aten.mm.default,
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=2,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # Q: How do we come to this number 4?
+            # A: We have 2 matmuls in the forward pass, each matmul contributes 2 `mm` ops in the backward pass,
+            # so we have at least 4 `mm` ops in backward pass. It's "at least" because whether second matmul in
+            # the forward pass is recomputed in the backward pass is up to the partitioner to decide.
+            freq_ge=4,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_partial_ctx_fn(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_partial_ctx_fn(self, device, partition_fn):
         def selective_checkpointing_context_fn(no_recompute_list):
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
@@ -1182,37 +1228,40 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 ),
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=2,
-                op=torch.ops.aten.mm.default,
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                # We would've expected 6 here
-                # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
-                # if we didn't enable selective checkpointing.
-                freq=4,
-                op=torch.ops.aten.mm.default,
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=2,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # We would've expected 6 here
+            # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
+            # if we didn't enable selective checkpointing.
+            freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_outplace_op(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_outplace_op(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1234,34 +1283,37 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freqs=[2, 1],
-                ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                freqs=[4, 0],
-                ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freqs=[2, 1],
+            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[4, 0],
+            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_list_ops(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_list_ops(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             # recompute everything
             no_recompute_list = []
@@ -1281,30 +1333,26 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freqs=[1],
-                ops=[torch.ops.aten.cat.default],
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                freqs=[1],
-                ops=[torch.ops.aten.cat.default],
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freqs=[1],
+            ops=[torch.ops.aten.cat.default],
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[1],
+            ops=[torch.ops.aten.cat.default],
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @unittest.skip(
@@ -1312,7 +1360,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         "requires TorchDispatchMode + torch.compile work to complete"
     )
     @requires_cuda_and_triton
-    def test_compile_selective_checkpoint_inplace_op(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_inplace_op(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1336,35 +1391,38 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True, device=device)
-            y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freqs=[2, 1],
-                ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                freqs=[4, 0],
-                ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            self._validate(fn, backend, x, y)
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freqs=[2, 1],
+            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[4, 0],
+            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
-    def test_compile_selective_checkpoint_random_op(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            # default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_random_op(self, device, partition_fn):
         for preserve_rng_state in [True, False]:
 
             def selective_checkpointing_context_fn():
@@ -1389,45 +1447,48 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                     context_fn=selective_checkpointing_context_fn,
                 )
 
-            for partitioner in (
-                min_cut_rematerialization_partition,
-                # default_partition,
-            ):
-                x = torch.randn(4, 4, requires_grad=True, device=device)
+            x = torch.randn(4, 4, requires_grad=True, device=device)
 
-                fw_compiler = functools.partial(
-                    count_ops,
-                    freqs=[2, 1],
-                    ops=[
-                        torch.ops.aten.sigmoid.default,
-                        torch.ops.aten.native_dropout.default,
-                    ],
-                )
-                bw_compiler = functools.partial(
-                    count_ops,
-                    # NOTE: This unit test expects `dropout` to be recomputed (notice the count for `native_dropout` is 1).
-                    freqs=[0, 1],
-                    ops=[
-                        torch.ops.aten.sigmoid.default,
-                        torch.ops.aten.native_dropout.default,
-                    ],
-                )
-                backend = aot_autograd(
-                    fw_compiler=fw_compiler,
-                    bw_compiler=bw_compiler,
-                    partition_fn=partitioner,
-                )
+            fw_compiler = functools.partial(
+                count_ops,
+                freqs=[2, 1],
+                ops=[
+                    torch.ops.aten.sigmoid.default,
+                    torch.ops.aten.native_dropout.default,
+                ],
+            )
+            bw_compiler = functools.partial(
+                count_ops,
+                # NOTE: This unit test expects `dropout` to be recomputed (notice the count for `native_dropout` is 1).
+                freqs=[0, 1],
+                ops=[
+                    torch.ops.aten.sigmoid.default,
+                    torch.ops.aten.native_dropout.default,
+                ],
+            )
+            backend = aot_autograd(
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+                partition_fn=partition_fn,
+            )
 
-                # NOTE: when `preserve_rng_state` is False, gradient will mismatch between torch.compile and eager,
-                # because eager version doesn't preserve RNG state while torch.compile still does.
-                # Hence when `preserve_rng_state` is False, we skip the output and gradient comparison
-                # between torch.compile and eager.
-                self._validate(fn, backend, x, skip_check=not preserve_rng_state)
-                self._compare_orig_and_checkpointed_fns(gn, fn, x)
+            # NOTE: when `preserve_rng_state` is False, gradient will mismatch between torch.compile and eager,
+            # because eager version doesn't preserve RNG state while torch.compile still does.
+            # Hence when `preserve_rng_state` is False, we skip the output and gradient comparison
+            # between torch.compile and eager.
+            self._validate(fn, backend, x, skip_check=not preserve_rng_state)
+            self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_invalid_context(self):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_invalid_context(self, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y)) * y
 
@@ -1440,36 +1501,39 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 context_fn=_invalid_context_gen,
             )
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            x = torch.randn(4, 4, requires_grad=True)
-            y = torch.randn(4, 4, requires_grad=True)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
 
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=1,
-                op=torch.ops.aten.mm.default,
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                freq_ge=2,
-                op=torch.ops.aten.mm.default,
-            )
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
-            with self.assertRaisesRegex(
-                Exception, "must generate a tuple of two `TorchDispatchMode`s"
-            ):
-                self._validate(fn, backend, x, y)
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=1,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freq_ge=2,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        with self.assertRaisesRegex(
+            Exception, "must generate a tuple of two `TorchDispatchMode`s"
+        ):
+            self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-    def test_compile_selective_checkpoint_parametrization(self):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_parametrization(self, partition_fn):
         def sac_policy():
             def _recomp_policy():
                 def _custom_policy(ctx, func, *args, **kwargs):
@@ -1524,47 +1588,43 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             def reset_parameters(self):
                 self.net1.reset_parameters()
 
-        for partitioner in (
-            min_cut_rematerialization_partition,
-            default_partition,
-        ):
-            fw_compiler = functools.partial(
-                count_ops,
-                freqs=[1, 1],
-                ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
-            )
-            bw_compiler = functools.partial(
-                count_ops,
-                freqs=[
-                    # 1 from mul recompute, 1 from mul backward
-                    # w/o CSE, we have one extra mul
-                    3 if partitioner is default_partition else 2,
-                    1,
-                ],
-                ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
-            )
+        fw_compiler = functools.partial(
+            count_ops,
+            freqs=[1, 1],
+            ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[
+                # 1 from mul recompute, 1 from mul backward
+                # w/o CSE, we have one extra mul
+                3 if partition_fn is default_partition else 2,
+                1,
+            ],
+            ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
+        )
 
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=partitioner,
-            )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
 
-            model = MLPModule()
-            model = apply_parametrization(model)
-            model_compiled = torch.compile(
-                copy.deepcopy(model), backend=backend, fullgraph=True
-            )
-            input = torch.randn(8, 16, requires_grad=True)
-            input_compiled = copy.deepcopy(input)
+        model = MLPModule()
+        model = apply_parametrization(model)
+        model_compiled = torch.compile(
+            copy.deepcopy(model), backend=backend, fullgraph=True
+        )
+        input = torch.randn(8, 16, requires_grad=True)
+        input_compiled = copy.deepcopy(input)
 
-            out = model(input)
-            out.sum().backward()
-            out_compiled = model_compiled(input_compiled)
-            out_compiled.sum().backward()
+        out = model(input)
+        out.sum().backward()
+        out_compiled = model_compiled(input_compiled)
+        out_compiled.sum().backward()
 
-            self.assertEqual(out, out_compiled)
-            self.assertEqual(input.grad, input_compiled.grad)
+        self.assertEqual(out, out_compiled)
+        self.assertEqual(input.grad, input_compiled.grad)
 
     @requires_cuda_and_triton
     def test_autocast_flash_attention(self, device):
