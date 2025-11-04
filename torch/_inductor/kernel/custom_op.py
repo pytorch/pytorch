@@ -322,19 +322,8 @@ def autotune_custom_op(
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
     # Run autotuning to select the best choice
-    # Request both the result and the winning choice when epilogue fusion is enabled
-    winning_choice = None
-    if enable_fusion:
-        selected_result, winning_choice = autotune_select_algorithm(
-            name=name,
-            choices=choices,
-            input_nodes=list(inputs),
-            layout=choices[0].layout,
-            input_gen_fns=input_gen_fns,
-            return_choice=True,
-        )
-    else:
-        selected_result = autotune_select_algorithm(
+    if not enable_fusion:
+        return autotune_select_algorithm(
             name=name,
             choices=choices,
             input_nodes=list(inputs),
@@ -342,36 +331,30 @@ def autotune_custom_op(
             input_gen_fns=input_gen_fns,
         )
 
-    # Apply inlining if epilogue fusion is enabled
-    if enable_fusion and isinstance(selected_result, TensorBox):
-        assert winning_choice is not None, (
-            "winning_choice must be set when enable_fusion is True"
-        )
-        # Only inline if the winning choice is a SubgraphChoiceCaller (has .gm attribute)
-        # ExternKernelCaller (fallback) doesn't support inlining
-        if hasattr(winning_choice, "gm"):
-            choice_desc = (
-                winning_choice.description
-                if hasattr(winning_choice, "description")
-                else str(type(winning_choice))
-            )
-            log.debug(
-                "Inlining winning choice for fusion: %s (name=%s)", choice_desc, name
-            )
-            inlined_result = _inline_custom_op_choice(winning_choice, inputs, name)
-            return inlined_result
-        else:
-            choice_name = (
-                winning_choice.name
-                if hasattr(winning_choice, "name")
-                else str(type(winning_choice))
-            )
-            log.debug(
-                "Winning choice does not support inlining (ExternKernelCaller/fallback): %s (name=%s)",
-                choice_name,
-                name,
-            )
+    # Request both the result and the winning choice when fusion is enabled
+    selected_result, winning_choice = autotune_select_algorithm(
+        name=name,
+        choices=choices,
+        input_nodes=list(inputs),
+        layout=choices[0].layout,
+        input_gen_fns=input_gen_fns,
+        return_choice=True,
+    )
 
+    # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default impl)
+    if hasattr(winning_choice, "gm"):
+        log.debug(
+            "Inlining winning choice: %s (name=%s)",
+            getattr(winning_choice, "name", type(winning_choice).__name__),
+            name,
+        )
+        return _inline_custom_op_choice(winning_choice, inputs, name)
+
+    log.debug(
+        "Winning choice does not support inlining: %s (name=%s)",
+        getattr(winning_choice, "name", type(winning_choice).__name__),
+        name,
+    )
     return selected_result
 
 

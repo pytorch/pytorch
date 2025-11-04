@@ -28,15 +28,8 @@ def inline_subgraph_to_ir_nodes(
 ) -> Any:
     """Inline a subgraph by converting its FX operations to individual IR nodes.
 
-    This converts a subgraph from a single ExternKernel (unfusable) to multiple ComputedBuffer
-    nodes (fusable), enabling epilogue fusion with subsequent operations.
-
-    This function is used by both custom_op.py and mm.py to enable inline fusion.
-
-    Args:
-        gm: GraphModule containing the operations to inline
-        inputs: Actual input nodes (IR TensorBox objects)
-        name: Subgraph name for debugging
+    This converts a subgraph to multiple ComputedBuffer nodes (fusable),
+    enabling epilogue fusion with subsequent operations.
 
     Returns:
         TensorBox containing the final operation result as individual IR nodes

@@ -1315,13 +1315,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # The future will be awaited at scheduling time in select_algorithm.py
         best_config_future = gen_best_config(mat1, mat2)
 
-    # When benchmark_epilogue_fusion=False (immediate autotune path), we can optionally
-    # inline the winning subgraph choice to enable epilogue fusion at the IR level
+    # If not using benchmark_epilogue_fusion, try to inline subgraph for fusion
     if (
         not inductor_config.benchmark_epilogue_fusion
         and inductor_config.enable_inline_subgraph_fusion
     ):
-        # Request both the result and the winning choice for potential inlining
         result, winning_choice = autotune_select_algorithm(
             name,
             choices,
@@ -1331,37 +1329,32 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             return_choice=True,
         )
 
-        # Only inline if the winning choice is a SubgraphChoiceCaller (has .gm attribute)
-        # Other choice types (e.g., TritonTemplateCaller, ExternKernelChoice) don't support inlining
+        # If choice has graph to lower, inline it; otherwise use result as-is(cublas mm)
         if hasattr(winning_choice, "gm"):
             from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
 
             log.debug(
-                "Inlining winning subgraph choice for fusion in tuned_mm: %s (name=%s)",
-                winning_choice.name
-                if hasattr(winning_choice, "name")
-                else type(winning_choice).__name__,
+                "Inlining subgraph choice: %s (name=%s)",
+                getattr(winning_choice, "name", type(winning_choice).__name__),
                 name,
             )
             return inline_subgraph_to_ir_nodes(winning_choice.gm, [mat1, mat2], name)
-        else:
-            log.debug(
-                "Winning choice does not support inlining in tuned_mm: %s (name=%s)",
-                winning_choice.name
-                if hasattr(winning_choice, "name")
-                else type(winning_choice).__name__,
-                name,
-            )
-        return result
-    else:
-        # Normal path: benchmark_epilogue_fusion=True or inline fusion disabled
-        return autotune_select_algorithm(
+
+        log.debug(
+            "Choice does not support inlining: %s (name=%s)",
+            getattr(winning_choice, "name", type(winning_choice).__name__),
             name,
-            choices,
-            kernel_inputs.nodes(),
-            layout,
-            best_config_future=best_config_future,
         )
+        return result
+
+    # Normal path: use autotune_select_algorithm directly
+    return autotune_select_algorithm(
+        name,
+        choices,
+        kernel_inputs.nodes(),
+        layout,
+        best_config_future=best_config_future,
+    )
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)

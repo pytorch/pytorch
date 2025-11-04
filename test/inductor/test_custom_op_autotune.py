@@ -235,7 +235,6 @@ class TestCustomOpAutoTune(TestCase):
             """MLP implementation with different computational approaches controlled by method parameter."""
 
             if method == 0:
-                # Separate matmuls: standard implementation with torch.matmul
                 gate_proj = torch.matmul(input_tensor, gate_weight)
                 up_proj = torch.matmul(input_tensor, up_weight)
                 gated = torch.relu(gate_proj) * up_proj
@@ -282,7 +281,7 @@ class TestCustomOpAutoTune(TestCase):
                 dtype=input_tensor.dtype,
             )
 
-        # Use explicit configs with method parameter as tuning knob
+        # Use explicit config with method parameter as tuning knob
         register_custom_op_autotuning(
             test_mlp_op,
             configs=[
@@ -524,7 +523,7 @@ class TestCustomOpAutoTune(TestCase):
             (3, 16),  # einsum, chunk_size ignored
         ]
 
-        for i, (scale_mode, chunk_size) in enumerate(configs):
+        for scale_mode, chunk_size in configs:
             result = multi_param_scaling(
                 test_x, test_factor, scale_mode=scale_mode, chunk_size=chunk_size
             )

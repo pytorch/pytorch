@@ -3536,7 +3536,6 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
-
         if not config.benchmark_fusion and not is_multi_template:
             return True
 
@@ -4736,7 +4735,6 @@ class Scheduler:
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
         """
-
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
         remaining_deps_by_name: dict[str, list[Dep]] = defaultdict(list)
