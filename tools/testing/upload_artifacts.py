@@ -1,11 +1,14 @@
 import glob
 import gzip
+import json
 import os
 import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from tools.stats.upload_test_stats import parse_xml_report
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -140,3 +143,52 @@ def trigger_upload_test_stats_intermediate_workflow() -> None:
         },
     )
     print(x.text)
+
+
+def parse_xml_and_upload_json() -> None:
+    """
+    Parse xml test reports that do not yet have a corresponding json report
+    uploaded to s3, and upload the json reports to s3.
+    """
+    json_files = [
+        Path(f).relative_to(REPO_ROOT).with_suffix("")
+        for f in glob.glob(f"{REPO_ROOT}/test/test-reports/**/*.json", recursive=True)
+    ]
+    xml_files = [
+        Path(f).relative_to(REPO_ROOT).with_suffix("")
+        for f in glob.glob(f"{REPO_ROOT}/test/test-reports/**/*.xml", recursive=True)
+    ]
+
+    for file_stem in xml_files:
+        if file_stem in json_files:
+            # It has already been parsed and uploaded
+            continue
+
+        test_cases = parse_xml_report(
+            "testcase",
+            REPO_ROOT / file_stem.with_suffix(".xml"),
+            int(os.environ.get("GITHUB_RUN_ID", "0")),
+            int(os.environ.get("GITHUB_RUN_ATTEMPT", "0")),
+        )
+        line_by_line_jsons = "\n".join([json.dumps(tc) for tc in test_cases])
+
+        gzipped = gzip.compress(line_by_line_jsons.encode("utf-8"))
+        s3_key = (
+            file_stem.with_suffix(".json")
+            .relative_to("test/test-reports")
+            .as_posix()
+            .replace("/", "_")
+        )
+        get_s3_resource().put_object(
+            Body=gzipped,
+            Bucket="gha-artifacts",
+            Key=f"test_jsons_while_running/{os.environ.get('GITHUB_RUN_ID')}/{s3_key}",
+            ContentType="application/json",
+            ContentEncoding="gzip",
+        )
+
+        # We don't need to save the json file locally, but doing so lets us
+        # track which ones have been uploaded already. We could probably also
+        # check S3
+        with open(REPO_ROOT / file_stem.with_suffix(".json"), "w") as f:
+            f.write(line_by_line_jsons)

@@ -73,7 +73,10 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
-from tools.testing.upload_artifacts import zip_and_upload_artifacts
+from tools.testing.upload_artifacts import (
+    parse_xml_and_upload_json,
+    zip_and_upload_artifacts,
+)
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -1886,6 +1889,7 @@ def run_tests(
 
     def handle_complete(failure: Optional[TestFailure]):
         failed = failure is not None
+        parse_xml_and_upload_json()
         if IS_CI and options.upload_artifacts_while_running:
             zip_and_upload_artifacts(failed)
         if not failed:
