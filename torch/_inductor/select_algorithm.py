@@ -14,12 +14,12 @@ import re
 import sys
 import textwrap
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -2709,8 +2709,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        # TODO(jgong5): support multi-template on CPU
-        if input_gen_fns is not None or layout.device.type == "cpu":
+        # TODO(jgong5): support multi-template on CPU C++ backend
+        if input_gen_fns is not None or (
+            layout.device.type == "cpu" and config.cpu_backend != "triton"
+        ):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
