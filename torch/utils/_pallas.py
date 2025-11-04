@@ -1,5 +1,7 @@
 import functools
 
+import torch
+
 
 @functools.cache
 def has_jax_package() -> bool:
@@ -67,8 +69,6 @@ def has_pallas() -> bool:
     """
     if not has_pallas_package():
         return False
-
-    import torch
 
     # Only enable Pallas if CUDA is available
     # (Pallas primarily targets GPU workloads)

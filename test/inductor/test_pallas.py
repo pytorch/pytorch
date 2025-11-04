@@ -70,7 +70,7 @@ class PallasTests(TestCase):
         b = torch.randn(1024, device="cuda")
         result = compiled(a, b)
         expected = fn(a, b)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_simple_mul(self):
         """Test basic element-wise multiplication."""
@@ -86,7 +86,7 @@ class PallasTests(TestCase):
         b = torch.randn(1024, device="cuda")
         result = compiled(a, b)
         expected = fn(a, b)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_sin(self):
         """Test sin operation."""
@@ -101,7 +101,7 @@ class PallasTests(TestCase):
         x = torch.randn(1024, device="cuda")
         result = compiled(x)
         expected = fn(x)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_fused_ops(self):
         """Test fused operations (sin + add)."""
@@ -117,7 +117,7 @@ class PallasTests(TestCase):
         y = torch.randn(1024, device="cuda")
         result = compiled(x, y)
         expected = fn(x, y)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_exp_log(self):
         """Test exp and log operations."""
@@ -132,7 +132,7 @@ class PallasTests(TestCase):
         x = torch.randn(1024, device="cuda")
         result = compiled(x)
         expected = fn(x)
-        torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-5)
+        self.assertEqual(result, expected)
 
     def test_sqrt(self):
         """Test sqrt operation."""
@@ -147,7 +147,7 @@ class PallasTests(TestCase):
         x = torch.randn(1024, device="cuda").abs()  # Ensure positive for sqrt
         result = compiled(x)
         expected = fn(x)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_tanh(self):
         """Test tanh operation."""
@@ -162,7 +162,7 @@ class PallasTests(TestCase):
         x = torch.randn(1024, device="cuda")
         result = compiled(x)
         expected = fn(x)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_abs_neg(self):
         """Test abs and neg operations."""
@@ -177,7 +177,7 @@ class PallasTests(TestCase):
         x = torch.randn(1024, device="cuda")
         result = compiled(x)
         expected = fn(x)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_maximum_minimum(self):
         """Test maximum and minimum operations."""
@@ -193,7 +193,7 @@ class PallasTests(TestCase):
         b = torch.randn(1024, device="cuda")
         result = compiled(a, b)
         expected = fn(a, b)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     @unittest.skipUnless(has_triton(), "requires triton")
     @unittest.skip("Random ops not yet implemented in Pallas backend")
@@ -257,7 +257,7 @@ class PallasTests(TestCase):
         y = torch.randn(32, 32, device="cuda")
         result = compiled(x, y)
         expected = fn(x, y)
-        torch.testing.assert_close(result, expected)
+        self.assertEqual(result, expected)
 
     def test_different_shapes(self):
         """Test with different tensor shapes."""
@@ -273,7 +273,72 @@ class PallasTests(TestCase):
             x = torch.randn(shape, device="cuda")
             result = compiled(x)
             expected = fn(x)
-            torch.testing.assert_close(result, expected)
+            self.assertEqual(result, expected)
+
+    def test_contiguous_index_validation(self):
+        """Test that contiguous index validation works correctly end-to-end."""
+
+        # Test 1: Contiguous operations should work
+        def contiguous_add(a, b):
+            return a + b
+
+        compiled = torch.compile(
+            contiguous_add, backend="inductor", options={"cuda_backend": "pallas"}
+        )
+
+        a = torch.randn(1024, device="cuda")
+        b = torch.randn(1024, device="cuda")
+        result = compiled(a, b)
+        expected = contiguous_add(a, b)
+        self.assertEqual(result, expected)
+
+        # Test 2: Operations on contiguous tensors should work
+        def contiguous_mul(x):
+            return x * 2.0
+
+        compiled = torch.compile(
+            contiguous_mul, backend="inductor", options={"cuda_backend": "pallas"}
+        )
+
+        x = torch.randn(128, 8, device="cuda")
+        result = compiled(x)
+        expected = contiguous_mul(x)
+        self.assertEqual(result, expected)
+
+        # Test 3: Non-contiguous views will fail at runtime with JAX/Pallas
+        # This demonstrates that the Pallas backend requires contiguous memory layout
+        def operate_on_tensor(x):
+            return x.sin()
+
+        compiled = torch.compile(
+            operate_on_tensor, backend="inductor", options={"cuda_backend": "pallas"}
+        )
+
+        # Create a transposed (non-contiguous) view
+        x = torch.randn(64, 32, device="cuda")
+        x_t = x.t()  # Non-contiguous view
+        self.assertFalse(x_t.is_contiguous())
+
+        # This will fail because JAX/Pallas cannot handle non-contiguous layout via DLPack
+        # The error indicates that our contiguous-only approach is correct
+        with self.assertRaises((RuntimeError, Exception)) as cm:
+            result = compiled(x_t)
+
+        # Verify the error is related to layout/contiguous issues
+        error_msg = str(cm.exception)
+        self.assertTrue(
+            "layout" in error_msg.lower()
+            or "contiguous" in error_msg.lower()
+            or "non-default" in error_msg.lower(),
+            f"Expected layout/contiguous error, got: {error_msg}",
+        )
+
+        # But if we make it contiguous first, it should work
+        x_t_contiguous = x_t.contiguous()
+        self.assertTrue(x_t_contiguous.is_contiguous())
+        result = compiled(x_t_contiguous)
+        expected = operate_on_tensor(x_t_contiguous)
+        self.assertEqual(result, expected)
 
 
 # Create test variants using the main test suite

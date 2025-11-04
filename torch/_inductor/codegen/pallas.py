@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
 import sympy  # noqa: TC002
 
@@ -19,6 +19,38 @@ from .simd import SIMDKernel, SIMDScheduling
 if TYPE_CHECKING:
     from ..ir import IRNode
     from ..scheduler import BaseSchedulerNode
+
+
+# Main function suffix used in generated Pallas code
+MAIN_SUFFIX = "main"
+
+# Logger for Pallas kernel code
+kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+
+
+class PallasKernelWrapper:
+    """Wrapper to provide .run() interface for Pallas kernels"""
+
+    def __init__(
+        self, kernel_fn: Callable[..., Any], kernel_path: Optional[str] = None
+    ):
+        self.kernel_fn = kernel_fn
+        self.kernel_path = kernel_path
+        kernel_code_log.info("Pallas kernel path: %s", kernel_path)
+
+    def run(self, *args, stream=None, **kwargs):
+        """
+        Execute the Pallas kernel.
+
+        Args:
+            *args: Arguments to pass to the kernel function
+            stream: CUDA stream to pass to the kernel function
+            **kwargs: Additional keyword arguments for the kernel
+
+        Returns:
+            Result of the kernel execution
+        """
+        return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
 class Unsupported(RuntimeError):
@@ -163,18 +195,56 @@ class PallasKernel(SIMDKernel):
     - Compute expression with Python operators (compatible with jax.numpy broadcasting)
     - Store as full-array ref assignment: "out_ptrY[...] = <expr>"
     - Generate Python code that defines a Pallas kernel and a host entrypoint.
-    - Use async_compile.cutedsl path to compile and load Python code (generic wrapper).
+    - Use async_compile.pallas path to compile and load Python code.
     """
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
 
+    def _get_contiguous_index_str(self, index: sympy.Expr) -> str:
+        """
+        Validate that the index represents contiguous access and return the indexing string.
+
+        For Pallas, we only support simple contiguous access patterns where the index
+        is a single symbol (e.g., xindex) representing a flattened iteration.
+        This ensures the load/store order is contiguous.
+
+        Args:
+            index: The indexing expression to validate
+
+        Returns:
+            The indexing string to use (currently always "...")
+
+        Raises:
+            Unsupported: If the index is not a simple contiguous pattern
+        """
+        # Prepare and simplify the index
+        prepared_index = self.prepare_indexing(index)
+
+        # For contiguous access, we expect a single symbol (like xindex)
+        # or a simple integer (for scalar operations)
+        if isinstance(prepared_index, sympy.Symbol):
+            # This is the expected case: a single symbol representing contiguous iteration
+            return "..."
+        elif prepared_index.is_Integer:
+            # Scalar case
+            return "..."
+        else:
+            # If there's any complex expression (ModularIndexing, FloorDiv, etc.),
+            # it's not a simple contiguous pattern
+            raise Unsupported(
+                f"Pallas backend only supports contiguous access patterns. "
+                f"Got complex index: {prepared_index}"
+            )
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
+        # Validate contiguous access and get index string
+        index_str = self._get_contiguous_index_str(index)
         # Pallas refs must be unpacked with [...] to load the array
         return self.cse.generate(
             self.compute,
-            f"{buf}[...]",
+            f"{buf}[{index_str}]",
             dtype=dtype,
         )
 
@@ -185,8 +255,10 @@ class PallasKernel(SIMDKernel):
             raise Unsupported("pallas store mode not supported")
         out = self.args.output(name)
         self.store_buffer_names.add(name)
+        # Validate contiguous access and get index string
+        index_str = self._get_contiguous_index_str(index)
         # Pallas refs must use [...] assignment to store back to the ref
-        self.stores.writeline(f"{out}[...] = {value}")
+        self.stores.writeline(f"{out}[{index_str}] = {value}")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
         """
@@ -301,7 +373,7 @@ class PallasKernel(SIMDKernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
 
         # Generate kernel call: kernel_name.run(arg1, arg2, ...)
-        # Note: cutedsl loads {name}_main function and wraps it in CuteDSLKernelWrapper
+        # Note: async_compile.pallas loads {name}_main function and wraps it in PallasKernelWrapper
         # which exposes a run() method
         kernel_call = f"{name}.run({', '.join(map(str, call_args))})"
         wrapper.writeline(kernel_call)
@@ -341,7 +413,7 @@ class PallasScheduling(SIMDScheduling):
         src_code = src_code.replace("<KERNEL_NAME>", kernel_name)
 
         compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(f"async_compile.cutedsl({kernel_name!r}, r'''")
+        compile_wrapper.writeline(f"async_compile.pallas({kernel_name!r}, r'''")
         compile_wrapper.splice(src_code, strip=True)
         compile_wrapper.writeline("''')")
 
