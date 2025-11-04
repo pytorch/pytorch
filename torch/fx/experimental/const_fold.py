@@ -130,6 +130,10 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
             new_node = gm.graph.node_copy(inline_node, replacement_fn)
         replacement_mapping[inline_node] = new_node
 
+    # Explicitly remove the module that was just inlined,
+    # this module may contain impure ops so cannot be dead code eliminated,
+    # this module is unneeded as it's just inlined back to main graph.
+    gm.graph.erase_node(call_mod_node_to_replace)
     gm.graph.eliminate_dead_code()
 
 

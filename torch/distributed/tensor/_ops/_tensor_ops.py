@@ -17,7 +17,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._embedding_ops import MaskPartial
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -84,6 +84,7 @@ register_op_strategy(
         aten.clone.default,
         aten.contiguous.default,
         aten.detach.default,
+        aten.alias.default,
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
@@ -484,7 +485,7 @@ def replicate_tensor_dim(
 def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
-    # 3. numer of elements in src in dim need to match the slice size.
+    # 3. number of elements in src in dim need to match the slice size.
     # Given the above:
     # - We suggest for src to follow the sharding of input, except on the scatter dimension,
     #   where our best bet for now is to make them replicated as a fall-back.
@@ -646,7 +647,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
     if dim < len(index_shape) and index_shape[dim] == 1:
-        index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
+        index_partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),

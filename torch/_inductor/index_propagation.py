@@ -24,8 +24,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, overload, Union
-from typing_extensions import TypeAlias
+from typing import Any, Literal, Optional, overload, TypeAlias, Union
 
 import sympy
 
@@ -333,7 +332,7 @@ class IndexPropagation(DefaultHandler):
                 for k, v in self.indirect_var_ranges.items()
             ),
         )
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return statically_known_true(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
