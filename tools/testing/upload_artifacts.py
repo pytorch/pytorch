@@ -118,25 +118,3 @@ def zip_and_upload_artifacts(failed: bool) -> None:
         except Exception as e:
             print(f"Failed to upload artifacts: {e}")
         print(f"Uploading artifacts took {time.time() - start:.2f} seconds")
-
-
-def trigger_upload_test_stats_intermediate_workflow() -> None:
-    import requests
-
-    # The GITHUB_TOKEN cannot trigger workflow so this isn't used for now
-    print("Triggering upload_test_stats_intermediate workflow")
-    x = requests.post(
-        "https://api.github.com/repos/pytorch/pytorch/actions/workflows/upload_test_stats_intermediate.yml/dispatches",  # noqa: B950 @lint-ignore
-        headers={
-            "Accept": "application/vnd.github.v3+json",
-            "Authorization": f"Bearer {os.environ.get('GITHUB_TOKEN')}",
-        },
-        json={
-            "ref": "main",
-            "inputs": {
-                "workflow_run_id": os.environ.get("GITHUB_RUN_ID"),
-                "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
-            },
-        },
-    )
-    print(x.text)

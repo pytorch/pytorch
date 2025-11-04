@@ -242,21 +242,11 @@ if __name__ == "__main__":
         required=True,
         help="Head repository of the workflow",
     )
-    parser.add_argument(
-        "--circleci",
-        action="store_true",
-        help="If this is being run through circleci",
-    )
     args = parser.parse_args()
 
     print(f"Workflow id is: {args.workflow_run_id}")
 
-    if args.circleci:
-        test_cases = get_tests_for_circleci(
-            args.workflow_run_id, args.workflow_run_attempt
-        )
-    else:
-        test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
+    test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
     # Flush stdout so that any errors in the upload show up last in the logs.
     sys.stdout.flush()
