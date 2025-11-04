@@ -348,15 +348,16 @@ struct MinValuesOps: public at::native::MinOps<scalar_t> {
 };
 
 void min_values_kernel_impl(TensorIterator& iter) {
-  if (iter.dtype() == kLong) {
-    // This case is special because of Vectorized<int64_t> does not
-    // handle upper_bound<int64_t>().
-    // See: https://github.com/pytorch/pytorch/issues/43254
-    using scalar_t = int64_t;
-    binary_kernel_reduce(
-      iter,
-      MinValuesOps<scalar_t>{},
-      std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
+  // This case is special because of Vectorized<int64_t> does not
+  // handle upper_bound<int64_t>().
+  // See: https://github.com/pytorch/pytorch/issues/43254
+  if (iter.dtype() == kLong || iter.dtype() == kUInt64) {
+    AT_DISPATCH_V2(iter.dtype(), "min_values_cpu", AT_WRAP([&iter] {
+      binary_kernel_reduce(
+        iter,
+        MinValuesOps<scalar_t>{},
+        std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
+    }), kLong, kUInt64);
     return;
   }
   AT_DISPATCH_V2(iter.dtype(), "min_values_cpu", AT_WRAP([&iter] {
