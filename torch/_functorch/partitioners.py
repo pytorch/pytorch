@@ -1051,7 +1051,7 @@ def default_partition(
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         assert_functional_graph(joint_module.graph)
-        joint_module = cleanup_recompute_tags(joint_module)
+        joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
 
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
@@ -1622,7 +1622,7 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             break
 
 
-def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
+def cleanup_recompute_tags(joint_module: fx.GraphModule, *, is_default_partition: bool) -> fx.GraphModule:
     """
     If there are two consecutive checkpointed blocks with no operator in
     between, we would still want to stash the tensor at the boundary of
@@ -1659,9 +1659,16 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
                 # Solution: check whether `out` has a backward hook, and if so, intentionally save `out`
                 # in forward graph outputs. With this, we can break the above circular dependency.
                 node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-        else:
-            if any(must_recompute(user) for user in node.users):
-                node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        elif (
+            "ac_graph_id" not in node.meta
+            and any(must_recompute(user) for user in node.users)
+            and is_default_partition
+        ):
+            # This node is not part of the AC region and a user is marked as recompute.
+            # This means it's an input to the AC region and we should save it.
+            # For ease of landing, gate this to default partitioner only, but we should think
+            # about flipping the switch in general as well.
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
     return joint_module
 
 
@@ -2817,7 +2824,7 @@ def min_cut_rematerialization_partition(
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
-        joint_module = cleanup_recompute_tags(joint_module)
+        joint_module = cleanup_recompute_tags(joint_module, is_default_partition=False)
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
     force_save_bw_mutation_src(joint_module)

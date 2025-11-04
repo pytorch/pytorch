@@ -1419,7 +1419,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         "partition_fn",
         [
             min_cut_rematerialization_partition,
-            # default_partition,
+            default_partition,
         ],
     )
     def test_compile_selective_checkpoint_random_op(self, device, partition_fn):
