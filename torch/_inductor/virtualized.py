@@ -59,7 +59,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, cast, Generic, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar, Union
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -75,6 +75,8 @@ from .ops_handler import (  # noqa: F401
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
     from torch._inductor.choices import InductorChoices
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
@@ -207,9 +209,13 @@ def _choices_default():
 
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
     """
+    from torch._inductor import config
     from torch._inductor.choices import InductorChoices
 
-    rv = InductorChoices()
+    if config.inductor_choices_class is not None:
+        rv = config.inductor_choices_class()
+    else:
+        rv = InductorChoices()
     setattr(threadlocal, _choices._key, rv)
     return rv
 

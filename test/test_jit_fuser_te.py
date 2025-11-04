@@ -94,7 +94,7 @@ def strip_profiling_nodes(nodes):
 
 
 def warmup_forward(f, *args, profiling_count=2):
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -2284,7 +2284,7 @@ class TestTEFuser(JitTestCase):
         x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         script = torch.jit.script(fn)
-        for i in range(11):
+        for _ in range(11):
             y = fn(x)
             g0 = torch.rand_like(y)
             y.backward(g0)
@@ -2514,7 +2514,7 @@ class TestTEFuser(JitTestCase):
                                 x, y, z = gen(n), gen(n), gen(n)
                                 func_s(x, y, z)
 
-                            for incr in range(3):
+                            for _incr in range(3):
                                 func_s(*[gen(n + 1) for _ in range(3)])
 
                             g = torch.jit.last_executed_optimized_graph()
@@ -2678,7 +2678,7 @@ class TestTEFuser(JitTestCase):
 
             f_traced = torch.jit.trace(f, (x, y))
 
-            for i in range(4):
+            for _ in range(4):
                 # make sure this doesn't error out
                 res = f_traced(x, y)
 
@@ -2697,7 +2697,7 @@ class TestTEFuser(JitTestCase):
         ref = fn(x)
 
         script_fn = torch.jit.script(fn)
-        for i in range(4):
+        for _ in range(4):
             res = script_fn(x)
 
         self.assertEqual(ref, res)

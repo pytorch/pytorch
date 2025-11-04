@@ -11,7 +11,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -68,6 +68,7 @@ from .exc import (
 )
 from .fx_utils import count_flops_fx
 from .ir import (
+    assign_origin_node,
     Constant,
     DonatedBuffer,
     FixedLayout,
@@ -116,7 +117,7 @@ from .virtualized import NullHandler, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
     from types import ModuleType
 
     from torch._higher_order_ops.effects import _EffectType
@@ -660,7 +661,7 @@ class GraphLowering(torch.fx.Interpreter):
             return True
 
         conv_nodes = [
-            n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
+            n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
         nconv = len(conv_nodes)
 
@@ -859,7 +860,7 @@ class GraphLowering(torch.fx.Interpreter):
         nodes_cannot_propagate = [torch.ops.aten.bmm.default]
         output_set = OrderedSet[Node]()
         for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
-            if n.target == torch.ops.aten.convolution.default:
+            if n.target is torch.ops.aten.convolution.default:
                 output_set.add(n)
                 if last_conv is None:
                     last_conv = n
@@ -1321,7 +1322,12 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+            if "should_fallback" in n.meta:
+                out = fallback_handler(target, add_to_fallback_set=False)(
+                    *args, **kwargs
+                )
+            else:
+                out = lowerings[target](*args, **kwargs)  # type: ignore[index]
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
@@ -1854,31 +1860,7 @@ class GraphLowering(torch.fx.Interpreter):
                     if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 
-        # This is not complete, but it doesn't have to be: origin_node
-        # tracking is best effort.  The logic here critically relies on direct
-        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
-        # to get views to work.  Feel free to add any extra cases as needed.
-        #
-        # Note: we can't YOLO tree_map over this result, because if there are
-        # buffers or a view involved, we might not be able to validly assign
-        # the origin_node here.
-        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
-            if isinstance(result.data.data, ir.Loops):
-                result.data.data._post_init_setattr("origin_node", n)
-            elif isinstance(result.data.data, ir.Buffer):
-                result.data.data._post_init_setattr("origin_node", n)
-                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
-                    result.data.data.data, ir.Loops
-                ):
-                    result.data.data.data._post_init_setattr("origin_node", n)
-                # Not really multi-output, can straightforwardly recurse in
-                elif (
-                    isinstance(result.data.data, ir.MultiOutput)
-                    and not result.data.data.indices
-                ):
-                    if isinstance(result.data.data.inputs[0], ir.Buffer):
-                        result.data.data.inputs[0]._post_init_setattr("origin_node", n)
-
+        assign_origin_node(result, n)
         self.register_users_of(result)
 
         new_unbacked_defs = OrderedSet[sympy.Symbol]()
@@ -2006,7 +1988,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if (
             full_aoti_runtime_assert()
-            and n.target == torch.ops.aten._assert_scalar.default
+            and n.target is torch.ops.aten._assert_scalar.default
             and self.aot_mode
         ):
             node_args, _ = self.fetch_args_kwargs_from_env(n)

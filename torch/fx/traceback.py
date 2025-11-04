@@ -30,10 +30,35 @@ __all__ = [
     "NodeSource",
     "NodeSourceAction",
     "get_graph_provenance_json",
+    "set_current_replay_node",
+    "get_current_replay_node",
 ]
 
 current_meta: dict[str, Any] = {}
+current_replay_node: Optional[Node] = None
 should_preserve_node_meta = False
+
+# =============================================================================
+# FX Metadata Registry for Memory Profiler
+# =============================================================================
+# Global in-memory registry for FX metadata
+# Maps module_name -> metadata dict containing lineno_map and node_metadata
+_FX_METADATA_REGISTRY: dict[str, dict[str, Any]] = {}
+
+
+def _register_fx_metadata(module_name: str, metadata: dict[str, Any]) -> None:
+    """
+    Register FX metadata in the global in-memory registry.
+
+    This is called automatically during graph module compilation to store metadata
+    for later use by memory profiler augmentation.
+
+    Args:
+        module_name: The module identifier (content-addressed filename)
+        metadata: Metadata dict containing lineno_map, node_metadata, and source_code
+    """
+    # TODO: add logging to tlparse
+    _FX_METADATA_REGISTRY[module_name] = metadata
 
 
 @compatibility(is_backward_compatible=False)
@@ -398,6 +423,31 @@ def set_current_meta(node, pass_name=""):
 @compatibility(is_backward_compatible=False)
 def get_current_meta() -> dict[str, Any]:
     return current_meta
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def set_current_replay_node(node):
+    """
+    Set the currently replay node. If `current_replay_node` is not None,
+    then we're re-generating the `current_replay_node` in FunctionalTensorMode.
+    """
+    # See [Note] annotation for more details.
+    global current_replay_node
+    saved_current_replay_node = current_replay_node
+    try:
+        current_replay_node = node
+        yield
+    finally:
+        current_replay_node = saved_current_replay_node
+
+
+@compatibility(is_backward_compatible=False)
+def get_current_replay_node():
+    """
+    Get the currently replay node
+    """
+    return current_replay_node
 
 
 @compatibility(is_backward_compatible=False)
