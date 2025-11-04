@@ -295,7 +295,7 @@ class FuzzedTensor:
             raw_tensor = raw_tensor.permute(tuple(order)).contiguous()
             raw_tensor = raw_tensor.permute(tuple(np.argsort(order)))
 
-        slices = [slice(0, size * step, step) for size, step in zip(size, steps)]
+        slices = [slice(0, size * step, step) for size, step in zip(size, steps, strict=True)]
         tensor = raw_tensor[tuple(slices)]
 
         properties = {
@@ -326,7 +326,7 @@ class FuzzedTensor:
 
         size = resolve(self._size, dim)
         steps = resolve(self._steps or (), dim)
-        allocation_size = tuple(size_i * step_i for size_i, step_i in zip(size, steps))
+        allocation_size = tuple(size_i * step_i for size_i, step_i in zip(size, steps, strict=True))
         return size, steps, allocation_size
 
     def satisfies_constraints(self, params):

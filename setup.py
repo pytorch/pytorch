@@ -1106,7 +1106,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent delocate from attempting to package another instance
+            # This should prevent deallocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
             install_name_tool_args = [

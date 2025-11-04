@@ -42,7 +42,7 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, NamedTuple, Optional, Sized, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -394,13 +394,6 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
-
-    def __len__(self) -> int:
-        # Proxy the len call to the original module
-        if isinstance(self._orig_mod, Sized):
-            return len(self._orig_mod)
-        # Mimic python's default behavior for objects without a length
-        raise TypeError(f"{type(self._orig_mod).__name__} does not support len()")
 
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
@@ -1791,7 +1784,7 @@ def rewrite_signature(
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
 
-        for i, val in enumerate(candidates):
+        for val in candidates:
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:

@@ -1881,6 +1881,8 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 
 REGISTER_CUDA_DISPATCH(geqrf_stub, &geqrf_kernel)
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename scalar_t>
 static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
@@ -1955,8 +1957,6 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
 #endif
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 // This is a type dispatch function for 'apply_magma_eigh'
 // For small inputs result is computed on CPU
 void linalg_eigh_magma(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
@@ -2019,10 +2019,10 @@ This is an in-place routine, content of 'input', 'values', 'vectors' is overwrit
 For more information see MAGMA's documentation for GEEV routine.
 */
 template <typename scalar_t>
-void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
+void apply_magma_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
-                   "Either transfer the tensor to the CPU before calling torch.linalg.eig or recompile with MAGMA.");
+TORCH_CHECK(false, "Calling torch.linalg.eig with MAGMA requires compiling PyTorch with MAGMA. "
+                   "Either transfer the tensor to the CPU before calling torch.linalg.eig or use cuSolver.");
 #else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == at::kCPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
@@ -2076,22 +2076,44 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
 #endif
 }
 
-// This is a type dispatching helper function for 'apply_linalg_eig'
+// MAGMA wrapper: transfers tensors to CPU, calls apply_magma_eig, then copies results back.
+void linalg_eig_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors){
+  // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer to CPU
+  auto eigenvalues_cpu = eigenvalues.cpu();
+  auto eigenvectors_cpu = eigenvectors.cpu();
+  auto infos_cpu = infos.cpu();
+
+  Tensor input_cpu = at::empty(input.sizes(), input.options().device(kCPU));
+  input_cpu.transpose_(-2, -1);
+  input_cpu.copy_(input);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "linalg_eig_out_cuda", [&]{
+    apply_magma_eig<scalar_t>(eigenvalues_cpu, eigenvectors_cpu, input_cpu, infos_cpu, compute_eigenvectors);
+  });
+
+  eigenvalues.copy_(eigenvalues_cpu);
+  eigenvectors.copy_(eigenvectors_cpu);
+  infos.copy_(infos_cpu);
+}
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
-  // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
+  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
+  // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
 
-  // apply_linalg_eig modifies the provided input matrix in-place, therefore we need a copy
-  // MAGMA doesn't have GPU interface for the eigendecomposition and it forces us to transfer 'input' to CPU
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
-  Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
-  input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
-  input_working_copy.copy_(input);
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "linalg_eig_out_cuda", [&]{
-    apply_linalg_eig<scalar_t>(eigenvalues, eigenvectors, input_working_copy, infos, compute_eigenvectors);
-  });
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+    default:
+      linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
+      return;
+    case at::LinalgBackend::Magma:
+      break; // MAGMA path handled below
+  }
+#endif
+  linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
 }
 
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)

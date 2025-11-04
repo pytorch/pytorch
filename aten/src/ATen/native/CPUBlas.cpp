@@ -680,9 +680,9 @@ void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_daxpy(i_n, a, x, i_incx, y, i_incy);
     #else
@@ -705,9 +705,9 @@ void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t in
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_saxpy(i_n, a, x, i_incx, y, i_incy);
     #else
@@ -730,9 +730,9 @@ void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int6
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_zaxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
@@ -755,9 +755,9 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_caxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
@@ -781,9 +781,9 @@ void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_dcopy(i_n, x, i_incx, y, i_incy);
     #else
@@ -805,9 +805,9 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_scopy(i_n, x, i_incx, y, i_incy);
     #else
@@ -829,9 +829,9 @@ void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<d
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_zcopy(i_n, x, i_incx, y, i_incy);
     #else
@@ -853,9 +853,9 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     #if C10_IOS
     cblas_ccopy(i_n, &x, i_incx, y, i_incy);
     #else
@@ -1082,7 +1082,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
         M,
         N,
         K,
-        int64_t(1),
+        1,
         ld_a,
         ld_b,
         ld_c,
@@ -1096,7 +1096,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
           M,
           N,
           K,
-          int64_t(1),
+          1,
           ld_a,
           ld_b,
           ld_c,
