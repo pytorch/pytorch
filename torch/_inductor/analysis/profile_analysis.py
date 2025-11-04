@@ -76,7 +76,9 @@ def _slow_conv2d_adapter(
     return conv_adapter(tuple(tmp), tuple(tmp2))
 
 
-@register_adapter(["convolution", "_convolution", "cudnn_convolution"])
+@register_adapter(
+    ["convolution", "_convolution", "cudnn_convolution", "convolution_overrideable"]
+)
 def conv_adapter(
     shapes: tuple[Any, ...], concrete: tuple[Any, ...]
 ) -> tuple[tuple[Any], dict[Any, Any]]:
