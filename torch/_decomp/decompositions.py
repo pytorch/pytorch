@@ -5347,6 +5347,41 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
+@register_decomposition(aten.combinations)
+def combinations(self, r=2, with_replacement=False):
+    # This decomposition avoids calling numel() which doesn't work with symbolic shapes
+    torch._check(self.dim() == 1, lambda: f"Expect a 1D vector, but got shape {self.shape}")
+    torch._check(r >= 0, lambda: f"Expect a non-negative number, but got {r}")
+    
+    if r == 0:
+        return torch.empty(0, dtype=self.dtype, device=self.device)
+    
+    # Get the size of the input tensor (works with symbolic shapes)
+    num_elements = self.size(0)
+    
+    # Create meshgrid of r copies of self
+    grids = torch.meshgrid([self] * r, indexing="ij")
+    
+    # Create a triangular upper mask based on indices
+    # This creates indices 0, 1, 2, ... num_elements-1
+    range_tensor = torch.arange(num_elements, dtype=torch.long, device=self.device)
+    index_grids = torch.meshgrid([range_tensor] * r, indexing="ij")
+    
+    # Create mask for valid combinations (i <= j <= k ... or i < j < k ...)
+    mask = torch.full(index_grids[0].shape, True, dtype=torch.bool, device=self.device)
+    for i in range(r - 1):
+        if with_replacement:
+            mask = mask & (index_grids[i] <= index_grids[i + 1])
+        else:
+            mask = mask & (index_grids[i] < index_grids[i + 1])
+    
+    # Apply mask to each grid and collect results
+    filtered_grids = [grid.masked_select(mask) for grid in grids]
+    
+    # Stack the results
+    return torch.stack(filtered_grids, dim=1)
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

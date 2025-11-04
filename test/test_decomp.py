@@ -1264,6 +1264,36 @@ class DecompOneOffTests(TestCase):
             in generated_codes[1]
         )
 
+    def test_combinations_with_dynamic_shapes(self, device):
+        # Test that combinations works with dynamic shapes and aot_eager
+        # This is a regression test for https://github.com/pytorch/pytorch/issues/xxxxx
+        
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x):
+                x = torch.combinations(x.flatten(), r=2)
+                return x
+
+        model = Model()
+        x = torch.randn(3, 1, 1, device=device)
+
+        # Test with eager mode
+        expected = model(x)
+
+        # Test with compiled mode and dynamic shapes
+        compiled_model = torch.compile(model, backend="aot_eager", dynamic=True)
+        result = compiled_model(x)
+
+        self.assertEqual(result, expected)
+
+        # Test with different input size to verify dynamic shapes work
+        x2 = torch.randn(4, 1, 1, device=device)
+        expected2 = model(x2)
+        result2 = compiled_model(x2)
+        self.assertEqual(result2, expected2)
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
