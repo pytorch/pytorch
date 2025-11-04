@@ -1889,8 +1889,8 @@ def run_tests(
 
     def handle_complete(failure: Optional[TestFailure]):
         failed = failure is not None
-        parse_xml_and_upload_json()
         if IS_CI and options.upload_artifacts_while_running:
+            parse_xml_and_upload_json()
             zip_and_upload_artifacts(failed)
         if not failed:
             return False
