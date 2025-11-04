@@ -1,8 +1,9 @@
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from unittest import mock
 
 import torch
