@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from typing import Optional, Union
-from typing_extensions import NewType, Self
+from typing_extensions import Self
 
 import torch
 
 
-_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
+_POOL_HANDLE = tuple[int, int]
 
 
 class MTIAGraph(torch._C._MTIAGraph):
     def __new__(cls, keep_graph: bool = False) -> Self:
         return super().__new__(cls, keep_graph)
 
-    def capture_begin(self, pool: _POOL_HANDLE = (0, 0)) -> None:
+    def capture_begin(self, pool: _POOL_HANDLE) -> None:
         super().capture_begin(pool)
 
     def capture_end(self) -> None:
