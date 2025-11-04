@@ -86,11 +86,9 @@ bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
   return false;
 }
 
-bool can_use_mem_efficien_attention(sdp::sdp_params const& params, bool debug) {
-  if (debug) {
-    TORCH_WARN("XPU don't support SDPA mem efficient attention backend.");
-  }
-  return false;
+bool can_use_mem_efficient_attention(sdp::sdp_params const& params, bool debug) {
+  // Currently, XPU fallbacks memory efficient attention to overridable
+  return can_use_overrideable_attention(params, debug);
 }
 
 bool priority_order_init = false;
@@ -156,8 +154,10 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
         break;
       case sdp::SDPBackend::efficient_attention:
         if (ctx.userEnabledMemEfficientSDP() &&
-            can_use_mem_efficien_attention(kernel_params, print_debug)) {
-          TORCH_CHECK(false, "Invalid backend");
+            can_use_mem_efficient_attention(kernel_params, print_debug)) {
+          TORCH_WARN_ONCE(
+              "SDPA Memory Efficient Attention backend is not supported on XPU, falling back to OVERRIDEABLE backend.");
+          return sdp::SDPBackend::overrideable;
         }
         break;
       default:
