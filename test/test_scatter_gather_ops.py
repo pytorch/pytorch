@@ -68,7 +68,7 @@ class TestScatterGather(TestCase):
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
-        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100)):
+        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
             src = make_tensor((m, k), device=device, dtype=dtype)
             alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
             discontig = alloc0.view(m, 2 * k)[:, ::2].copy_(src)
