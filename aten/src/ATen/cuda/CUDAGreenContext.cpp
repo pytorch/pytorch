@@ -1,12 +1,14 @@
 #include <ATen/cuda/CUDAGreenContext.h>
 
-#if defined(CUDA_VERSION) && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030) && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #include <stdexcept>
 #include <vector>
 #define HAS_CUDA_GREEN_CONTEXT() 1
 #else
 #define HAS_CUDA_GREEN_CONTEXT() 0
+// Suppress unsued private field warnings as this class is not supposed to be called
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-private-field")
 #endif
 
 namespace at::cuda {
